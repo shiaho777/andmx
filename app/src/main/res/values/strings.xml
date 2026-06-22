@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AndMX</string>
+    <string name="accessibility_service_description">允许 AndMX 的 AI agent 在你授权时操作屏幕(点击、滑动、输入),实现 Computer Use 功能。仅在你主动使用该功能时工作。</string>
+</resources>

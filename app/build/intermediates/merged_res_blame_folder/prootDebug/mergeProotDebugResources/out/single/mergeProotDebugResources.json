@@ -1,0 +1,22 @@
+[
+    {
+        "merged": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-prootDebug-65:/xml_network_security_config.xml.flat",
+        "source": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-main-67:/xml/network_security_config.xml"
+    },
+    {
+        "merged": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-prootDebug-65:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-main-67:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-prootDebug-65:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-main-67:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-prootDebug-65:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "/Users/shiaho/.gradle/daemon/8.7/com.andmx.app-main-67:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.andmx.app-prootDebug-65:/xml_accessibility_service_config.xml.flat",
+        "source": "com.andmx.app-main-67:/xml/accessibility_service_config.xml"
+    }
+]

@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.andmx.app-mergeProotDebugResources-63:/values-v29/values-v29.xml",
+            "map": [
+                {
+                    "source": "/Users/shiaho/.gradle/caches/transforms-4/4023b571319c9e41f22fc1da57955d21/transformed/core-splashscreen-1.0.1/res/values-v29/values-v29.xml",
+                    "from": {
+                        "startLines": "2,7",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,374",
+                        "endLines": "6,8",
+                        "endColumns": "12,12",
+                        "endOffsets": "369,464"
+                    }
+                }
+            ]
+        }
+    ]
+}
