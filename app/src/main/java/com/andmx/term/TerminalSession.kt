@@ -23,6 +23,7 @@ class TerminalSession(
     private val context: Context,
     private val runtime: ProotRuntime = ProotRuntime(context),
 ) {
+    val sessionId: String = java.util.UUID.randomUUID().toString()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val buffer = TerminalEmulator(rows = 24, cols = 80)
     private var process: PtyProcess? = null
@@ -41,6 +42,7 @@ class TerminalSession(
         val exitCode: Int? = null,
         val status: String = "",
         val screenText: String = "",
+        val coloredLines: List<List<Pair<String, Int>>> = emptyList(),
     )
 
     val screen: String get() = _state.value.screenText
@@ -115,11 +117,19 @@ class TerminalSession(
 
     private fun feed(s: String) {
         buffer.feed(s)
-        _state.value = _state.value.copy(revision = buffer.revision, screenText = buffer.render().text)
+        _state.value = _state.value.copy(
+            revision = buffer.revision,
+            screenText = buffer.render(),
+            coloredLines = buffer.renderColored()
+        )
     }
 
     private fun emit(running: Boolean = _state.value.running, exitCode: Int? = _state.value.exitCode, status: String) {
-        _state.value = _state.value.copy(running = running, exitCode = exitCode, status = status, revision = buffer.revision, screenText = buffer.render().text)
+        _state.value = _state.value.copy(
+            running = running, exitCode = exitCode, status = status,
+            revision = buffer.revision, screenText = buffer.render(),
+            coloredLines = buffer.renderColored()
+        )
     }
 
     fun destroy() {

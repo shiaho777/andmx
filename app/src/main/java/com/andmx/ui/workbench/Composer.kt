@@ -21,13 +21,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +45,8 @@ import androidx.compose.material.icons.outlined.TrackChanges
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,10 +58,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import com.andmx.agent.ApprovalMode
 import com.andmx.ui.conversation.AttachmentPreflightSummary
 import com.andmx.ui.conversation.Attachments
@@ -98,6 +106,15 @@ fun Composer(
     reasoningEffort: String = "off",
     reasoning: com.andmx.llm.provider.ReasoningConfig? = null,
     onReasoningEffortSelected: (String) -> Unit = {},
+    // Quick model switcher: left column = providers, right column = that
+    // provider's added models. Tapping a model switches immediately.
+    providers: List<com.andmx.llm.provider.ProviderDefinition> = emptyList(),
+    activeProviderId: String = "",
+    selectedModel: String = "",
+    onSwitchModel: (providerId: String, modelId: String) -> Unit = { _, _ -> },
+    onAddModel: (providerId: String, modelId: String) -> Unit = { _, _ -> },
+    onConfigureProvider: () -> Unit = {},
+    onConfigureModels: () -> Unit = {},
     goalLabel: String = "",
     onGoalClick: () -> Unit = {},
     onSend: (String) -> Unit = {},
@@ -177,21 +194,44 @@ fun Composer(
 
                 Spacer(Modifier.size(Spacing.sm))
 
-                // FlowRow so the pills wrap to a second line instead of squashing
-                // each other when the model name is long on a narrow screen. The
-                // model selector + send button are bundled into one Row so they
-                // never split across lines.
-                FlowRow(
+                // All pills on a single row — model selector + send button stay
+                // on the right, never wrapping to a second line. Left-side pills
+                // (attach/permission/goal) take available space; if the model
+                // name is very long the whole row scrolls horizontally.
+                Row(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     CircleIconButton(Icons.Outlined.Add, onAttachClick)
                     PermissionPill(accessLabel, accessMode, onAccessClick, onAccessModeSelected)
-                    GoalPill(goalLabel, onGoalClick)
-                    Spacer(Modifier.weight(1f, fill = true))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                        ModelSelector(modelLabel, reasoningEffort, reasoning, onModelClick, onReasoningEffortSelected)
+                    // Goal pill only shows when a goal is set (via /goal command
+                    // or agent create_goal tool) — not on every conversation.
+                    if (goalLabel.isNotBlank()) {
+                        GoalPill(goalLabel, onGoalClick)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    // Model selector + send button — capped width so they stay
+                    // visible even when left-side pills are wide.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        modifier = Modifier.widthIn(max = 200.dp),
+                    ) {
+                        ModelSelector(
+                            modelLabel = modelLabel,
+                            reasoningEffort = reasoningEffort,
+                            reasoning = reasoning,
+                            onReasoningEffortSelected = onReasoningEffortSelected,
+                            onOpenSettings = onModelClick,
+                            providers = providers,
+                            activeProviderId = activeProviderId,
+                            selectedModel = selectedModel,
+                            onSwitchModel = onSwitchModel,
+                            onAddModel = onAddModel,
+                            onConfigureProvider = onConfigureProvider,
+                            onConfigureModels = onConfigureModels,
+                        )
                         // Crossfade between Send and Stop so the swap doesn't pop.
                         AnimatedContent(
                             targetState = busy,
@@ -412,17 +452,42 @@ private fun ModelSelector(
     modelLabel: String,
     reasoningEffort: String,
     reasoning: com.andmx.llm.provider.ReasoningConfig?,
-    onClick: () -> Unit,
     onReasoningEffortSelected: (String) -> Unit,
+    onOpenSettings: () -> Unit,
+    providers: List<com.andmx.llm.provider.ProviderDefinition>,
+    activeProviderId: String,
+    selectedModel: String,
+    onSwitchModel: (providerId: String, modelId: String) -> Unit,
+    onAddModel: (providerId: String, modelId: String) -> Unit,
+    onConfigureProvider: () -> Unit,
+    onConfigureModels: () -> Unit,
 ) {
     val colors = AndmxTheme.colors
     var expanded by remember { mutableStateOf(false) }
+    // The provider currently focused in the left column. Defaults to the active
+    // provider so the right column shows something meaningful on first open.
+    var focusProviderId by remember { mutableStateOf(activeProviderId) }
+    if (focusProviderId.isBlank() && providers.isNotEmpty()) {
+        focusProviderId = providers.first().id
+    }
+    val focusProvider = providers.firstOrNull { it.id == focusProviderId }
+    var showAddModel by remember { mutableStateOf(false) }
+    var newModelText by remember { mutableStateOf("") }
+    var modelQuery by remember { mutableStateOf("") }
+
     Box {
+        // Trigger pill.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .clip(Radii.pill)
-                .clickable { expanded = true }
+                .clickable {
+                    expanded = !expanded
+                    focusProviderId = activeProviderId.ifBlank { providers.firstOrNull()?.id.orEmpty() }
+                    showAddModel = false
+                    newModelText = ""
+                    modelQuery = ""
+                }
                 .padding(horizontal = Spacing.xs, vertical = Spacing.xxs),
         ) {
             Text(
@@ -430,54 +495,280 @@ private fun ModelSelector(
                 style = AndmxTheme.typography.labelMedium,
                 color = if (modelLabel.isBlank()) colors.textTertiary else colors.textPrimary,
                 maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 140.dp),
             )
             Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(15.dp))
         }
-        androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            androidx.compose.material3.DropdownMenuItem(
-                text = {
-                    Column {
-                        Text(modelLabel.ifBlank { "未选择模型" }, style = AndmxTheme.typography.bodyMedium, color = colors.textPrimary)
-                        Text("当前模型", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+
+        if (expanded) {
+            Popup(
+                alignment = Alignment.BottomStart,
+                onDismissRequest = {
+                    expanded = false
+                    showAddModel = false
+                },
+            ) {
+                Column(
+                    Modifier
+                        .widthIn(min = 300.dp, max = 360.dp)
+                        .clip(Radii.md)
+                        .background(colors.surfaceElevated)
+                        .border(1.dp, colors.border, Radii.md),
+                ) {
+                    // Two-column body: providers (left) | models (right).
+                    Row(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
+                        // ── Left: provider list ──
+                        Column(
+                            Modifier
+                                .width(116.dp)
+                                .fillMaxHeight()
+                                .background(colors.sunken)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            providers.forEach { def ->
+                                val isSelected = def.id == focusProviderId
+                                val isActive = def.id == activeProviderId
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(if (isSelected) colors.selected else colors.hover.copy(alpha = 0f))
+                                        .clickable {
+                                            focusProviderId = def.id
+                                            showAddModel = false
+                                            modelQuery = ""
+                                        }
+                                        .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
+                                ) {
+                                    Box(Modifier.width(Spacing.xs).size(6.dp)) {
+                                        if (isActive) Box(
+                                            Modifier.size(6.dp).clip(Radii.pill).background(colors.accent),
+                                        )
+                                    }
+                                    Text(
+                                        def.name.ifBlank { "未命名" },
+                                        style = AndmxTheme.typography.labelMedium,
+                                        color = if (isSelected) colors.textPrimary else colors.textSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            if (providers.isEmpty()) {
+                                Text(
+                                    "暂无供应商", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary,
+                                    modifier = Modifier.padding(Spacing.sm),
+                                )
+                            }
+                        }
+
+                        // ── Right: model list of the focused provider ──
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                        ) {
+                            val allModels = focusProvider?.models?.keys?.toList() ?: emptyList()
+                            val models = if (modelQuery.isBlank()) allModels
+                                else allModels.filter { it.contains(modelQuery, ignoreCase = true) }
+                            // Search box — always at the top, filters the list.
+                            Box(
+                                Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                            ) {
+                                BasicTextField(
+                                    value = modelQuery,
+                                    onValueChange = { modelQuery = it },
+                                    singleLine = true,
+                                    textStyle = AndmxTheme.typography.bodyMedium.copy(color = colors.textPrimary),
+                                    cursorBrush = SolidColor(colors.accent),
+                                    decorationBox = { inner ->
+                                        if (modelQuery.isEmpty()) {
+                                            Text("搜索模型…", style = AndmxTheme.typography.bodyMedium, color = colors.textTertiary)
+                                        }
+                                        inner()
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(Radii.sm)
+                                        .border(1.dp, colors.border, Radii.sm)
+                                        .background(colors.surface)
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                )
+                            }
+                            // Scrollable model list.
+                            Column(
+                                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                            ) {
+                            if (models.isNotEmpty()) {
+                                models.forEach { id ->
+                                    val isSelected = focusProvider?.id == activeProviderId && id == selectedModel
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(if (isSelected) colors.accentSoft else Color.Transparent)
+                                            .clickable {
+                                                onSwitchModel(focusProvider!!.id, id)
+                                                expanded = false
+                                            }
+                                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                    ) {
+                                        Icon(
+                                            if (isSelected) Icons.Outlined.TrackChanges else Icons.Outlined.Bolt,
+                                            contentDescription = null,
+                                            tint = if (isSelected) colors.textPrimary else colors.textTertiary,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                        Spacer(Modifier.width(Spacing.sm))
+                                        Text(
+                                            id,
+                                            style = AndmxTheme.typography.bodyMedium,
+                                            color = if (isSelected) colors.textPrimary else colors.textSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    "该供应商暂无模型", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary,
+                                    modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.md),
+                                )
+                            }
+
+                            // Inline add-model row.
+                            if (showAddModel && focusProvider != null) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                                ) {
+                                    BasicTextField(
+                                        value = newModelText,
+                                        onValueChange = { newModelText = it },
+                                        singleLine = true,
+                                        textStyle = AndmxTheme.typography.bodyMedium.copy(color = colors.textPrimary),
+                                        cursorBrush = SolidColor(colors.accent),
+                                        decorationBox = { inner ->
+                                            if (newModelText.isEmpty()) {
+                                                Text("模型 ID", style = AndmxTheme.typography.bodyMedium, color = colors.textTertiary)
+                                            }
+                                            inner()
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(Radii.sm)
+                                            .border(1.dp, colors.border, Radii.sm)
+                                            .background(colors.surface)
+                                            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                                    )
+                                    Spacer(Modifier.width(Spacing.xs))
+                                    SwitcherMiniAction(
+                                        label = "添加",
+                                        emphasized = false,
+                                        onClick = {
+                                            if (newModelText.isNotBlank() && focusProvider != null) {
+                                                onAddModel(focusProvider.id, newModelText.trim())
+                                                newModelText = ""
+                                                showAddModel = false
+                                            }
+                                        },
+                                    )
+                                }
+                            } else if (focusProvider != null) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showAddModel = true }
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                ) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(Spacing.sm))
+                                    Text("添加模型", style = AndmxTheme.typography.labelMedium, color = colors.textSecondary)
+                                }
+                            }
+                            } // end scrollable model list Column
+                        }
                     }
-                },
-                onClick = {
-                    expanded = false
-                    onClick()
-                },
-            )
-            // Reasoning options are generated from the model's declared capability:
-            // NONE → nothing (e.g. gpt-4o, deepseek-reasoner); EFFORT → the model's
-            // accepted levels; THINKING → a single on/off toggle.
-            reasoningOptionsFor(reasoning).forEach { (value, label, description) ->
-                androidx.compose.material3.DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(label, style = AndmxTheme.typography.bodyMedium, color = colors.textPrimary)
-                            Text(description, style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+
+                    // ── Footer: reasoning (if applicable) + config entries ──
+                    val reasoningOptions = reasoningOptionsFor(reasoning)
+                    if (reasoningOptions.isNotEmpty()) {
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                        Column(Modifier.fillMaxWidth().padding(vertical = Spacing.xs)) {
+                            reasoningOptions.forEach { (value, label, description) ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onReasoningEffortSelected(value)
+                                            expanded = false
+                                        }
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.TrackChanges, contentDescription = null,
+                                        tint = if (reasoningEffort == value) colors.textPrimary else colors.textTertiary,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Spacer(Modifier.width(Spacing.sm))
+                                    Column {
+                                        Text(label, style = AndmxTheme.typography.labelMedium, color = colors.textPrimary)
+                                        Text(description, style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+                                    }
+                                }
+                            }
                         }
-                    },
-                    leadingIcon = {
-                        if (reasoningEffort == value) {
-                            Icon(Icons.Outlined.TrackChanges, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
-                        }
-                    },
-                    onClick = {
-                        expanded = false
-                        onReasoningEffortSelected(value)
-                    },
-                )
+                    }
+
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                    Row(Modifier.fillMaxWidth().padding(Spacing.sm), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        SwitcherFooterAction(Icons.Outlined.Settings, "配置供应商", Modifier.weight(1f), onConfigureProvider) { expanded = false }
+                        SwitcherFooterAction(Icons.Outlined.Tune, "配置模型列表", Modifier.weight(1f), onConfigureModels) { expanded = false }
+                    }
+                }
             }
-            androidx.compose.material3.DropdownMenuItem(
-                text = { Text("模型设置…", style = AndmxTheme.typography.bodyMedium, color = colors.textPrimary) },
-                onClick = {
-                    expanded = false
-                    onClick()
-                },
-            )
         }
+    }
+}
+
+/** Compact text button used inside the model switcher panel. */
+@Composable
+private fun SwitcherMiniAction(label: String, emphasized: Boolean, onClick: () -> Unit) {
+    val colors = AndmxTheme.colors
+    Text(
+        label,
+        style = AndmxTheme.typography.labelMedium,
+        color = if (emphasized) colors.onAccent else colors.textSecondary,
+        modifier = Modifier
+            .clip(Radii.sm)
+            .background(if (emphasized) colors.accent else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+    )
+}
+
+/** Footer entry: icon + label, opens a config surface. */
+@Composable
+private fun SwitcherFooterAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit, onDismiss: () -> Unit) {
+    val colors = AndmxTheme.colors
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(Radii.sm)
+            .clickable {
+                onDismiss()
+                onClick()
+            }
+            .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
+    ) {
+        Icon(icon, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(Spacing.xs))
+        Text(label, style = AndmxTheme.typography.labelMedium, color = colors.textSecondary)
     }
 }
 

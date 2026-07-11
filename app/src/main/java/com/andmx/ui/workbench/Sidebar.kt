@@ -21,8 +21,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Update
@@ -71,16 +75,32 @@ fun Sidebar(
     onRenameConversation: (Long, String) -> Unit,
     /** Open the project picker/creator dialog. */
     onProjectHeaderClick: () -> Unit = {},
+    /** Close the sidebar drawer (compact only). When non-null, a header with a
+     *  back/close button is rendered at the top. */
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = AndmxTheme.colors
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .background(colors.sidebar)
-            .padding(horizontal = Spacing.sm),
+            .background(colors.sidebar),
     ) {
-        Spacer(Modifier.height(Spacing.md))
+        // Header row: close button (left) — ChatGPT style.
+        if (onClose != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.xs, vertical = Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(36.dp).clip(Radii.pill)
+                        .clickable { onClose() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Close, contentDescription = "关闭", tint = colors.textPrimary, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
 
         NavRow(Icons.Outlined.ChatBubbleOutline, "新对话", onClick = onNewChat)
         NavRow(Icons.Outlined.Search, "搜索", onClick = onSearch)
@@ -98,23 +118,78 @@ fun Sidebar(
             if (groups.isEmpty()) {
                 item {
                     Text(
-                        "还没有对话",
-                        style = AndmxTheme.typography.bodySmall,
+                        "无对话",
+                        style = AndmxTheme.typography.labelSmall,
                         color = AndmxTheme.colors.textTertiary,
                         modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.sm),
                     )
                 }
             }
             items(groups) { group ->
-                ProjectHeader(group.name, onClick = onProjectHeaderClick)
-                group.conversations.forEach { conv ->
-                    ConversationRow(
-                        conv = conv,
-                        selected = conv.id == activeId,
-                        onClick = { onSelectConversation(conv.id) },
-                        onDelete = { onDeleteConversation(conv.id) },
-                        onRename = { onRenameConversation(conv.id, conv.title) },
+                // Collapsible group header — tap to expand/collapse.
+                val groupName = group.name.trimEnd('/').substringAfterLast('/').ifBlank { "默认" }
+                var expanded by remember(group.name) { mutableStateOf(true) }
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(Radii.sm)
+                        .clickable { expanded = !expanded }
+                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                        contentDescription = if (expanded) "收起" else "展开",
+                        tint = colors.textTertiary,
+                        modifier = Modifier.size(16.dp),
                     )
+                    Spacer(Modifier.width(Spacing.xs))
+                    Icon(Icons.Outlined.Folder, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text(
+                        groupName,
+                        style = AndmxTheme.typography.labelMedium,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "${group.conversations.size}",
+                        style = AndmxTheme.typography.labelSmall,
+                        color = colors.textTertiary,
+                    )
+                }
+                if (expanded) {
+                    // Show only the first N conversations by default; reveal the
+                    // rest when the user taps "显示更多" — mirrors Codex's
+                    // progressive disclosure in the thread list.
+                    val previewCount = 5
+                    var showAll by remember(group.name) { mutableStateOf(false) }
+                    val visible = if (showAll) group.conversations else group.conversations.take(previewCount)
+                    visible.forEach { conv ->
+                        ConversationRow(
+                            conv = conv,
+                            selected = conv.id == activeId,
+                            onClick = { onSelectConversation(conv.id) },
+                            onDelete = { onDeleteConversation(conv.id) },
+                            onRename = { onRenameConversation(conv.id, conv.title) },
+                        )
+                    }
+                    if (group.conversations.size > previewCount) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(Radii.sm)
+                                .clickable { showAll = !showAll }
+                                .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (showAll) "收起" else "显示更多 (${group.conversations.size - previewCount})",
+                                style = AndmxTheme.typography.labelSmall,
+                                color = colors.textTertiary,
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.height(Spacing.xs))
             }
@@ -129,57 +204,26 @@ fun Sidebar(
 @Composable
 private fun NavRow(icon: ImageVector, label: String, selected: Boolean = false, onClick: () -> Unit = {}) {
     val colors = AndmxTheme.colors
+    // Horizontal layout: icon left, label right — ChatGPT style.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) colors.selected else androidx.compose.ui.graphics.Color.Transparent)
+            .clip(Radii.sm)
             .clickable(onClick = onClick)
-            .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = colors.textSecondary,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(Spacing.md))
         Text(
             text = label,
             style = AndmxTheme.typography.titleSmall,
             color = colors.textPrimary,
-        )
-    }
-}
-
-@Composable
-private fun ProjectHeader(rawName: String, onClick: () -> Unit = {}) {
-    val colors = AndmxTheme.colors
-    // Project grouping stores the guest path (e.g. /root/my-app); display the
-    // last path segment as the project name.
-    val name = rawName.trimEnd('/').substringAfterLast('/').ifBlank { rawName }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
-    ) {
-        Icon(
-            imageVector = Icons.Outlined.Folder,
-            contentDescription = null,
-            tint = colors.textTertiary,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(Spacing.md))
-        Text(
-            text = name,
-            style = AndmxTheme.typography.labelLarge,
-            color = colors.textSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -196,33 +240,27 @@ private fun ConversationRow(
     val colors = AndmxTheme.colors
     var menu by remember { mutableStateOf(false) }
     val rowBg by androidx.compose.animation.animateColorAsState(
-        if (selected) colors.selected else androidx.compose.ui.graphics.Color.Transparent,
+        if (selected) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent,
         label = "convRowBg",
     )
     Row(
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .padding(horizontal = Spacing.xs)
+            .clip(Radii.sm)
             .background(rowBg)
             .combinedClickable(onClick = onClick, onLongClick = { menu = true })
-            .padding(start = Spacing.xxxl, end = Spacing.sm)
-            .padding(vertical = 10.dp),
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = conv.title,
-                style = AndmxTheme.typography.bodyMedium,
-                color = if (selected) colors.textPrimary else if (conv.muted) colors.textTertiary else colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (conv.goalText.isNotBlank()) {
-                Spacer(Modifier.height(Spacing.xxs))
-                GoalStatusLine(conv)
-            }
-        }
+        Text(
+            text = conv.title,
+            style = AndmxTheme.typography.bodyMedium,
+            color = if (selected) colors.textPrimary else if (conv.muted) colors.textTertiary else colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
         if (conv.time.isNotEmpty()) {
             Spacer(Modifier.width(Spacing.sm))
             Text(
@@ -230,60 +268,23 @@ private fun ConversationRow(
                 style = AndmxTheme.typography.labelSmall,
                 color = colors.textTertiary,
                 maxLines = 1,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            androidx.compose.material3.DropdownMenuItem(
-                text = { Text("重命名", color = colors.textPrimary) },
-                onClick = { menu = false; onRename() },
-            )
-            androidx.compose.material3.DropdownMenuItem(
-                text = { Text("删除对话", color = colors.warning) },
-                onClick = { menu = false; onDelete() },
             )
         }
     }
-}
-
-@Composable
-private fun GoalStatusLine(conv: ConversationItem) {
-    val colors = AndmxTheme.colors
-    val statusColor = goalStatusColor(conv.goalPhase)
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Box(
-            Modifier.clip(Radii.pill)
-                .background(statusColor.copy(alpha = if (colors.isDark) 0.18f else 0.12f))
-                .padding(horizontal = Spacing.xs, vertical = Spacing.xxs),
-        ) {
-            Text(
-                conv.goalPhase.label,
-                style = AndmxTheme.typography.labelSmall,
-                color = statusColor,
-                maxLines = 1,
-            )
-        }
-        Spacer(Modifier.width(Spacing.xs))
-        Text(
-            conv.goalNote.ifBlank { conv.goalText },
-            style = AndmxTheme.typography.labelSmall,
-            color = colors.textTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("重命名", color = colors.textPrimary) },
+            onClick = { menu = false; onRename() },
         )
-    }
-}
-
-@Composable
-private fun goalStatusColor(phase: GoalPhase): Color {
-    val colors = AndmxTheme.colors
-    return when (phase) {
-        GoalPhase.RUNNING -> colors.accent
-        GoalPhase.WAITING_APPROVAL, GoalPhase.NEEDS_SETUP, GoalPhase.FAILED -> colors.warning
-        GoalPhase.PAUSED -> colors.textSecondary
-        GoalPhase.READY -> colors.textTertiary
-        GoalPhase.EMPTY -> colors.textTertiary
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("分支", color = colors.textPrimary) },
+            onClick = { menu = false; onDelete() }, // TODO: wire to fork
+        )
+        androidx.compose.material3.HorizontalDivider()
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("删除", color = colors.warning) },
+            onClick = { menu = false; onDelete() },
+        )
     }
 }
 
@@ -292,7 +293,7 @@ private fun SidebarDivider() {
     val colors = AndmxTheme.colors
     Box(
         Modifier
-            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+            .padding(vertical = Spacing.xs)
             .fillMaxWidth()
             .height(1.dp)
             .background(colors.border),

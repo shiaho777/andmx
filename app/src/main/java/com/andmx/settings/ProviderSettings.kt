@@ -38,6 +38,46 @@ data class ProviderSettings(
     val reasoningEffort: String = "off",
     /** newline list of MCP servers as "name|command". */
     val mcpServers: String = "",
+
+    // ── 常规设置（对标 ZCode General）──
+    /** 界面语言: "system" | "zh" | "en" */
+    val locale: String = "system",
+    /** 终端字体覆盖；留空时自动继承系统终端字体。 */
+    val terminalFontFamily: String = "",
+    /** 任务完成/失败/需确认时发送通知。 */
+    val notification: Boolean = true,
+    /** 通知提示音（notification 开启时生效）。 */
+    val notificationSound: Boolean = true,
+    /** 运行时后续操作的处理: "queue" | "guide" */
+    val interactionBehavior: String = "queue",
+    /** 在消息流中展示模型思考内容。 */
+    val showReasoning: Boolean = true,
+    /** 在消息流中展示 Todo 工具卡片。 */
+    val showTodos: Boolean = true,
+    /** 自动归档超过保留期的已完成任务。 */
+    val taskAutoArchive: Boolean = false,
+    /** 归档保留时长（天）: 3 | 7 | 14 | 30 */
+    val taskAutoArchiveDays: Int = 7,
+
+    // ── 代码预览（对标 ZCode Code Preview）──
+    /** 浅色模式下代码块主题 id。 */
+    val lightCodeTheme: String = "github-light",
+    /** 深色模式下代码块主题 id。 */
+    val darkCodeTheme: String = "one-dark-pro",
+    /** 在代码块中显示行号。 */
+    val showLineNumbers: Boolean = false,
+    /** 长行自动换行（否则横向滚动）。 */
+    val wrapLongLines: Boolean = false,
+    /** 代码块字号（sp）。 */
+    val codeFontSize: Int = 13,
+
+    // ── 索引库（对标 ZCode Indexing）──
+    /** 自动索引新打开的项目文件夹。 */
+    val indexNewFolders: Boolean = true,
+    /** 索引仓库以实现即时 Grep 搜索（测试版）。 */
+    val instantGrep: Boolean = false,
+    /** 自动索引的文件数上限。 */
+    val indexFileLimit: Int = 50_000,
 ) {
     /**
      * Whether the agent can take a turn. Provider readiness (key present etc.)
@@ -59,6 +99,23 @@ class SettingsStore(private val context: Context) {
     private val personaKey = stringPreferencesKey("persona")
     private val reasoningKey = stringPreferencesKey("reasoning_effort")
     private val mcpKey = stringPreferencesKey("mcp_servers")
+    private val localeKey = stringPreferencesKey("locale")
+    private val terminalFontKey = stringPreferencesKey("terminal_font_family")
+    private val notificationKey = androidx.datastore.preferences.core.booleanPreferencesKey("notification")
+    private val notificationSoundKey = androidx.datastore.preferences.core.booleanPreferencesKey("notification_sound")
+    private val interactionKey = stringPreferencesKey("interaction_behavior")
+    private val showReasoningKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_reasoning")
+    private val showTodosKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_todos")
+    private val autoArchiveKey = androidx.datastore.preferences.core.booleanPreferencesKey("task_auto_archive")
+    private val autoArchiveDaysKey = androidx.datastore.preferences.core.intPreferencesKey("task_auto_archive_days")
+    private val lightCodeThemeKey = stringPreferencesKey("light_code_theme")
+    private val darkCodeThemeKey = stringPreferencesKey("dark_code_theme")
+    private val showLineNumbersKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_line_numbers")
+    private val wrapLongLinesKey = androidx.datastore.preferences.core.booleanPreferencesKey("wrap_long_lines")
+    private val codeFontSizeKey = androidx.datastore.preferences.core.intPreferencesKey("code_font_size")
+    private val indexNewFoldersKey = androidx.datastore.preferences.core.booleanPreferencesKey("index_new_folders")
+    private val instantGrepKey = androidx.datastore.preferences.core.booleanPreferencesKey("instant_grep")
+    private val indexFileLimitKey = androidx.datastore.preferences.core.intPreferencesKey("index_file_limit")
 
     // Legacy keys retained only for one-time migration into the providers table.
     internal val legacyBaseUrlKey = stringPreferencesKey("base_url")
@@ -78,6 +135,23 @@ class SettingsStore(private val context: Context) {
             persona = p[personaKey] ?: def.persona,
             reasoningEffort = p[reasoningKey] ?: def.reasoningEffort,
             mcpServers = p[mcpKey] ?: def.mcpServers,
+            locale = p[localeKey] ?: def.locale,
+            terminalFontFamily = p[terminalFontKey] ?: def.terminalFontFamily,
+            notification = p[notificationKey] ?: def.notification,
+            notificationSound = p[notificationSoundKey] ?: def.notificationSound,
+            interactionBehavior = p[interactionKey] ?: def.interactionBehavior,
+            showReasoning = p[showReasoningKey] ?: def.showReasoning,
+            showTodos = p[showTodosKey] ?: def.showTodos,
+            taskAutoArchive = p[autoArchiveKey] ?: def.taskAutoArchive,
+            taskAutoArchiveDays = p[autoArchiveDaysKey] ?: def.taskAutoArchiveDays,
+            lightCodeTheme = p[lightCodeThemeKey] ?: def.lightCodeTheme,
+            darkCodeTheme = p[darkCodeThemeKey] ?: def.darkCodeTheme,
+            showLineNumbers = p[showLineNumbersKey] ?: def.showLineNumbers,
+            wrapLongLines = p[wrapLongLinesKey] ?: def.wrapLongLines,
+            codeFontSize = p[codeFontSizeKey] ?: def.codeFontSize,
+            indexNewFolders = p[indexNewFoldersKey] ?: def.indexNewFolders,
+            instantGrep = p[instantGrepKey] ?: def.instantGrep,
+            indexFileLimit = p[indexFileLimitKey] ?: def.indexFileLimit,
         )
     }
 
@@ -92,6 +166,23 @@ class SettingsStore(private val context: Context) {
             p[personaKey] = settings.persona
             p[reasoningKey] = settings.reasoningEffort
             p[mcpKey] = settings.mcpServers
+            p[localeKey] = settings.locale
+            p[terminalFontKey] = settings.terminalFontFamily
+            p[notificationKey] = settings.notification
+            p[notificationSoundKey] = settings.notificationSound
+            p[interactionKey] = settings.interactionBehavior
+            p[showReasoningKey] = settings.showReasoning
+            p[showTodosKey] = settings.showTodos
+            p[autoArchiveKey] = settings.taskAutoArchive
+            p[autoArchiveDaysKey] = settings.taskAutoArchiveDays
+            p[lightCodeThemeKey] = settings.lightCodeTheme
+            p[darkCodeThemeKey] = settings.darkCodeTheme
+            p[showLineNumbersKey] = settings.showLineNumbers
+            p[wrapLongLinesKey] = settings.wrapLongLines
+            p[codeFontSizeKey] = settings.codeFontSize
+            p[indexNewFoldersKey] = settings.indexNewFolders
+            p[instantGrepKey] = settings.instantGrep
+            p[indexFileLimitKey] = settings.indexFileLimit
         }
     }
 
@@ -126,7 +217,64 @@ class SettingsStore(private val context: Context) {
             p[automationsKey] = automationJson.encodeToString(ListSerializer(Automation.serializer()), list)
         }
     }
+
+    // ---- Custom commands（用户自定义 /command）----
+    private val commandsKey = stringPreferencesKey("custom_commands")
+
+    val customCommands: Flow<List<CustomCommand>> = context.dataStore.data.map { p ->
+        p[commandsKey]?.let {
+            runCatching { automationJson.decodeFromString(ListSerializer(CustomCommand.serializer()), it) }.getOrNull()
+        } ?: emptyList()
+    }
+
+    suspend fun saveCommands(list: List<CustomCommand>) {
+        context.dataStore.edit { p ->
+            p[commandsKey] = automationJson.encodeToString(ListSerializer(CustomCommand.serializer()), list)
+        }
+    }
+
+    // ---- Custom sub-agents（用户级子智能体定义）----
+    private val subAgentsKey = stringPreferencesKey("custom_subagents")
+
+    val customSubAgents: Flow<List<CustomSubAgent>> = context.dataStore.data.map { p ->
+        p[subAgentsKey]?.let {
+            runCatching { automationJson.decodeFromString(ListSerializer(CustomSubAgent.serializer()), it) }.getOrNull()
+        } ?: emptyList()
+    }
+
+    suspend fun saveSubAgents(list: List<CustomSubAgent>) {
+        context.dataStore.edit { p ->
+            p[subAgentsKey] = automationJson.encodeToString(ListSerializer(CustomSubAgent.serializer()), list)
+        }
+    }
 }
 
 @Serializable
 data class Automation(val title: String, val prompt: String)
+
+@Serializable
+data class CustomCommand(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val argumentHint: String = "",
+    val prompt: String
+)
+
+@Serializable
+data class CustomSubAgent(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val systemPrompt: String = "",
+    /** "inherit" | "main" | "lite" */
+    val model: String = "inherit",
+    /** default | acceptEdits | auto | bypassPermissions | dontAsk | plan */
+    val permissionMode: String = "default",
+    /** 颜色标记: blue/cyan/green/orange/pink/purple/red/yellow */
+    val color: String = "blue",
+    /** 允许作为后台任务运行。 */
+    val background: Boolean = false,
+    /** 是否启用。 */
+    val enabled: Boolean = true
+)

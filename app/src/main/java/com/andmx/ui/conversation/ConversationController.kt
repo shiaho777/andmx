@@ -29,6 +29,7 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolCapability
 import com.andmx.agent.ToolRisk
 import com.andmx.agent.TaskPlanSnapshot
+import com.andmx.agent.ToolArgs
 import com.andmx.agent.WebSearchTool
 import com.andmx.agent.WriteFileTool
 import com.andmx.agent.agentMethodologyText
@@ -48,6 +49,24 @@ import com.andmx.data.ConversationRepository
 import com.andmx.llm.ApiMessage
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.SettingsStore
+import com.andmx.ui.workbench.ArtifactKind
+import com.andmx.ui.workbench.ArtifactState
+import com.andmx.ui.workbench.BackgroundTaskKind
+import com.andmx.ui.workbench.BackgroundTaskState
+import com.andmx.ui.workbench.BackgroundTaskStatus
+import com.andmx.ui.workbench.ComposerDraftState
+import com.andmx.ui.workbench.ExecutionSessionState
+import com.andmx.ui.workbench.FocusTarget
+import com.andmx.ui.workbench.GoalState
+import com.andmx.ui.workbench.JumpPoint
+import com.andmx.ui.workbench.SidePanelTabId
+import com.andmx.ui.workbench.TerminalBindingState
+import com.andmx.ui.workbench.ToolExecutionState
+import com.andmx.ui.workbench.ToolExecutionStatus
+import com.andmx.ui.workbench.TurnState
+import com.andmx.ui.workbench.TurnStatus
+import com.andmx.ui.workbench.toolTerminalSessionKey
+import com.andmx.ui.workbench.toolTarget
 import com.andmx.ui.workbench.runLogEntries
 import com.andmx.ui.workbench.runLogStateLabel
 import com.andmx.ui.workbench.activitySummaryText
@@ -105,12 +124,14 @@ import com.andmx.ui.workbench.verificationStateLabel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 /** UI-facing items rendered in the conversation. */
 sealed interface ChatItem {
     val key: Long
-    data class User(override val key: Long, val text: String) : ChatItem
-    data class Assistant(override val key: Long, val text: String, val done: Boolean = false) : ChatItem
+    data class User(override val key: Long, val text: String, val sentAt: Long = 0L) : ChatItem
+    data class Assistant(override val key: Long, val text: String, val done: Boolean = false, val sentAt: Long = 0L, val completedAt: Long = 0L) : ChatItem
     data class ToolUse(
         override val key: Long,
         val callId: String,
@@ -119,6 +140,7 @@ sealed interface ChatItem {
         val output: String? = null,
         val running: Boolean = true,
         val error: Boolean = false,
+        val imageUrls: List<String> = emptyList(),
     ) : ChatItem
     data class Approval(
         override val key: Long,
@@ -132,16 +154,51 @@ sealed interface ChatItem {
     ) : ChatItem
 }
 
+/**
+ * Goal status — mirrors Codex's thread_goals.status enum exactly.
+ *
+ * The agent transitions between these via create_goal/update_goal tools and
+ * /goal commands. The UI renders a different color/label for each.
+ */
+enum class GoalStatus(val label: String) {
+    ACTIVE("运行中"),
+    PAUSED("已暂停"),
+    BLOCKED("已阻塞"),
+    USAGE_LIMITED("达到用量上限"),
+    BUDGET_LIMITED("达到预算上限"),
+    COMPLETE("已完成"),
+    EMPTY("未设置");
+
+    /** Map to the legacy GoalPhase for backward-compatible code paths. */
+    fun toPhase(): GoalPhase = when (this) {
+        ACTIVE -> GoalPhase.RUNNING
+        PAUSED -> GoalPhase.PAUSED
+        BLOCKED -> GoalPhase.FAILED
+        USAGE_LIMITED -> GoalPhase.FAILED
+        BUDGET_LIMITED -> GoalPhase.FAILED
+        COMPLETE -> GoalPhase.READY
+        EMPTY -> GoalPhase.EMPTY
+    }
+}
+
+/** Legacy phase enum — kept for compatibility; new code uses [GoalStatus]. */
 enum class GoalPhase { EMPTY, RUNNING, PAUSED, READY, WAITING_APPROVAL, NEEDS_SETUP, FAILED }
 
 data class ConversationGoal(
     val text: String = "",
+    val status: GoalStatus = GoalStatus.EMPTY,
     val phase: GoalPhase = GoalPhase.EMPTY,
+    val tokenBudget: Int = 0,
+    val tokensUsed: Int = 0,
     val startedAt: Long = 0L,
     val updatedAt: Long = 0L,
     val note: String = "",
 ) {
     val hasGoal: Boolean get() = text.isNotBlank()
+    /** Remaining token budget, or 0 if no budget set. */
+    val remainingBudget: Int get() = if (tokenBudget > 0) (tokenBudget - tokensUsed).coerceAtLeast(0) else 0
+    /** True when a budget is set and has been exhausted. */
+    val isBudgetExhausted: Boolean get() = tokenBudget > 0 && tokensUsed >= tokenBudget
 }
 
 /**
@@ -186,6 +243,8 @@ class ConversationController(
     private val configLoader = com.andmx.config.ConfigLoader(context, guestFs, store)
     private val telemetrySink = com.andmx.telemetry.TelemetrySink(repo)
     private val tokenUsageTracker = com.andmx.llm.TokenUsageTracker()
+    private val imageJson = Json { ignoreUnknownKeys = true }
+    private val shellTool = ShellTool(context, cwdProvider = { project })
 
     /** Live plan state for UI binding. */
     val planState get() = updatePlanTool.state
@@ -225,6 +284,11 @@ class ConversationController(
             // control tool (resume/wait/close/list), so the model can manage
             // sub-agent state, not just fire-and-forget.
             engine.addTools(listOf(_orchestrator!!.createSubAgentTool(), _orchestrator!!.createMultiAgentTool()))
+            scope.launch {
+                _orchestrator!!.events.collectLatest { event ->
+                    updateBackgroundTask(event)
+                }
+            }
         }
         // Register plugin-declared tools once, after the engine is ready.
         if (!_pluginToolsLoaded) {
@@ -253,20 +317,27 @@ class ConversationController(
         scope.launch { pluginSystem.setEnabled(name, enabled) }
     }
 
+    /** Goal tool state — shared between agent tools and the UI. */
+    private val goalToolState = com.andmx.agent.GoalToolState()
+    /** Set by /goal edit to request the UI to open the goal overlay. */
+    var showGoalCommand by mutableStateOf(false)
+
     private val builtInTools = listOf(
-        ShellTool(context, cwdProvider = { project }),
+        shellTool,
         ReadFileTool(context),
         WriteFileTool(context),
         EditFileTool(context),
         ApplyPatchTool(context),
         GitTool(context, cwdProvider = { project }),
-        BrowseTool(networkPolicy, onBrowseUrl = { url -> browseMirrorUrl = url }),   // ← with network policy + UI mirror
+        BrowseTool(networkPolicy, onBrowseUrl = { url -> browseMirrorUrl = url }),
         ListDirTool(context),
-        WebSearchTool(networkPolicy), // ← with network policy
-        updatePlanTool,  // ← model can track its plan
-        // Computer Use: pure-visual screen operation (screenshot→action→screenshot).
-        // The tool self-checks grants and returns guidance if not authorized, so it's
-        // safe to always expose — the model won't crash on it when ungranted.
+        WebSearchTool(networkPolicy),
+        updatePlanTool,
+        // Codex-style goal management: the agent can create, update, and query
+        // the current objective + token budget autonomously.
+        com.andmx.agent.CreateGoalTool(goalToolState),
+        com.andmx.agent.UpdateGoalTool(goalToolState),
+        com.andmx.agent.GetGoalTool(goalToolState),
         ComputerUseTool(context),
     )
 
@@ -276,7 +347,13 @@ class ConversationController(
     /** The engine is rebuilt when the primary provider changes so the client binds the right endpoint/key/protocol. */
     private var engine = AgentEngine(
         tools = builtInTools,
-        client = com.andmx.llm.LlmClient(com.andmx.llm.provider.ProviderDefinition.BUILTIN_PROVIDERS.first()),
+        // Placeholder provider; replaced as soon as the primary flow emits.
+        client = com.andmx.llm.LlmClient(
+            com.andmx.llm.provider.ProviderDefinition(
+                id = "placeholder", name = "", baseUrl = "",
+                apiKey = "", apiKeyRequired = false,
+            )
+        ),
         approve = ::approveGate,
     )
     private var seq = 0L
@@ -292,6 +369,8 @@ class ConversationController(
     private var mcpConnected = false
 
     val items = mutableStateListOf<ChatItem>()
+    var executionSessionState by mutableStateOf(ExecutionSessionState(project = project))
+        private set
     var busy by mutableStateOf(false)
         private set
     var settings by mutableStateOf(ProviderSettings())
@@ -312,6 +391,7 @@ class ConversationController(
         private set
     var goal by mutableStateOf(ConversationGoal())
         private set
+    val executionState get() = executionSessionState
 
     /** Set by the host UI so `/model` can open the settings sheet. */
     var onOpenSettings: () -> Unit = {}
@@ -840,6 +920,11 @@ class ConversationController(
             }
             GoalAction.PAUSE -> pauseGoal("由 /goal 暂停")
             GoalAction.RESUME -> resumeGoal("由 /goal 恢复,等待继续推进")
+            GoalAction.EDIT -> {
+                if (!goal.hasGoal) return "## 当前目标\n- 未设置\n- 先创建目标: `/goal <目标文本>`"
+                // Trigger the goal overlay in edit mode via the showGoal flag.
+                showGoalCommand = true
+            }
             GoalAction.CLEAR -> {
                 clearGoal()
                 return "## 当前目标\n- 已清除\n- 发送新任务或使用 `/goal <目标文本>` 可重新建立线程目标。"
@@ -945,6 +1030,18 @@ class ConversationController(
     }
 
     init {
+        // Bridge agent goal tools → Compose state. When the agent calls
+        // create_goal/update_goal, the new goal flows into the UI.
+        goalToolState.onGoalChange = { newGoal ->
+            goal = newGoal
+            syncGoalSnapshots()
+            persistGoal()
+        }
+        scope.launch {
+            shellTool.events.collectLatest { event ->
+                updateShellBinding(event)
+            }
+        }
         // Seed the providers table from legacy DataStore values on first run.
         scope.launch {
             providerStore.ensureSeeded(store.legacyProvider())
@@ -1035,11 +1132,14 @@ class ConversationController(
         conversationId = null
         activeId = null
         items.clear()
+        executionSessionState = ExecutionSessionState(project = project)
         streamingIndex = null
         toolArgsByCallId.clear()
         turnToolOutputs.clear()
         goal = ConversationGoal()
+        syncGoalSnapshots()
         updatePlanTool.clear()  // ← clear plan on new conversation
+        editIndex = null
         engine.seed(emptyList())
         refreshSystemPrompt()
     }
@@ -1049,6 +1149,7 @@ class ConversationController(
             val msgs = repo.messages(id)
             conversationId = id
             activeId = id
+            editIndex = null
             // Restore the project working directory this conversation belongs to,
             // so tools operate in the right cwd after switching conversations.
             repo.conversation(id)?.project?.takeIf { it.isNotBlank() }?.let { project = it }
@@ -1058,8 +1159,20 @@ class ConversationController(
             val api = mutableListOf<ApiMessage>()
             for (m in msgs) {
                 when (m.role) {
-                    "user" -> { items += ChatItem.User(seq++, m.content); api += ApiMessage("user", m.content) }
-                    "assistant" -> { items += ChatItem.Assistant(seq++, m.content); api += ApiMessage("assistant", m.content) }
+                    "user" -> {
+                        items += ChatItem.User(seq++, m.content, sentAt = m.createdAt)
+                        api += ApiMessage("user", m.content)
+                    }
+                    "assistant" -> {
+                        items += ChatItem.Assistant(
+                            seq++,
+                            m.content,
+                            done = true,
+                            sentAt = m.createdAt,
+                            completedAt = m.createdAt,
+                        )
+                        api += ApiMessage("assistant", m.content)
+                    }
                     "tool" -> {
                         items += ChatItem.ToolUse(
                             seq++,
@@ -1069,6 +1182,7 @@ class ConversationController(
                             m.content,
                             running = false,
                             error = m.toolError,
+                            imageUrls = decodeImageUrls(m.imageUrlsJson),
                         )
                         api += ApiMessage("assistant", "[tool ${m.toolName}] ${m.content.take(400)}")
                     }
@@ -1089,7 +1203,9 @@ class ConversationController(
             }
             val restoredGoal = repo.conversation(id)?.toGoal()?.takeIf { it.hasGoal }
             goal = restoredGoal ?: deriveGoalFromTranscript()
+            syncGoalSnapshots()
             if (restoredGoal == null && goal.hasGoal) persistGoal()
+            rebuildExecutionSessionState()
             engine.seed(api)
             refreshSystemPrompt()
         }
@@ -1182,25 +1298,58 @@ class ConversationController(
         goalNoteOverride: String? = null,
     ) {
         if (busy) return
+        // If resending an edited message, truncate the transcript back to the
+        // edit point *now* (synchronously on the UI thread): drop the old user
+        // message and everything after it, then re-seed the engine. The DB
+        // truncation happens inside the turn job below.
+        val pendingEditIdx = editIndex
+        editIndex = null
+        if (pendingEditIdx != null) {
+            while (items.size > pendingEditIdx) items.removeAt(items.lastIndex)
+            streamingIndex = null
+            toolArgsByCallId.clear()
+            val remaining = mutableListOf<com.andmx.llm.ApiMessage>()
+            items.forEach { item ->
+                when (item) {
+                    is ChatItem.User -> remaining += com.andmx.llm.ApiMessage(role = "user", content = item.text)
+                    is ChatItem.Assistant -> remaining += com.andmx.llm.ApiMessage(role = "assistant", content = item.text)
+                    else -> {}
+                }
+            }
+            engine.seed(remaining)
+            rebuildExecutionSessionState()
+        }
         val display = Attachments.displayText(text, attachments)
         when (val cmd = com.andmx.agent.SlashCommands.parse(text)) {
             is com.andmx.agent.SlashResult.NotCommand -> Unit
             else -> { handleSlash(text, cmd, attachments); return }
         }
         if (!isProviderReady) {
-            items += ChatItem.User(seq++, display)
+            items += ChatItem.User(seq++, display, sentAt = System.currentTimeMillis())
+            beginExecutionTurn(display, attachments)
             val intake = Attachments.localIntakeText(attachments)
             val msg = listOf(
                 "⚠️ 尚未配置 API 密钥。点击右上角设置填入 baseUrl / Key / 模型。",
                 intake.takeIf { it.isNotBlank() },
             ).filterNotNull().joinToString("\n\n")
             items += ChatItem.Assistant(seq++, msg)
-            startGoal(goalOverride ?: text, GoalPhase.NEEDS_SETUP, goalNoteOverride ?: "需要先配置模型")
+            updateActiveTurn {
+                it.copy(
+                    assistantText = msg,
+                    assistantDone = true,
+                    status = TurnStatus.FAILED,
+                    completedAt = System.currentTimeMillis(),
+                )
+            }
+            executionSessionState = executionSessionState.copy(isWorking = false, activeTurnId = null)
+            // Don't auto-create a goal — goals are set explicitly via /goal
+            // or the agent's create_goal tool.
             scope.launch {
                 if (conversationId == null) {
                     conversationId = repo.createConversation(project, conversationTitleOverride ?: text.take(30).ifBlank { "需配置模型" })
                     activeId = conversationId
                     persistGoal()
+                    executionSessionState = executionSessionState.copy(conversationId = conversationId, project = project)
                 }
                 conversationId?.let {
                     repo.addMessage(it, "user", display)
@@ -1209,9 +1358,15 @@ class ConversationController(
             }
             return
         }
-        items += ChatItem.User(seq++, display)
+        items += ChatItem.User(seq++, display, sentAt = System.currentTimeMillis())
+        beginExecutionTurn(display, attachments)
         toolArgsByCallId.clear()
-        startGoal(goalOverride ?: text, GoalPhase.RUNNING, goalNoteOverride ?: "正在执行")
+        // Goals are only set via /goal command or agent create_goal tool —
+        // not automatically on every message. Update an existing goal's status
+        // if one is active, but don't create one.
+        if (goal.hasGoal && goal.status == GoalStatus.ACTIVE) {
+            // Keep goal active during the turn.
+        }
         busy = true
         turnStopped = false
         turnJob = scope.launch {
@@ -1220,6 +1375,17 @@ class ConversationController(
                     conversationId = repo.createConversation(project, conversationTitleOverride ?: text.take(30).ifBlank { "附件对话" })
                     activeId = conversationId
                     persistGoal()
+                    executionSessionState = executionSessionState.copy(conversationId = conversationId, project = project)
+                }
+                // Persist the edit-revert truncation before adding the new message.
+                if (pendingEditIdx != null) {
+                    val id = conversationId
+                    if (id != null) {
+                        val dbMsgs = repo.messages(id)
+                        if (pendingEditIdx < dbMsgs.size) {
+                            repo.truncateFrom(id, dbMsgs[pendingEditIdx].id)
+                        }
+                    }
                 }
                 conversationId?.let { repo.addMessage(it, "user", display) }
 
@@ -1313,9 +1479,24 @@ class ConversationController(
         turnStopped = true
         turnJob?.cancel()
         turnJob = null
+        // Commit the in-progress streaming message as a completed (partial)
+        // assistant item so its text isn't lost — don't just drop it.
+        streamingIndex?.let { idx ->
+            if (idx in items.indices) {
+                val partial = items[idx] as? ChatItem.Assistant
+                if (partial != null && partial.text.isNotBlank()) {
+                    val now = System.currentTimeMillis()
+                    items[idx] = partial.copy(done = true, completedAt = now)
+                    conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", partial.text) } }
+                } else {
+                    items.removeAt(idx)
+                }
+            }
+        }
         streamingIndex = null
         busy = false
         updateGoalPhase(GoalPhase.PAUSED, "已由用户停止")
+        finishExecution(TurnStatus.CANCELLED)
         val msg = "_已停止_"
         items += ChatItem.Assistant(seq++, msg)
         conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
@@ -1328,8 +1509,12 @@ class ConversationController(
         var i = items.lastIndex
         while (i >= 0 && items[i] !is ChatItem.User) { items.removeAt(i); i-- }
         if (items.none { it is ChatItem.User }) return
-        val lastUser = items.lastOrNull { it is ChatItem.User } as? ChatItem.User
-        lastUser?.let { startGoal(it.text, GoalPhase.RUNNING, "正在重新生成") }
+        rebuildExecutionSessionState()
+        // Don't auto-create goal on retry — only if one already exists.
+        if (goal.hasGoal) {
+            goal = goal.copy(status = GoalStatus.ACTIVE, phase = GoalStatus.ACTIVE.toPhase(), note = "正在重新生成", updatedAt = System.currentTimeMillis())
+            persistGoal()
+        }
         toolArgsByCallId.clear()
         busy = true
         turnStopped = false
@@ -1364,6 +1549,7 @@ class ConversationController(
                     toolName = it.name,
                     toolArgs = it.args,
                     toolError = it.error,
+                    imageUrls = it.imageUrls,
                 )
                 is ChatItem.Approval -> if (it.resolved) {
                     repo.addMessage(
@@ -1380,6 +1566,39 @@ class ConversationController(
             }
             load(newId)
         }
+    }
+
+    /**
+     * The index in [items] currently being edited, or null. When non-null, the
+     * next [sendInternal] will truncate the conversation back to this point
+     * *before* sending — so the old tail is only discarded once the user
+     * actually resends. Mirrors Codex: edit loads the text into the composer,
+     * nothing is destroyed until send.
+     */
+    var editIndex by mutableStateOf<Int?>(null)
+        private set
+
+    /**
+     * Begin editing a user message — Codex style.
+     *
+     * Returns the message text for the composer and stashes [editIndex]; the
+     * conversation transcript is **not** modified yet. The actual revert
+     * happens in [sendInternal] when the user resends. Call [cancelEdit] to
+     * abort (e.g. when the composer is cleared without sending).
+     *
+     * Returns null if the index is invalid, not a user message, or busy.
+     */
+    fun editFrom(index: Int): String? {
+        if (busy) return null
+        if (index !in items.indices) return null
+        val userMsg = items[index] as? ChatItem.User ?: return null
+        editIndex = index
+        return userMsg.text
+    }
+
+    /** Abort a pending edit (composer cleared without sending). */
+    fun cancelEdit() {
+        editIndex = null
     }
 
     /** Start a clean conversation and continue from a handoff resume prompt. */
@@ -1429,26 +1648,582 @@ class ConversationController(
         persistGoal()
     }
 
+    private fun beginExecutionTurn(userText: String, attachments: List<Attachment>) {
+        val turnId = java.util.UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val jump = JumpPoint(
+            id = "jump-$turnId",
+            turnId = turnId,
+            title = userText.lineSequence().firstOrNull()?.take(60).orEmpty(),
+            subtitle = if (attachments.isEmpty()) "" else "${attachments.size} 个附件",
+            createdAt = now,
+        )
+        executionSessionState = executionSessionState.copy(
+            conversationId = conversationId,
+            project = project,
+            turns = executionSessionState.turns + TurnState(
+                id = turnId,
+                userText = userText,
+                userAttachments = attachments,
+                status = TurnStatus.RUNNING,
+                createdAt = now,
+            ),
+            activeTurnId = turnId,
+            latestTurnId = turnId,
+            isWorking = true,
+            goal = GoalState(goal),
+            draft = ComposerDraftState(editingIndex = editIndex),
+            focusTarget = FocusTarget.Timeline(turnId),
+            sidePanelTab = SidePanelTabId.TIMELINE,
+            jumpPoints = executionSessionState.jumpPoints + jump,
+        )
+    }
+
+    private fun updateActiveTurn(block: (TurnState) -> TurnState) {
+        val turnId = executionSessionState.activeTurnId ?: return
+        executionSessionState = executionSessionState.copy(
+            turns = executionSessionState.turns.map { if (it.id == turnId) block(it) else it },
+        )
+    }
+
+    private fun appendArtifacts(artifacts: List<ArtifactState>) {
+        if (artifacts.isEmpty()) return
+        executionSessionState = executionSessionState.copy(
+            artifacts = (executionSessionState.artifacts + artifacts).distinctBy { it.id },
+        )
+    }
+
+    private fun buildToolArtifacts(callId: String, name: String, args: String, imageUrls: List<String>): List<ArtifactState> {
+        val artifacts = mutableListOf<ArtifactState>()
+        val editedPath = com.andmx.agent.ToolArgs.editedPath(name, args)
+        if (editedPath.isNotBlank()) {
+            artifacts += ArtifactState(
+                id = "$callId-diff",
+                kind = ArtifactKind.DIFF,
+                title = editedPath.substringAfterLast('/'),
+                subtitle = editedPath,
+                path = editedPath,
+                toolCallId = callId,
+            )
+        }
+        val filePath = com.andmx.agent.ToolArgs.filePath(name, args)
+        if (editedPath.isBlank() && filePath.isNotBlank()) {
+            artifacts += ArtifactState(
+                id = "$callId-file",
+                kind = ArtifactKind.FILE,
+                title = filePath.substringAfterLast('/'),
+                subtitle = filePath,
+                path = filePath,
+                toolCallId = callId,
+            )
+        }
+        val webUrl = com.andmx.agent.ToolArgs.webUrl(name, args)
+        if (webUrl.isNotBlank()) {
+            artifacts += ArtifactState(
+                id = "$callId-web",
+                kind = ArtifactKind.WEB,
+                title = webUrl,
+                url = webUrl,
+                toolCallId = callId,
+            )
+        }
+        imageUrls.forEachIndexed { index, imageUrl ->
+            artifacts += ArtifactState(
+                id = "$callId-image-$index",
+                kind = ArtifactKind.IMAGE,
+                title = "$name 图像 ${index + 1}",
+                imageUrl = imageUrl,
+                toolCallId = callId,
+            )
+        }
+        return artifacts
+    }
+
+    private fun updateGoalState() {
+        executionSessionState = executionSessionState.copy(
+            conversationId = conversationId,
+            project = project,
+            goal = GoalState(goal),
+        )
+    }
+
+    private fun syncGoalSnapshots() {
+        goalToolState.goal = goal
+        updateGoalState()
+    }
+
+    private fun decodeImageUrls(raw: String): List<String> =
+        raw.takeIf { it.isNotBlank() }
+            ?.let { runCatching { imageJson.decodeFromString<List<String>>(it) }.getOrDefault(emptyList()) }
+            ?: emptyList()
+
+    private fun terminalBindingTitle(command: String): String =
+        command.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "run_shell" }.take(42)
+
+    private fun shellExitCode(output: String): Int? =
+        Regex("""\[exit=(-?\d+)]\s*$""").find(output.trim())?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+    private fun updateTerminalBindings(mutator: (MutableList<TerminalBindingState>) -> Unit) {
+        val updated = executionSessionState.terminalBindings.toMutableList()
+        mutator(updated)
+        executionSessionState = executionSessionState.copy(
+            terminalBindings = updated.sortedWith(
+                compareByDescending<TerminalBindingState> { it.status == ToolExecutionStatus.RUNNING }
+                    .thenByDescending { it.updatedAt },
+            ),
+        )
+    }
+
+    private fun upsertToolTerminalBinding(
+        callId: String,
+        args: String,
+        status: ToolExecutionStatus,
+        output: String? = null,
+        error: Boolean = false,
+        exitCode: Int? = null,
+    ) {
+        val command = ToolArgs.value(args, "command")
+        val now = System.currentTimeMillis()
+        val sessionId = toolTerminalSessionKey(callId)
+        updateTerminalBindings { sessions ->
+            val index = sessions.indexOfFirst { it.id == sessionId }
+            val current = sessions.getOrNull(index)
+            val next = TerminalBindingState(
+                id = sessionId,
+                callId = callId,
+                title = terminalBindingTitle(command),
+                command = command,
+                output = output ?: current?.output.orEmpty(),
+                status = status,
+                exitCode = exitCode ?: current?.exitCode,
+                error = error || current?.error == true,
+                createdAt = current?.createdAt ?: now,
+                updatedAt = now,
+            )
+            if (index >= 0) sessions[index] = next else sessions += next
+        }
+    }
+
+    private fun updateShellBinding(event: ShellTool.ShellEvent) {
+        when (event) {
+            is ShellTool.ShellEvent.Started -> {
+                val now = System.currentTimeMillis()
+                updateTerminalBindings { sessions ->
+                    val sessionId = toolTerminalSessionKey(event.callId)
+                    val index = sessions.indexOfFirst { it.id == sessionId }
+                    val current = sessions.getOrNull(index)
+                    val next = TerminalBindingState(
+                        id = sessionId,
+                        callId = event.callId,
+                        title = terminalBindingTitle(event.command),
+                        command = event.command,
+                        output = current?.output.orEmpty(),
+                        status = ToolExecutionStatus.RUNNING,
+                        exitCode = null,
+                        error = false,
+                        createdAt = current?.createdAt ?: now,
+                        updatedAt = now,
+                    )
+                    if (index >= 0) sessions[index] = next else sessions += next
+                }
+            }
+            is ShellTool.ShellEvent.Delta -> {
+                val now = System.currentTimeMillis()
+                updateTerminalBindings { sessions ->
+                    val sessionId = toolTerminalSessionKey(event.callId)
+                    val index = sessions.indexOfFirst { it.id == sessionId }
+                    val current = sessions.getOrNull(index) ?: TerminalBindingState(
+                        id = sessionId,
+                        callId = event.callId,
+                        title = "run_shell",
+                    )
+                    val next = current.copy(
+                        output = current.output + event.chunk,
+                        status = ToolExecutionStatus.RUNNING,
+                        updatedAt = now,
+                    )
+                    if (index >= 0) sessions[index] = next else sessions += next
+                }
+            }
+            is ShellTool.ShellEvent.Finished -> {
+                val now = System.currentTimeMillis()
+                updateTerminalBindings { sessions ->
+                    val sessionId = toolTerminalSessionKey(event.callId)
+                    val index = sessions.indexOfFirst { it.id == sessionId }
+                    val current = sessions.getOrNull(index) ?: TerminalBindingState(
+                        id = sessionId,
+                        callId = event.callId,
+                        title = terminalBindingTitle(event.command),
+                        command = event.command,
+                    )
+                    val next = current.copy(
+                        status = if (event.isError) ToolExecutionStatus.FAILED else ToolExecutionStatus.SUCCEEDED,
+                        exitCode = event.exitCode,
+                        error = event.isError,
+                        updatedAt = now,
+                    )
+                    if (index >= 0) sessions[index] = next else sessions += next
+                }
+            }
+            is ShellTool.ShellEvent.Failed -> {
+                val now = System.currentTimeMillis()
+                updateTerminalBindings { sessions ->
+                    val sessionId = toolTerminalSessionKey(event.callId)
+                    val index = sessions.indexOfFirst { it.id == sessionId }
+                    val current = sessions.getOrNull(index) ?: TerminalBindingState(
+                        id = sessionId,
+                        callId = event.callId,
+                        title = terminalBindingTitle(event.command),
+                        command = event.command,
+                    )
+                    val next = current.copy(
+                        output = (current.output + event.message).trim(),
+                        status = ToolExecutionStatus.FAILED,
+                        error = true,
+                        updatedAt = now,
+                    )
+                    if (index >= 0) sessions[index] = next else sessions += next
+                }
+            }
+        }
+    }
+
+    private fun mergeAssistantSegment(committed: String, segment: String): String {
+        if (segment.isBlank()) return committed
+        if (committed.isBlank()) return segment
+        if (committed == segment) return committed
+        return "$committed\n\n$segment"
+    }
+
+    private fun rebuildExecutionSessionState() {
+        val turns = mutableListOf<TurnState>()
+        val artifacts = mutableListOf<ArtifactState>()
+        val terminalBindings = mutableListOf<TerminalBindingState>()
+        val jumps = mutableListOf<JumpPoint>()
+        var currentTurn: TurnState? = null
+        var lastFocusTarget: FocusTarget = FocusTarget.None
+        var lastSidePanelTab: SidePanelTabId? = null
+        var pendingApprovals = 0
+
+        fun flushCurrentTurn() {
+            val turn = currentTurn ?: return
+            val finalized = when {
+                turn.status == TurnStatus.WAITING_APPROVAL -> turn
+                turn.failureMessage.isNotBlank() -> turn.copy(status = TurnStatus.FAILED)
+                turn.tools.any { it.status == ToolExecutionStatus.RUNNING || it.status == ToolExecutionStatus.WAITING_APPROVAL } ->
+                    turn.copy(status = TurnStatus.RUNNING)
+                turn.assistantText.isBlank() && turn.tools.isEmpty() -> turn.copy(status = TurnStatus.RUNNING)
+                else -> turn.copy(status = TurnStatus.SUCCEEDED, assistantDone = true)
+            }
+            turns += finalized
+            currentTurn = null
+        }
+
+        fun ensureTurn(createdAt: Long): TurnState {
+            currentTurn?.let { return it }
+            val turnId = "turn-${turns.size}-${createdAt}"
+            return TurnState(
+                id = turnId,
+                userText = "",
+                status = TurnStatus.IDLE,
+                createdAt = createdAt,
+            ).also { currentTurn = it }
+        }
+
+        items.forEach { item ->
+            when (item) {
+                is ChatItem.User -> {
+                    flushCurrentTurn()
+                    val createdAt = item.sentAt.takeIf { it > 0L } ?: System.currentTimeMillis()
+                    val turnId = "turn-${turns.size}-${item.key}"
+                    currentTurn = TurnState(
+                        id = turnId,
+                        userText = item.text,
+                        status = TurnStatus.IDLE,
+                        createdAt = createdAt,
+                    )
+                    jumps += JumpPoint(
+                        id = "jump-$turnId",
+                        turnId = turnId,
+                        title = item.text.lineSequence().firstOrNull()?.take(60).orEmpty(),
+                        createdAt = createdAt,
+                    )
+                    lastFocusTarget = FocusTarget.Timeline(turnId)
+                    lastSidePanelTab = SidePanelTabId.TIMELINE
+                }
+                is ChatItem.Assistant -> {
+                    val turn = ensureTurn(item.sentAt.takeIf { it > 0L } ?: System.currentTimeMillis())
+                    currentTurn = turn.copy(
+                        assistantText = mergeAssistantSegment(turn.assistantText, item.text),
+                        assistantDone = item.done || item.completedAt > 0L,
+                        completedAt = item.completedAt,
+                    )
+                }
+                is ChatItem.ToolUse -> {
+                    val turn = ensureTurn(System.currentTimeMillis())
+                    val builtArtifacts = buildToolArtifacts(item.callId, item.name, item.args, item.imageUrls)
+                    val (focusTarget, sidePanelTab) = toolTarget(
+                        item.name,
+                        item.args,
+                        item.imageUrls,
+                        toolCallId = item.callId,
+                    )
+                    artifacts += builtArtifacts
+                    currentTurn = turn.copy(
+                        tools = turn.tools + ToolExecutionState(
+                            callId = item.callId,
+                            name = item.name,
+                            args = item.args,
+                            output = item.output.orEmpty(),
+                            error = item.error,
+                            artifacts = builtArtifacts,
+                            focusTarget = focusTarget,
+                            sidePanelTab = sidePanelTab,
+                            status = when {
+                                item.running -> ToolExecutionStatus.RUNNING
+                                item.error -> ToolExecutionStatus.FAILED
+                                else -> ToolExecutionStatus.SUCCEEDED
+                            },
+                        ),
+                        artifacts = (turn.artifacts + builtArtifacts).distinctBy { it.id },
+                        focusTarget = if (focusTarget != FocusTarget.None) focusTarget else turn.focusTarget,
+                        sidePanelTab = sidePanelTab ?: turn.sidePanelTab,
+                        status = if (item.running) TurnStatus.RUNNING else turn.status,
+                    )
+                    if (focusTarget != FocusTarget.None) lastFocusTarget = focusTarget
+                    if (sidePanelTab != null) lastSidePanelTab = sidePanelTab
+                    if (item.name == "run_shell") {
+                        val command = ToolArgs.value(item.args, "command")
+                        terminalBindings += TerminalBindingState(
+                            id = toolTerminalSessionKey(item.callId),
+                            callId = item.callId,
+                            title = terminalBindingTitle(command),
+                            command = command,
+                            output = item.output.orEmpty(),
+                            status = when {
+                                item.running -> ToolExecutionStatus.RUNNING
+                                item.error -> ToolExecutionStatus.FAILED
+                                else -> ToolExecutionStatus.SUCCEEDED
+                            },
+                            exitCode = shellExitCode(item.output.orEmpty()),
+                            error = item.error,
+                        )
+                    }
+                }
+                is ChatItem.Approval -> {
+                    val turn = ensureTurn(System.currentTimeMillis())
+                    val waiting = !item.resolved
+                    if (waiting) pendingApprovals += 1
+                    currentTurn = turn.copy(
+                        status = if (waiting) TurnStatus.WAITING_APPROVAL else turn.status,
+                    )
+                }
+            }
+        }
+        flushCurrentTurn()
+
+        val activeTurnId = turns.lastOrNull()?.takeIf {
+            it.status == TurnStatus.RUNNING || it.status == TurnStatus.WAITING_APPROVAL
+        }?.id
+
+        executionSessionState = ExecutionSessionState(
+            conversationId = conversationId,
+            project = project,
+            turns = turns,
+            activeTurnId = activeTurnId,
+            latestTurnId = turns.lastOrNull()?.id,
+            isWorking = activeTurnId != null,
+            backgroundTasks = emptyList(),
+            terminalBindings = terminalBindings.sortedWith(
+                compareByDescending<TerminalBindingState> { it.status == ToolExecutionStatus.RUNNING }
+                    .thenByDescending { it.updatedAt },
+            ),
+            artifacts = artifacts.distinctBy { it.id },
+            pendingApprovals = pendingApprovals,
+            goal = GoalState(goal),
+            draft = executionSessionState.draft.copy(editingIndex = editIndex),
+            focusTarget = lastFocusTarget,
+            sidePanelTab = lastSidePanelTab,
+            jumpPoints = jumps,
+        )
+    }
+
+    private fun finishExecution(status: TurnStatus, keepWorking: Boolean = false) {
+        val completedAt = System.currentTimeMillis()
+        updateActiveTurn {
+            it.copy(
+                status = status,
+                completedAt = completedAt,
+                assistantDone = it.assistantDone || status != TurnStatus.RUNNING,
+            )
+        }
+        executionSessionState = executionSessionState.copy(
+            conversationId = conversationId,
+            project = project,
+            isWorking = keepWorking || executionSessionState.backgroundTasks.any {
+                it.status == BackgroundTaskStatus.RUNNING || it.status == BackgroundTaskStatus.WAITING
+            },
+            activeTurnId = if (keepWorking) executionSessionState.activeTurnId else null,
+            goal = GoalState(goal),
+        )
+    }
+
+    private fun updateBackgroundTask(event: com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent) {
+        fun mutate(block: (BackgroundTaskState?) -> BackgroundTaskState?) {
+            val current = executionSessionState.backgroundTasks.associateBy { it.id }.toMutableMap()
+            val existing = current[event.agentId()]
+            val next = block(existing)
+            if (next == null) current.remove(event.agentId()) else current[event.agentId()] = next
+            executionSessionState = executionSessionState.copy(
+                conversationId = conversationId,
+                project = project,
+                backgroundTasks = current.values.sortedByDescending { it.updatedAt },
+                focusTarget = next?.focusTarget ?: executionSessionState.focusTarget,
+                sidePanelTab = if (next != null) SidePanelTabId.BACKGROUND else executionSessionState.sidePanelTab,
+                isWorking = (executionSessionState.activeTurnId != null) || current.values.any {
+                    it.status == BackgroundTaskStatus.RUNNING || it.status == BackgroundTaskStatus.WAITING
+                },
+            )
+        }
+        when (event) {
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Started -> mutate {
+                BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = event.task.ifBlank { "子智能体" }.take(60),
+                    status = BackgroundTaskStatus.RUNNING,
+                    summary = event.task,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Delta -> mutate { current ->
+                (current ?: BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = "子智能体",
+                    status = BackgroundTaskStatus.RUNNING,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                )).copy(
+                    status = BackgroundTaskStatus.RUNNING,
+                    detail = event.text,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Completed -> mutate { current ->
+                (current ?: BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = "子智能体",
+                    status = BackgroundTaskStatus.COMPLETED,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                )).copy(
+                    status = BackgroundTaskStatus.COMPLETED,
+                    result = event.result,
+                    detail = event.result.take(240),
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Failed -> mutate { current ->
+                (current ?: BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = "子智能体",
+                    status = BackgroundTaskStatus.FAILED,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                )).copy(
+                    status = BackgroundTaskStatus.FAILED,
+                    detail = event.error,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Resumed -> mutate { current ->
+                (current ?: BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = "子智能体",
+                    status = BackgroundTaskStatus.RUNNING,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                )).copy(
+                    status = BackgroundTaskStatus.RUNNING,
+                    detail = event.input,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Suspended -> mutate { current ->
+                (current ?: BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = "子智能体",
+                    status = BackgroundTaskStatus.WAITING,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                )).copy(
+                    status = BackgroundTaskStatus.WAITING,
+                    detail = event.reason,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Closed -> mutate { current ->
+                (current ?: BackgroundTaskState(
+                    id = event.agentId,
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    title = "子智能体",
+                    status = BackgroundTaskStatus.CLOSED,
+                    focusTarget = FocusTarget.BackgroundTask(event.agentId),
+                )).copy(
+                    status = BackgroundTaskStatus.CLOSED,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+        }
+    }
+
+    private fun com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.agentId(): String = when (this) {
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Started -> agentId
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Delta -> agentId
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Completed -> agentId
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Failed -> agentId
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Suspended -> agentId
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Resumed -> agentId
+        is com.andmx.agent.multi.SubAgentOrchestrator.SubAgentEvent.Closed -> agentId
+    }
+
     private fun handle(ev: AgentEvent) {
         when (ev) {
             is AgentEvent.AssistantDelta -> {
                 val idx = streamingIndex
                 if (idx == null) {
-                    items += ChatItem.Assistant(seq++, ev.text)
+                    items += ChatItem.Assistant(seq++, ev.text, sentAt = System.currentTimeMillis())
                     streamingIndex = items.lastIndex
                 } else {
                     val cur = items[idx] as ChatItem.Assistant
                     items[idx] = cur.copy(text = cur.text + ev.text)
                 }
+                updateActiveTurn {
+                    it.copy(
+                        assistantStreamingText = it.assistantStreamingText + ev.text,
+                        status = TurnStatus.RUNNING,
+                    )
+                }
             }
             is AgentEvent.Assistant -> {
+                val now = System.currentTimeMillis()
                 val idx = streamingIndex
                 if (idx != null) {
-                    items[idx] = (items[idx] as ChatItem.Assistant).copy(text = ev.text, done = true)
+                    items[idx] = (items[idx] as ChatItem.Assistant).copy(text = ev.text, done = true, completedAt = now)
                 } else {
-                    items += ChatItem.Assistant(seq++, ev.text, done = true)
+                    items += ChatItem.Assistant(seq++, ev.text, done = true, sentAt = now, completedAt = now)
                 }
                 streamingIndex = null
+                updateActiveTurn {
+                    it.copy(
+                        assistantText = mergeAssistantSegment(it.assistantText, ev.text),
+                        assistantStreamingText = "",
+                        assistantDone = true,
+                        status = TurnStatus.RUNNING,
+                    )
+                }
                 conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", ev.text) } }
                 scope.launch {
                     rolloutWriter.writeResponseItem(
@@ -1464,6 +2239,29 @@ class ConversationController(
                 streamingIndex = null
                 toolArgsByCallId[ev.id] = ev.arguments
                 items += ChatItem.ToolUse(seq++, ev.id, ev.name, ev.arguments)
+                if (ev.name == "run_shell") {
+                    upsertToolTerminalBinding(ev.id, ev.arguments, ToolExecutionStatus.RUNNING)
+                }
+                val (focusTarget, sidePanelTab) = toolTarget(ev.name, ev.arguments, toolCallId = ev.id)
+                updateActiveTurn {
+                    it.copy(
+                        tools = it.tools + ToolExecutionState(
+                            callId = ev.id,
+                            name = ev.name,
+                            args = ev.arguments,
+                            status = ToolExecutionStatus.RUNNING,
+                            focusTarget = focusTarget,
+                            sidePanelTab = sidePanelTab,
+                        ),
+                        focusTarget = if (focusTarget != FocusTarget.None) focusTarget else it.focusTarget,
+                        sidePanelTab = sidePanelTab ?: it.sidePanelTab,
+                        status = TurnStatus.RUNNING,
+                    )
+                }
+                executionSessionState = executionSessionState.copy(
+                    focusTarget = if (focusTarget != FocusTarget.None) focusTarget else executionSessionState.focusTarget,
+                    sidePanelTab = sidePanelTab ?: executionSessionState.sidePanelTab,
+                )
                 scope.launch {
                     rolloutWriter.writeResponseItem(
                         com.andmx.data.rollout.ResponseItem(
@@ -1491,10 +2289,46 @@ class ConversationController(
                 }
                 val idx = items.indexOfLast { it is ChatItem.ToolUse && it.callId == ev.id }
                 val args = if (idx >= 0) (items[idx] as ChatItem.ToolUse).args else toolArgsByCallId[ev.id].orEmpty()
+                val artifacts = buildToolArtifacts(ev.id, ev.name, args, ev.imageUrls.orEmpty())
                 if (idx >= 0) {
                     val card = items[idx] as ChatItem.ToolUse
-                    items[idx] = card.copy(output = ev.output, running = false, error = ev.isError)
+                    items[idx] = card.copy(output = ev.output, running = false, error = ev.isError, imageUrls = ev.imageUrls.orEmpty())
                 }
+                if (ev.name == "run_shell") {
+                    upsertToolTerminalBinding(
+                        ev.id,
+                        args,
+                        if (ev.isError) ToolExecutionStatus.FAILED else ToolExecutionStatus.SUCCEEDED,
+                        output = ev.output,
+                        error = ev.isError,
+                        exitCode = shellExitCode(ev.output),
+                    )
+                }
+                appendArtifacts(artifacts)
+                val (focusTarget, sidePanelTab) = toolTarget(ev.name, args, ev.imageUrls.orEmpty(), ev.id)
+                updateActiveTurn {
+                    it.copy(
+                        tools = it.tools.map { tool ->
+                            if (tool.callId != ev.id) tool else tool.copy(
+                                output = ev.output,
+                                error = ev.isError,
+                                status = if (ev.isError) ToolExecutionStatus.FAILED else ToolExecutionStatus.SUCCEEDED,
+                                artifacts = artifacts,
+                                focusTarget = focusTarget,
+                                sidePanelTab = sidePanelTab,
+                                completedAt = System.currentTimeMillis(),
+                            )
+                        },
+                        artifacts = (it.artifacts + artifacts).distinctBy { artifact -> artifact.id },
+                        focusTarget = if (focusTarget != FocusTarget.None) focusTarget else it.focusTarget,
+                        sidePanelTab = sidePanelTab ?: it.sidePanelTab,
+                        status = TurnStatus.RUNNING,
+                    )
+                }
+                executionSessionState = executionSessionState.copy(
+                    focusTarget = if (focusTarget != FocusTarget.None) focusTarget else executionSessionState.focusTarget,
+                    sidePanelTab = sidePanelTab ?: executionSessionState.sidePanelTab,
+                )
                 toolArgsByCallId.remove(ev.id)
                 if (ev.isError && goal.phase != GoalPhase.PAUSED) {
                     updateGoalPhase(GoalPhase.RUNNING, "${ev.name} 返回错误,等待模型处理")
@@ -1515,8 +2349,16 @@ class ConversationController(
             is AgentEvent.Failed -> {
                 streamingIndex = null
                 updateGoalPhase(GoalPhase.FAILED, ev.message)
+                updateActiveTurn {
+                    it.copy(
+                        assistantStreamingText = "",
+                        failureMessage = ev.message,
+                    )
+                }
+                finishExecution(TurnStatus.FAILED)
                 val msg = "⚠️ ${ev.message}"
-                items += ChatItem.Assistant(seq++, msg)
+                val now = System.currentTimeMillis()
+                items += ChatItem.Assistant(seq++, msg, sentAt = now, completedAt = now)
                 conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
                 scope.launch {
                     rolloutWriter.writeEventMsg(
@@ -1526,6 +2368,24 @@ class ConversationController(
             }
             AgentEvent.Done -> {
                 streamingIndex = null
+                // ── Token budget tracking ── accumulate this turn's token usage
+                // into the goal, and transition to BUDGET_LIMITED if exhausted.
+                if (goal.hasGoal && goal.tokenBudget > 0) {
+                    val usage = tokenUsageTracker.lastTurnUsage.value
+                    if (usage.totalTokens > 0) {
+                        val newUsed = goal.tokensUsed + usage.totalTokens
+                        val exhausted = newUsed >= goal.tokenBudget
+                        goal = goal.copy(
+                            tokensUsed = newUsed,
+                            status = if (exhausted) GoalStatus.BUDGET_LIMITED else goal.status,
+                            phase = if (exhausted) GoalStatus.BUDGET_LIMITED.toPhase() else goal.phase,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                        goalToolState.goal = goal
+                        persistGoal()
+                    }
+                }
+                finishExecution(TurnStatus.SUCCEEDED)
                 scope.launch {
                     rolloutWriter.writeEventMsg(
                         com.andmx.data.rollout.EventMsg(type = "task_completed")
@@ -1572,22 +2432,9 @@ class ConversationController(
             providerStore.upsert(def)
             if (makePrimary) {
                 providerStore.setPrimary(def.id)
-                settings = settings.copy(activeProviderId = def.id, model = def.models.keys.firstOrNull() ?: settings.model)
+                settings = settings.copy(activeProviderId = def.id)
                 store.update(settings)
             }
-        }
-    }
-
-    /** Add a new provider cloned from a built-in preset id, returns the new id. */
-    fun addProviderFromPreset(presetId: String) {
-        val preset = com.andmx.llm.provider.ProviderDefinition.builtin(presetId) ?: return
-        scope.launch {
-            val newDef = preset.copy(
-                id = java.util.UUID.randomUUID().toString(),
-                source = com.andmx.llm.provider.ProviderDefinition.SOURCE_CUSTOM,
-                enabled = true,
-            )
-            providerStore.upsert(newDef)
         }
     }
 
@@ -1596,7 +2443,7 @@ class ConversationController(
         scope.launch {
             val newDef = com.andmx.llm.provider.ProviderDefinition(
                 id = java.util.UUID.randomUUID().toString(),
-                name = "新供应商",
+                name = "",
                 kind = com.andmx.llm.provider.ProviderKind.OPENAI,
                 baseUrl = "",
                 source = com.andmx.llm.provider.ProviderDefinition.SOURCE_CUSTOM,
@@ -1611,14 +2458,125 @@ class ConversationController(
         scope.launch { providerStore.delete(id) }
     }
 
-    /** Set the active provider and pick its first model. */
+    /** Set the active provider. Clears any stale model selection. */
     fun selectProvider(id: String) {
         scope.launch {
             providerStore.setPrimary(id)
-            val def = providers.firstOrNull { it.id == id }
-            val model = def?.models?.keys?.firstOrNull().orEmpty()
-            settings = settings.copy(activeProviderId = id, model = model)
+            // Clear the model selection so the user is prompted to fetch/pick
+            // afresh for this provider (models are provider-specific).
+            settings = settings.copy(activeProviderId = id, model = "")
             store.update(settings)
+        }
+    }
+
+    /** Model-list fetch state surfaced to the settings UI. */
+    var fetchingModels by mutableStateOf(false)
+        private set
+    var fetchModelsError by mutableStateOf<String?>(null)
+        private set
+    /** Last successfully-fetched model ids for the provider being edited. */
+    var fetchedModels by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    /** Connection-test state surfaced to the settings UI. */
+    var testingConnection by mutableStateOf(false)
+        private set
+    var connectionResult by mutableStateOf<String?>(null)
+        private set
+    var connectionOk by mutableStateOf<Boolean?>(null)
+        private set
+
+    /**
+     * Fetch the model list for [def] from its `GET {base}/models` endpoint,
+     * dispatching to the right [com.andmx.llm.wire.WireAdapter] for the
+     * provider's protocol.
+     *
+     * Takes the full definition (not just an id) so it uses the *form's current*
+     * baseUrl/apiKey/kind — which may not have been persisted yet when the user
+     * opens the model picker before saving. Persists the fetched ids into the
+     * provider's `models` map and exposes them via [fetchedModels] /
+     * [fetchModelsError].
+     */
+    fun fetchModels(def: com.andmx.llm.provider.ProviderDefinition) {
+        scope.launch {
+            when {
+                def.id.isBlank() -> {
+                    fetchModelsError = "供应商不存在"
+                    fetchedModels = emptyList()
+                }
+                def.baseUrl.isBlank() -> {
+                    fetchModelsError = "请先填写 Base URL"
+                    fetchedModels = emptyList()
+                }
+                else -> {
+                    fetchingModels = true
+                    fetchModelsError = null
+                    try {
+                        val adapter = com.andmx.llm.wire.AdapterFactory.forKind(def.kind)
+                        val ids = adapter.listModels(def)
+                        if (ids.isEmpty()) {
+                            fetchModelsError = "未能获取模型列表（请检查 URL/Key 是否正确，或该端点是否支持 /models）"
+                            fetchedModels = emptyList()
+                        } else {
+                            // Persist into the provider's models map so the list sticks.
+                            val updated = def.copy(models = ids.associateWith { com.andmx.llm.provider.ModelDefinition() })
+                            providerStore.upsert(updated)
+                            fetchedModels = ids
+                        }
+                    } catch (t: Throwable) {
+                        fetchModelsError = t.message ?: t::class.simpleName ?: "未知错误"
+                        fetchedModels = emptyList()
+                    } finally {
+                        fetchingModels = false
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Test the full chat path by sending a minimal one-shot request through a
+     * fresh [com.andmx.llm.LlmClient] bound to [def] and [modelId]. Verifies
+     * that the URL + key + selected model all work end-to-end — not just that
+     * the endpoint is reachable. Sets [connectionOk]/[connectionResult].
+     */
+    fun testConnection(def: com.andmx.llm.provider.ProviderDefinition, modelId: String) {
+        scope.launch {
+            testingConnection = true
+            connectionResult = null
+            connectionOk = null
+            try {
+                when {
+                    def.baseUrl.isBlank() -> {
+                        connectionOk = false
+                        connectionResult = "请先填写 Base URL"
+                    }
+                    modelId.isBlank() -> {
+                        connectionOk = false
+                        connectionResult = "请先选择模型"
+                    }
+                    else -> {
+                        val client = com.andmx.llm.LlmClient(def)
+                        val request = com.andmx.llm.ChatRequest(
+                            model = modelId,
+                            messages = listOf(com.andmx.llm.ApiMessage(role = "user", content = "ping")),
+                        )
+                        val result = client.chat(request)
+                        result.onSuccess {
+                            connectionOk = true
+                            connectionResult = "连接成功：模型 $modelId 可正常对话"
+                        }.onFailure { t ->
+                            connectionOk = false
+                            connectionResult = t.message ?: t::class.simpleName ?: "连接失败"
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                connectionOk = false
+                connectionResult = t.message ?: t::class.simpleName ?: "未知错误"
+            } finally {
+                testingConnection = false
+            }
         }
     }
 
@@ -1628,6 +2586,51 @@ class ConversationController(
         scope.launch { store.update(settings) }
     }
 
+    /**
+     * One-shot provider+model switch for the quick switcher in the composer.
+     * Sets the provider primary and the model in a single step — unlike
+     * [selectProvider], it does *not* clear the model selection.
+     */
+    fun switchModel(providerId: String, modelId: String) {
+        scope.launch {
+            providerStore.setPrimary(providerId)
+            settings = settings.copy(activeProviderId = providerId, model = modelId)
+            store.update(settings)
+        }
+    }
+
+    /** Append a model id to a provider's `models` map and persist it. */
+    fun addModel(providerId: String, modelId: String) {
+        val id = modelId.trim()
+        if (id.isBlank()) return
+        scope.launch {
+            val def = providers.firstOrNull { it.id == providerId } ?: return@launch
+            if (def.models.containsKey(id)) return@launch
+            providerStore.upsert(def.copy(models = def.models + (id to com.andmx.llm.provider.ModelDefinition())))
+            // Auto-select the newly-added model when there's no current
+            // selection, so the provider becomes immediately usable (sends
+            // were silently disabled by an empty `settings.model`).
+            if (settings.model.isBlank()) {
+                settings = settings.copy(activeProviderId = providerId, model = id)
+                providerStore.setPrimary(providerId)
+                store.update(settings)
+            }
+        }
+    }
+
+    /** Remove a model id from a provider's `models` map and persist it. */
+    fun removeModel(providerId: String, modelId: String) {
+        scope.launch {
+            val def = providers.firstOrNull { it.id == providerId } ?: return@launch
+            providerStore.upsert(def.copy(models = def.models - modelId))
+            // If we removed the currently-selected model, clear the selection.
+            if (providerId == settings.activeProviderId && settings.model == modelId) {
+                settings = settings.copy(model = "")
+                store.update(settings)
+            }
+        }
+    }
+
     fun delete(id: Long) {
         scope.launch {
             repo.delete(id)
@@ -1635,9 +2638,11 @@ class ConversationController(
                 conversationId = null
                 activeId = null
                 items.clear()
+                executionSessionState = ExecutionSessionState(project = project)
                 streamingIndex = null
                 toolArgsByCallId.clear()
                 goal = ConversationGoal()
+                syncGoalSnapshots()
                 engine.seed(emptyList())
             }
         }
@@ -2114,6 +3119,14 @@ class ConversationController(
                 )
                 pendingApprovalIndex = items.lastIndex
                 updateGoalPhase(GoalPhase.WAITING_APPROVAL, "等待授权: ${tool.name}")
+                executionSessionState = executionSessionState.copy(
+                    focusTarget = executionSessionState.focusTarget,
+                    sidePanelTab = executionSessionState.sidePanelTab ?: SidePanelTabId.TIMELINE,
+                    pendingApprovals = items.count { it is ChatItem.Approval && !it.resolved },
+                )
+                updateActiveTurn {
+                    it.copy(status = TurnStatus.WAITING_APPROVAL)
+                }
                 deferred.await()
             }
         }
@@ -2132,6 +3145,9 @@ class ConversationController(
         pendingApprovalIndex = null
         pendingApproval?.complete(allow)
         pendingApproval = null
+        executionSessionState = executionSessionState.copy(
+            pendingApprovals = items.count { it is ChatItem.Approval && !it.resolved },
+        )
 
         // ── ExecPolicy amendment (Codex parity) ──
         // When user approves a shell command, auto-add a rule so similar
@@ -2168,6 +3184,9 @@ class ConversationController(
             if (allow) GoalPhase.RUNNING else GoalPhase.PAUSED,
             if (allow) "授权已允许,继续执行" else "授权被拒绝",
         )
+        updateActiveTurn {
+            it.copy(status = TurnStatus.RUNNING)
+        }
     }
 
     private fun describe(args: kotlinx.serialization.json.JsonObject): String =
@@ -2202,13 +3221,28 @@ class ConversationController(
         if (clean.isBlank()) return
         val now = System.currentTimeMillis()
         val started = if (goal.text == clean && goal.startedAt > 0L) goal.startedAt else now
-        goal = ConversationGoal(clean, phase, startedAt = started, updatedAt = now, note = note)
+        val status = when (phase) {
+            GoalPhase.RUNNING -> GoalStatus.ACTIVE
+            GoalPhase.PAUSED -> GoalStatus.PAUSED
+            GoalPhase.FAILED -> GoalStatus.BLOCKED
+            GoalPhase.NEEDS_SETUP -> GoalStatus.BLOCKED
+            else -> GoalStatus.ACTIVE
+        }
+        goal = ConversationGoal(text = clean, status = status, phase = phase, startedAt = started, updatedAt = now, note = note)
         persistGoal()
     }
 
     private fun updateGoalPhase(phase: GoalPhase, note: String = "") {
         if (!goal.hasGoal) return
-        goal = goal.copy(phase = phase, note = note, updatedAt = System.currentTimeMillis())
+        val status = when (phase) {
+            GoalPhase.RUNNING -> GoalStatus.ACTIVE
+            GoalPhase.PAUSED -> GoalStatus.PAUSED
+            GoalPhase.FAILED -> GoalStatus.BLOCKED
+            GoalPhase.NEEDS_SETUP -> GoalStatus.BLOCKED
+            GoalPhase.READY -> GoalStatus.COMPLETE
+            else -> goal.status
+        }
+        goal = goal.copy(phase = phase, status = status, note = note, updatedAt = System.currentTimeMillis())
         persistGoal()
     }
 
@@ -2228,8 +3262,9 @@ class ConversationController(
     }
 
     private fun persistGoal() {
-        val id = conversationId ?: return
         val snapshot = goal
+        syncGoalSnapshots()
+        val id = conversationId ?: return
         scope.launch {
             repo.updateGoal(
                 conversationId = id,
@@ -2252,10 +3287,28 @@ class ConversationController(
 private fun com.andmx.data.ConversationEntity.toGoal(): ConversationGoal {
     val text = goalText.trim()
     if (text.isBlank()) return ConversationGoal()
-    val phase = runCatching { GoalPhase.valueOf(goalPhase) }.getOrDefault(GoalPhase.READY)
+    // RUNNING / WAITING_APPROVAL are transient runtime states — they must not
+    // survive a reload. Codex treats the sidebar as a passive index; a session
+    // that was mid-run when the app closed simply resumes as "ready to continue".
+    val rawPhase = runCatching { GoalPhase.valueOf(goalPhase) }.getOrDefault(GoalPhase.READY)
+    val phase = when (rawPhase) {
+        GoalPhase.RUNNING, GoalPhase.WAITING_APPROVAL -> GoalPhase.READY
+        else -> rawPhase
+    }
+    // Map phase to Codex-style status.
+    val status = when (phase) {
+        GoalPhase.RUNNING -> GoalStatus.ACTIVE
+        GoalPhase.PAUSED -> GoalStatus.PAUSED
+        GoalPhase.FAILED -> GoalStatus.BLOCKED
+        GoalPhase.READY -> GoalStatus.COMPLETE
+        GoalPhase.NEEDS_SETUP -> GoalStatus.BLOCKED
+        GoalPhase.WAITING_APPROVAL -> GoalStatus.ACTIVE
+        GoalPhase.EMPTY -> GoalStatus.EMPTY
+    }
     val now = System.currentTimeMillis()
     return ConversationGoal(
-        text = text,
+        text = goalText,
+        status = status,
         phase = phase,
         startedAt = goalStartedAt.takeIf { it > 0L } ?: now,
         updatedAt = goalUpdatedAt.takeIf { it > 0L } ?: now,

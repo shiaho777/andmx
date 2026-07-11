@@ -43,28 +43,31 @@ class ProviderStore(
     val state: Flow<Pair<List<ProviderDefinition>, ProviderDefinition?>> =
         combine(providers, primary) { list, p -> list to p }
 
-    /** Seed built-in presets and migrate legacy DataStore config if needed. Idempotent. */
+    /**
+     * Migrate a legacy DataStore single-provider config into the providers table
+     * on first run, if present. Idempotent.
+     *
+     * No built-in presets are seeded — the table starts empty and the user adds
+     * each provider by hand (name, protocol, URL, key), then fetches the model
+     * list from the endpoint.
+     */
     suspend fun ensureSeeded(legacy: LegacyProvider? = null) {
         if (prefs.getBoolean(KEY_SEEDED, false)) return
         val existing = dao.allProviders()
-        if (existing.isEmpty()) {
+        if (existing.isEmpty() && legacy != null) {
             val now = System.currentTimeMillis()
-            // Insert the built-in presets as disabled, non-primary rows.
-            ProviderDefinition.BUILTIN_PROVIDERS.forEach { def ->
-                dao.upsertProvider(def.copy(enabled = false).toEntity(createdAtMs = now, isPrimary = false))
-            }
-            // Migrate the legacy single-provider config into the primary row.
-            val primary = legacy?.toProviderDefinition()
-                ?: ProviderDefinition.BUILTIN_PROVIDERS.first().copy(apiKey = "")
-            dao.upsertProvider(primary.copy(enabled = true).toEntity(createdAtMs = now, isPrimary = true))
+            dao.upsertProvider(legacy.toProviderDefinition().copy(enabled = true).toEntity(createdAtMs = now, isPrimary = true))
         }
         prefs.edit().putBoolean(KEY_SEEDED, true).apply()
     }
 
-    /** Insert or update a provider by id. */
+    /** Insert or update a provider by id, preserving its existing primary flag. */
     suspend fun upsert(def: ProviderDefinition) {
         val now = System.currentTimeMillis()
-        dao.upsertProvider(def.toEntity(createdAtMs = now, isPrimary = false))
+        // Preserve the existing isPrimary state so editing a provider (e.g.
+        // adding a model) doesn't accidentally demote the active provider.
+        val existingPrimary = dao.allProviders().firstOrNull { it.id == def.id }?.isPrimary ?: false
+        dao.upsertProvider(def.toEntity(createdAtMs = now, isPrimary = existingPrimary))
     }
 
     /** Delete a provider. Falls back to the first remaining provider as primary. */
@@ -156,7 +159,7 @@ private fun LegacyProvider.toProviderDefinition(): ProviderDefinition {
     val id = "migrated"
     return ProviderDefinition(
         id = id,
-        name = "迁移配置",
+        name = "",
         kind = kind,
         baseUrl = baseUrl,
         apiKey = apiKey,

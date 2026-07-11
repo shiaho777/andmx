@@ -1,173 +1,158 @@
 package com.andmx.ui.workbench
 
-import androidx.compose.animation.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.andmx.agent.plugins.PluginSystem
+import com.andmx.mcp.McpManager
+import com.andmx.ui.theme.AndmxColors
 import com.andmx.ui.theme.AndmxTheme
+import com.andmx.ui.theme.Radii
 import com.andmx.ui.theme.Spacing
-import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * MCP servers panel — Codex-style.
+ *
+ * Displays each connected MCP server as a card with its tool list.
+ * Mirrors how Codex shows MCP server status: name, connection state,
+ * and the tools each server advertises. Empty state guides the user
+ * to the settings page where servers are configured.
+ */
 @Composable
 fun PluginPanel(
-    pluginState: StateFlow<PluginSystem.PluginDiscovery>,
-    onTogglePlugin: (String, Boolean) -> Unit,
+    servers: List<McpManager.Connected>,
     modifier: Modifier = Modifier,
 ) {
-    val discovery by pluginState.collectAsState()
     val colors = AndmxTheme.colors
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(Spacing.sm),
+            .verticalScroll(rememberScrollState())
+            .padding(Spacing.md),
     ) {
         // Header
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Extension, contentDescription = null, modifier = Modifier.size(18.dp), tint = colors.accent)
+            Icon(Icons.Outlined.Extension, contentDescription = null, modifier = Modifier.size(18.dp), tint = colors.textSecondary)
             Spacer(Modifier.width(Spacing.sm))
-            Text("插件", style = AndmxTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+            Text("MCP 服务器", style = AndmxTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
             Spacer(Modifier.weight(1f))
-            Text("${discovery.plugins.size} 个", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+            Text("${servers.size} 个", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
         }
 
-        Spacer(Modifier.height(Spacing.sm))
+        Spacer(Modifier.height(Spacing.md))
 
-        // Stats row
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            StatBadge(Icons.Outlined.Build, "工具", discovery.totalTools, colors)
-            StatBadge(Icons.Outlined.Anchor, "钩子", discovery.totalHooks, colors)
-            StatBadge(Icons.Outlined.School, "技能", discovery.totalSkills, colors)
-        }
-
-        Spacer(Modifier.height(Spacing.sm))
-
-        if (discovery.plugins.isEmpty()) {
+        if (servers.isEmpty()) {
+            // Empty state
             Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xl),
+                modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xxl),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Icon(Icons.Outlined.Extension, contentDescription = null, modifier = Modifier.size(32.dp), tint = colors.textTertiary)
                 Spacer(Modifier.height(Spacing.sm))
-                Text("暂无已安装的插件", style = AndmxTheme.typography.bodySmall, color = colors.textSecondary)
+                Text("暂无已连接的 MCP 服务器", style = AndmxTheme.typography.bodySmall, color = colors.textSecondary)
                 Spacer(Modifier.height(Spacing.xs))
                 Text(
-                    "将插件放入 /root/.andmx/plugins/ 目录即可自动发现。\n支持 Codex (plugin.json) 和 Claude (.claude-plugin/plugin.json) 格式。",
+                    "在设置 → 偏好中添加 MCP 服务器\n格式: 名称|启动命令 (每行一个)",
                     style = AndmxTheme.typography.labelSmall,
                     color = colors.textTertiary,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = Spacing.md),
+                    textAlign = TextAlign.Center,
                 )
             }
         } else {
-            for (plugin in discovery.plugins) {
-                PluginCard(plugin, onTogglePlugin, colors)
-                Spacer(Modifier.height(Spacing.xs))
+            servers.forEach { server ->
+                McpServerCard(server, colors)
+                Spacer(Modifier.height(Spacing.sm))
             }
         }
     }
 }
 
 @Composable
-private fun StatBadge(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, count: Int, colors: com.andmx.ui.theme.AndmxColors) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = if (count > 0) colors.accent else colors.textTertiary)
-        Spacer(Modifier.height(2.dp))
-        Text("$count", style = AndmxTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = colors.textPrimary)
-        Text(label, style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
-    }
-}
-
-@Composable
-private fun PluginCard(
-    plugin: PluginSystem.Plugin,
-    onToggle: (String, Boolean) -> Unit,
-    colors: com.andmx.ui.theme.AndmxColors,
-) {
-    var enabled by remember(plugin.enabled, plugin.manifest.name) { mutableStateOf(plugin.enabled) }
+private fun McpServerCard(server: McpManager.Connected, colors: AndmxColors) {
     var expanded by remember { mutableStateOf(false) }
+    val dotColor by animateColorAsState(if (server.tools.isNotEmpty()) colors.accent else colors.textTertiary, label = "mcpDot")
 
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = colors.surface,
-        modifier = Modifier
+    Column(
+        Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded },
+            .clip(Radii.md)
+            .background(colors.surface)
+            .clickable { expanded = !expanded }
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
     ) {
-        Column(modifier = Modifier.padding(Spacing.sm)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.Extension,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = if (enabled) colors.accent else colors.textTertiary,
-                )
-                Spacer(Modifier.width(Spacing.xs))
-                Column(modifier = Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Status dot
+            Box(
+                Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(dotColor),
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Text(
+                server.name,
+                style = AndmxTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${server.tools.size} 工具",
+                style = AndmxTheme.typography.labelSmall,
+                color = colors.textTertiary,
+            )
+            Spacer(Modifier.width(Spacing.xs))
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                tint = colors.textTertiary,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+
+        if (expanded && server.tools.isNotEmpty()) {
+            Spacer(Modifier.height(Spacing.sm))
+            server.tools.forEach { toolName ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("·", style = AndmxTheme.typography.bodySmall, color = colors.textTertiary)
+                    Spacer(Modifier.width(Spacing.xs))
                     Text(
-                        plugin.manifest.name,
-                        style = AndmxTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = colors.textPrimary,
+                        toolName,
+                        style = AndmxTheme.typography.bodySmall,
+                        color = colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        plugin.manifest.description.ifBlank { "无描述" },
-                        style = AndmxTheme.typography.labelSmall,
-                        color = colors.textSecondary,
-                        maxLines = if (expanded) 3 else 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Switch(checked = enabled, onCheckedChange = { enabled = it; onToggle(plugin.manifest.name, it) })
-            }
-
-            AnimatedVisibility(expanded) {
-                Column(modifier = Modifier.padding(top = Spacing.xs)) {
-                    InfoLine("版本", plugin.manifest.version, colors)
-                    if (plugin.manifest.author.isNotBlank()) InfoLine("作者", plugin.manifest.author, colors)
-                    InfoLine("工具", "${plugin.manifest.tools.size} 个", colors)
-                    InfoLine("钩子", "${plugin.manifest.hooks.size} 个", colors)
-                    InfoLine("技能", "${plugin.manifest.skills.size} 个", colors)
-                    InfoLine("目录", plugin.dir, colors)
-
-                    if (plugin.manifest.hooks.isNotEmpty()) {
-                        Spacer(Modifier.height(Spacing.xs))
-                        Text("钩子详情", style = AndmxTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.textSecondary)
-                        for (hook in plugin.manifest.hooks) {
-                            Text(
-                                "· ${hook.name.ifBlank { hook.event }}: ${hook.command.take(60)}",
-                                style = AndmxTheme.typography.labelSmall,
-                                color = colors.textTertiary,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                modifier = Modifier.padding(start = Spacing.sm),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun InfoLine(label: String, value: String, colors: com.andmx.ui.theme.AndmxColors) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-        Text("$label: ", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
-        Text(value, style = AndmxTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

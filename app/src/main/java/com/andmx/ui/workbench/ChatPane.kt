@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.TrackChanges
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,14 +76,22 @@ fun ChatPane(
     onOpenFile: (String) -> Unit = {},
     onOpenUrl: (String) -> Unit = {},
     onOpenReference: (String) -> Unit = {},
+    onOpenTerminal: (String?) -> Unit = {},
     showGoal: Boolean = false,
     onShowGoalChange: (Boolean) -> Unit = {},
     initialDraft: String = "",
+    /** When false, the composer is omitted (the caller renders its own). */
+    showComposer: Boolean = true,
+    /** When false, the AgentContextStrip (model/project chips) is omitted. */
+    showContextStrip: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val colors = AndmxTheme.colors
     val context = androidx.compose.ui.platform.LocalContext.current
     val hasMessages = controller.items.isNotEmpty()
+    val latestTurn = remember(controller.executionState, controller.items.toList(), controller.busy) {
+        buildLatestTurnSummary(controller.executionState, controller.items, controller.busy)
+    }
     var draft by remember { mutableStateOf(initialDraft) }
     val attachments = remember { androidx.compose.runtime.mutableStateListOf<com.andmx.ui.conversation.Attachment>() }
     val guestFs = remember { com.andmx.exec.files.GuestFs(com.andmx.exec.proot.ProotRuntime(context)) }
@@ -103,6 +112,24 @@ fun ChatPane(
         attachments.clear()
     }
 
+    fun openFocusTarget(target: WorkbenchFocusTarget) {
+        when (target) {
+            is WorkbenchFocusTarget.Files -> target.path?.let(onOpenFile)
+            is WorkbenchFocusTarget.Terminal -> onOpenTerminal(target.sessionKey)
+            is WorkbenchFocusTarget.Diff -> onOpenDiff(target.path)
+            is WorkbenchFocusTarget.Browser -> target.url?.let(onOpenUrl)
+            is WorkbenchFocusTarget.Reference -> target.assetPath?.let(onOpenReference)
+            WorkbenchFocusTarget.Plugins -> onOpenSettings()
+        }
+    }
+
+    LaunchedEffect(controller.showGoalCommand) {
+        if (controller.showGoalCommand) {
+            onShowGoalChange(true)
+            controller.showGoalCommand = false
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(colors.canvas)) {
         androidx.compose.animation.Crossfade(
             targetState = hasMessages,
@@ -112,10 +139,10 @@ fun ChatPane(
         if (!empty) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.align(Alignment.Center).widthIn(max = 640.dp).fillMaxWidth()
+                modifier = Modifier.align(Alignment.Center).fillMaxWidth()
                     .padding(horizontal = Spacing.xxl),
             ) {
-                AgentContextStrip(
+                if (showContextStrip) AgentContextStrip(
                     controller = controller,
                     projectName = projectName,
                     onOpenSettings = onOpenSettings,
@@ -129,17 +156,19 @@ fun ChatPane(
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(Spacing.xxl))
-                MentionMenu(draft, guestFs) { draft = it }
-                SlashMenu(draft) { draft = it }
-                ComposerBlock(
-                    controller, draft, { draft = it }, ::submit, onOpenSettings,
-                    attachments, { picker.launch(arrayOf("*/*")) }, { attachments.remove(it) },
-                    { draft += it }, ::addUri, { onShowGoalChange(true) }, withChips = projectName,
-                )
+                if (showComposer) {
+                    MentionMenu(draft, guestFs) { draft = it }
+                    SlashMenu(draft) { draft = it }
+                    ComposerBlock(
+                        controller, draft, { draft = it }, ::submit, onOpenSettings,
+                        attachments, { picker.launch(arrayOf("*/*")) }, { attachments.remove(it) },
+                        { draft += it }, ::addUri, { onShowGoalChange(true) }, withChips = projectName,
+                    )
+                }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                AgentContextStrip(
+                if (showContextStrip) AgentContextStrip(
                     controller = controller,
                     projectName = projectName,
                     onOpenSettings = onOpenSettings,
@@ -147,6 +176,16 @@ fun ChatPane(
                         .padding(horizontal = Spacing.xl)
                         .padding(top = Spacing.lg, bottom = Spacing.sm),
                 )
+                latestTurn?.let { summary ->
+                    LatestTurnStrip(
+                        summary = summary,
+                        onOpenTarget = ::openFocusTarget,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.xl)
+                            .padding(bottom = Spacing.sm),
+                    )
+                }
                 MessageList(
                     items = controller.items,
                     onApprove = controller::resolveApproval,
@@ -158,25 +197,40 @@ fun ChatPane(
                     onOpenFile = onOpenFile,
                     onOpenUrl = onOpenUrl,
                     onOpenReference = onOpenReference,
+                    onOpenTerminal = onOpenTerminal,
                     onRunCommand = controller::send,
+                    onEdit = { idx ->
+                        controller.editFrom(idx)?.let { revertedText ->
+                            draft = revertedText
+                        }
+                    },
+                    editingIndex = controller.editIndex,
+                    onCancelEdit = {
+                        controller.cancelEdit()
+                        draft = ""
+                    },
                     modifier = Modifier.weight(1f),
                 )
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .imePadding()
-                        .navigationBarsPadding()
-                        .padding(horizontal = Spacing.xl)
-                        .padding(bottom = Spacing.lg),
-                ) {
-                    Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().align(Alignment.Center)) {
-                        MentionMenu(draft, guestFs) { draft = it }
-                        SlashMenu(draft) { draft = it }
-                        ComposerBlock(
-                            controller, draft, { draft = it }, ::submit, onOpenSettings,
-                            attachments, { picker.launch(arrayOf("*/*")) }, { attachments.remove(it) },
-                            { draft += it }, ::addUri, { onShowGoalChange(true) }, withChips = null,
-                        )
+                if (showComposer) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .imePadding()
+                            .navigationBarsPadding()
+                            .padding(horizontal = Spacing.xl)
+                            .padding(bottom = Spacing.lg),
+                    ) {
+                        // Composer fills the full chat width — no narrow cap, so it
+                        // aligns edge-to-edge with the message list above it.
+                        Column(Modifier.fillMaxWidth()) {
+                            MentionMenu(draft, guestFs) { draft = it }
+                            SlashMenu(draft) { draft = it }
+                            ComposerBlock(
+                                controller, draft, { draft = it }, ::submit, onOpenSettings,
+                                attachments, { picker.launch(arrayOf("*/*")) }, { attachments.remove(it) },
+                                { draft += it }, ::addUri, { onShowGoalChange(true) }, withChips = null,
+                            )
+                        }
                     }
                 }
             }
@@ -260,6 +314,13 @@ private fun ComposerBlock(
         onReasoningEffortSelected = { effort ->
             controller.saveSettings(controller.settings.copy(reasoningEffort = effort))
         },
+        providers = controller.providers,
+        activeProviderId = controller.currentProvider?.id.orEmpty(),
+        selectedModel = controller.settings.model,
+        onSwitchModel = controller::switchModel,
+        onAddModel = controller::addModel,
+        onConfigureProvider = onOpenSettings,
+        onConfigureModels = onOpenSettings,
         goalLabel = goalPillLabel(controller),
         onGoalClick = onGoalClick,
         onSend = onSend,
@@ -506,17 +567,16 @@ internal fun goalOverlayActionState(goal: ConversationGoal, busy: Boolean): Goal
 
 private fun goalPillLabel(controller: ConversationController): String {
     val goal = controller.goal
-    if (!goal.hasGoal) return "目标"
-    val prefix = when (goal.phase) {
+    if (!goal.hasGoal) return ""
+    return when (goal.phase) {
         GoalPhase.RUNNING -> "运行中"
         GoalPhase.PAUSED -> "已暂停"
         GoalPhase.WAITING_APPROVAL -> "待授权"
         GoalPhase.NEEDS_SETUP -> "需设置"
         GoalPhase.FAILED -> "失败"
         GoalPhase.READY -> "待继续"
-        GoalPhase.EMPTY -> "目标"
+        GoalPhase.EMPTY -> ""
     }
-    return "$prefix · ${goal.text.take(18)}"
 }
 
 @Composable

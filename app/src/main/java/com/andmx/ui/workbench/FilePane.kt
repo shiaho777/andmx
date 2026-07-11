@@ -236,7 +236,8 @@ fun FilePane(
 
 @Stable
 class FilePaneState {
-    var currentGuestPath by mutableStateOf("/")
+    /** Default to the project mount point (/root/project) — the agent's cwd. */
+    var currentGuestPath by mutableStateOf("/root/project")
     var viewingGuestPath by mutableStateOf<String?>(null)
     var refreshToken by mutableStateOf(0)
 }

@@ -321,7 +321,6 @@ private fun commandIcon(id: CommandId): ImageVector = when (id) {
     CommandId.TOGGLE_THEME -> Icons.Outlined.Settings
     CommandId.TOGGLE_WORK_PANE -> Icons.AutoMirrored.Outlined.ViewSidebar
     CommandId.TOGGLE_TERMINAL_DOCK -> Icons.Outlined.Terminal
-    CommandId.OPEN_INSPECTOR -> Icons.Outlined.Psychology
     CommandId.OPEN_FILES -> Icons.Outlined.FolderOpen
     CommandId.OPEN_TERMINAL -> Icons.Outlined.Terminal
     CommandId.OPEN_DIFF -> Icons.Outlined.Difference

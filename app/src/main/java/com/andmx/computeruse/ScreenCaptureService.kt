@@ -65,9 +65,18 @@ class ScreenCaptureService : Service() {
             .setOngoing(true)
             .build()
 
+        // Android 14+ requires the mediaProjection foreground type, but starting
+        // with that type throws SecurityException if the user hasn't granted the
+        // projection yet. Fall back to a typeless foreground start so the service
+        // doesn't crash the app; the type will be re-declared once a real capture
+        // session begins.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14+: must declare the mediaProjection foreground type.
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            try {
+                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "mediaProjection FGS type not allowed yet; starting typeless: ${e.message}")
+                runCatching { startForeground(NOTIF_ID, notification) }
+            }
         } else {
             startForeground(NOTIF_ID, notification)
         }

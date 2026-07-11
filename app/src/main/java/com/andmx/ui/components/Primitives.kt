@@ -175,6 +175,7 @@ fun FormField(
     password: Boolean = false,
     singleLine: Boolean = true,
     modifier: Modifier = Modifier,
+    placeholder: String? = null,
 ) {
     val colors = AndmxTheme.colors
     Column(modifier.fillMaxWidth()) {
@@ -192,6 +193,16 @@ fun FormField(
                 .border(1.dp, colors.border, Radii.sm)
                 .background(colors.surface, Radii.sm)
                 .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            decorationBox = { inner ->
+                if (value.isEmpty() && placeholder != null) {
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(placeholder, style = AndmxTheme.typography.bodyMedium, color = colors.textTertiary)
+                        inner()
+                    }
+                } else {
+                    inner()
+                }
+            },
         )
     }
 }

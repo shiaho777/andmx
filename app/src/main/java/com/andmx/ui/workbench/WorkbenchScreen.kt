@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.LightMode
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.outlined.PostAdd
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.ScreenShare
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
@@ -94,6 +97,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
 
 /**
  * The landscape three-pane workbench shell:
@@ -132,6 +141,8 @@ fun WorkbenchScreen(
     val conversations by repo.observeConversations()
         .collectAsState(initial = emptyList())
     var showSettings by remember { mutableStateOf(false) }
+    /** Which tab the settings sheet opens on: 0=模型, 1=通用. */
+    var settingsInitialTab by remember { mutableIntStateOf(1) }
 
     val groups = remember(conversations) { groupConversations(conversations) }
     var renameTarget by remember { mutableStateOf<Pair<Long, String>?>(null) }
@@ -143,35 +154,85 @@ fun WorkbenchScreen(
     var showComputerUse by remember { mutableStateOf(false) }
     var showProjectPicker by remember { mutableStateOf(false) }
     var recentCommandIds by remember { mutableStateOf<List<CommandId>>(emptyList()) }
-    var showWorkPane by remember { mutableStateOf(true) }
-    var showTerminalDock by remember { mutableStateOf(false) }
     /** Sidebar drawer open state, used only in COMPACT (phone portrait). */
     var drawerOpen by remember { mutableStateOf(false) }
     val viewport = rememberViewportClass()
+    // On compact/medium screens the work pane is a full-screen overlay, so
+    // default to hidden there — the chat must be visible first. On expanded
+    // (tablet/desktop) it sits beside chat, so show it by default.
+    var showWorkPane by remember { mutableStateOf(viewport == ViewportClass.EXPANDED) }
+    var showTerminalDock by remember { mutableStateOf(false) }
     var terminalDockTall by remember { mutableStateOf(false) }
     var localTitleOverride by remember { mutableStateOf<String?>(null) }
     var workPaneTab by remember { mutableStateOf(WorkPaneTab.TERMINAL) }
+    var focusTarget by remember { mutableStateOf<WorkbenchFocusTarget>(WorkbenchFocusTarget.Terminal()) }
     var selectedFilePath by remember { mutableStateOf<String?>(null) }
     var selectedDiffPath by remember { mutableStateOf<String?>(null) }
     var browserUrl by remember { mutableStateOf<String?>(null) }
+    var selectedReferencePath by remember { mutableStateOf<String?>(null) }
     val fileState = rememberFilePaneState()
     val browserState = rememberBrowserPaneState()
+    val executionState = controller.executionState
 
-    // Mirror the agent's browsing: when the `browse` tool fetches a URL, open
-    // the in-app browser pane on the same page so the user can preview it
-    // (Codex parity — agent browses → user sees the same page).
+    val terminalSessions = remember { mutableStateListOf<TerminalSession>() }
+    var selectedTerminalKey by remember { mutableStateOf("") }
+
+    fun terminalSurfaceKey(preferred: String? = null): String? {
+        val available = buildSet {
+            terminalSessions.forEach { add(liveTerminalSessionKey(it.sessionId)) }
+            executionState.terminalBindings.forEach { add(it.id) }
+        }
+        val candidates = buildList {
+            preferred?.takeIf { it.isNotBlank() }?.let(::add)
+            selectedTerminalKey.takeIf { it.isNotBlank() }?.let(::add)
+            terminalSessions.firstOrNull()?.let { add(liveTerminalSessionKey(it.sessionId)) }
+            executionState.terminalBindings.firstOrNull()?.id?.let(::add)
+        }
+        return candidates.firstOrNull { it in available }
+    }
+
+    fun setFocusTarget(target: WorkbenchFocusTarget, revealPane: Boolean = true) {
+        focusTarget = target
+        workPaneTab = target.tab
+        when (target) {
+            is WorkbenchFocusTarget.Files -> selectedFilePath = target.path
+            is WorkbenchFocusTarget.Terminal -> {
+                selectedTerminalKey = terminalSurfaceKey(target.sessionKey).orEmpty()
+            }
+            is WorkbenchFocusTarget.Diff -> selectedDiffPath = target.path
+            is WorkbenchFocusTarget.Browser -> {
+                browserUrl = target.url
+                target.url?.takeIf { it.isNotBlank() }?.let(browserState::load)
+            }
+            is WorkbenchFocusTarget.Reference -> selectedReferencePath = target.assetPath
+            WorkbenchFocusTarget.Plugins -> Unit
+        }
+        if (revealPane) showWorkPane = true
+    }
+
     val mirroredUrl = controller.browseMirrorUrl
     androidx.compose.runtime.LaunchedEffect(mirroredUrl) {
         if (!mirroredUrl.isNullOrBlank()) {
-            browserUrl = mirroredUrl
-            browserState.load(mirroredUrl)
-            showWorkPane = true
-            workPaneTab = WorkPaneTab.BROWSER
+            setFocusTarget(WorkbenchFocusTarget.Browser(mirroredUrl))
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(
+        executionState.focusTarget,
+        executionState.artifacts,
+        executionState.latestTurnId,
+        executionState.sidePanelTab,
+        viewport,
+        showWorkPane,
+    ) {
+        val target = executionState.focusTarget.toWorkbenchFocusTarget(executionState.artifacts) ?: return@LaunchedEffect
+        if (target != focusTarget) {
+            setFocusTarget(
+                target,
+                revealPane = showWorkPane || viewport == ViewportClass.EXPANDED,
+            )
         }
     }
     var restoredWorkbenchConversationId by remember { mutableStateOf<Long?>(null) }
-    val terminalSessions = remember { mutableStateListOf<TerminalSession>() }
-    var selectedTerminalIndex by remember { mutableIntStateOf(0) }
     val changes by com.andmx.workspace.ChangeTracker.changes.collectAsState()
     val activeTitle = remember(conversations, controller.activeId, controller.items.size, localTitleOverride) {
         localTitleOverride
@@ -187,13 +248,24 @@ fun WorkbenchScreen(
         controller.saveSettings(controller.settings.copy(themeMode = next))
     }
     fun openWorkPane(tab: WorkPaneTab) {
-        showWorkPane = true
-        workPaneTab = tab
+        setFocusTarget(
+            focusTargetFor(
+                tab = tab,
+                selectedFilePath = selectedFilePath,
+                selectedDiffPath = selectedDiffPath,
+                browserUrl = browserUrl,
+                selectedReferencePath = selectedReferencePath,
+                selectedTerminalKey = terminalSurfaceKey(),
+            ),
+        )
     }
-    // ── Unified navigation callbacks (replaces 4× duplicated inline lambdas) ──
-    fun openDiff(path: String) { selectedDiffPath = path; openWorkPane(WorkPaneTab.DIFF) }
-    fun openFile(path: String) { selectedFilePath = path; openWorkPane(WorkPaneTab.FILES) }
-    fun openUrl(url: String) { browserUrl = url; browserState.load(url); openWorkPane(WorkPaneTab.BROWSER) }
+    fun openDiff(path: String) = setFocusTarget(WorkbenchFocusTarget.Diff(path))
+    fun openFile(path: String) = setFocusTarget(WorkbenchFocusTarget.Files(path))
+    fun openUrl(url: String) = setFocusTarget(WorkbenchFocusTarget.Browser(url))
+    fun openReference(assetPath: String) = setFocusTarget(WorkbenchFocusTarget.Reference(assetPath))
+    fun openTerminal(sessionKey: String? = null) = setFocusTarget(
+        WorkbenchFocusTarget.Terminal(terminalSurfaceKey(sessionKey) ?: sessionKey),
+    )
     fun runCommand(command: CommandId) {
         recentCommandIds = updatedRecentCommands(command, recentCommandIds)
         when (command) {
@@ -241,19 +313,27 @@ fun WorkbenchScreen(
             CommandId.PLUGINS -> showPlugins = true
             CommandId.AUTOMATIONS -> showAutomations = true
             CommandId.TOGGLE_THEME -> cycleTheme()
-            CommandId.TOGGLE_WORK_PANE -> showWorkPane = !showWorkPane
+            CommandId.TOGGLE_WORK_PANE -> if (showWorkPane) showWorkPane = false else openWorkPane(workPaneTab)
             CommandId.TOGGLE_TERMINAL_DOCK -> showTerminalDock = !showTerminalDock
-            CommandId.OPEN_INSPECTOR -> openWorkPane(WorkPaneTab.INSPECTOR)
             CommandId.OPEN_FILES -> openWorkPane(WorkPaneTab.FILES)
             CommandId.OPEN_TERMINAL -> openWorkPane(WorkPaneTab.TERMINAL)
             CommandId.OPEN_DIFF -> openWorkPane(WorkPaneTab.DIFF)
             CommandId.OPEN_BROWSER -> openWorkPane(WorkPaneTab.BROWSER)
         }
     }
-    androidx.compose.runtime.SideEffect { controller.onOpenSettings = { showSettings = true } }
+    androidx.compose.runtime.SideEffect { controller.onOpenSettings = { settingsInitialTab = 0; showSettings = true } }
     DisposableEffect(Unit) {
         if (terminalSessions.isEmpty()) terminalSessions.add(TerminalSession(context))
         onDispose { terminalSessions.forEach { it.destroy() } }
+    }
+    LaunchedEffect(terminalSessions.size, executionState.terminalBindings, selectedTerminalKey, focusTarget) {
+        val resolvedKey = terminalSurfaceKey()
+        if (resolvedKey != null && selectedTerminalKey != resolvedKey) {
+            selectedTerminalKey = resolvedKey
+            if (focusTarget.tab == WorkPaneTab.TERMINAL) {
+                focusTarget = WorkbenchFocusTarget.Terminal(resolvedKey)
+            }
+        }
     }
     LaunchedEffect(controller.activeId, conversations) {
         val id = controller.activeId
@@ -261,13 +341,17 @@ fun WorkbenchScreen(
         if (id == null) {
             if (restoredWorkbenchConversationId != null) {
                 restoredWorkbenchConversationId = null
-                showWorkPane = true
+                // Compact: never auto-open the work pane on new conversation.
+                showWorkPane = viewport == ViewportClass.EXPANDED
                 showTerminalDock = false
                 terminalDockTall = false
                 workPaneTab = WorkPaneTab.TERMINAL
+                selectedTerminalKey = terminalSurfaceKey().orEmpty()
+                focusTarget = WorkbenchFocusTarget.Terminal(selectedTerminalKey.ifBlank { null })
                 selectedFilePath = null
                 selectedDiffPath = null
                 browserUrl = null
+                selectedReferencePath = null
                 fileState.currentGuestPath = "/"
                 fileState.viewingGuestPath = null
             }
@@ -275,13 +359,25 @@ fun WorkbenchScreen(
         }
         if (conversation == null || restoredWorkbenchConversationId == id) return@LaunchedEffect
         val restored = conversation.toWorkbenchState()
-        showWorkPane = restored.workPaneVisible
+        // Compact: never auto-open the work pane when switching conversations —
+        // it's a manual bottom drawer there.
+        showWorkPane = if (viewport == ViewportClass.EXPANDED) restored.workPaneVisible else false
         showTerminalDock = restored.terminalDockVisible
         terminalDockTall = restored.terminalDockTall
         workPaneTab = restored.workPaneTab
         selectedFilePath = restored.selectedFilePath.ifBlank { null }
         selectedDiffPath = restored.selectedDiffPath.ifBlank { null }
         browserUrl = restored.browserUrl.ifBlank { null }
+        selectedReferencePath = null
+        selectedTerminalKey = terminalSurfaceKey().orEmpty()
+        focusTarget = focusTargetFor(
+            tab = restored.workPaneTab,
+            selectedFilePath = selectedFilePath,
+            selectedDiffPath = selectedDiffPath,
+            browserUrl = browserUrl,
+            selectedReferencePath = selectedReferencePath,
+            selectedTerminalKey = selectedTerminalKey,
+        )
         fileState.currentGuestPath = restored.fileCurrentGuestPath.ifBlank { "/" }
         fileState.viewingGuestPath = restored.fileViewingGuestPath.ifBlank { null }
         restored.browserUrl.takeIf { it.isNotBlank() }?.let { browserState.restore(it) }
@@ -361,6 +457,8 @@ fun WorkbenchScreen(
                 onDeleteConversation = { controller.delete(it) },
                 onRenameConversation = { id, title -> renameTarget = id to title },
                 onProjectHeaderClick = { showProjectPicker = true },
+                // Show a close button in the sidebar header on compact (drawer).
+                onClose = if (viewport.isCompact) { { drawerOpen = false } } else null,
                 modifier = mod,
             )
         }
@@ -378,7 +476,7 @@ fun WorkbenchScreen(
                     terminalVisible = showTerminalDock,
                     changeCount = changes.size,
                     onProgressClick = { showProgress = !showProgress },
-                    onToggleWorkPane = { showWorkPane = !showWorkPane },
+                    onToggleWorkPane = { if (showWorkPane) showWorkPane = false else openWorkPane(workPaneTab) },
                     onToggleTerminalDock = { showTerminalDock = !showTerminalDock },
                     onNewChat = {
                         localTitleOverride = null
@@ -411,10 +509,12 @@ fun WorkbenchScreen(
                         controller = controller,
                         projectName = controller.projectManager.projectName,
                         initialDraft = composerText,
-                        onOpenSettings = { showSettings = true },
+                        onOpenSettings = { settingsInitialTab = 0; showSettings = true },
                         onOpenDiff = { it?.let { openDiff(it) } },
                         onOpenFile = { it?.let { openFile(it) } },
                         onOpenUrl = { it?.let { openUrl(it) } },
+                        onOpenReference = ::openReference,
+                        onOpenTerminal = ::openTerminal,
                         showGoal = showGoal,
                         onShowGoalChange = { showGoal = it },
                         modifier = if (workPaneInline && showWorkPane) Modifier.weight(1f) else Modifier.fillMaxWidth(),
@@ -428,16 +528,19 @@ fun WorkbenchScreen(
                         VerticalHairline()
                         WorkPane(
                             selected = workPaneTab,
-                            onSelect = { workPaneTab = it },
+                            onSelect = { openWorkPane(it) },
                             controller = controller,
+                            focusTarget = focusTarget,
                             selectedFilePath = selectedFilePath,
                             selectedDiffPath = selectedDiffPath,
                             browserUrl = browserUrl,
+                            selectedReferencePath = selectedReferencePath,
                             fileState = fileState,
                             browserState = browserState,
                             terminalSessions = terminalSessions,
-                            selectedTerminalIndex = selectedTerminalIndex,
-                            onSelectedTerminalIndexChange = { selectedTerminalIndex = it },
+                            toolTerminalSessions = executionState.terminalBindings,
+                            selectedTerminalKey = selectedTerminalKey,
+                            onSelectedTerminalKeyChange = { selectedTerminalKey = it },
                             onOpenDiff = { it?.let { openDiff(it) } },
                             onOpenFile = { it?.let { openFile(it) } },
                             onOpenUrl = { it?.let { openUrl(it) } },
@@ -470,8 +573,9 @@ fun WorkbenchScreen(
                         expanded = terminalDockTall,
                         onToggleExpanded = { terminalDockTall = !terminalDockTall },
                         terminalSessions = terminalSessions,
-                        selectedTerminalIndex = selectedTerminalIndex,
-                        onSelectedTerminalIndexChange = { selectedTerminalIndex = it },
+                        toolTerminalSessions = executionState.terminalBindings,
+                        selectedTerminalKey = selectedTerminalKey,
+                        onSelectedTerminalKeyChange = { selectedTerminalKey = it },
                         modifier = Modifier.fillMaxWidth().height(dockHeight),
                     )
                 }
@@ -482,16 +586,19 @@ fun WorkbenchScreen(
         val workPane: @Composable (Modifier) -> Unit = { mod ->
             WorkPane(
                 selected = workPaneTab,
-                onSelect = { workPaneTab = it },
+                onSelect = { openWorkPane(it) },
                 controller = controller,
+                focusTarget = focusTarget,
                 selectedFilePath = selectedFilePath,
                 selectedDiffPath = selectedDiffPath,
                 browserUrl = browserUrl,
+                selectedReferencePath = selectedReferencePath,
                 fileState = fileState,
                 browserState = browserState,
                 terminalSessions = terminalSessions,
-                selectedTerminalIndex = selectedTerminalIndex,
-                onSelectedTerminalIndexChange = { selectedTerminalIndex = it },
+                toolTerminalSessions = executionState.terminalBindings,
+                selectedTerminalKey = selectedTerminalKey,
+                onSelectedTerminalKeyChange = { selectedTerminalKey = it },
                 onOpenDiff = { it?.let { openDiff(it) } },
                 onOpenFile = { it?.let { openFile(it) } },
                 onOpenUrl = { it?.let { openUrl(it) } },
@@ -510,15 +617,15 @@ fun WorkbenchScreen(
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.systemBars),
             ) {
-                sidebar(Modifier.width(252.dp))
+                sidebar(Modifier.width(96.dp))
                 VerticalHairline()
                 mainColumn(true, Modifier.weight(1f))
             }
         } else {
-            // ── Phone portrait (<600dp) and landscape/small tablet (600-839dp) ──
-            // Sidebar is a drawer on both, since it'd cramp the panes if docked.
-            // The work pane differs: portrait overlays full-screen (not enough width
-            // for two columns), landscape sits beside chat (double-pane).
+            // ── Phone + small tablet (COMPACT + MEDIUM): sidebar drawer + mainColumn ──
+            // Same mainColumn as EXPANDED — only the sidebar delivery (drawer vs
+            // docked) and work-pane placement (bottom-expand vs side-by-side)
+            // differ. Chat, plan, composer, goal overlay are all identical.
             val workPaneInline = viewport == ViewportClass.MEDIUM
             val drawerState = androidx.compose.material3.rememberDrawerState(
                 initialValue = androidx.compose.material3.DrawerValue.Closed,
@@ -532,21 +639,30 @@ fun WorkbenchScreen(
             androidx.compose.material3.ModalNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = {
-                    sidebar(Modifier.fillMaxHeight().fillMaxWidth(0.82f).widthIn(max = 300.dp).navigationBarsPadding())
+                    sidebar(Modifier.fillMaxHeight().width(260.dp).navigationBarsPadding())
                 },
             ) {
                 Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
                     mainColumn(workPaneInline, Modifier.fillMaxSize())
-                    // Portrait: work pane slides in as a full-screen overlay.
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = !workPaneInline && showWorkPane,
-                        enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(com.andmx.ui.theme.Motion.DUR_SLOW, easing = com.andmx.ui.theme.Motion.EASE_OUT)) { it } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(com.andmx.ui.theme.Motion.DUR_STD)),
-                        exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(com.andmx.ui.theme.Motion.DUR_STD)) { it } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(com.andmx.ui.theme.Motion.DUR_FAST)),
-                    ) {
-                        Box(Modifier.fillMaxSize().background(colors.canvas)) {
-                            workPane(Modifier.fillMaxSize())
-                        }
-                    }
+                }
+            }
+        }
+
+        if (viewport == ViewportClass.COMPACT && showWorkPane) {
+            androidx.activity.compose.BackHandler(enabled = true) { showWorkPane = false }
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { showWorkPane = false },
+                properties = androidx.compose.ui.window.DialogProperties(
+                    usePlatformDefaultWidth = false,
+                ),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(colors.canvas)
+                        .windowInsetsPadding(WindowInsets.systemBars),
+                ) {
+                    workPane(Modifier.fillMaxSize())
                 }
             }
         }
@@ -577,6 +693,22 @@ fun WorkbenchScreen(
             onAddBlankProvider = controller::addBlankProvider,
             onDeleteProvider = controller::deleteProvider,
             onSelectProvider = controller::selectProvider,
+            onFetchModels = controller::fetchModels,
+            fetchingModels = controller.fetchingModels,
+            fetchModelsError = controller.fetchModelsError,
+            fetchedModels = controller.fetchedModels,
+            onAddModel = controller::addModel,
+            onRemoveModel = controller::removeModel,
+            onTestConnection = controller::testConnection,
+            testingConnection = controller.testingConnection,
+            connectionOk = controller.connectionOk,
+            connectionResult = controller.connectionResult,
+            memoryEnabled = controller.memoryState.value.hasMemory,
+            onMemoryEnabledChange = { /* config toggle — memory system reads config */ },
+            memoryContent = controller.memoryState.value.memoryContent,
+            onClearMemory = { controller.clearMemory() },
+            onConsolidateMemory = { controller.consolidateMemory() },
+            initialTab = settingsInitialTab,
         )
     }
 
@@ -632,7 +764,7 @@ fun WorkbenchScreen(
     if (showPlugins) {
         PluginsOverlay(
             controller = controller,
-            onConfigure = { showSettings = true },
+            onConfigure = { settingsInitialTab = 0; showSettings = true },
             onDismiss = { showPlugins = false },
         )
     }
@@ -772,11 +904,18 @@ private fun BottomTerminalDock(
     onToggleExpanded: () -> Unit,
     onClose: () -> Unit,
     terminalSessions: androidx.compose.runtime.snapshots.SnapshotStateList<TerminalSession>,
-    selectedTerminalIndex: Int,
-    onSelectedTerminalIndexChange: (Int) -> Unit,
+    toolTerminalSessions: List<TerminalBindingState>,
+    selectedTerminalKey: String,
+    onSelectedTerminalKeyChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AndmxTheme.colors
+    val subtitle = remember(toolTerminalSessions, selectedTerminalKey) {
+        toolTerminalSessions.firstOrNull { it.id == selectedTerminalKey }
+            ?.command
+            ?.takeIf { it.isNotBlank() }
+            ?: "Android/proot shell"
+    }
     Column(modifier.background(colors.sunken)) {
         Row(
             Modifier.fillMaxWidth().height(34.dp).padding(horizontal = Spacing.md),
@@ -786,7 +925,7 @@ private fun BottomTerminalDock(
             Spacer(Modifier.width(Spacing.sm))
             Text("Terminal", style = AndmxTheme.typography.labelLarge, color = colors.textPrimary)
             Spacer(Modifier.width(Spacing.sm))
-            Text("Android/proot shell", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary, modifier = Modifier.weight(1f))
+            Text(subtitle, style = AndmxTheme.typography.labelSmall, color = colors.textTertiary, modifier = Modifier.weight(1f))
             ChromeButton(
                 if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.Outlined.KeyboardArrowUp,
                 if (expanded) "收起终端" else "展开终端",
@@ -804,9 +943,10 @@ private fun BottomTerminalDock(
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         TerminalHost(
-            sessions = terminalSessions,
-            selectedIndex = selectedTerminalIndex,
-            onSelectedIndexChange = onSelectedTerminalIndexChange,
+            liveSessions = terminalSessions,
+            toolSessions = toolTerminalSessions,
+            selectedKey = selectedTerminalKey,
+            onSelectedKeyChange = onSelectedTerminalKeyChange,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -822,14 +962,9 @@ private fun ProgressPopover(
     modifier: Modifier = Modifier,
 ) {
     val colors = AndmxTheme.colors
-    val hasMessages = controller.items.isNotEmpty()
     val toolEvents = controller.items.filterIsInstance<com.andmx.ui.conversation.ChatItem.ToolUse>()
-    val hasToolEvents = toolEvents.isNotEmpty()
-    val runningTools = toolEvents.count { it.running }
     val failedTools = toolEvents.count { it.error }
-    val completedTools = toolEvents.count { !it.running && !it.error }
     val goal = controller.goal
-    val sourceLinks = remember(toolEvents) { progressSourceLinks(toolEvents) }
     val runLog = remember(controller.items.toList()) { runLogEntries(controller.items) }
     val verifications = remember(controller.items.toList()) { verificationEntries(controller.items) }
     val evidence = remember(controller.items.toList(), changes) { controller.evidenceLedger() }
@@ -889,7 +1024,55 @@ private fun ProgressPopover(
     }
     val handoffAdvice = remember(inspectorSnapshot) { contextHandoffAdvice(inspectorSnapshot) }
     val parity = remember(inspectorSnapshot, evidence, policy, checklist, designSystem, screenshotExtraction, interactionFlow, selfModel) { controller.codexParityAudit() }
-    var section by remember { mutableStateOf(ProgressSection.CHECKLIST) }
+
+    // 主状态：优先用 DeliveryReport.state（已聚合 checklist/verification/parity 等）；
+    // 无产物时回退到运行/目标阶段判定。
+    val hasArtifacts = changes.isNotEmpty() || verifications.isNotEmpty() || evidence.items.isNotEmpty()
+    val (statusLabel, statusColor) = when {
+        controller.busy -> "运行中" to colors.accent
+        goal.phase == GoalPhase.WAITING_APPROVAL -> "待授权" to colors.warning
+        goal.phase == GoalPhase.PAUSED -> "已暂停" to colors.textTertiary
+        goal.phase == GoalPhase.NEEDS_SETUP -> "需设置" to colors.warning
+        goal.phase == GoalPhase.FAILED -> "失败" to colors.warning
+        failedTools > 0 -> "$failedTools 个失败" to colors.warning
+        hasArtifacts -> when (report.state) {
+            DeliveryReportState.BLOCKED -> "阻塞" to colors.warning
+            DeliveryReportState.NEEDS_VERIFICATION -> "待验证" to colors.warning
+            DeliveryReportState.NEEDS_REVIEW -> "待审查" to colors.accent
+            DeliveryReportState.READY -> "可交付" to colors.accent
+        }
+        goal.hasGoal -> goal.phase.label to colors.textTertiary
+        else -> "待命" to colors.textTertiary
+    }
+
+    // REFERENCES tab 激活上下文：用于分组折叠默认状态。
+    val activationCtx = remember(
+        policy, interactionFlow, selfModel, evidence, changes, verifications,
+        parity, handoffAdvice, referenceBoard, blueprint, visualAcceptance,
+        designSystem, screenshotExtraction, screenshotTrace,
+    ) {
+        ReferenceActivationContext(
+            policyRows = policy.rows.size,
+            policyBoundaryRows = policy.boundaryRows.size,
+            interactionFlowTotal = interactionFlow.readyCount + interactionFlow.activeCount + interactionFlow.watchCount + interactionFlow.blockedCount,
+            selfModelTotal = selfModel.readyCount + selfModel.watchCount + selfModel.gapCount,
+            evidenceItems = evidence.items.size,
+            changedFiles = changes.size,
+            verifications = verifications.size,
+            parityTotal = parity.readyCount + parity.watchCount + parity.gapCount,
+            handoffRecommended = handoffAdvice.level == HandoffAdviceLevel.RECOMMENDED || handoffAdvice.level == HandoffAdviceLevel.REQUIRED,
+            referenceBoardTotal = referenceBoard.referenceCount + referenceBoard.codexCount + referenceBoard.readyCount + referenceBoard.openCount,
+            blueprintTotal = blueprint.referenceCount + blueprint.extractionTasks.size + blueprint.acceptanceChecks.size,
+            visualAcceptanceTotal = visualAcceptance.referenceCount + visualAcceptance.readyCount + visualAcceptance.waitingCount,
+            designSystemTotal = designSystem.readyCount + designSystem.watchCount + designSystem.gapCount,
+            screenshotExtractionTotal = screenshotExtraction.referenceCount + screenshotExtraction.readyCount + screenshotExtraction.waitingCount,
+            screenshotTraceTotal = screenshotTrace.referenceCount + screenshotTrace.readyCount + screenshotTrace.waitingCount + screenshotTrace.changedFileCount,
+        )
+    }
+    val referencesBadge = ReferenceGroup.entries.sumOf { it.activeCount(activationCtx) }
+
+    var section by remember { mutableStateOf(ProgressSection.CURRENT) }
+    var logExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier.fillMaxWidth(0.92f).widthIn(max = 420.dp).clip(Radii.lg)
@@ -900,27 +1083,9 @@ private fun ProgressPopover(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text("任务面板", style = AndmxTheme.typography.titleSmall, color = colors.textPrimary, modifier = Modifier.weight(1f))
             Text(
-                when {
-                    controller.busy -> "运行中"
-                    goal.phase == GoalPhase.WAITING_APPROVAL -> "待授权"
-                    goal.phase == GoalPhase.PAUSED -> "已暂停"
-                    goal.phase == GoalPhase.NEEDS_SETUP -> "需设置"
-                    goal.phase == GoalPhase.FAILED -> "失败"
-                    failedTools > 0 -> "$failedTools 个失败"
-                    goal.hasGoal -> goal.phase.label
-                    completedTools > 0 -> "已完成"
-                    else -> "待命"
-                },
+                statusLabel,
                 style = AndmxTheme.typography.labelSmall,
-                color = when {
-                    controller.busy -> colors.accent
-                    goal.phase == GoalPhase.PAUSED -> colors.textTertiary
-                    goal.phase == GoalPhase.WAITING_APPROVAL -> colors.warning
-                    goal.phase == GoalPhase.NEEDS_SETUP -> colors.warning
-                    goal.phase == GoalPhase.FAILED -> colors.warning
-                    failedTools > 0 -> colors.warning
-                    else -> colors.textTertiary
-                },
+                color = statusColor,
                 modifier = Modifier.clip(Radii.pill).background(colors.sunken)
                     .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
             )
@@ -928,29 +1093,40 @@ private fun ProgressPopover(
         Spacer(Modifier.height(Spacing.md))
         ProgressTabs(
             selected = section,
-            checklistBadge = checklist.missingCount + checklist.watchCount,
-            outputBadge = changes.size,
-            verificationBadge = verifications.size,
-            sourceBadge = progressSourceBadge(
-                toolEvents = toolEvents.size,
-                visualAcceptanceWaiting = visualAcceptance.waitingCount,
-                referenceBoardOpen = referenceBoard.openCount,
-                designSystemOpen = designSystem.watchCount + designSystem.gapCount,
-                screenshotExtractionWaiting = screenshotExtraction.waitingCount,
-                interactionFlowOpen = interactionFlow.openCount,
-                selfModelOpen = selfModel.watchCount + selfModel.gapCount,
-            ),
-            logBadge = runLog.size,
+            currentBadge = checklist.missingCount + checklist.watchCount,
+            outputBadge = changes.size + verifications.size,
+            referencesBadge = referencesBadge,
             onSelect = { section = it },
         )
         Spacer(Modifier.height(Spacing.md))
 
         when (section) {
-            ProgressSection.CHECKLIST -> {
+            ProgressSection.CURRENT -> {
+                // 主状态卡：下一步建议
                 ProgressNextActionCard(nextAction) { command ->
                     controller.send(command)
                 }
                 Spacer(Modifier.height(Spacing.md))
+                // 交接建议（与"现在该干嘛"强相关，从原 SOURCES 移上来）
+                ProgressHandoffAdviceRow(handoffAdvice) { controller.send(it) }
+                Spacer(Modifier.height(Spacing.md))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                Spacer(Modifier.height(Spacing.md))
+                // 计划步骤
+                val plan = controller.taskPlanSnapshot()
+                Text("计划步骤", style = AndmxTheme.typography.titleSmall, color = colors.textSecondary)
+                Spacer(Modifier.height(Spacing.xs))
+                if (plan.items.isEmpty()) {
+                    EmptyProgressText("暂无计划项")
+                } else {
+                    plan.items.forEach { item ->
+                        ProgressPlanStep(item)
+                    }
+                }
+                Spacer(Modifier.height(Spacing.md))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                Spacer(Modifier.height(Spacing.md))
+                // 清单
                 Text(checklist.title, style = AndmxTheme.typography.titleSmall, color = checklistTint(checklist, colors))
                 Spacer(Modifier.height(Spacing.xs))
                 Text(checklist.detail, style = AndmxTheme.typography.bodySmall, color = colors.textTertiary)
@@ -961,13 +1137,10 @@ private fun ProgressPopover(
                     }
                 }
             }
-            ProgressSection.STEPS -> {
-                val plan = controller.taskPlanSnapshot()
-                plan.items.forEach { item ->
-                    ProgressPlanStep(item)
-                }
-            }
             ProgressSection.OUTPUT -> {
+                // 变更
+                Text("变更", style = AndmxTheme.typography.titleSmall, color = colors.textSecondary)
+                Spacer(Modifier.height(Spacing.xs))
                 if (changes.isEmpty()) {
                     EmptyProgressText("暂无产物")
                 } else {
@@ -986,8 +1159,12 @@ private fun ProgressPopover(
                             .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
                     )
                 }
-            }
-            ProgressSection.VERIFY -> {
+                Spacer(Modifier.height(Spacing.md))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                Spacer(Modifier.height(Spacing.md))
+                // 验证
+                Text("验证", style = AndmxTheme.typography.titleSmall, color = colors.textSecondary)
+                Spacer(Modifier.height(Spacing.xs))
                 if (verifications.isEmpty()) {
                     EmptyProgressText("暂无测试、构建或诊断记录")
                     Spacer(Modifier.height(Spacing.sm))
@@ -1011,75 +1188,93 @@ private fun ProgressPopover(
                             .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
                     )
                 }
+                Spacer(Modifier.height(Spacing.md))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                Spacer(Modifier.height(Spacing.md))
+                // 活动（原 LOG tab，限制前 8 条，可展开）
+                Text("活动", style = AndmxTheme.typography.titleSmall, color = colors.textSecondary)
+                Spacer(Modifier.height(Spacing.xs))
+                if (runLog.isEmpty()) {
+                    EmptyProgressText("尚无运行记录")
+                } else {
+                    val visible = if (logExpanded) runLog else runLog.take(8)
+                    visible.forEach { entry ->
+                        ProgressRunLogRow(entry, onOpenFile, onOpenUrl)
+                    }
+                    if (!logExpanded && runLog.size > 8) {
+                        Spacer(Modifier.height(Spacing.sm))
+                        Text(
+                            "查看全部 ${runLog.size} 条",
+                            style = AndmxTheme.typography.labelMedium,
+                            color = colors.accent,
+                            modifier = Modifier.clip(Radii.sm).clickable { logExpanded = true }
+                                .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                        )
+                    }
+                }
             }
-            ProgressSection.SOURCES -> {
-                ProgressHandoffAdviceRow(handoffAdvice) { controller.send(it) }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressEvidenceSummary(evidence) { controller.send("/evidence") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressReferenceBoardSummary(referenceBoard) { controller.send("/references") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressBlueprintSummary(blueprint) { controller.send("/blueprint") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressVisualAcceptanceSummary(visualAcceptance) { controller.send("/visual-check") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressDesignSystemSummary(designSystem) { controller.send("/design-system") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressScreenshotExtractionSummary(screenshotExtraction) { controller.send("/screenshot-extract") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressScreenshotTraceSummary(screenshotTrace) { controller.send("/trace") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressInteractionFlowSummary(interactionFlow) { controller.send("/flow") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressSelfModelSummary(selfModel) { controller.send("/self-model") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressPolicySummary(policy) { controller.send("/policy") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressParitySummary(parity) { controller.send("/parity") }
-                Spacer(Modifier.height(Spacing.md))
-                ProgressDeliveryReportSummary(report) { controller.send("/report") }
-                Spacer(Modifier.height(Spacing.md))
+            ProgressSection.REFERENCES -> {
+                // 环境摘要
                 ProgressSourceRow("内置工具", "${controller.toolList().size}")
                 ProgressSourceRow("MCP 服务器", "${controller.mcpServers().size}")
                 ProgressSourceRow("工具事件", "${toolEvents.size}")
                 ProgressSourceRow("消息", "${controller.items.size}")
                 Spacer(Modifier.height(Spacing.md))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
-                Spacer(Modifier.height(Spacing.md))
-                if (sourceLinks.isNotEmpty()) {
-                    Text("来源", style = AndmxTheme.typography.titleSmall, color = colors.textTertiary)
-                    Spacer(Modifier.height(Spacing.sm))
-                    sourceLinks.take(5).forEach { link ->
-                        ProgressSourceLinkRow(
-                            link = link,
-                            onOpenFile = onOpenFile,
-                            onOpenUrl = onOpenUrl,
-                        )
-                    }
-                    if (sourceLinks.size > 5) {
-                        Text("另有 ${sourceLinks.size - 5} 个来源", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+                // 3 组分组折叠
+                ReferenceGroup.entries.forEach { group ->
+                    val activeCount = group.activeCount(activationCtx)
+                    ProgressReferenceGroup(
+                        title = group.title,
+                        activeCount = activeCount,
+                        total = group.cards.size,
+                        defaultExpanded = activeCount > 0,
+                    ) {
+                        group.cards.forEach { card ->
+                            when (card) {
+                                ReferenceCard.TOOL_POLICY -> {
+                                    ProgressPolicySummary(policy) { controller.send("/policy") }
+                                }
+                                ReferenceCard.INTERACTION_FLOW -> {
+                                    ProgressInteractionFlowSummary(interactionFlow) { controller.send("/flow") }
+                                }
+                                ReferenceCard.SELF_MODEL -> {
+                                    ProgressSelfModelSummary(selfModel) { controller.send("/self-model") }
+                                }
+                                ReferenceCard.EVIDENCE_LEDGER -> {
+                                    ProgressEvidenceSummary(evidence) { controller.send("/evidence") }
+                                }
+                                ReferenceCard.DELIVERY_REPORT -> {
+                                    ProgressDeliveryReportSummary(report) { controller.send("/report") }
+                                }
+                                ReferenceCard.CODEX_PARITY -> {
+                                    ProgressParitySummary(parity) { controller.send("/parity") }
+                                }
+                                ReferenceCard.HANDOFF_ADVICE -> {
+                                    ProgressHandoffAdviceRow(handoffAdvice) { controller.send(it) }
+                                }
+                                ReferenceCard.UI_REFERENCE_BOARD -> {
+                                    ProgressReferenceBoardSummary(referenceBoard) { controller.send("/references") }
+                                }
+                                ReferenceCard.UI_REPLICA_BLUEPRINT -> {
+                                    ProgressBlueprintSummary(blueprint) { controller.send("/blueprint") }
+                                }
+                                ReferenceCard.VISUAL_ACCEPTANCE -> {
+                                    ProgressVisualAcceptanceSummary(visualAcceptance) { controller.send("/visual-check") }
+                                }
+                                ReferenceCard.DESIGN_SYSTEM -> {
+                                    ProgressDesignSystemSummary(designSystem) { controller.send("/design-system") }
+                                }
+                                ReferenceCard.SCREENSHOT_EXTRACTION -> {
+                                    ProgressScreenshotExtractionSummary(screenshotExtraction) { controller.send("/screenshot-extract") }
+                                }
+                                ReferenceCard.SCREENSHOT_TRACE -> {
+                                    ProgressScreenshotTraceSummary(screenshotTrace) { controller.send("/trace") }
+                                }
+                            }
+                            Spacer(Modifier.height(Spacing.sm))
+                        }
                     }
                     Spacer(Modifier.height(Spacing.md))
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
-                    Spacer(Modifier.height(Spacing.md))
-                }
-                Text("最近活动", style = AndmxTheme.typography.titleSmall, color = colors.textTertiary)
-                Spacer(Modifier.height(Spacing.sm))
-                if (runLog.isEmpty()) {
-                    EmptyProgressText("尚无活动")
-                } else {
-                    runLog.take(5).forEach { entry ->
-                        ProgressRunLogRow(entry, onOpenFile, onOpenUrl)
-                    }
-                }
-            }
-            ProgressSection.LOG -> {
-                if (runLog.isEmpty()) {
-                    EmptyProgressText("尚无运行记录")
-                } else {
-                    runLog.forEach { entry ->
-                        ProgressRunLogRow(entry, onOpenFile, onOpenUrl)
-                    }
                 }
             }
         }
@@ -1089,16 +1284,61 @@ private fun ProgressPopover(
 @Composable
 private fun ProgressTabs(
     selected: ProgressSection,
-    checklistBadge: Int,
+    currentBadge: Int,
     outputBadge: Int,
-    verificationBadge: Int,
-    sourceBadge: Int,
-    logBadge: Int,
+    referencesBadge: Int,
     onSelect: (ProgressSection) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().clip(Radii.sm).background(AndmxTheme.colors.sunken).padding(Spacing.xxs)) {
-        progressTabSpecs(checklistBadge, outputBadge, verificationBadge, sourceBadge, logBadge).forEach { tab ->
+        progressTabSpecs(currentBadge, outputBadge, referencesBadge).forEach { tab ->
             ProgressTab(tab.label, selected == tab.section, tab.badge, Modifier.weight(1f)) { onSelect(tab.section) }
+        }
+    }
+}
+
+/**
+ * REFERENCES tab 的分组容器：标题行 + 可折叠内容区。
+ * 未激活组默认折叠为一行，点击展开看全部卡。
+ */
+@Composable
+private fun ProgressReferenceGroup(
+    title: String,
+    activeCount: Int,
+    total: Int,
+    defaultExpanded: Boolean,
+    content: @Composable () -> Unit,
+) {
+    val colors = AndmxTheme.colors
+    var expanded by remember(title, defaultExpanded) { mutableStateOf(defaultExpanded) }
+    val tint = if (activeCount > 0) colors.accent else colors.textTertiary
+    Column(
+        Modifier.fillMaxWidth().clip(Radii.sm)
+            .background(colors.sunken)
+            .border(1.dp, colors.border, Radii.sm),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }
+                .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Text(title, style = AndmxTheme.typography.labelMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+            Text(
+                if (activeCount > 0) "$activeCount/$total 激活" else "$total 项待启动",
+                style = AndmxTheme.typography.labelSmall,
+                color = tint,
+            )
+        }
+        if (expanded) {
+            Box(Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.sm)) {
+                content()
+            }
         }
     }
 }
@@ -1891,7 +2131,7 @@ private fun VerticalHairline() {
 private fun groupConversations(
     rows: List<com.andmx.data.ConversationEntity>,
 ): List<com.andmx.ui.workbench.ProjectGroup> =
-    rows.groupBy { it.project }.map { (project, convs) ->
+    rows.groupBy { it.project.ifBlank { "" } }.map { (project, convs) ->
         com.andmx.ui.workbench.ProjectGroup(
             name = project,
             conversations = convs.map {
@@ -1907,8 +2147,15 @@ private fun groupConversations(
         )
     }
 
-private fun parseGoalPhase(value: String): GoalPhase =
-    runCatching { GoalPhase.valueOf(value) }.getOrDefault(GoalPhase.EMPTY)
+private fun parseGoalPhase(value: String): GoalPhase {
+    val raw = runCatching { GoalPhase.valueOf(value) }.getOrDefault(GoalPhase.EMPTY)
+    // Transient states (RUNNING/WAITING_APPROVAL) don't belong in the sidebar
+    // index — they're only meaningful for the currently-active session in memory.
+    return when (raw) {
+        GoalPhase.RUNNING, GoalPhase.WAITING_APPROVAL -> GoalPhase.READY
+        else -> raw
+    }
+}
 
 internal data class WorkbenchStateSnapshot(
     val workPaneTab: WorkPaneTab = WorkPaneTab.TERMINAL,
@@ -1955,3 +2202,8 @@ private fun relativeTime(ts: Long): String {
 /** Apply an alpha via graphicsLayer (used for the inline work-pane fade-in). */
 private fun Modifier.graphicsLayerAlpha(alpha: Float): Modifier =
     this.then(Modifier.graphicsLayer { this.alpha = alpha })
+
+// ── Compact (phone portrait) — REMOVED: now uses mainColumn, same as every
+//    other viewport. Only layout placement differs (sidebar drawer + work pane
+//    bottom-expand vs docked sidebar + side-by-side panes). All feature
+//    components (ChatPane, PlanPanel, GoalOverlay, Composer) are shared.

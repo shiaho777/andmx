@@ -64,7 +64,7 @@ import com.andmx.ui.theme.Spacing
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun TerminalPane(session: TerminalSession, modifier: Modifier = Modifier) {
+fun TerminalPane(session: TerminalSession, modifier: Modifier = Modifier, compact: Boolean = false) {
     val colors = AndmxTheme.colors
 
     androidx.compose.runtime.LaunchedEffect(session) { session.start() }
@@ -101,18 +101,23 @@ fun TerminalPane(session: TerminalSession, modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxSize().background(colors.sunken)) {
-        // status bar
-        Row(
-            modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("guest@alpine", style = AndmxTheme.typography.labelMedium, color = colors.textSecondary)
-            Spacer(Modifier.weight(1f))
-            Text(state.status, style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+        // Status bar — hidden in compact mode to save vertical space.
+        if (!compact) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = Spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("guest@alpine", style = AndmxTheme.typography.labelMedium, color = colors.textSecondary)
+                Spacer(Modifier.weight(1f))
+                Text(state.status, style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
 
-        // console output
+        // console output — in compact mode this fills all remaining space and
+        // the input field is overlaid transparently on top of it, so tapping
+        // anywhere in the output focuses the hidden input and routes keystrokes
+        // to the PTY. No separate input row or quick-key bar is shown.
         Box(
             Modifier.weight(1f).fillMaxWidth()
                 .onSizeChanged { sz ->
@@ -128,8 +133,32 @@ fun TerminalPane(session: TerminalSession, modifier: Modifier = Modifier) {
                 .verticalScroll(scroll),
         ) {
             Text(text = session.screen, style = AndmxCodeTextStyle, color = colors.textPrimary)
+            // Compact: transparent input overlaid on the output so the user
+            // taps the screen to type, no extra UI chrome.
+            if (compact) {
+                BasicTextField(
+                    value = input,
+                    onValueChange = { newText ->
+                        if (newText.contains('\n')) {
+                            input = newText.replace("\n", "")
+                            sendInput()
+                        } else {
+                            input = newText
+                        }
+                    },
+                    textStyle = AndmxCodeTextStyle.copy(color = androidx.compose.ui.graphics.Color.Transparent),
+                    cursorBrush = SolidColor(colors.accent),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendInput() }),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusRequester(focusRequester),
+                )
+            }
         }
 
+        if (!compact) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
 
         // quick control keys
@@ -196,6 +225,7 @@ fun TerminalPane(session: TerminalSession, modifier: Modifier = Modifier) {
                 }
             }
         }
+        } // end if (!compact)
     }
 }
 

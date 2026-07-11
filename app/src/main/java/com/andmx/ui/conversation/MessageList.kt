@@ -62,6 +62,7 @@ import com.andmx.ui.theme.AndmxTheme
 import com.andmx.ui.theme.Motion
 import com.andmx.ui.theme.Radii
 import com.andmx.ui.theme.Spacing
+import com.andmx.ui.workbench.toolTerminalSessionKey
 import com.andmx.workspace.GuestPaths
 
 // Diff colors unified in com.andmx.ui.components (DiffAddFg etc.); alias for local stats text.
@@ -81,26 +82,32 @@ fun MessageList(
     onOpenUrl: (String) -> Unit = {},
     onOpenReference: (String) -> Unit = {},
     onRunCommand: (String) -> Unit = {},
+    onOpenTerminal: (String?) -> Unit = {},
+    /** Re-edit a user message: revert to it and pre-fill the composer. */
+    onEdit: (Int) -> Unit = {},
+    /** Index of the user message currently being edited, or null. */
+    editingIndex: Int? = null,
+    /** Cancel the pending edit (clears the composer + editingIndex). */
+    onCancelEdit: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val rows = remember(items.toList()) { groupTimeline(items) }
     val changes by com.andmx.workspace.ChangeTracker.changes.collectAsState()
-    // Track whether the user is parked at the bottom so we only auto-follow
-    // streaming growth when they're already reading the latest.
     val isAtBottom by androidx.compose.runtime.derivedStateOf {
         val info = listState.layoutInfo
         val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
-        last >= items.lastIndex - 1
+        last >= rows.lastIndex - 1
     }
     val lastLen = (items.lastOrNull() as? ChatItem.Assistant)?.text?.length ?: 0
-    // Scroll on new rows (size change); follow streaming growth only if at bottom.
-    androidx.compose.runtime.LaunchedEffect(items.size) {
-        if (items.isNotEmpty()) listState.animateScrollToItem(items.lastIndex)
+    androidx.compose.runtime.LaunchedEffect(rows.size, isAtBottom) {
+        if (rows.isNotEmpty() && (listState.layoutInfo.totalItemsCount == 0 || isAtBottom)) {
+            listState.animateScrollToItem(rows.lastIndex)
+        }
     }
-    androidx.compose.runtime.LaunchedEffect(lastLen, isAtBottom) {
-        if (items.isNotEmpty() && isAtBottom) {
-            listState.animateScrollToItem(items.lastIndex)
+    androidx.compose.runtime.LaunchedEffect(lastLen, isAtBottom, rows.size) {
+        if (rows.isNotEmpty() && isAtBottom) {
+            listState.animateScrollToItem(rows.lastIndex)
         }
     }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -111,27 +118,37 @@ fun MessageList(
             contentPadding = PaddingValues(horizontal = Spacing.xl, vertical = Spacing.lg),
         ) {
             itemsIndexed(rows, key = { _, row -> row.key }) { _, row ->
-                // Animate new/removed items in place so messages slide/fade in
-                // instead of popping. Per-item key lets Compose track moves.
                 androidx.compose.foundation.layout.Box(
                     Modifier.animateItem(
                         fadeInSpec = androidx.compose.animation.core.tween(Motion.DUR_STD, easing = Motion.EASE_OUT),
-                        fadeOutSpec = androidx.compose.animation.core.tween(Motion.DUR_FAST),
+                        fadeOutSpec = null,
                         placementSpec = androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow),
                     ),
                 ) {
                 when (row) {
                     is TimelineRow.Single -> when (val item = row.item) {
-                    is ChatItem.User -> {
+                    is ChatItem.User -> Column {
                         UserBubble(item.text)
                         val references = remember(item.text) { messageReferences(item.text) }
                         MessageReferenceRow(references, onOpenFile, onOpenUrl, onOpenReference, onRunCommand)
-                        MsgActions {
-                            ActionText("复制") { clipboard.setText(androidx.compose.ui.text.AnnotatedString(item.text)) }
-                                ActionText("分支") { onBranch(indexOfItem(items, item.key)) }
+                        // Right-aligned actions: copy + edit/cancel-edit.
+                        val itemIndex = items.indexOf(item)
+                        val isEditing = itemIndex == editingIndex
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                        ) {
+                            MsgActions {
+                                ActionText("复制") { clipboard.setText(androidx.compose.ui.text.AnnotatedString(item.text)) }
+                                if (isEditing) {
+                                    ActionText("取消编辑") { onCancelEdit() }
+                                } else {
+                                    ActionText("编辑") { onEdit(itemIndex) }
+                                }
+                            }
                         }
                     }
-                    is ChatItem.Assistant -> {
+                    is ChatItem.Assistant -> Column {
                         AssistantBlock(item.text)
                             val itemIndex = indexOfItem(items, item.key)
                             val isLast = itemIndex == items.lastIndex
@@ -150,9 +167,18 @@ fun MessageList(
                             }
                             if (isLast) ActionText("重试") { onRetry() }
                                 ActionText("分支") { onBranch(itemIndex) }
+                            // Timestamps: sent time + completed time (compact HH:mm).
+                            if (item.completedAt > 0L) {
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text(
+                                    formatTime(item.sentAt) + " → " + formatTime(item.completedAt),
+                                    style = AndmxTheme.typography.labelSmall,
+                                    color = AndmxTheme.colors.textTertiary,
+                                )
+                            }
                         }
                     }
-                    is ChatItem.ToolUse -> ToolCard(item, changes, onOpenDiff, onOpenFile, onOpenUrl)
+                    is ChatItem.ToolUse -> ToolCard(item, changes, onOpenDiff, onOpenFile, onOpenUrl, onOpenReference, onOpenTerminal)
                     is ChatItem.Approval -> ApprovalCard(item, onApprove)
                 }
                     is TimelineRow.ToolGroup -> ToolGroupCard(row.tools, changes, onOpenDiff, onOpenFile, onOpenUrl)
@@ -241,8 +267,9 @@ private fun groupTimeline(items: List<ChatItem>): List<TimelineRow> {
         }
     }
     for (item in items) {
-        if (item is ChatItem.ToolUse) pending += item
-        else {
+        if (item is ChatItem.ToolUse && shouldGroupTool(item)) {
+            pending += item
+        } else {
             flush()
             rows += TimelineRow.Single(item)
         }
@@ -251,8 +278,27 @@ private fun groupTimeline(items: List<ChatItem>): List<TimelineRow> {
     return rows
 }
 
+private fun shouldGroupTool(item: ChatItem.ToolUse): Boolean {
+    val artifacts = toolArtifactSummary(item)
+    return !item.running &&
+        !item.error &&
+        artifacts.images.isEmpty() &&
+        ToolArgs.editedPath(item.name, item.args).isBlank() &&
+        ToolArgs.filePath(item.name, item.args).isBlank() &&
+        ToolArgs.webUrl(item.name, item.args).isBlank()
+}
+
 private fun indexOfItem(items: List<ChatItem>, key: Long): Int =
     items.indexOfFirst { it.key == key }.coerceAtLeast(0)
+
+/** Format a timestamp (ms) as compact HH:mm, or "" if 0/unset. */
+private fun formatTime(ms: Long): String {
+    if (ms <= 0L) return ""
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    val h = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    val m = cal.get(java.util.Calendar.MINUTE)
+    return "%02d:%02d".format(h, m)
+}
 
 @Composable
 private fun MsgActions(content: @Composable () -> Unit) {
@@ -376,6 +422,8 @@ private fun ToolCard(
     onOpenDiff: (String?) -> Unit,
     onOpenFile: (String) -> Unit,
     onOpenUrl: (String) -> Unit,
+    onOpenReference: (String) -> Unit,
+    onOpenTerminal: (String?) -> Unit = {},
 ) {
     val colors = AndmxTheme.colors
     var expanded by remember { mutableStateOf(false) }
@@ -384,6 +432,7 @@ private fun ToolCard(
     val editedPath = remember(item.name, item.args) { ToolArgs.editedPath(item.name, item.args) }
     val openablePath = remember(item.name, item.args) { ToolArgs.filePath(item.name, item.args) }
     val openableUrl = remember(item.name, item.args) { ToolArgs.webUrl(item.name, item.args) }
+    val artifacts = remember(item.callId, item.output) { toolArtifactSummary(item) }
 
     Column(
         Modifier.fillMaxWidth().clip(Radii.md).border(1.dp, colors.border, Radii.md).background(colors.surface),
@@ -413,6 +462,20 @@ private fun ToolCard(
                 else -> "完成"
             }
             Text(status, style = AndmxTheme.typography.labelSmall, color = if (item.error) colors.warning else colors.textTertiary)
+            if (artifacts.images.isNotEmpty()) {
+                Spacer(Modifier.width(Spacing.sm))
+                Text("${artifacts.images.size} 张图", style = AndmxTheme.typography.labelSmall, color = colors.accent)
+            }
+            // Shell commands: tap to jump into the terminal tab and see live output.
+            if (item.name == "run_shell") {
+                Spacer(Modifier.width(Spacing.xs))
+                Icon(
+                    Icons.Outlined.Terminal,
+                    contentDescription = "在终端中查看",
+                    tint = colors.accent,
+                    modifier = Modifier.size(15.dp).clip(Radii.sm).clickable { onOpenTerminal(toolTerminalSessionKey(item.callId)) }.padding(2.dp),
+                )
+            }
             Spacer(Modifier.width(Spacing.xs))
             val arrowRotation by animateFloatAsState(if (expanded) 180f else 0f, label = "toolArrow")
             Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(15.dp).rotate(arrowRotation))
@@ -422,8 +485,42 @@ private fun ToolCard(
             enter = fadeIn(androidx.compose.animation.core.tween(Motion.DUR_STD)) + expandVertically(androidx.compose.animation.core.tween(Motion.DUR_STD)),
             exit = fadeOut(androidx.compose.animation.core.tween(Motion.DUR_FAST)) + shrinkVertically(androidx.compose.animation.core.tween(Motion.DUR_FAST)),
         ) {
-            Box(Modifier.fillMaxWidth().background(colors.codeBackground).padding(Spacing.md)) {
-                Text(item.output.orEmpty(), style = AndmxCodeTextStyle, color = colors.textSecondary)
+            val rawOutput = item.output.orEmpty()
+            var showFullOutput by remember(item.callId) { mutableStateOf(false) }
+            val maxPreviewLines = 12
+            val lineCount = rawOutput.count { it == '\n' } + 1
+            val displayOutput = if (showFullOutput || lineCount <= maxPreviewLines) rawOutput
+                else rawOutput.lineSequence().take(maxPreviewLines).joinToString("\n")
+            Column(Modifier.fillMaxWidth().background(colors.codeBackground).padding(Spacing.md)) {
+                Text(
+                    displayOutput,
+                    style = AndmxCodeTextStyle,
+                    color = colors.textSecondary,
+                )
+                if (lineCount > maxPreviewLines) {
+                    Spacer(Modifier.height(Spacing.xs))
+                    Text(
+                        if (showFullOutput) "收起" else "显示全部 ($lineCount 行)",
+                        style = AndmxTheme.typography.labelSmall,
+                        color = colors.textTertiary,
+                        modifier = Modifier.clip(Radii.sm).clickable { showFullOutput = !showFullOutput }
+                            .padding(horizontal = Spacing.sm, vertical = Spacing.xxs),
+                    )
+                }
+            }
+        }
+        if (artifacts.images.isNotEmpty()) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = Spacing.md)
+                    .padding(bottom = Spacing.sm),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Spacing.xs),
+            ) {
+                Text("图像产物", style = AndmxTheme.typography.labelSmall, color = colors.textTertiary)
+                ToolArtifactGallery(
+                    artifacts = artifacts.images,
+                    onOpenReference = onOpenReference,
+                )
             }
         }
         if (editedPath.isNotBlank()) {
