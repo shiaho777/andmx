@@ -65,6 +65,14 @@ android {
         }
     }
 
+    // 单元测试中 android.util.Log 等 Android 框架调用返回默认值而非抛异常。
+    // AgentEngine.streamWithRetry 等生产代码使用 Log.i/e，本地 JVM 测试需要此配置。
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
