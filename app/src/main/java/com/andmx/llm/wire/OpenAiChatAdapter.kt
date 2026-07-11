@@ -6,9 +6,15 @@ import com.andmx.llm.ApiFunctionCall
 import com.andmx.llm.ChatRequest
 import com.andmx.llm.ChatResponse
 import com.andmx.llm.provider.ProviderDefinition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * OpenAI Chat Completions wire adapter: `POST {base}/chat/completions`.
@@ -89,5 +95,36 @@ object OpenAiChatAdapter : WireAdapter {
         var id: String? = null
         var name: String? = null
         val arguments = StringBuilder()
+    }
+
+    /**
+     * `GET {base}/models` — OpenAI-style catalogue listing.
+     *
+     * Shared by every OpenAI-compatible backend (OpenAI, DeepSeek, Ollama, LM
+     * Studio, Groq, OpenRouter, …). Response shape: `{ "data": [{ "id": "..." }] }`.
+     * Returns an empty list on any failure (network/HTTP/parse) so the caller
+     * can fall back to manual entry.
+     */
+    override suspend fun listModels(def: ProviderDefinition): List<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = URL(def.baseUrl.trimEnd('/') + "/models")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 20_000
+                authHeader(def.apiKey)?.let { (k, v) -> setRequestProperty(k, v) }
+                extraHeaders().forEach { (k, v) -> setRequestProperty(k, v) }
+            }
+            try {
+                val code = conn.responseCode
+                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) return@runCatching emptyList()
+                val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@runCatching emptyList()
+                data.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrDefault(emptyList())
     }
 }

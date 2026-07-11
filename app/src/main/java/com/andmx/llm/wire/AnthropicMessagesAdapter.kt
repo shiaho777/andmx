@@ -6,6 +6,8 @@ import com.andmx.llm.ApiToolCall
 import com.andmx.llm.ApiFunctionCall
 import com.andmx.llm.ChatRequest
 import com.andmx.llm.provider.ProviderDefinition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -26,6 +28,8 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Anthropic Messages wire adapter: `POST {base}/v1/messages`.
@@ -293,5 +297,36 @@ object AnthropicMessagesAdapter : WireAdapter {
         put("type", "base64")
         put("media_type", mediaType)
         put("data", data)
+    }
+
+    /**
+     * `GET {base}/models` — Anthropic catalogue listing.
+     *
+     * Anthropic's models endpoint uses the same `{ "data": [{ "id": "..." }] }`
+     * envelope as OpenAI but authenticates with `x-api-key` plus the
+     * `anthropic-version` header (both supplied via [authHeader] /
+     * [extraHeaders]). Returns an empty list on any failure.
+     */
+    override suspend fun listModels(def: ProviderDefinition): List<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = URL(def.baseUrl.trimEnd('/') + "/models")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 20_000
+                authHeader(def.apiKey)?.let { (k, v) -> setRequestProperty(k, v) }
+                extraHeaders().forEach { (k, v) -> setRequestProperty(k, v) }
+            }
+            try {
+                val code = conn.responseCode
+                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) return@runCatching emptyList()
+                val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@runCatching emptyList()
+                data.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrDefault(emptyList())
     }
 }

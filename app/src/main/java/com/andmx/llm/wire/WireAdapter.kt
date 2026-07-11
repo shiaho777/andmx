@@ -41,4 +41,15 @@ interface WireAdapter {
 
     /** Extract a usage object from the body, if present, for token tracking. */
     fun extractUsage(body: String): JsonObject? = null
+
+    /**
+     * Fetch the list of model ids this provider serves, via `GET {base}/models`.
+     *
+     * Implemented per-protocol because endpoints and response shapes differ
+     * (OpenAI-style `{ "data": [{ "id": "..." }] }` vs Anthropic's variant).
+     * Auth and protocol-fixed headers are reused from [authHeader] /
+     * [extraHeaders]. Returns an empty list on any failure so the caller can
+     * fall back to manual model-id entry.
+     */
+    suspend fun listModels(def: ProviderDefinition): List<String>
 }

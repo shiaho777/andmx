@@ -142,68 +142,6 @@ data class ProviderDefinition(
     val isUsable: Boolean get() = enabled && (!apiKeyRequired || apiKey.isNotBlank())
 
     companion object {
-        const val SOURCE_BUILTIN = "builtin"
         const val SOURCE_CUSTOM = "custom"
-
-        /**
-         * Built-in provider presets — the set formerly hardcoded in the deleted
-         * `ModelProviderRegistry`. Used to seed first-run and to offer quick-add
-         * templates in the UI.
-         */
-        val BUILTIN_PROVIDERS: List<ProviderDefinition> = listOf(
-            ProviderDefinition(
-                id = "openai", name = "OpenAI", kind = ProviderKind.OPENAI,
-                baseUrl = "https://api.openai.com/v1", source = SOURCE_BUILTIN,
-                models = mapOf(
-                    "gpt-4o" to ModelDefinition(contextWindow = 128_000, maxOutputTokens = 16_384, inputModalities = listOf("text", "image")),
-                    "gpt-4o-mini" to ModelDefinition(contextWindow = 128_000, maxOutputTokens = 16_384, inputModalities = listOf("text", "image")),
-                    "gpt-4.1" to ModelDefinition(contextWindow = 1_047_576, maxOutputTokens = 32_768, inputModalities = listOf("text", "image")),
-                    "gpt-4.1-mini" to ModelDefinition(contextWindow = 1_047_576, maxOutputTokens = 32_768, inputModalities = listOf("text", "image")),
-                    "gpt-5" to ModelDefinition(contextWindow = 400_000, maxOutputTokens = 128_000, inputModalities = listOf("text", "image"), reasoning = ReasoningConfig.OPENAI_EFFORT),
-                    "gpt-5-mini" to ModelDefinition(contextWindow = 400_000, maxOutputTokens = 128_000, inputModalities = listOf("text", "image"), reasoning = ReasoningConfig.OPENAI_EFFORT),
-                    "o3" to ModelDefinition(contextWindow = 200_000, maxOutputTokens = 100_000, inputModalities = listOf("text", "image"), reasoning = ReasoningConfig.OPENAI_EFFORT),
-                    "o4-mini" to ModelDefinition(contextWindow = 200_000, maxOutputTokens = 100_000, inputModalities = listOf("text", "image"), reasoning = ReasoningConfig.OPENAI_EFFORT),
-                ),
-            ),
-            ProviderDefinition(
-                id = "anthropic", name = "Anthropic", kind = ProviderKind.ANTHROPIC,
-                baseUrl = "https://api.anthropic.com/v1", source = SOURCE_BUILTIN,
-                models = mapOf(
-                    "claude-sonnet-4" to ModelDefinition(contextWindow = 200_000, maxOutputTokens = 16_384, inputModalities = listOf("text", "image"), reasoning = ReasoningConfig.ANTHROPIC_THINKING),
-                    "claude-opus-4" to ModelDefinition(contextWindow = 200_000, maxOutputTokens = 32_768, inputModalities = listOf("text", "image"), reasoning = ReasoningConfig.ANTHROPIC_THINKING),
-                ),
-            ),
-            ProviderDefinition(
-                id = "deepseek", name = "DeepSeek", kind = ProviderKind.OPENAI,
-                baseUrl = "https://api.deepseek.com/v1", source = SOURCE_BUILTIN,
-                models = mapOf(
-                    "deepseek-chat" to ModelDefinition(contextWindow = 128_000, maxOutputTokens = 8_192),
-                    // deepseek-reasoner always emits a CoT (reasoning_content) and is NOT
-                    // user-adjustable — so reasoning stays null/NONE.
-                    "deepseek-reasoner" to ModelDefinition(contextWindow = 128_000, maxOutputTokens = 32_768),
-                ),
-            ),
-            ProviderDefinition(
-                id = "openrouter", name = "OpenRouter", kind = ProviderKind.OPENAI,
-                baseUrl = "https://openrouter.ai/api/v1", source = SOURCE_BUILTIN,
-                httpHeaders = mapOf("X-Title" to "AndMX"),
-            ),
-            ProviderDefinition(
-                id = "groq", name = "Groq", kind = ProviderKind.OPENAI,
-                baseUrl = "https://api.groq.com/openai/v1", source = SOURCE_BUILTIN,
-                requestMaxRetries = 3,
-            ),
-            ProviderDefinition(
-                id = "ollama", name = "Ollama (local)", kind = ProviderKind.OPENAI,
-                baseUrl = "http://127.0.0.1:11434/v1", apiKeyRequired = false, source = SOURCE_BUILTIN,
-            ),
-            ProviderDefinition(
-                id = "lmstudio", name = "LM Studio (local)", kind = ProviderKind.OPENAI,
-                baseUrl = "http://127.0.0.1:1234/v1", apiKeyRequired = false, source = SOURCE_BUILTIN,
-            ),
-        )
-
-        /** Look up a built-in preset by id. */
-        fun builtin(id: String): ProviderDefinition? = BUILTIN_PROVIDERS.firstOrNull { it.id == id }
     }
 }
