@@ -22,6 +22,8 @@ data class ConversationEntity(
     val goalStartedAt: Long = 0L,
     val goalUpdatedAt: Long = 0L,
     val goalNote: String = "",
+    val goalTokenBudget: Int = 0,
+    val goalTokensUsed: Int = 0,
     val workPaneTab: String = "TERMINAL",
     val workPaneVisible: Boolean = true,
     val terminalDockVisible: Boolean = false,
@@ -49,6 +51,20 @@ data class ConversationEntity(
     val archived: Boolean = false,
     /** Session ID from the rollout writer. */
     val sessionId: String = "",
+    /** Whether the conversation is pinned to the top of the sidebar. */
+    val pinned: Boolean = false,
+    /** Custom task group id (empty = no custom group, grouped by project instead). */
+    val groupId: String = "",
+)
+
+@Entity(tableName = "task_groups")
+data class TaskGroupEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    /** Color key: gray/red/orange/yellow/green/blue/purple */
+    val color: String = "blue",
+    val sortOrder: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
 )
 
 @Entity(
@@ -81,6 +97,7 @@ data class MessageEntity(
     val approvalModeLabel: String = "",
     /** Snapshot for approval messages: user-facing risk explanation at the time of the prompt. */
     val approvalRiskDescription: String = "",
+    val imageUrlsJson: String = "",
     val createdAt: Long = System.currentTimeMillis(),
 )
 

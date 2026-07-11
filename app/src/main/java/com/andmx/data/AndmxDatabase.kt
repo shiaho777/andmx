@@ -15,8 +15,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ThreadSpawnEdgeEntity::class,
         LogEntity::class,
         ProviderEntity::class,
+        TaskGroupEntity::class,
     ],
-    version = 8,
+    version = 12,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -35,6 +36,10 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
+                    MIGRATION_9_10,
+                    MIGRATION_10_11,
+                    MIGRATION_11_12,
                 )
                 .build()
                 .also { instance = it }
@@ -183,6 +188,44 @@ abstract class AndmxDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_providers_isPrimary ON providers(isPrimary)")
+            }
+        }
+
+        /**
+         * v8 → v9: Adds goalTokenBudget / goalTokensUsed to conversations
+         * for Codex-style goal token budget tracking.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN goalTokenBudget INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN goalTokensUsed INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN imageUrlsJson TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN groupId TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS task_groups (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        color TEXT NOT NULL DEFAULT 'blue',
+                        sortOrder INTEGER NOT NULL DEFAULT 0,
+                        createdAt INTEGER NOT NULL DEFAULT 0
+                    )"""
+                )
             }
         }
     }

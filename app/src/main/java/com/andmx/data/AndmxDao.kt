@@ -2,6 +2,7 @@ package com.andmx.data
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
@@ -15,11 +16,17 @@ interface AndmxDao {
     @Update
     suspend fun updateConversation(c: ConversationEntity)
 
-    @Query("SELECT * FROM conversations WHERE archived = 0 ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM conversations WHERE archived = 0 ORDER BY pinned DESC, updatedAt DESC")
     fun observeConversations(): Flow<List<ConversationEntity>>
+
+    @Query("SELECT * FROM conversations WHERE archived = 1 ORDER BY updatedAt DESC")
+    fun observeArchived(): Flow<List<ConversationEntity>>
 
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC")
     fun observeAllConversations(): Flow<List<ConversationEntity>>
+
+    @Query("UPDATE conversations SET pinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: Long, pinned: Boolean)
 
     @Query(
         "SELECT DISTINCT c.* FROM conversations c " +
@@ -74,6 +81,10 @@ interface AndmxDao {
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY id ASC")
     suspend fun messagesFor(conversationId: Long): List<MessageEntity>
+
+    /** Delete a message and everything after it in the same conversation (for re-edit). */
+    @Query("DELETE FROM messages WHERE conversationId = :conversationId AND id >= :fromId")
+    suspend fun deleteMessagesFrom(conversationId: Long, fromId: Long)
 
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun deleteConversation(id: Long)
@@ -173,4 +184,21 @@ interface AndmxDao {
 
     @Query("UPDATE providers SET isPrimary = 1 WHERE id = :id")
     suspend fun setPrimary(id: String)
+
+    // ── Task groups（自定义分组）──
+
+    @Query("SELECT * FROM task_groups ORDER BY sortOrder ASC, createdAt ASC")
+    fun observeTaskGroups(): Flow<List<TaskGroupEntity>>
+
+    @Query("SELECT * FROM task_groups ORDER BY sortOrder ASC, createdAt ASC")
+    suspend fun allTaskGroups(): List<TaskGroupEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTaskGroup(group: TaskGroupEntity)
+
+    @Query("DELETE FROM task_groups WHERE id = :id")
+    suspend fun deleteTaskGroup(id: String)
+
+    @Query("UPDATE conversations SET groupId = :groupId WHERE id = :conversationId")
+    suspend fun setConversationGroup(conversationId: Long, groupId: String)
 }

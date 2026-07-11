@@ -2,6 +2,8 @@ package com.andmx.data
 
 import android.content.Context
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /** Thin repository over the Room DAO for conversations and messages. */
 class ConversationRepository(context: Context) {
@@ -27,6 +29,7 @@ class ConversationRepository(context: Context) {
         approvalRisk: String = "",
         approvalModeLabel: String = "",
         approvalRiskDescription: String = "",
+        imageUrls: List<String> = emptyList(),
     ) {
         dao.insertMessage(
             MessageEntity(
@@ -39,6 +42,7 @@ class ConversationRepository(context: Context) {
                 approvalRisk = approvalRisk,
                 approvalModeLabel = approvalModeLabel,
                 approvalRiskDescription = approvalRiskDescription,
+                imageUrlsJson = Json.encodeToString(imageUrls),
             ),
         )
         dao.touchConversation(conversationId, titleKeep(conversationId), System.currentTimeMillis())
@@ -86,6 +90,18 @@ class ConversationRepository(context: Context) {
 
     suspend fun delete(conversationId: Long) = dao.deleteConversation(conversationId)
 
+    /**
+     * Truncate a conversation: delete every message whose DB id >= [fromDbId]
+     * (inclusive). Used by re-edit to roll the transcript back to a given point.
+     */
+    suspend fun truncateFrom(conversationId: Long, fromDbId: Long) =
+        dao.deleteMessagesFrom(conversationId, fromDbId)
+
+    /** Delete all messages in a conversation (keeps the conversation row itself). */
+    suspend fun clearMessages(conversationId: Long) {
+        dao.deleteMessagesFrom(conversationId, 0)
+    }
+
     // ── v7: Session metadata ──
 
     suspend fun updateSessionMetadata(
@@ -104,6 +120,11 @@ class ConversationRepository(context: Context) {
 
     suspend fun setArchived(conversationId: Long, archived: Boolean) =
         dao.setArchived(conversationId, archived)
+
+    suspend fun setPinned(conversationId: Long, pinned: Boolean) =
+        dao.setPinned(conversationId, pinned)
+
+    fun observeArchived(): Flow<List<ConversationEntity>> = dao.observeArchived()
 
     suspend fun conversationsByArchived(archived: Boolean): List<ConversationEntity> =
         dao.conversationsByArchived(archived)
