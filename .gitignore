@@ -4,8 +4,14 @@
 /.idea/
 .DS_Store
 /build/
+/app/build/
 /captures/
 .externalNativeBuild/
 .cxx/
 *.apk
 *.aab
+
+# 工具/IDE 产物
+.kotlin/
+.trae/
+.zcode/
