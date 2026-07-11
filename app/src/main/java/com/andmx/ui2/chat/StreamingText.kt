@@ -22,8 +22,11 @@ fun StreamingText(
     modifier: Modifier = Modifier
 ) {
     Row(modifier = modifier) {
-        MarkdownView(markdown = text)
-        
+        // MarkdownView 在 wrapLongLines=false 时内部用 horizontalScroll，
+        // 放进 Row 必须用 weight 给它有限宽度约束，否则 Row 传入无限宽度
+        // 会触发 "measured with an infinity maximum width constraints" 崩溃。
+        MarkdownView(markdown = text, modifier = Modifier.weight(1f))
+
         if (isStreaming) {
             val infiniteTransition = rememberInfiniteTransition(label = "cursor")
             val alpha by infiniteTransition.animateFloat(
@@ -35,7 +38,7 @@ fun StreamingText(
                 ),
                 label = "cursorAlpha"
             )
-            
+
             Text(
                 text = "▋",
                 style = MaterialTheme.typography.bodyLarge,

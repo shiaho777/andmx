@@ -102,6 +102,12 @@ fun TerminalScreen(modifier: Modifier = Modifier) {
         onDispose { sessions.forEach { it.destroy() } }
     }
 
+    // Clamp activeIndex whenever the session list shrinks (e.g. after closing a
+    // tab) so it never points past the last session — this keeps selectedTabIndex
+    // and the Tab content count in lock-step for ScrollableTabRow.
+    val safeIndex = activeIndex.coerceIn(0, (sessions.size - 1).coerceAtLeast(0))
+    if (safeIndex != activeIndex) activeIndex = safeIndex
+
     val active = sessions.getOrNull(activeIndex)
     val state = active?.let { it.state.collectAsState().value } ?: null
 
@@ -115,13 +121,17 @@ fun TerminalScreen(modifier: Modifier = Modifier) {
             }
         )
 
+        // Snapshot the tab list so ScrollableTabRow always sees a stable count
+        // even if sessions mutates mid-recomposition. selectedTabIndex MUST stay
+        // < tab count or TabRow throws IndexOutOfBoundsException.
         if (sessions.size > 1) {
+            val tabCount = sessions.size
             ScrollableTabRow(
-                selectedTabIndex = activeIndex.coerceIn(0, (sessions.size - 1).coerceAtLeast(0)),
+                selectedTabIndex = activeIndex.coerceAtMost(tabCount - 1),
                 edgePadding = 8.dp,
                 divider = {}
             ) {
-                sessions.forEachIndexed { i, _ ->
+                repeat(tabCount) { i ->
                     Tab(
                         selected = i == activeIndex,
                         onClick = { activeIndex = i },
