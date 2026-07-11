@@ -36,7 +36,11 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.ListAlt
+import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.RocketLaunch
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
@@ -394,8 +398,9 @@ private fun ExecModePill(
                 .clickable { expanded = true }
                 .padding(horizontal = 8.dp, vertical = 6.dp),
         ) {
+            // pill 图标跟随当前模式（ZCode：每档不同图标）
             Icon(
-                Icons.Outlined.Bolt,
+                mode.icon(),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.size(15.dp),
@@ -416,6 +421,7 @@ private fun ExecModePill(
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             ExecMode.entries.forEach { option ->
+                val selected = option == mode
                 DropdownMenuItem(
                     text = {
                         Column {
@@ -427,16 +433,24 @@ private fun ExecModePill(
                             )
                         }
                     },
+                    // 每档显示各自图标；选中时用 primary 高亮
                     leadingIcon = {
-                        if (option == mode) {
+                        Icon(
+                            option.icon(),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    trailingIcon = {
+                        if (selected) {
                             Icon(
                                 Icons.Outlined.Check,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.primary,
                             )
-                        } else {
-                            Spacer(Modifier.size(16.dp))
                         }
                     },
                     onClick = {
@@ -885,6 +899,20 @@ private fun ContextChipKind.icon(): ImageVector = when (this) {
     ContextChipKind.COMMAND -> Icons.Outlined.Terminal
     ContextChipKind.SKILL -> Icons.Outlined.Bolt
     ContextChipKind.ATTACHMENT -> Icons.Outlined.AttachFile
+}
+
+/**
+ * 执行模式图标（逆向自 ZCode 执行模式菜单截图：每档不同图标）。
+ * - 改前确认：手掌「停/等」
+ * - 自动编辑：盾牌（文件改动自动放行）
+ * - 计划模式：清单文档
+ * - 完全访问：火箭（全速放行）
+ */
+private fun ExecMode.icon(): ImageVector = when (this) {
+    ExecMode.CONFIRM -> Icons.Outlined.PanTool
+    ExecMode.AUTO_EDIT -> Icons.Outlined.Security
+    ExecMode.PLAN -> Icons.Outlined.ListAlt
+    ExecMode.FULL -> Icons.Outlined.RocketLaunch
 }
 
 data class ConversationPick(
