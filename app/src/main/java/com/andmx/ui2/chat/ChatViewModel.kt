@@ -122,9 +122,40 @@ class ChatViewModel @Inject constructor(
             ComposerConfig(settings = settings, providers = providers, primary = primary)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ComposerConfig())
 
-    private var currentConversationId = 1L
+    /** 当前会话 id，UI 据此高亮侧边栏选中项。 */
+    private val _currentConversationId = MutableStateFlow(1L)
+    val currentConversationId: StateFlow<Long> = _currentConversationId.asStateFlow()
+
     private var currentAssistantText = ""
     private var turnJob: Job? = null
+
+    /** 切换到指定会话：更新当前 id + 加载历史消息到 messages。 */
+    fun switchToConversation(id: Long) {
+        if (id == _currentConversationId.value) return
+        turnJob?.cancel()
+        _currentConversationId.value = id
+        currentAssistantText = ""
+        _isLoading.value = false
+        viewModelScope.launch {
+            val history = runCatching { repo.messages(id) }.getOrDefault(emptyList())
+            _messages.value = history.mapNotNull { msg ->
+                when (msg.role) {
+                    "user" -> ChatMessage(id = msg.id, role = "user", content = msg.content)
+                    "assistant" -> ChatMessage(id = msg.id, role = "assistant", content = msg.content)
+                    else -> null // tool 消息历史暂不回放为气泡
+                }
+            }
+            _toolCalls.value = emptyList()
+        }
+    }
+
+    /** 新建会话并切换过去。返回新会话 id。 */
+    fun createConversation() {
+        viewModelScope.launch {
+            val id = repo.createConversation(project = "/root", title = "新任务")
+            switchToConversation(id)
+        }
+    }
 
     init {
         viewModelScope.launch {
@@ -231,7 +262,7 @@ class ChatViewModel @Inject constructor(
             _isLoading.value = true
             _error.value = null
             try {
-                controller.sendMessage(currentConversationId, text).collect { event ->
+                controller.sendMessage(_currentConversationId.value, text).collect { event ->
                     handleEvent(event)
                 }
             } finally {

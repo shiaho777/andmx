@@ -193,7 +193,8 @@ fun ChatScreen(
     ConversationDrawer(
         open = drawerOpen,
         onDismiss = { drawerOpen = false },
-        onSelectConversation = {
+        onSelectConversation = { id ->
+            viewModel.switchToConversation(id)
             drawerOpen = false
         },
         onOpenFiles = {
