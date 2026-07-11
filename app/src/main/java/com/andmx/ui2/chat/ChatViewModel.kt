@@ -3,25 +3,38 @@ package com.andmx.ui2.chat
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.andmx.agent.plugins.SkillInstaller
+import com.andmx.data.ConversationRepository
+import com.andmx.exec.files.GuestFs
+import com.andmx.exec.proot.ProotRuntime
+import com.andmx.llm.provider.ProviderDefinition
+import com.andmx.llm.provider.ReasoningConfig
 import com.andmx.settings.ProviderSettings
+import com.andmx.settings.ProviderStore
 import com.andmx.settings.SettingsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val controller = ChatController(context)
     private val settingsStore = SettingsStore(context)
+    private val providerStore = ProviderStore(context)
+    private val repo = ConversationRepository(context)
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -35,23 +48,131 @@ class ChatViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    /** 待发送消息队列（生成中入队，本轮结束自动继续）。 */
     private val _queue = MutableStateFlow<List<String>>(emptyList())
     val queue: StateFlow<List<String>> = _queue.asStateFlow()
+
+    /** 输入区上下文 chips（@ / # 等）。 */
+    private val _contextChips = MutableStateFlow<List<ContextChip>>(emptyList())
+    val contextChips: StateFlow<List<ContextChip>> = _contextChips.asStateFlow()
+
+    /** 供 # 联想的最近会话。 */
+    val recentConversations: StateFlow<List<ConversationPick>> =
+        repo.observeConversations()
+            .map { list ->
+                list.take(30).map { c ->
+                    ConversationPick(
+                        id = c.id,
+                        title = c.title.ifBlank { "未命名会话" },
+                        subtitle = c.project.takeIf { it.isNotBlank() }.orEmpty(),
+                    )
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 供 $ 联想的已安装技能（读取 guest 文件系统）。 */
+    private val _skills = MutableStateFlow<List<SkillInstaller.InstalledSkill>>(emptyList())
+    val skills: StateFlow<List<SkillInstaller.InstalledSkill>> = _skills.asStateFlow()
+    private val skillInstaller = SkillInstaller(GuestFs(ProotRuntime(context)))
+
+    /** 供应商列表 + 当前选中设置（Composer 配置链）。 */
+    data class ComposerConfig(
+        val settings: ProviderSettings = ProviderSettings(),
+        val providers: List<ProviderDefinition> = emptyList(),
+        val primary: ProviderDefinition? = null,
+    ) {
+        val modelLabel: String
+            get() {
+                val mid = settings.model
+                if (mid.isBlank()) return ""
+                val p = primary ?: providers.firstOrNull { it.id == settings.activeProviderId }
+                val display = p?.models?.get(mid)?.displayName?.takeIf { it.isNotBlank() }
+                return display ?: mid
+            }
+
+        val reasoning: ReasoningConfig?
+            get() {
+                val mid = settings.model
+                val p = primary
+                    ?: providers.firstOrNull { it.id == settings.activeProviderId }
+                    ?: providers.firstOrNull { it.models.containsKey(mid) }
+                return p?.models?.get(mid)?.reasoning
+            }
+
+        val execMode: ExecMode get() = ExecMode.from(settings.approvalMode)
+    }
+
+    val composerConfig: StateFlow<ComposerConfig> =
+        combine(
+            settingsStore.settings,
+            providerStore.providers,
+            providerStore.primary,
+        ) { settings, providers, primary ->
+            ComposerConfig(settings = settings, providers = providers, primary = primary)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ComposerConfig())
 
     private var currentConversationId = 1L
     private var currentAssistantText = ""
     private var turnJob: Job? = null
 
-    /** 发送消息。生成中时行为取决于交互行为设置：queue=入队，guide=同样入队等待本轮结束。 */
+    init {
+        viewModelScope.launch {
+            // 确保旧 DataStore provider 已迁移到 Room，Composer 能列出模型
+            runCatching {
+                providerStore.ensureSeeded(settingsStore.legacyProvider())
+            }
+            // 拉取已安装技能，供 $ 联想；proot 未就绪则保持空列表
+            _skills.value = runCatching { skillInstaller.listInstalled() }
+                .getOrDefault(emptyList())
+            // ZCode 对齐：模型支持推理时，首次默认选「最高」
+            applyDefaultReasoningIfNeeded()
+        }
+    }
+
+    /**
+     * 若用户从未设置过 reasoningEffort（仍是旧默认 "off"）且当前模型支持推理，
+     * 自动切到该模型的最高可用档，对齐 ZCode 默认「最高」。
+     */
+    private suspend fun applyDefaultReasoningIfNeeded() {
+        val settings = settingsStore.settings.firstOrNull() ?: return
+        if (settings.reasoningEffort.isNotBlank() && settings.reasoningEffort != "off") return
+        val cfg = composerConfig.firstOrNull() ?: return
+        val reasoning = cfg.reasoning ?: return
+        val target = com.andmx.ui2.chat.defaultEffortFor(reasoning)
+        if (target != "off" && target != settings.reasoningEffort) {
+            settingsStore.update(settings.copy(reasoningEffort = target))
+        }
+    }
+
     fun sendMessage(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty() && _contextChips.value.isEmpty()) return
+        // 把上下文 chips 拼进用户消息前缀，模型能看到引用
+        val withContext = buildMessageWithContext(trimmed)
         if (_isLoading.value) {
-            _queue.value = _queue.value + trimmed
+            _queue.value = _queue.value + withContext
             return
         }
-        runTurn(trimmed)
+        _contextChips.value = emptyList()
+        runTurn(withContext)
+    }
+
+    private fun buildMessageWithContext(text: String): String {
+        val chips = _contextChips.value
+        if (chips.isEmpty()) return text
+        val prefix = buildString {
+            appendLine("[上下文]")
+            chips.forEach { chip ->
+                when (chip.kind) {
+                    ContextChipKind.FILE -> appendLine("- 文件: ${chip.payload}")
+                    ContextChipKind.CONVERSATION -> appendLine("- 关联会话: ${chip.label} (id=${chip.payload})")
+                    ContextChipKind.COMMAND -> appendLine("- 命令: ${chip.payload}")
+                    ContextChipKind.SKILL -> appendLine("- Skill: ${chip.payload}")
+                    ContextChipKind.ATTACHMENT -> appendLine("- 附件: ${chip.label}")
+                }
+            }
+            appendLine()
+        }
+        return if (text.isBlank()) prefix.trim() else prefix + text
     }
 
     private fun runTurn(text: String) {
@@ -69,12 +190,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** 停止当前生成。 */
     fun stop() {
         turnJob?.cancel()
         turnJob = null
         _isLoading.value = false
-        // 收尾：把流式中的最后一条标记为完成
         val current = _messages.value.toMutableList()
         val idx = current.indexOfLast { it.role == "assistant" && it.isStreaming }
         if (idx >= 0) current[idx] = current[idx].copy(isStreaming = false)
@@ -92,12 +211,93 @@ class ChatViewModel @Inject constructor(
         _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
     }
 
-    /** 立即发送队列中的某条（若空闲）。 */
     fun sendQueuedNow(index: Int) {
         val item = _queue.value.getOrNull(index) ?: return
         if (_isLoading.value) return
         _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
         runTurn(item)
+    }
+
+    // ── 配置链写入 ─────────────────────────────────────────────────────────
+
+    fun switchModel(providerId: String, modelId: String) {
+        viewModelScope.launch {
+            val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+            // 先切换 primary provider，再写 model 选择
+            if (providerId.isNotBlank()) {
+                providerStore.setPrimary(providerId)
+            }
+            settingsStore.update(
+                cur.copy(
+                    activeProviderId = providerId,
+                    model = modelId,
+                ),
+            )
+        }
+    }
+
+    fun setReasoningEffort(effort: String) {
+        viewModelScope.launch {
+            val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+            settingsStore.update(cur.copy(reasoningEffort = effort))
+        }
+    }
+
+    fun setExecMode(mode: ExecMode) {
+        viewModelScope.launch {
+            val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+            settingsStore.update(cur.copy(approvalMode = mode.id))
+        }
+    }
+
+    // ── 上下文 chips ───────────────────────────────────────────────────────
+
+    fun addContextChip(chip: ContextChip) {
+        if (_contextChips.value.any { it.id == chip.id }) return
+        _contextChips.value = _contextChips.value + chip
+    }
+
+    fun removeContextChip(id: String) {
+        _contextChips.value = _contextChips.value.filterNot { it.id == id }
+    }
+
+    fun addFileContext(path: String) {
+        val label = path.substringAfterLast('/').ifBlank { path }
+        addContextChip(
+            ContextChip(
+                id = "file:$path",
+                kind = ContextChipKind.FILE,
+                label = "@$label",
+                payload = path,
+            ),
+        )
+    }
+
+    fun addConversationContext(pick: ConversationPick) {
+        addContextChip(
+            ContextChip(
+                id = "conv:${pick.id}",
+                kind = ContextChipKind.CONVERSATION,
+                label = "#${pick.title}",
+                payload = pick.id.toString(),
+            ),
+        )
+    }
+
+    fun addSkillContext(skill: SkillInstaller.InstalledSkill) {
+        addSkillByName(skill.name, skill.path)
+    }
+
+    /** Composer 的 $ 联想选中后调用（解耦自 InstalledSkill 类型）。 */
+    fun addSkillByName(name: String, path: String) {
+        addContextChip(
+            ContextChip(
+                id = "skill:$name",
+                kind = ContextChipKind.SKILL,
+                label = "\$$name",
+                payload = path,
+            ),
+        )
     }
 
     private fun handleEvent(event: ChatEvent) {
@@ -135,7 +335,7 @@ class ChatViewModel @Inject constructor(
                 val index = current.indexOfFirst { it.id == event.id }
                 if (index >= 0) {
                     current[index] = current[index].copy(
-                        output = event.output, isRunning = false, isError = event.isError
+                        output = event.output, isRunning = false, isError = event.isError,
                     )
                 }
                 _toolCalls.value = current
@@ -145,5 +345,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun clearError() { _error.value = null }
+    fun clearError() {
+        _error.value = null
+    }
 }

@@ -51,6 +51,7 @@ fun ChatScreen(
     val config by viewModel.composerConfig.collectAsState()
     val contextChips by viewModel.contextChips.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
+    val skills by viewModel.skills.collectAsState()
 
     var drawerOpen by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
@@ -105,6 +106,18 @@ fun ChatScreen(
                         it.subtitle.contains(q, ignoreCase = true)
                 }
                 .take(8)
+        }
+    }
+    val skillSuggestions by remember {
+        derivedStateOf {
+            val t = inputText
+            // 行尾 $query 触发技能联想
+            val match = Regex("""(?:^|\s)\$([^\s$]*)$""").find(t) ?: return@derivedStateOf emptyList()
+            val q = match.groupValues[1]
+            skills
+                .filter { q.isBlank() || it.name.contains(q, ignoreCase = true) }
+                .take(8)
+                .map { SkillSuggestion(name = it.name, path = it.path) }
         }
     }
 
@@ -248,6 +261,9 @@ fun ChatScreen(
                 onInsertCommand = {
                     insertAtCursor("/")
                 },
+                onInsertSkill = {
+                    insertAtCursor("\$")
+                },
                 // 建议
                 slashSuggestions = slashSuggestions,
                 onPickSlash = { spec ->
@@ -260,6 +276,14 @@ fun ChatScreen(
                         mr.value.takeWhile { it.isWhitespace() }
                     }.trimEnd()
                     viewModel.addConversationContext(pick)
+                },
+                skillSuggestions = skillSuggestions,
+                onPickSkill = { skill ->
+                    // 去掉行尾 $query，加上 chip
+                    inputText = Regex("""(?:^|\s)\$[^\s$]*$""").replace(inputText) { mr ->
+                        mr.value.takeWhile { it.isWhitespace() }
+                    }.trimEnd()
+                    viewModel.addSkillByName(skill.name, skill.path)
                 },
                 modifier = Modifier
                     .fillMaxWidth()

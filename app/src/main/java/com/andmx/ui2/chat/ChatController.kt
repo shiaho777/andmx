@@ -25,25 +25,32 @@ class ChatController(private val context: Context) {
         
         repo.addMessage(conversationId, "user", text)
         
-        val settings = settingsStore.settings.firstOrNull() 
+        val settings = settingsStore.settings.firstOrNull()
             ?: return@flow emit(ChatEvent.Error("设置未初始化"))
-        
-        val provider = providerStore.primary.firstOrNull()
-            ?: return@flow emit(ChatEvent.Error("未配置提供商"))
-        
+
         if (!settings.hasSelection) {
             return@flow emit(ChatEvent.Error("请先选择模型"))
         }
-        
+
+        // 与 Composer 配置链一致：优先 activeProviderId，再回退 primary
+        val providers = providerStore.providers.firstOrNull().orEmpty()
+        val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
+            ?: providerStore.primary.firstOrNull()
+            ?: return@flow emit(ChatEvent.Error("未配置提供商"))
+
+        if (!provider.isUsable) {
+            return@flow emit(ChatEvent.Error("当前提供商不可用，请检查 API Key"))
+        }
+
         val client = LlmClient(provider)
         val tools = emptyList<com.andmx.agent.Tool>()
-        
+
         val engine = AgentEngine(
             tools = tools,
             client = client,
-            systemPrompt = buildSystemPrompt(settings)
+            systemPrompt = buildSystemPrompt(settings),
         )
-        
+
         val turnContext = TurnContext(provider, settings.model)
         
         try {
