@@ -200,12 +200,21 @@ class AgentEngine(
 
             val calls = msg.toolCalls
             if (calls.isNullOrEmpty()) {
+                // Final answer — commit the text and finish.
                 msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
                 emit(AgentEvent.Done)
                 return
             }
 
-            // Run each requested tool — parallel when there are multiple calls.
+            // Tool call ahead — commit any intermediate text so it's not lost
+            // on pause/restart. Codex shows these as agent_message items between
+            // tool calls, narrating the work process.
+            msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
+
+            // Run each requested tool. Multiple calls execute concurrently, but
+            // emissions must stay on the flow's owner coroutine (FlowCollector
+            // is not thread-safe), so we emit ToolStarted up front, run the
+            // tools in parallel without emitting, then emit ToolFinished in order.
             if (calls.size <= 1) {
                 for (call in calls) {
                     emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
@@ -214,16 +223,18 @@ class AgentEngine(
                     history += ApiMessage(role = "tool", content = result.output, toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
                 }
             } else {
+                // Emit all ToolStarted first (serial, on the flow coroutine).
+                calls.forEach { call ->
+                    emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
+                }
+                // Execute tools in parallel — NO emit inside async.
                 val results = coroutineScope {
                     calls.map { call ->
-                        async {
-                            emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
-                            val result = executeToolCall(call)
-                            Triple(call, result, Unit)
-                        }
+                        async { call to executeToolCall(call) }
                     }.map { it.await() }
                 }
-                for ((call, result, _) in results) {
+                // Emit ToolFinished in order (serial, on the flow coroutine).
+                for ((call, result) in results) {
                     emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
                     history += ApiMessage(role = "tool", content = result.output, toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
                 }
@@ -334,7 +345,10 @@ class AgentEngine(
             if (!approve(tool, effectiveArgs)) {
                 ToolResult("已被用户拒绝执行", isError = true)
             } else {
-                val raw = runCatching { tool.execute(effectiveArgs) }
+                val raw = runCatching {
+                    if (tool is ExecutionAwareTool) tool.execute(call.id, effectiveArgs)
+                    else tool.execute(effectiveArgs)
+                }
                     .getOrElse { ToolResult("工具异常: ${it.message}", isError = true) }
                 // ── POST_TOOL_USE: hooks may rewrite the output ──
                 val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
@@ -444,12 +458,12 @@ class AgentEngine(
             appendLine("- 对于简单的问候、确认或一次性的对话消息,自然回应即可,不需要标题或列表")
             appendLine()
 
-            // ── Working with the user ──
+            // ── Working with the user (mirrors Codex) ──
             appendLine("# 与用户交互")
-            appendLine("你通过终端界面与用户交互。有两种沟通方式:")
-            appendLine("- 工作过程中的中间更新直接在回复中输出")
-            appendLine("- 完成所有工作后,发送最终消息总结结果")
-            appendLine("回复应提供适当的详细程度,同时易于扫描。")
+            appendLine("在工具调用之间,用一两句话说明你在做什么以及为什么。")
+            appendLine("不要空洞地叙述;解释具体动作和理由。")
+            appendLine("工具的输出不需要重复(用户已能看到),只需总结变更并指出重要的上下文或下一步。")
+            appendLine("完成所有工作后,发送最终消息总结结果。")
             appendLine()
 
             // ── Computer Use (screen operation) ──

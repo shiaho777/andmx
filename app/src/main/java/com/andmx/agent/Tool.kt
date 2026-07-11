@@ -21,6 +21,10 @@ interface Tool {
     )
 }
 
+interface ExecutionAwareTool {
+    suspend fun execute(callId: String, args: JsonObject): ToolResult
+}
+
 /** How dangerous a tool call is — drives the graduated approval policy. */
 enum class ToolRisk { READ, WRITE, EXECUTE, NETWORK }
 

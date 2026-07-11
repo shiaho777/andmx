@@ -42,7 +42,7 @@ sealed interface SlashResult {
     data class Unknown(val name: String) : SlashResult
 }
 
-enum class GoalAction { SHOW, SET, PAUSE, RESUME, CLEAR }
+enum class GoalAction { SHOW, SET, EDIT, PAUSE, RESUME, CLEAR }
 
 /** Codex-style `/` commands handled client-side (no LLM round-trip). */
 object SlashCommands {
@@ -183,6 +183,7 @@ object SlashCommands {
             "pause", "paused", "stop", "暂停" -> SlashResult.Goal(GoalAction.PAUSE)
             "resume", "continue", "run", "恢复", "继续" -> SlashResult.Goal(GoalAction.RESUME)
             "clear", "delete", "reset", "清除", "删除", "重置" -> SlashResult.Goal(GoalAction.CLEAR)
+            "edit", "change", "修改", "编辑" -> SlashResult.Goal(GoalAction.EDIT)
             "show", "status", "view", "查看", "状态" -> SlashResult.Goal(GoalAction.SHOW)
             else -> SlashResult.Goal(GoalAction.SET, args)
         }
