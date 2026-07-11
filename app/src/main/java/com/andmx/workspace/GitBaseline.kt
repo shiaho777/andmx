@@ -185,6 +185,44 @@ class GitBaseline(
         env.execute(ProcessSpec(argv = listOf(sh, "-lc", script)))
     }
 
+    /**
+     * List local branches of the workspace repo. The current branch is marked
+     * with a leading `*` in git's output. Returns (name, isCurrent) pairs.
+     * Returns empty list if not a git repo or git unavailable.
+     */
+    suspend fun listBranches(workspacePath: String): List<BranchInfo> = withContext(Dispatchers.IO) {
+        ensureGit()
+        val script = "cd '$workspacePath' 2>/dev/null && git branch --list 2>/dev/null"
+        val res = env.execute(ProcessSpec(argv = listOf(sh, "-c", script)))
+        res.stdout.lines()
+            .mapNotNull { line ->
+                val current = line.startsWith("*")
+                val name = line.removePrefix("*").trim()
+                if (name.isNotEmpty()) BranchInfo(name, current) else null
+            }
+    }
+
+    /** Branch list entry. */
+    data class BranchInfo(val name: String, val isCurrent: Boolean)
+
+    /**
+     * Checkout an existing branch, or create+checkout a new one when
+     * [create] is true. Returns the result message from git.
+     */
+    suspend fun checkout(
+        workspacePath: String,
+        branch: String,
+        create: Boolean = false,
+    ): BaselineResult = withContext(Dispatchers.IO) {
+        ensureGit()
+        val flag = if (create) "-b" else ""
+        val script = "cd '$workspacePath' 2>/dev/null && git checkout $flag '$branch' 2>&1"
+        val res = env.execute(ProcessSpec(argv = listOf(sh, "-c", script)))
+        val ok = res.stdout.contains("Switched to") || res.stdout.contains("new branch")
+            || (res.stderr.isBlank() && res.stdout.isBlank())
+        BaselineResult(ok, if (ok) "已切换到 $branch" else res.stdout.ifBlank { res.stderr }, collectGitInfo(workspacePath))
+    }
+
     private fun extractVar(output: String, prefix: String): String {
         val line = output.lines().firstOrNull { it.startsWith(prefix) } ?: return ""
         return line.removePrefix(prefix).trim()

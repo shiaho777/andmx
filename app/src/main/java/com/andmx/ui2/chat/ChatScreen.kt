@@ -2,12 +2,14 @@ package com.andmx.ui2.chat
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
@@ -45,7 +48,6 @@ import com.andmx.ui2.drawer.ConversationDrawer
 import com.andmx.ui2.files.FilesScreen
 import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
-import com.andmx.workspace.ProjectManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,13 +67,15 @@ fun ChatScreen(
 
     // ZCode 对齐：对话为唯一主屏，终端/文件/设置均为浮层
     val context = LocalContext.current
-    val projectManager = remember { ProjectManager(context) }
-    val hostPath by projectManager.hostPath.collectAsState()
-    val projectName = remember(hostPath) { projectManager.projectName }
+    val projectName by viewModel.projectName.collectAsState()
+    val gitInfo by viewModel.gitInfo.collectAsState()
+    val branch = gitInfo?.branch.orEmpty()
 
     var showTerminal by remember { mutableStateOf(false) }
     var showFiles by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showBranchDialog by remember { mutableStateOf(false) }
+    var showWorkspacePicker by remember { mutableStateOf(false) }
 
     // 浮层打开时拦截返回键：先关浮层，再走系统返回
     BackHandler(enabled = showTerminal || showFiles || showSettings) {
@@ -109,6 +113,23 @@ fun ChatScreen(
         if (uri != null) {
             val name = uri.lastPathSegment?.substringAfterLast('/') ?: "图片"
             attachments = attachments + Attachment(name = name, uri = uri.toString())
+        }
+    }
+
+    // SAF 目录选择器：选择工作区文件夹
+    val workspacePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            // SAF tree uri → 真实文件系统路径（MANAGE_EXTERNAL_STORAGE 语义）
+            val seg = uri.lastPathSegment.orEmpty()
+            val path = if (seg.startsWith("primary:")) {
+                val base = android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
+                "$base/${seg.removePrefix("primary:")}"
+            } else {
+                seg
+            }
+            if (path.isNotBlank()) viewModel.selectProject(path)
         }
     }
 
@@ -179,11 +200,35 @@ fun ChatScreen(
             showSettings = true
         },
         workspaceName = projectName,
+        suggestedRoots = remember { viewModel.suggestedRoots() },
+        onSelectWorkspace = { viewModel.selectProject(it); drawerOpen = false },
+        onPickWorkspaceDir = { workspacePicker.launch(null); drawerOpen = false },
     ) {
         Box(modifier = modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
             TopAppBar(
-                title = { Text(projectName) },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable(
+                            enabled = branch.isNotBlank(),
+                        ) { showBranchDialog = true },
+                    ) {
+                        Text(
+                            projectName,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        if (branch.isNotBlank()) {
+                            Text(
+                                "  ⎇ $branch",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = { drawerOpen = true }) {
                         Icon(Icons.Outlined.Menu, "菜单")
@@ -354,5 +399,15 @@ fun ChatScreen(
                 SettingsScreen(modifier = Modifier.fillMaxSize().background(Color.Black))
             }
         } // end Box
+
+        // ── 分支切换对话框（ZCode：分支作为工作区上下文）──
+        if (showBranchDialog) {
+            BranchSwitchDialog(
+                currentBranch = branch,
+                onListBranches = { viewModel.listBranches() },
+                onCheckout = { name, create, cb -> viewModel.checkoutBranch(name, create, cb) },
+                onDismiss = { showBranchDialog = false },
+            )
+        }
     }
 }

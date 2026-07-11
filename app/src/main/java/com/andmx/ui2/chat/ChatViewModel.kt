@@ -35,6 +35,8 @@ class ChatViewModel @Inject constructor(
     private val settingsStore = SettingsStore(context)
     private val providerStore = ProviderStore(context)
     private val repo = ConversationRepository(context)
+    private val gitBaseline = com.andmx.workspace.GitBaseline(context)
+    private val projectManager = com.andmx.workspace.ProjectManager(context)
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -47,6 +49,16 @@ class ChatViewModel @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    /** 工作区名（项目目录名），跟随 hostPath 变化。 */
+    val projectName: StateFlow<String> =
+        projectManager.hostPath.map { projectManager.projectName }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), projectManager.projectName)
+    val hostPath: StateFlow<String?> = projectManager.hostPath
+
+    /** 当前工作区的 git 信息（分支、变更等）；非 git 仓库时为 null。 */
+    private val _gitInfo = MutableStateFlow<com.andmx.workspace.GitBaseline.GitInfo?>(null)
+    val gitInfo: StateFlow<com.andmx.workspace.GitBaseline.GitInfo?> = _gitInfo.asStateFlow()
 
     private val _queue = MutableStateFlow<List<String>>(emptyList())
     val queue: StateFlow<List<String>> = _queue.asStateFlow()
@@ -126,7 +138,46 @@ class ChatViewModel @Inject constructor(
             // ZCode 对齐：模型支持推理时，首次默认选「最高」
             applyDefaultReasoningIfNeeded()
         }
+        // 工作区变化时刷新 git 信息（分支指示器）
+        viewModelScope.launch {
+            projectManager.hostPath.collect { refreshGitInfo() }
+        }
     }
+
+    /** 刷新当前工作区的 git 信息（分支、变更）。proot 未就绪时静默忽略。 */
+    fun refreshGitInfo() {
+        viewModelScope.launch {
+            val path = projectManager.hostPath.value ?: return@launch
+            _gitInfo.value = runCatching { gitBaseline.collectGitInfo(path) }
+                .getOrNull()?.takeIf { it.isRepo }
+        }
+    }
+
+    /** 列出本地分支（供分支切换 UI）。 */
+    suspend fun listBranches(): List<com.andmx.workspace.GitBaseline.BranchInfo> {
+        val path = projectManager.hostPath.value ?: return emptyList()
+        return runCatching { gitBaseline.listBranches(path) }.getOrDefault(emptyList())
+    }
+
+    /** 切换或新建分支，完成后刷新 git 信息。 */
+    fun checkoutBranch(name: String, create: Boolean, onDone: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val path = projectManager.hostPath.value
+            if (path == null) { onDone(false, "未选择工作区"); return@launch }
+            val result = runCatching { gitBaseline.checkout(path, name, create) }
+                .getOrDefault(com.andmx.workspace.GitBaseline.BaselineResult(false, "执行失败"))
+            onDone(result.ok, result.message)
+            refreshGitInfo()
+        }
+    }
+
+    /** 选择工作区目录（侧边栏工作区选择器调用）。 */
+    fun selectProject(path: String) {
+        projectManager.selectProject(path)
+    }
+
+    /** 建议的工作区根目录（供选择器快捷入口）。 */
+    fun suggestedRoots(): List<String> = projectManager.suggestedRoots()
 
     /**
      * 若用户从未设置过 reasoningEffort（仍是旧默认 "off"）且当前模型支持推理，

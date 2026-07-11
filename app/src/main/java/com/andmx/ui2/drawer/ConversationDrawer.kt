@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.UnfoldMore
@@ -69,6 +70,9 @@ fun ConversationDrawer(
     onOpenFiles: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     workspaceName: String = "",
+    suggestedRoots: List<String> = emptyList(),
+    onSelectWorkspace: (String) -> Unit = {},
+    onPickWorkspaceDir: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val drawerState = rememberDrawerState(if (open) DrawerValue.Open else DrawerValue.Closed)
@@ -112,11 +116,14 @@ fun ConversationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                // ZCode 对齐：侧边栏顶部工作区指示器（Commit 2 补完整选择器下拉）
+                // ZCode 对齐：侧边栏顶部工作区选择器
                 if (workspaceName.isNotBlank()) {
                     WorkspaceStrip(
                         name = workspaceName,
+                        suggestedRoots = suggestedRoots,
                         onOpenFiles = onOpenFiles,
+                        onSelectWorkspace = onSelectWorkspace,
+                        onPickWorkspaceDir = onPickWorkspaceDir,
                     )
                     HorizontalDivider()
                 }
@@ -325,33 +332,71 @@ private fun buildGroupKeys(list: List<ConversationEntity>, taskGroups: List<Task
 
 /**
  * 侧边栏顶部工作区条（ZCode 对齐）。
- * Commit 1：显示当前工作区名 + 文件浏览入口。Commit 2 扩展为完整选择器（下拉切换/新建）。
+ * 显示当前工作区名，点击展开下拉选择器（建议目录 + 选择文件夹）。
  */
 @Composable
-private fun WorkspaceStrip(name: String, onOpenFiles: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.Folder,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            name,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 10.dp),
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-        )
-        IconButton(onClick = onOpenFiles) {
-            Icon(Icons.Outlined.Folder, "查看工作区文件")
+private fun WorkspaceStrip(
+    name: String,
+    suggestedRoots: List<String>,
+    onOpenFiles: () -> Unit,
+    onSelectWorkspace: (String) -> Unit,
+    onPickWorkspaceDir: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                name,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 10.dp),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = "切换工作区",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        androidx.compose.material3.DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            suggestedRoots.forEach { root ->
+                val display = root.trimEnd('/').substringAfterLast('/').ifBlank { root }
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(display) },
+                    leadingIcon = { Icon(Icons.Outlined.Folder, null, Modifier.size(18.dp)) },
+                    onClick = { expanded = false; onSelectWorkspace(root) },
+                )
+            }
+            androidx.compose.material3.HorizontalDivider()
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("选择文件夹…") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.DriveFolderUpload,
+                        null,
+                        Modifier.size(18.dp),
+                    )
+                },
+                onClick = { expanded = false; onPickWorkspaceDir() },
+            )
         }
     }
 }
