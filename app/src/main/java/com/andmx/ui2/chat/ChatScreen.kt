@@ -74,6 +74,7 @@ fun ChatScreen(
     val projectName by viewModel.projectName.collectAsState()
     val gitInfo by viewModel.gitInfo.collectAsState()
     val hostPath by viewModel.hostPath.collectAsState()
+    val currentConversationId by viewModel.currentConversationId.collectAsState()
     val branch = gitInfo?.branch.orEmpty()
 
     var showTerminal by remember { mutableStateOf(false) }
@@ -209,6 +210,7 @@ fun ChatScreen(
         suggestedRoots = remember { viewModel.suggestedRoots() },
         onSelectWorkspace = { viewModel.selectProject(it); drawerOpen = false },
         onPickWorkspaceDir = { workspacePicker.launch(null); drawerOpen = false },
+        currentConversationId = currentConversationId,
     ) {
         Box(modifier = modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {

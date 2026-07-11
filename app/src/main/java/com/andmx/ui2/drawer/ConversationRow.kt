@@ -1,6 +1,7 @@
 package com.andmx.ui2.drawer
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,8 @@ fun ConversationRow(
     onArchive: () -> Unit,
     onTogglePin: () -> Unit,
     archivedMode: Boolean = false,
-    onUnarchive: () -> Unit = {}
+    onUnarchive: () -> Unit = {},
+    selected: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -50,6 +52,10 @@ fun ConversationRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(
+                    if (selected) MaterialTheme.colorScheme.secondaryContainer
+                    else androidx.compose.ui.graphics.Color.Transparent,
+                )
                 .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
@@ -66,13 +72,16 @@ fun ConversationRow(
                 Text(
                     conversation.title.ifBlank { "未命名任务" },
                     style = MaterialTheme.typography.bodyLarge,
+                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     relativeTime(conversation.updatedAt),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

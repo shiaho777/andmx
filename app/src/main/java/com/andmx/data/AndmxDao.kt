@@ -82,6 +82,10 @@ interface AndmxDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY id ASC")
     suspend fun messagesFor(conversationId: Long): List<MessageEntity>
 
+    /** 该会话的消息数（用于空会话检测：新建时若已有空会话则不重复创建）。 */
+    @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId")
+    suspend fun messageCount(conversationId: Long): Int
+
     /** Delete a message and everything after it in the same conversation (for re-edit). */
     @Query("DELETE FROM messages WHERE conversationId = :conversationId AND id >= :fromId")
     suspend fun deleteMessagesFrom(conversationId: Long, fromId: Long)

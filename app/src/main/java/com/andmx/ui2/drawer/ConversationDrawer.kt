@@ -73,6 +73,7 @@ fun ConversationDrawer(
     suggestedRoots: List<String> = emptyList(),
     onSelectWorkspace: (String) -> Unit = {},
     onPickWorkspaceDir: () -> Unit = {},
+    currentConversationId: Long = 0L,
     content: @Composable () -> Unit
 ) {
     val drawerState = rememberDrawerState(if (open) DrawerValue.Open else DrawerValue.Closed)
@@ -131,10 +132,18 @@ fun ConversationDrawer(
                     showArchived = showArchived,
                     onNew = {
                         scope.launch {
-                            val id = dao.insertConversation(
-                                ConversationEntity(project = "/root", title = "新任务")
-                            )
-                            onSelectConversation(id)
+                            // ZCode 对齐：已有空会话时不重复创建，直接切过去
+                            val emptyConv = conversations.firstOrNull { conv ->
+                                dao.messageCount(conv.id) == 0
+                            }
+                            if (emptyConv != null) {
+                                onSelectConversation(emptyConv.id)
+                            } else {
+                                val id = dao.insertConversation(
+                                    ConversationEntity(project = "/root", title = "新任务")
+                                )
+                                onSelectConversation(id)
+                            }
                         }
                     },
                     onBackFromArchive = { showArchived = false; query = "" }
@@ -193,7 +202,8 @@ fun ConversationDrawer(
                                     TaskItem(conv, scope, dao,
                                         onRename = { renameTarget = conv },
                                         onDelete = { deleteTarget = conv },
-                                        onSelect = onSelectConversation
+                                        onSelect = onSelectConversation,
+                                        selected = conv.id == currentConversationId,
                                     )
                                 }
                             }
@@ -206,7 +216,8 @@ fun ConversationDrawer(
                                         TaskItem(conv, scope, dao,
                                             onRename = { renameTarget = conv },
                                             onDelete = { deleteTarget = conv },
-                                            onSelect = onSelectConversation
+                                            onSelect = onSelectConversation,
+                                            selected = conv.id == currentConversationId,
                                         )
                                     }
                                 }
@@ -233,7 +244,8 @@ fun ConversationDrawer(
                                                 TaskItem(conv, scope, dao,
                                                     onRename = { renameTarget = conv },
                                                     onDelete = { deleteTarget = conv },
-                                                    onSelect = onSelectConversation
+                                                    onSelect = onSelectConversation,
+                                                    selected = conv.id == currentConversationId,
                                                 )
                                             }
                                         }

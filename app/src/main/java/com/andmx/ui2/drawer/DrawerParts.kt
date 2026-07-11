@@ -253,7 +253,8 @@ fun BottomEntry(icon: ImageVector, label: String, onClick: () -> Unit) {
 @Composable
 fun TaskItem(
     conv: ConversationEntity, scope: CoroutineScope, dao: AndmxDao,
-    onRename: () -> Unit, onDelete: () -> Unit, onSelect: (Long) -> Unit
+    onRename: () -> Unit, onDelete: () -> Unit, onSelect: (Long) -> Unit,
+    selected: Boolean = false,
 ) {
     ConversationRow(
         conversation = conv,
@@ -261,7 +262,8 @@ fun TaskItem(
         onRename = onRename,
         onDelete = onDelete,
         onArchive = { scope.launch { dao.setArchived(conv.id, true) } },
-        onTogglePin = { scope.launch { dao.setPinned(conv.id, !conv.pinned) } }
+        onTogglePin = { scope.launch { dao.setPinned(conv.id, !conv.pinned) } },
+        selected = selected,
     )
 }
 
