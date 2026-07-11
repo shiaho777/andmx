@@ -103,7 +103,6 @@ class CommandPaletteTest {
         assertEquals(CommandId.SET_FULL_ACCESS, filterCommands("/full").first().id)
         assertEquals(CommandId.SET_ASK_APPROVAL, filterCommands("/ask").first().id)
         assertEquals(CommandId.SET_READ_ONLY, filterCommands("/readonly").first().id)
-        assertEquals(CommandId.OPEN_INSPECTOR, filterCommands("inspector").first().id)
         assertEquals(CommandId.OPEN_DIFF, filterCommands("review changes").first().id)
     }
 
@@ -168,7 +167,6 @@ class CommandPaletteTest {
         assertEquals(CommandId.SHOW_GOAL, filterCommands("目标").first().id)
         assertEquals(CommandId.SHOW_GOAL, filterCommands("持久目标").first().id)
         assertEquals(CommandId.HANDOFF, filterCommands("交接").first().id)
-        assertEquals(CommandId.OPEN_INSPECTOR, filterCommands("自检").first().id)
         assertEquals(CommandId.DIAG, filterCommands("环境").first().id)
     }
 

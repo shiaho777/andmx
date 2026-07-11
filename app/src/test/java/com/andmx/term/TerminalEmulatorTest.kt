@@ -6,7 +6,7 @@ import org.junit.Test
 
 class TerminalEmulatorTest {
 
-    private fun TerminalEmulator.text() = render().text
+    private fun TerminalEmulator.text() = render()
 
     @Test
     fun writesAndWraps() {

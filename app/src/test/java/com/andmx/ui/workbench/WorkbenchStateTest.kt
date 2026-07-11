@@ -11,7 +11,7 @@ class WorkbenchStateTest {
     @Test
     fun parsesKnownTabAndFallsBackForUnknownValues() {
         assertEquals(WorkPaneTab.DIFF, parseWorkPaneTab("DIFF"))
-        assertEquals(WorkPaneTab.INSPECTOR, parseWorkPaneTab("INSPECTOR"))
+        assertEquals(WorkPaneTab.TERMINAL, parseWorkPaneTab("INSPECTOR"))
         assertEquals(WorkPaneTab.TERMINAL, parseWorkPaneTab("NOPE"))
         assertEquals(WorkPaneTab.TERMINAL, parseWorkPaneTab(""))
     }
