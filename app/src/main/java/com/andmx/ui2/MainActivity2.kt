@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.SettingsStore
-import com.andmx.ui2.nav.AppNav
+import com.andmx.ui2.chat.ChatScreen
 import com.andmx.ui2.theme.AndMX2Theme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -38,7 +38,7 @@ class MainActivity2 : ComponentActivity() {
                             fontSize = settings.codeFontSize
                         )
                 ) {
-                    AppNav(modifier = Modifier.fillMaxSize())
+                    ChatScreen(modifier = Modifier.fillMaxSize())
                 }
             }
         }

@@ -1,87 +1,29 @@
 package com.andmx.ui2.nav
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Chat
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import com.andmx.ui2.chat.ChatScreen
-import com.andmx.ui2.files.FilesScreen
-import com.andmx.ui2.settings.SettingsScreen
-import com.andmx.ui2.terminal.TerminalScreen
+/**
+ * ZCode 对齐：对话是唯一主屏，没有底部 TAB。
+ * 此前 AppNav 承载的 Scaffold + NavigationBar + NavHost 四目的地结构已移除。
+ *
+ * 终端、设置、文件现在分别从以下入口唤起（均为浮层，非独占 TAB）：
+ * - 终端：对话头部 TopAppBar 右上角终端图标
+ * - 设置：侧边栏底部入口
+ * - 文件：侧边栏工作区入口 / @ 引用
+ *
+ * NavBus 保留为进程级导航总线，供跨页面通信（如文件页回注 @ 引用）。
+ * Screen 枚举的 route 常量保留，仅作为浮层唤起的标识，不再是 TAB 目的地。
+ */
 
-sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    data object Chat : Screen("chat", "对话", Icons.Outlined.Chat)
-    data object Files : Screen("files", "文件", Icons.Outlined.Folder)
-    data object Terminal : Screen("terminal", "终端", Icons.Outlined.Terminal)
-    data object Settings : Screen("settings", "设置", Icons.Outlined.Settings)
+object AppRoutes {
+    const val CHAT = "chat"
+    const val FILES = "files"
+    const val TERMINAL = "terminal"
+    const val SETTINGS = "settings"
 }
 
-@Composable
-fun AppNav(modifier: Modifier = Modifier) {
-    val navController = rememberNavController()
-    val screens = listOf(Screen.Chat, Screen.Files, Screen.Terminal, Screen.Settings)
-
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        NavBus.requests.collect { route ->
-            navController.navigate(route) {
-                popUpTo(navController.graph.startDestinationId) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        }
-    }
-
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
-
-                screens.forEach { screen ->
-                    NavigationBarItem(
-                        icon = { Icon(screen.icon, screen.label) },
-                        label = { Text(screen.label) },
-                        selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                        onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.startDestinationId) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
-                    )
-                }
-            }
-        },
-        modifier = modifier
-    ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Chat.route,
-            modifier = Modifier.padding(padding)
-        ) {
-            composable(Screen.Chat.route) { ChatScreen() }
-            composable(Screen.Files.route) { FilesScreen() }
-            composable(Screen.Terminal.route) { TerminalScreen() }
-            composable(Screen.Settings.route) { SettingsScreen() }
-        }
-    }
+/** 旧 Screen 枚举的兼容别名，供现有 NavBus.navigateTo 调用方平滑过渡。 */
+object Screen {
+    const val CHAT = AppRoutes.CHAT
+    const val FILES = AppRoutes.FILES
+    const val TERMINAL = AppRoutes.TERMINAL
+    const val SETTINGS = AppRoutes.SETTINGS
 }

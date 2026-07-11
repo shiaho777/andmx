@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,6 +67,8 @@ fun ConversationDrawer(
     onDismiss: () -> Unit,
     onSelectConversation: (Long) -> Unit,
     onOpenFiles: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    workspaceName: String = "",
     content: @Composable () -> Unit
 ) {
     val drawerState = rememberDrawerState(if (open) DrawerValue.Open else DrawerValue.Closed)
@@ -109,6 +112,14 @@ fun ConversationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
+                // ZCode 对齐：侧边栏顶部工作区指示器（Commit 2 补完整选择器下拉）
+                if (workspaceName.isNotBlank()) {
+                    WorkspaceStrip(
+                        name = workspaceName,
+                        onOpenFiles = onOpenFiles,
+                    )
+                    HorizontalDivider()
+                }
                 DrawerHeader(
                     showArchived = showArchived,
                     onNew = {
@@ -231,6 +242,11 @@ fun ConversationDrawer(
                             showArchived = true; query = ""
                         }
                     }
+                    // ZCode 对齐：设置在侧边栏底部
+                    HorizontalDivider()
+                    BottomEntry(icon = Icons.Outlined.Tune, label = "设置") {
+                        onOpenSettings()
+                    }
                 }
             }
         },
@@ -306,6 +322,39 @@ private fun buildGroups(
 
 private fun buildGroupKeys(list: List<ConversationEntity>, taskGroups: List<TaskGroupEntity>, viewMode: ViewMode): List<String> =
     buildGroups(list, taskGroups, viewMode).map { it.key }
+
+/**
+ * 侧边栏顶部工作区条（ZCode 对齐）。
+ * Commit 1：显示当前工作区名 + 文件浏览入口。Commit 2 扩展为完整选择器（下拉切换/新建）。
+ */
+@Composable
+private fun WorkspaceStrip(name: String, onOpenFiles: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Folder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            name,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 10.dp),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        IconButton(onClick = onOpenFiles) {
+            Icon(Icons.Outlined.Folder, "查看工作区文件")
+        }
+    }
+}
 
 private fun projectName(project: String): String =
     project.trimEnd('/').substringAfterLast('/').ifBlank { "默认" }
