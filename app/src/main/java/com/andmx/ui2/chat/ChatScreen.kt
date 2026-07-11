@@ -21,7 +21,9 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,35 +32,93 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.andmx.agent.SlashCommands
 import com.andmx.ui2.drawer.ConversationDrawer
+import com.andmx.ui2.nav.NavBus
+import com.andmx.ui2.nav.Screen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     modifier: Modifier = Modifier,
-    viewModel: ChatViewModel = hiltViewModel()
+    viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsState()
     val toolCalls by viewModel.toolCalls.collectAsState()
     val error by viewModel.error.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val queue by viewModel.queue.collectAsState()
+    val config by viewModel.composerConfig.collectAsState()
+    val contextChips by viewModel.contextChips.collectAsState()
+    val recentConversations by viewModel.recentConversations.collectAsState()
+
     var drawerOpen by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
 
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    // 文件页 @ 引用注入
+    LaunchedEffect(Unit) {
         ChatComposerBus.inserts.collect { snippet ->
-            inputText = if (inputText.isBlank()) snippet else "$inputText\n$snippet"
+            val s = snippet.trim()
+            when {
+                // @ 引用 → 进 context chip（不留在输入框，避免发送时重复引用）
+                s.startsWith("@") -> {
+                    val path = s.removePrefix("@").trim()
+                    if (path.isNotBlank()) viewModel.addFileContext(path)
+                }
+                else -> {
+                    inputText = if (inputText.isBlank()) snippet else "$inputText\n$snippet"
+                }
+            }
         }
     }
 
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
     ) { uri ->
         if (uri != null) {
             val name = uri.lastPathSegment?.substringAfterLast('/') ?: "图片"
             attachments = attachments + Attachment(name = name, uri = uri.toString())
+        }
+    }
+
+    // ── 输入触发：/ 与 # 建议 ──
+    val slashSuggestions by remember {
+        derivedStateOf {
+            val t = inputText
+            // 仅当整行以 / 开头且尚无空格时给命令建议（ZCode 触发）
+            if (t.startsWith("/") && !t.contains(' ')) {
+                SlashCommands.suggestions(t, 6)
+            } else emptyList()
+        }
+    }
+    val conversationSuggestions by remember {
+        derivedStateOf {
+            val t = inputText
+            // 行尾 #query 触发会话联想
+            val match = Regex("""(?:^|\s)#([^\s#]*)$""").find(t) ?: return@derivedStateOf emptyList()
+            val q = match.groupValues[1]
+            recentConversations
+                .filter {
+                    q.isBlank() ||
+                        it.title.contains(q, ignoreCase = true) ||
+                        it.subtitle.contains(q, ignoreCase = true)
+                }
+                .take(8)
+        }
+    }
+
+    fun insertAtCursor(snippet: String, replaceTrigger: Regex? = null) {
+        val cur = inputText
+        inputText = if (replaceTrigger != null) {
+            replaceTrigger.replace(cur) { mr ->
+                val prefix = mr.value.takeWhile { it.isWhitespace() }
+                "$prefix$snippet"
+            }
+        } else {
+            if (cur.isBlank()) snippet
+            else if (cur.endsWith(" ") || cur.endsWith("\n")) cur + snippet
+            else "$cur $snippet"
         }
     }
 
@@ -70,8 +130,8 @@ fun ChatScreen(
         },
         onOpenFiles = {
             drawerOpen = false
-            com.andmx.ui2.nav.NavBus.navigateTo(com.andmx.ui2.nav.Screen.Files.route)
-        }
+            NavBus.navigateTo(Screen.Files.route)
+        },
     ) {
         Column(modifier = modifier.fillMaxSize()) {
             TopAppBar(
@@ -80,14 +140,14 @@ fun ChatScreen(
                     IconButton(onClick = { drawerOpen = true }) {
                         Icon(Icons.Outlined.Menu, "菜单")
                     }
-                }
+                },
             )
 
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                reverseLayout = true
+                reverseLayout = true,
             ) {
                 items(
                     items = (messages + toolCalls.map { it as Any }).reversed(),
@@ -97,12 +157,12 @@ fun ChatScreen(
                             is ToolCall -> item.id
                             else -> System.currentTimeMillis()
                         }
-                    }
+                    },
                 ) { item ->
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn() + slideInVertically { it / 2 },
-                        exit = fadeOut() + slideOutVertically()
+                        exit = fadeOut() + slideOutVertically(),
                     ) {
                         when (item) {
                             is ChatMessage -> MessageBubble(item)
@@ -114,18 +174,18 @@ fun ChatScreen(
 
             AnimatedVisibility(
                 visible = error != null,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                modifier = Modifier.align(Alignment.CenterHorizontally),
             ) {
                 error?.let {
                     Snackbar(
                         modifier = Modifier.padding(8.dp),
                         action = {
                             androidx.compose.material3.TextButton(
-                                onClick = { viewModel.clearError() }
+                                onClick = { viewModel.clearError() },
                             ) {
                                 Text("关闭")
                             }
-                        }
+                        },
                     ) {
                         Text(it)
                     }
@@ -138,7 +198,9 @@ fun ChatScreen(
                     onRemove = { viewModel.removeFromQueue(it) },
                     onSendNow = { viewModel.sendQueuedNow(it) },
                     canSendNow = !isLoading,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
                 )
             }
 
@@ -146,7 +208,7 @@ fun ChatScreen(
                 value = inputText,
                 onValueChange = { inputText = it },
                 onSend = {
-                    if (inputText.isNotBlank() || attachments.isNotEmpty()) {
+                    if (inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()) {
                         viewModel.sendMessage(inputText)
                         inputText = ""
                         attachments = emptyList()
@@ -154,13 +216,55 @@ fun ChatScreen(
                 },
                 isLoading = isLoading,
                 onStop = { viewModel.stop() },
+                // 配置链
+                modelLabel = config.modelLabel,
+                selectedModel = config.settings.model,
+                activeProviderId = config.settings.activeProviderId
+                    .ifBlank { config.primary?.id.orEmpty() },
+                providers = config.providers,
+                onSwitchModel = { pid, mid -> viewModel.switchModel(pid, mid) },
+                reasoningEffort = config.settings.reasoningEffort,
+                reasoning = config.reasoning,
+                onReasoningSelected = { viewModel.setReasoningEffort(it) },
+                execMode = config.execMode,
+                onExecModeSelected = { viewModel.setExecMode(it) },
+                // 上下文
+                contextChips = contextChips,
+                onRemoveContextChip = { viewModel.removeContextChip(it) },
                 attachments = attachments,
+                onRemoveAttachment = { i ->
+                    attachments = attachments.filterIndexed { idx, _ -> idx != i }
+                },
+                // + 菜单
                 onAddAttachment = { imagePicker.launch("image/*") },
-                onRemoveAttachment = { i -> attachments = attachments.filterIndexed { idx, _ -> idx != i } },
+                onInsertMention = {
+                    // 跳转文件页选文件；文件页会通过 ChatComposerBus 回注 @path
+                    NavBus.navigateTo(Screen.Files.route)
+                },
+                onInsertConversation = {
+                    // 在输入框插入 # 触发联想
+                    insertAtCursor("#")
+                },
+                onInsertCommand = {
+                    insertAtCursor("/")
+                },
+                // 建议
+                slashSuggestions = slashSuggestions,
+                onPickSlash = { spec ->
+                    inputText = SlashCommands.complete(spec)
+                },
+                conversationSuggestions = conversationSuggestions,
+                onPickConversation = { pick ->
+                    // 去掉行尾 #query，加上 chip
+                    inputText = Regex("""(?:^|\s)#[^\s#]*$""").replace(inputText) { mr ->
+                        mr.value.takeWhile { it.isWhitespace() }
+                    }.trimEnd()
+                    viewModel.addConversationContext(pick)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .imePadding()
-                    .padding(8.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             )
         }
     }
