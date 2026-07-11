@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -21,12 +22,12 @@ import java.io.File
 fun FilesScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val projectManager = remember { ProjectManager(context) }
-    val rootPath = remember {
-        projectManager.hostPath.value
-            ?: android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
-    }
+    // 跟随工作区切换：hostPath 变化时根目录随之更新
+    val hostPath by projectManager.hostPath.collectAsState()
+    val rootPath = hostPath
+        ?: android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
 
-    var currentPath by remember { mutableStateOf(rootPath) }
+    var currentPath by remember(rootPath) { mutableStateOf(rootPath) }
     var openFile by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var refresh by remember { mutableIntStateOf(0) }
