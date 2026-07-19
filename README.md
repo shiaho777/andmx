@@ -93,3 +93,10 @@ docs/                          设计分析与周报
 ## 许可
 
 私有项目，未声明开源许可。
+
+## 贡献
+
+交付环：**Issue → PR（base=`main`，`Fixes #N`）→ CI（`CI` / job `build`）→ merge → Issue 关闭**。
+
+详见 [CONTRIBUTING.md](CONTRIBUTING.md)；coding agent 见 [AGENTS.md](AGENTS.md)。
+
