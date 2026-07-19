@@ -220,13 +220,14 @@ class ConversationController(
     private val repo = ConversationRepository(context)
     private val guestFs = com.andmx.exec.files.GuestFs(com.andmx.exec.proot.ProotRuntime(context))
     val projectManager = com.andmx.workspace.ProjectManager(context)
+    private val workspaceAccess = com.andmx.workspace.WorkspaceAccess(context)
 
     init {
         // Re-apply the persisted project bind mount on startup so proot picks
         // it up on first command after a process restart.
         projectManager.restoreBinding()
         // If a project is bound, work in the guest mount path (/root/project).
-        if (projectManager.hasProject) project = projectManager.guestMountPath
+        if (projectManager.hasProject) project = workspaceAccess.guestCwd()
     }
 
     // ── New subsystem instances (Codex parity) ──
@@ -244,7 +245,7 @@ class ConversationController(
     private val telemetrySink = com.andmx.telemetry.TelemetrySink(repo)
     private val tokenUsageTracker = com.andmx.llm.TokenUsageTracker()
     private val imageJson = Json { ignoreUnknownKeys = true }
-    private val shellTool = ShellTool(context, cwdProvider = { project })
+    private val shellTool = ShellTool(context, cwdProvider = { workspaceAccess.guestCwd() })
 
     /** Live plan state for UI binding. */
     val planState get() = updatePlanTool.state
@@ -328,7 +329,7 @@ class ConversationController(
         WriteFileTool(context),
         EditFileTool(context),
         ApplyPatchTool(context),
-        GitTool(context, cwdProvider = { project }),
+        GitTool(context, cwdProvider = { workspaceAccess.guestCwd() }),
         BrowseTool(networkPolicy, onBrowseUrl = { url -> browseMirrorUrl = url }),
         ListDirTool(context),
         WebSearchTool(networkPolicy),
@@ -423,138 +424,8 @@ class ConversationController(
                 items += ChatItem.Assistant(seq++, msg)
                 persistLocalTurn(userText, msg)
             }
-            is com.andmx.agent.SlashResult.Context -> {
-                val msg = contextText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Plan -> {
-                val msg = planText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Verify -> {
-                val msg = verifyText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Changes -> {
-                val msg = changeSummaryText(com.andmx.workspace.ChangeTracker.changes.value)
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Activity -> {
-                val msg = activitySummaryText(items)
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Checklist -> {
-                val msg = checklistText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Next -> {
-                val msg = nextText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Evidence -> {
-                val msg = evidenceText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.References -> {
-                val msg = referencesText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Blueprint -> {
-                val msg = blueprintText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Policy -> {
-                val msg = policyText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
             is com.andmx.agent.SlashResult.Tools -> {
                 val msg = toolsText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Parity -> {
-                val msg = parityText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Report -> {
-                val msg = reportText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Architecture -> {
-                val msg = architectureText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Surfaces -> {
-                val msg = surfacesText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.VisualCheck -> {
-                val msg = visualCheckText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.DesignSystem -> {
-                val msg = designSystemText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.ScreenshotExtract -> {
-                val msg = screenshotExtractText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Appshots -> {
-                val msg = appshotsText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Trace -> {
-                val msg = traceText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.SelfModel -> {
-                val msg = selfModelText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Flow -> {
-                val msg = flowText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Method -> {
-                val msg = methodText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Improve -> {
-                val msg = improveText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Instructions -> {
-                val msg = instructionsText()
-                items += ChatItem.Assistant(seq++, msg)
-                persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Commands -> {
-                val msg = commandsText()
                 items += ChatItem.Assistant(seq++, msg)
                 persistLocalTurn(userText, msg)
             }
@@ -567,31 +438,6 @@ class ConversationController(
                 val msg = handoffText()
                 items += ChatItem.Assistant(seq++, msg)
                 persistLocalTurn(userText, msg)
-            }
-            is com.andmx.agent.SlashResult.Diag -> {
-                val pending = "正在运行执行环境诊断…"
-                items += ChatItem.Assistant(seq++, pending)
-                val idx = items.lastIndex
-                scope.launch {
-                    val id = ensureConversationForLocalCommand(userText)
-                    repo.addMessage(id, "assistant", pending)
-                    val summary = runtimeEnvironmentSummary()
-                    val exec = com.andmx.exec.ExecProbe(context).run()
-                    val proot = com.andmx.exec.proot.ProotProbe(context).run()
-                    val result = buildString {
-                        appendLine("## 执行环境摘要")
-                        appendLine(runtimeEnvironmentStatusText(summary))
-                        appendLine()
-                        appendLine("## 完整探针")
-                        appendLine("```")
-                        appendLine(exec.text)
-                        appendLine()
-                        appendLine(proot)
-                        appendLine("```")
-                    }.trimEnd()
-                    items[idx] = ChatItem.Assistant(seq++, result)
-                    repo.addMessage(id, "assistant", result)
-                }
             }
             is com.andmx.agent.SlashResult.Export -> {
                 scope.launch {
@@ -606,6 +452,29 @@ class ConversationController(
             }
             is com.andmx.agent.SlashResult.Help -> {
                 val msg = "可用命令:\n" + com.andmx.agent.SlashCommands.list.joinToString("\n") { "- `${it.name}` ${it.desc}" }
+                items += ChatItem.Assistant(seq++, msg)
+                persistLocalTurn(userText, msg)
+            }
+            is com.andmx.agent.SlashResult.Compact,
+            is com.andmx.agent.SlashResult.Checkpoint,
+            is com.andmx.agent.SlashResult.Regenerate,
+            is com.andmx.agent.SlashResult.Stop -> {
+                val msg = "该命令请在新版对话界面（ui2）使用。"
+                items += ChatItem.Assistant(seq++, msg)
+                persistLocalTurn(userText, msg)
+            }
+            is com.andmx.agent.SlashResult.PluginSlash -> {
+                val args = cmd.args
+                val msg = buildString {
+                    append("插件命令 `/")
+                    append(cmd.name)
+                    append("` 已收到")
+                    if (args.isNotBlank()) {
+                        append("，参数：")
+                        append(args)
+                    }
+                    append("。请在新版对话界面（ui2）使用完整 Agent 工作流。")
+                }
                 items += ChatItem.Assistant(seq++, msg)
                 persistLocalTurn(userText, msg)
             }
@@ -2191,6 +2060,9 @@ class ConversationController(
 
     private fun handle(ev: AgentEvent) {
         when (ev) {
+            is AgentEvent.ReasoningDelta -> Unit
+            is AgentEvent.ReasoningDone -> Unit
+            is AgentEvent.ToolCallArgsDelta -> Unit
             is AgentEvent.AssistantDelta -> {
                 val idx = streamingIndex
                 if (idx == null) {
@@ -2518,10 +2390,8 @@ class ConversationController(
                             fetchModelsError = "未能获取模型列表（请检查 URL/Key 是否正确，或该端点是否支持 /models）"
                             fetchedModels = emptyList()
                         } else {
-                            // Persist into the provider's models map so the list sticks.
-                            val updated = def.copy(models = ids.associateWith { com.andmx.llm.provider.ModelDefinition() })
-                            providerStore.upsert(updated)
-                            fetchedModels = ids
+                            val sorted = ids.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+                            fetchedModels = sorted
                         }
                     } catch (t: Throwable) {
                         fetchModelsError = t.message ?: t::class.simpleName ?: "未知错误"

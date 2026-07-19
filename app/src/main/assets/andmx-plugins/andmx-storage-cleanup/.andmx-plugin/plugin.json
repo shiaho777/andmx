@@ -1,0 +1,22 @@
+{
+  "name": "andmx-storage-cleanup",
+  "version": "0.1.1",
+  "description": "AndMX 本机存储清理：全盘扫描与清理工具返回结构化数据，由模型用文本 UI 说明并确认后自主清理。",
+  "author": "AndMX",
+  "license": "MIT",
+  "skills": [
+    "skills/andmx-storage-cleanup/SKILL.md"
+  ],
+  "commands": [
+    "commands/andmx-storage-cleanup.md"
+  ],
+  "tools": [],
+  "hooks": [],
+  "enabled": true,
+  "mcpServers": {
+    "device-storage": {
+      "type": "builtin",
+      "description": "本机存储扫描与清理工具（storage_*）"
+    }
+  }
+}

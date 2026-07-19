@@ -56,9 +56,30 @@ class PluginTool(
         val scriptPath = "$pluginDir/$script"
         val input = args["args"]?.jsonPrimitive?.content ?: args.toString()
         return runCatching {
+            val escaped = input.replace("'", "'\"'\"'")
+            val cmd = buildString {
+                append("cd '")
+                append(pluginDir)
+                append("' && ")
+                append("if [ -x '")
+                append(scriptPath)
+                append("' ]; then '")
+                append(scriptPath)
+                append("' '")
+                append(escaped)
+                append("'; elif [ -f '")
+                append(scriptPath)
+                append("' ]; then /bin/sh '")
+                append(scriptPath)
+                append("' '")
+                append(escaped)
+                append("'; else echo 'script not found: ")
+                append(scriptPath)
+                append("' >&2; exit 127; fi")
+            }
             val res = env.execute(
                 ProcessSpec(
-                    argv = listOf("/bin/sh", "-c", "$scriptPath '$input'"),
+                    argv = listOf("/bin/sh", "-c", cmd),
                     stdin = input,
                     redirectErrorStream = true,
                 ),

@@ -31,9 +31,19 @@ class ConversationRepository(context: Context) {
         approvalRiskDescription: String = "",
         imageUrls: List<String> = emptyList(),
     ) {
+        val safeId = if (conversationId > 0 && dao.getConversation(conversationId) != null) {
+            conversationId
+        } else {
+            dao.insertConversation(
+                ConversationEntity(
+                    project = "/root",
+                    title = content.take(24).ifBlank { "新任务" },
+                ),
+            )
+        }
         dao.insertMessage(
             MessageEntity(
-                conversationId = conversationId,
+                conversationId = safeId,
                 role = role,
                 content = content,
                 toolName = toolName,
@@ -45,7 +55,7 @@ class ConversationRepository(context: Context) {
                 imageUrlsJson = Json.encodeToString(imageUrls),
             ),
         )
-        dao.touchConversation(conversationId, titleKeep(conversationId), System.currentTimeMillis())
+        dao.touchConversation(safeId, titleKeep(safeId), System.currentTimeMillis())
     }
 
     private suspend fun titleKeep(id: Long): String = dao.getConversation(id)?.title ?: "对话"
@@ -62,7 +72,18 @@ class ConversationRepository(context: Context) {
         startedAt: Long,
         updatedAt: Long,
         note: String,
-    ) = dao.updateGoal(conversationId, text, phase, startedAt, updatedAt, note)
+        tokenBudget: Int = 0,
+        tokensUsed: Int = 0,
+    ) = dao.updateGoal(
+        conversationId,
+        text,
+        phase,
+        startedAt,
+        updatedAt,
+        note,
+        tokenBudget,
+        tokensUsed,
+    )
 
     suspend fun updateWorkbenchState(
         conversationId: Long,

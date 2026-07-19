@@ -36,7 +36,7 @@ class CodexSurfaceMapTest {
         assertEquals(0, map.waitingCount)
         assertEquals("/changes", map.primaryCommand)
         assertTrue(map.surfaces.any { it.title == "浏览与桌面操作" })
-        assertTrue(map.surfaces.any { it.title == "扩展与自动化" })
+        assertTrue(map.surfaces.any { it.title == "扩展" })
     }
 
     @Test
@@ -60,13 +60,13 @@ class CodexSurfaceMapTest {
         assertTrue(text.contains("### 命令面板"))
         assertTrue(text.contains("### 审批与安全"))
         assertTrue(text.contains("### 浏览与桌面操作"))
-        assertTrue(text.contains("### 扩展与自动化"))
+        assertTrue(text.contains("### 扩展"))
         assertTrue(text.contains("### 截图复刻流水线"))
         assertTrue(text.contains("AndMX 落点"))
         assertTrue(text.contains("验收"))
         assertTrue(text.contains("Local/Worktree/Cloud"))
         assertTrue(text.contains("Computer Use"))
-        assertTrue(text.contains("Skills、Plugins、MCP、Automations"))
+        assertTrue(text.contains("Skills、Plugins、MCP"))
         assertTrue(text.contains("依据"))
     }
 

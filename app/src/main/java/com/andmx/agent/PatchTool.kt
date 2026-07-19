@@ -4,9 +4,9 @@ import android.content.Context
 import com.andmx.diff.CodexPatchEngine
 import com.andmx.diff.PatchEngine
 import com.andmx.diff.PatchFileSystem
-import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.workspace.ChangeTracker
+import com.andmx.workspace.WorkspaceAccess
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -15,32 +15,19 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/**
- * apply_patch: Edit files using either Codex freeform patch format or
- * unified diff. Changes enter the diff review panel.
- *
- * Supports two formats:
- * 1. Codex freeform: `*** Begin Patch` / `*** Add File:` / `*** Update File:` / `*** Delete File:` / `*** End Patch`
- * 2. Unified diff: `@@` hunks with `+` / `-` / ` ` line prefixes
- *
- * The engine auto-detects which format is used.
- */
 class ApplyPatchTool(context: Context) : Tool {
-    private val fs = GuestFs(ProotRuntime(context))
+    private val access = WorkspaceAccess(context)
 
-    /** Adapter from GuestFs to PatchFileSystem. */
-    private inner class GuestFsAdapter(val guestPath: String) : PatchFileSystem {
-        override fun exists(path: String): Boolean = fs.exists(path)
-        override fun read(path: String): String = fs.readText(path)
-        override fun write(path: String, content: String) = fs.writeText(path, content)
-        override fun delete(path: String) { fs.deleteFile(path) }
+    private inner class AccessAdapter : PatchFileSystem {
+        override fun exists(path: String): Boolean = runBlocking { access.exists(path) }
+        override fun read(path: String): String = runBlocking { access.readText(path) }
+        override fun write(path: String, content: String) = runBlocking { access.writeText(path, content) }
+        override fun delete(path: String) { runBlocking { access.deleteFile(path) } }
     }
 
     override val name = "apply_patch"
     override val description =
-        "对沙箱中的文件应用补丁。支持两种格式:" +
-            "Codex freeform (*** Begin Patch / *** Add File / *** Update File / *** Delete File / *** End Patch) " +
-            "和 unified diff (@@ hunk + +/- 行)。变更会进入 diff 审查。"
+        "对当前工作区中的文件应用补丁。支持 Codex freeform 与 unified diff。变更会进入 diff 审查。"
     override val risk = ToolRisk.WRITE
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
@@ -61,30 +48,36 @@ class ApplyPatchTool(context: Context) : Tool {
         val patch = args["patch"]?.jsonPrimitive?.content
             ?: return ToolResult("缺少参数 patch", isError = true)
         val path = args["path"]?.jsonPrimitive?.content
-
         return runCatching {
-            if (CodexPatchEngine.isFreeform(patch)) {
-                // Codex freeform format — may touch multiple files
-                applyFreeform(patch)
-            } else {
-                // Unified diff — single file
-                if (path == null) return@runCatching ToolResult("unified diff 模式需要 path 参数", isError = true)
-                applyUnified(path, patch)
+            if (CodexPatchEngine.isFreeform(patch)) applyFreeform(patch)
+            else {
+                if (path == null) ToolResult("unified diff 模式需要 path 参数", isError = true)
+                else applyUnified(path, patch)
             }
         }.getOrElse { ToolResult("应用补丁失败: ${it.message}", isError = true) }
     }
 
     private fun applyFreeform(patch: String): ToolResult {
-        val adapter = GuestFsAdapter("")
-        when (val r = CodexPatchEngine.apply(patch, adapter)) {
+        val adapter = AccessAdapter()
+        return when (val r = CodexPatchEngine.apply(patch, adapter)) {
             is CodexPatchEngine.Result.Ok -> {
-                // Record all changes in ChangeTracker
                 for (change in r.changes) {
-                    val targetPath = change.newPath ?: change.path
-                    if (change.action != CodexPatchEngine.Action.DELETE) {
-                        ChangeTracker.record(targetPath, change.oldContent, change.newContent, existedBefore = change.action != CodexPatchEngine.Action.ADD)
-                    } else {
+                    if (change.action == CodexPatchEngine.Action.DELETE) {
                         ChangeTracker.record(change.path, change.oldContent, "", existedBefore = true)
+                    } else if (change.action == CodexPatchEngine.Action.ADD) {
+                        ChangeTracker.record(
+                            change.newPath ?: change.path,
+                            "",
+                            change.newContent,
+                            existedBefore = false,
+                        )
+                    } else {
+                        ChangeTracker.record(
+                            change.path,
+                            change.oldContent,
+                            change.newContent,
+                            existedBefore = true,
+                        )
                     }
                 }
                 val summary = r.changes.joinToString(", ") { c ->
@@ -95,20 +88,21 @@ class ApplyPatchTool(context: Context) : Tool {
                     }
                     "$verb ${c.newPath ?: c.path}"
                 }
-                return ToolResult("已应用补丁: $summary (${r.changes.size} 个文件)")
+                ToolResult("已应用补丁: $summary (${r.changes.size} 个文件)")
             }
-            is CodexPatchEngine.Result.Fail -> return ToolResult("应用补丁失败: ${r.reason}", isError = true)
+            is CodexPatchEngine.Result.Fail -> ToolResult("应用补丁失败: ${r.reason}", isError = true)
         }
     }
 
     private fun applyUnified(path: String, patch: String): ToolResult {
-        val existed = fs.exists(path)
-        val original = if (existed) fs.readText(path) else ""
+        val resolved = access.resolvePath(path)
+        val existed = runBlocking { access.exists(resolved) }
+        val original = if (existed) runBlocking { access.readText(resolved) } else ""
         return when (val r = PatchEngine.apply(original, patch)) {
             is PatchEngine.Result.Ok -> {
-                fs.writeText(path, r.content)
-                ChangeTracker.record(path, original, r.content, existedBefore = existed)
-                ToolResult("已应用补丁到 $path")
+                runBlocking { access.writeText(resolved, r.content) }
+                ChangeTracker.record(resolved, original, r.content, existedBefore = existed)
+                ToolResult("已应用补丁到 $resolved")
             }
             is PatchEngine.Result.Fail -> ToolResult("应用补丁失败: ${r.reason}", isError = true)
         }

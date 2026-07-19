@@ -109,7 +109,6 @@ internal fun buildCodexCommandReference(
                 item(CommandId.OPEN_DIFF),
                 item(CommandId.OPEN_BROWSER),
                 item(CommandId.PLUGINS, deepLink = "codex://plugins/openai-developers@openai-curated"),
-                item(CommandId.AUTOMATIONS, deepLink = "codex://automations"),
             ),
         ),
         CommandReferenceSection(
@@ -119,7 +118,6 @@ internal fun buildCodexCommandReference(
                 CommandReferenceItem("新线程", "创建新本地线程并可预填 prompt/path", deepLink = "codex://threads/new"),
                 CommandReferenceItem("设置", "打开设置面板", deepLink = "codex://settings"),
                 CommandReferenceItem("技能", "打开 Skills", deepLink = "codex://skills"),
-                CommandReferenceItem("自动化", "打开 Automations 创建流程", deepLink = "codex://automations"),
                 CommandReferenceItem("Computer Use", "打开 Chrome/Computer Use 设置", deepLink = "codex://settings/computer-use/google-chrome"),
             ),
         ),

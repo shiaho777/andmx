@@ -53,19 +53,22 @@ object Attachments {
         val mime = context.contentResolver.getType(uri) ?: ""
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         if (mime.startsWith("image/") && bytes.size <= IMAGE_LIMIT) {
-            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val prepared = compressImageForModel(bytes, mime)
+            val outMime = prepared.mime
+            val outBytes = prepared.bytes
+            val b64 = android.util.Base64.encodeToString(outBytes, android.util.Base64.NO_WRAP)
             val attachment = Attachment(
                 name = name,
                 content = imageContentLabel(name),
-                imageDataUrl = "data:$mime;base64,$b64",
-                imageMeta = imageMeta(mime, bytes),
+                imageDataUrl = "data:$outMime;base64,$b64",
+                imageMeta = imageMeta(outMime, outBytes),
             )
             return attachment.copy(
                 imageAssetPath = UiReferenceAssets.persist(
                     context = context,
-                    bytes = bytes,
+                    bytes = outBytes,
                     referenceId = attachment.referenceId,
-                    mime = mime,
+                    mime = outMime,
                     name = name,
                 ),
             )
@@ -75,6 +78,50 @@ object Attachments {
         val text = String(bytes.copyOf(minOf(bytes.size, LIMIT)), Charsets.UTF_8)
         Attachment(name, text, truncated = bytes.size > LIMIT)
     }.getOrNull()
+
+
+    private data class PreparedImage(val bytes: ByteArray, val mime: String)
+
+    private const val MODEL_IMAGE_MAX_EDGE = 1600
+    private const val MODEL_IMAGE_MAX_BYTES = 900 * 1024
+
+    private fun compressImageForModel(raw: ByteArray, mime: String): PreparedImage {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        if (raw.size <= MODEL_IMAGE_MAX_BYTES && w <= MODEL_IMAGE_MAX_EDGE && h <= MODEL_IMAGE_MAX_EDGE) {
+            return PreparedImage(raw, mime.ifBlank { "image/jpeg" })
+        }
+        var sample = 1
+        val maxSide = maxOf(w, h).coerceAtLeast(1)
+        while (maxSide / sample > MODEL_IMAGE_MAX_EDGE * 2) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        val decoded = BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)
+            ?: return PreparedImage(raw, mime.ifBlank { "image/jpeg" })
+        val scale = minOf(
+            1f,
+            MODEL_IMAGE_MAX_EDGE.toFloat() / maxOf(decoded.width, decoded.height).toFloat(),
+        )
+        val targetW = (decoded.width * scale).toInt().coerceAtLeast(1)
+        val targetH = (decoded.height * scale).toInt().coerceAtLeast(1)
+        val scaled = if (targetW == decoded.width && targetH == decoded.height) {
+            decoded
+        } else {
+            android.graphics.Bitmap.createScaledBitmap(decoded, targetW, targetH, true).also {
+                if (it !== decoded) decoded.recycle()
+            }
+        }
+        var quality = 85
+        var out = java.io.ByteArrayOutputStream()
+        do {
+            out = java.io.ByteArrayOutputStream()
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out)
+            quality -= 10
+        } while (out.size() > MODEL_IMAGE_MAX_BYTES && quality >= 45)
+        scaled.recycle()
+        return PreparedImage(out.toByteArray(), "image/jpeg")
+    }
 
     private fun displayName(context: Context, uri: Uri): String? = runCatching {
         context.contentResolver.query(uri, null, null, null, null)?.use { c ->

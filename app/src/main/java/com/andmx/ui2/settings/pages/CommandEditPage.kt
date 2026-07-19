@@ -57,6 +57,8 @@ fun CommandEditPage(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
                 title = { Text(if (initial == null) "新建命令" else "编辑命令") },

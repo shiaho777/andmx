@@ -177,7 +177,10 @@ class McpHttpTransport(
     private suspend fun handleServerRequest(id: Int, method: String, params: JsonObject?) {
         when (method) {
             McpProtocol.ELICITATION_CREATE -> {
-                val handler = elicitationHandler ?: run { sendResponse(id, error = "not supported"); return }
+                val handler = elicitationHandler ?: run {
+                    sendResponse(id, result = buildJsonObject { put("action", "cancel") })
+                    return
+                }
                 val msg = params?.get("message")?.jsonPrimitive?.content ?: ""
                 val schema = params?.get("schema") as? JsonObject
                 val response = handler(McpElicitationRequest(msg, schema))
@@ -186,6 +189,18 @@ class McpHttpTransport(
                     if (response.content != null) put("content", response.content)
                 })
             }
+            McpProtocol.SAMPLING_CREATE_MESSAGE -> sendResponse(
+                id,
+                result = buildJsonObject {
+                    put("role", "assistant")
+                    put("model", "andmx-mobile")
+                    put("content", buildJsonObject {
+                        put("type", "text")
+                        put("text", "Sampling declined on AndMX mobile client.")
+                    })
+                    put("stopReason", "endTurn")
+                },
+            )
             McpProtocol.PING -> sendResponse(id, result = buildJsonObject {})
             else -> sendResponse(id, error = "unknown method: $method")
         }

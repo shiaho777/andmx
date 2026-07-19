@@ -7,6 +7,7 @@ import com.andmx.exec.proot.LocalProotEnvironment
 import com.andmx.exec.proot.ProotRuntime
 import com.andmx.exec.proot.RootfsInstaller
 import com.andmx.exec.pty.PtyProcess
+import com.andmx.workspace.WorkspaceAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,8 +32,9 @@ import java.nio.charset.StandardCharsets
  */
 class ShellTool(
     private val context: Context,
-    private val cwdProvider: () -> String = { "/root" },
+    private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
 ) : Tool, ExecutionAwareTool {
+    private val access = WorkspaceAccess(context)
     private val runtime = ProotRuntime(context)
     private val env = LocalProotEnvironment(context, runtime)
     private val persistentShell = PersistentShell(context, runtime)
@@ -49,9 +51,9 @@ class ShellTool(
 
     override val name = "run_shell"
     override val description =
-        "在设备上的 Linux (Alpine/proot) 沙箱里执行一条 shell 命令,返回合并后的标准输出与错误输出。" +
-            "默认在当前项目目录下执行。可用于读写文件、运行 git/python、安装软件包(apk add)等。" +
-            "支持并行执行: 可以同时调用多个 run_shell。"
+        "在当前工作区执行一条 shell 命令并返回合并输出。" +
+            "本地工作区运行于 Linux (proot) 沙箱；远程工作区通过 SSH 在远端执行。" +
+            "默认在当前项目目录下执行。支持并行：可同时调用多个 run_shell。"
 
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
@@ -69,9 +71,33 @@ class ShellTool(
     override suspend fun execute(callId: String, args: JsonObject): ToolResult {
         val command = args["command"]?.jsonPrimitive?.content
             ?: return ToolResult("缺少参数 command", isError = true)
+        val prepared = ensureNetworkTools(command)
 
-        val cwd = cwdProvider()
-        val cdCommand = if (cwd.isNotBlank() && cwd != "/root") "cd '$cwd' 2>/dev/null; $command" else command
+        val cwd = cwdProvider().ifBlank { access.guestCwd() }
+        val cdCommand = if (cwd.isNotBlank()) "cd '$cwd' 2>/dev/null || cd ~; $prepared" else prepared
+
+        if (access.isRemote) {
+            if (callId.isNotBlank()) {
+                _events.tryEmit(ShellEvent.Started(callId, command, cwd))
+            }
+            val res = access.executeShell(prepared, cwd = cwd)
+            if (res.error != null) {
+                if (callId.isNotBlank()) {
+                    _events.tryEmit(ShellEvent.Failed(callId, command, res.error ?: "error"))
+                }
+                return ToolResult("执行失败: ${res.error}", isError = true)
+            }
+            val out = buildString {
+                append(res.stdout.ifBlank { "(无输出)" })
+                append("\n[exit=${res.exitCode}]")
+            }
+            if (callId.isNotBlank()) {
+                _events.tryEmit(
+                    ShellEvent.Finished(callId, command, res.exitCode, isError = res.exitCode != 0),
+                )
+            }
+            return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+        }
 
         if (callId.isNotBlank()) {
             return executeBound(callId, command, cwd, cdCommand)
@@ -177,6 +203,31 @@ class ShellTool(
             append("\n[exit=$exitCode]")
         }
         ToolResult(finalOutput.take(16_000), isError = exitCode != 0)
+    }
+
+
+    private fun ensureNetworkTools(command: String): String {
+        if (!Regex("""\bcurl\b""").containsMatchIn(command)) return command
+        val ensure = buildString {
+            append("command -v curl >/dev/null 2>&1 || ")
+            append("(command -v apk >/dev/null 2>&1 && apk add --no-cache curl wget ca-certificates >/dev/null 2>&1) || true; ")
+            append("if ! command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1; then ")
+            append("curl() { ")
+            append("local outfile=; local url=; ")
+            append("while [ ${'$'}# -gt 0 ]; do ")
+            append("case \"${'$'}1\" in ")
+            append("-o|--output) outfile=\"${'$'}2\"; shift 2 ;; ")
+            append("-O) shift ;; ")
+            append("-s|-S|-L|-f|-k|-sS|-sL|-sSL|-sSf|-sSLf|-sSfL|--silent|--show-error|--fail|--location|--insecure) shift ;; ")
+            append("--connect-timeout|--max-time|--retry|--user-agent|-A|-H|--header|-X|--request|-d|--data|--data-raw|--data-binary) shift 2 ;; ")
+            append("--*) shift ;; ")
+            append("-*) shift ;; ")
+            append("*) url=\"${'$'}1\"; shift ;; ")
+            append("esac; done; ")
+            append("if [ -n \"${'$'}outfile\" ]; then wget -qO \"${'$'}outfile\" \"${'$'}url\"; else wget -qO- \"${'$'}url\"; fi; ")
+            append("}; fi; ")
+        }
+        return ensure + command
     }
 
     /** Start the persistent shell for faster subsequent executions. */

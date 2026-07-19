@@ -114,6 +114,8 @@ private fun CommandListView(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = { backAppBar("命令", onBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {

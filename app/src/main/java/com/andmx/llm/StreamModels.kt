@@ -8,6 +8,15 @@ import kotlinx.serialization.json.JsonObject
 sealed interface LlmStreamEvent {
     /** A chunk of assistant text. */
     data class Content(val delta: String) : LlmStreamEvent
+    /** A chunk of model thinking / reasoning (hidden chain-of-thought style). */
+    data class Reasoning(val delta: String) : LlmStreamEvent
+    /** Incremental tool-call args as the model streams function arguments. */
+    data class ToolCallDelta(
+        val index: Int,
+        val id: String?,
+        val name: String?,
+        val argumentsDelta: String,
+    ) : LlmStreamEvent
     /** The turn finished; [message] is the fully-assembled assistant message. */
     data class Completed(val message: ApiMessage) : LlmStreamEvent
     /** Rate limit or token usage update. */
@@ -33,6 +42,8 @@ data class StreamChoice(
 data class Delta(
     val role: String? = null,
     val content: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
+    val reasoning: String? = null,
     @SerialName("tool_calls") val toolCalls: List<DeltaToolCall>? = null,
 )
 

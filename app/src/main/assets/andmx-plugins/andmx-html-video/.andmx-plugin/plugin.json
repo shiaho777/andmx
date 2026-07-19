@@ -1,0 +1,22 @@
+{
+  "name": "andmx-html-video",
+  "version": "0.1.0",
+  "description": "在当前工作区用 HTML/CSS/JS 与程序音频一次交付完整可播影片工程。",
+  "author": "AndMX",
+  "license": "MIT",
+  "skills": [
+    "skills/andmx-html-video/SKILL.md"
+  ],
+  "commands": [
+    "commands/andmx-html-video.md"
+  ],
+  "tools": [],
+  "hooks": [],
+  "enabled": true,
+  "mcpServers": {
+    "html-video": {
+      "type": "builtin",
+      "description": "HTML 影片工程工具（html_video_*）"
+    }
+  }
+}

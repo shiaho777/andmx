@@ -1,0 +1,59 @@
+{
+  "name": "andmx-android-dev",
+  "version": "0.1.1",
+  "description": "AndMX 官方 Android 开发插件：工程发现、Compose 脚手架、构建安装、模拟器/真机与 UI 自动化（对标 ZCode android-emulator）。",
+  "author": "AndMX",
+  "license": "MIT",
+  "skills": [
+    "skills/andmx-android-dev/SKILL.md"
+  ],
+  "commands": [
+    "commands/andmx-android-dev.md"
+  ],
+  "tools": [],
+  "hooks": [],
+  "enabled": true,
+  "userConfig": {
+    "sdk_path": {
+      "type": "string",
+      "default": "",
+      "description": "Optional Android SDK root. Empty uses ANDROID_HOME / ANDROID_SDK_ROOT / common paths."
+    },
+    "default_avd": {
+      "type": "string",
+      "default": "medium_phone",
+      "description": "Preferred AVD name."
+    },
+    "api_level": {
+      "type": "string",
+      "default": "35",
+      "description": "Android API level for projects and system images."
+    },
+    "build_tools_version": {
+      "type": "string",
+      "default": "35.0.0",
+      "description": "SDK build-tools version."
+    },
+    "system_image_variant": {
+      "type": "string",
+      "default": "default",
+      "description": "default | google_apis | google_apis_playstore"
+    },
+    "system_image_abi": {
+      "type": "string",
+      "default": "",
+      "description": "Optional ABI override. Empty auto-selects arm64-v8a / x86_64."
+    },
+    "jdk_major": {
+      "type": "string",
+      "default": "17",
+      "description": "JDK major for preflight and install guidance."
+    }
+  },
+  "mcpServers": {
+    "android-emulator": {
+      "type": "builtin",
+      "description": "AndMX 官方 Android 开发插件：工程发现、Compose 脚手架、构建安装、模拟器/真机与 UI 自动化（对标 ZCode android-emulator）。"
+    }
+  }
+}

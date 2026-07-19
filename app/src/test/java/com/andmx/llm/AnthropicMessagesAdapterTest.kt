@@ -124,7 +124,7 @@ class AnthropicMessagesAdapterTest {
             """data: {"type":"message_stop"}""",
         )
         val collected = StringBuilder()
-        val msg = adapter.parseStream(lines) { collected.append(it) }
+        val msg = adapter.parseStream(lines, onContent = { collected.append(it) })
 
         assertEquals("你好，世界", collected.toString())
         assertEquals("你好，世界", msg.content)
@@ -141,7 +141,7 @@ class AnthropicMessagesAdapterTest {
             """data: {"type":"content_block_stop","index":0}""",
             """data: {"type":"message_stop"}""",
         )
-        val msg = adapter.parseStream(lines) {}
+        val msg = adapter.parseStream(lines, onContent = {})
 
         val calls = msg.toolCalls
         assertNotNull(calls)

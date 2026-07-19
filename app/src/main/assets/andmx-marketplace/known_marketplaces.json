@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "marketplaces": [
+    {
+      "id": "andmx-plugins-official",
+      "source": {
+        "source": "builtin"
+      },
+      "name": "AndMX Official",
+      "description": "AndMX 官方插件"
+    },
+    {
+      "id": "claude-plugins-official",
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      },
+      "name": "claude-plugins-official",
+      "description": "Directory of popular Claude Code extensions including development tools, productivity plugins, and MCP integrations"
+    }
+  ]
+}

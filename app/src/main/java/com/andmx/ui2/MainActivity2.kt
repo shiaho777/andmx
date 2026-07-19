@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -28,19 +30,26 @@ class MainActivity2 : ComponentActivity() {
             val settings by store.settings.collectAsState(initial = ProviderSettings())
 
             AndMX2Theme(themeMode = settings.themeMode) {
-                androidx.compose.runtime.CompositionLocalProvider(
-                    com.andmx.ui2.markdown.LocalCodePreviewConfig provides
-                        com.andmx.ui2.markdown.CodePreviewConfig(
-                            lightTheme = settings.lightCodeTheme,
-                            darkTheme = settings.darkCodeTheme,
-                            showLineNumbers = settings.showLineNumbers,
-                            wrapLongLines = settings.wrapLongLines,
-                            fontSize = settings.codeFontSize
-                        )
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
                 ) {
-                    ChatScreen(modifier = Modifier.fillMaxSize())
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        com.andmx.ui2.markdown.LocalCodePreviewConfig provides
+                            com.andmx.ui2.markdown.CodePreviewConfig(
+                                lightTheme = settings.lightCodeTheme,
+                                darkTheme = settings.darkCodeTheme,
+                                showLineNumbers = settings.showLineNumbers,
+                                wrapLongLines = settings.wrapLongLines,
+                                fontSize = settings.codeFontSize
+                            )
+                    ) {
+                        ChatScreen(modifier = Modifier.fillMaxSize())
+                    }
                 }
             }
         }
     }
 }
+

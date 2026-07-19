@@ -45,6 +45,7 @@ interface AndmxDao {
     @Query(
         "UPDATE conversations SET goalText = :text, goalPhase = :phase, " +
             "goalStartedAt = :startedAt, goalUpdatedAt = :updatedAt, goalNote = :note, " +
+            "goalTokenBudget = :tokenBudget, goalTokensUsed = :tokensUsed, " +
             "updatedAt = :updatedAt WHERE id = :id",
     )
     suspend fun updateGoal(
@@ -54,6 +55,8 @@ interface AndmxDao {
         startedAt: Long,
         updatedAt: Long,
         note: String,
+        tokenBudget: Int,
+        tokensUsed: Int,
     )
 
     @Query(

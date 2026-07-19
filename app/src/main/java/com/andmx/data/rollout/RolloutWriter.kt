@@ -30,6 +30,7 @@ class RolloutWriter(
 ) {
     companion object {
         private const val TAG = "RolloutWriter"
+        private const val FLUSH_EVERY_LINES = 12
     }
 
     private val rolloutsDir = File(context.filesDir, "rollouts").apply { mkdirs() }
@@ -43,6 +44,9 @@ class RolloutWriter(
 
     @Volatile
     private var sessionId: String = ""
+
+    @Volatile
+    private var unflushedLines: Int = 0
 
     /** Start a new rollout file. Returns the session ID. */
     suspend fun startSession(
@@ -59,7 +63,8 @@ class RolloutWriter(
             val filename = "rollout-$timestamp-${sessionId.take(8)}.jsonl"
             val file = File(rolloutsDir, filename)
             currentFile = file
-            currentWriter = PrintWriter(FileWriter(file, true), true)
+            currentWriter = PrintWriter(FileWriter(file, true), false)
+            unflushedLines = 0
 
             val meta = SessionMeta(
                 id = sessionId,
@@ -94,6 +99,20 @@ class RolloutWriter(
         mutex.withLock { closeInternal() }
     }
 
+    suspend fun attachExisting(file: File, existingSessionId: String) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            closeInternal()
+            if (!file.exists()) {
+                file.parentFile?.mkdirs()
+                file.createNewFile()
+            }
+            currentFile = file
+            currentWriter = PrintWriter(FileWriter(file, true), false)
+            unflushedLines = 0
+            sessionId = existingSessionId.ifBlank { file.nameWithoutExtension }
+        }
+    }
+
     /** Get the current rollout file path (for storing in the database). */
     fun currentFilePath(): String? = currentFile?.absolutePath
 
@@ -106,7 +125,7 @@ class RolloutWriter(
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
-    private fun writeEntry(entry: RolloutEntry) {
+    private fun writeEntry(entry: RolloutEntry, forceFlush: Boolean = false) {
         val writer = currentWriter
         if (writer == null) {
             Log.w(TAG, "No active rollout writer, dropping entry")
@@ -115,8 +134,21 @@ class RolloutWriter(
         val line = runCatching { json.encodeToString(RolloutEntry.serializer(), entry) }
             .getOrElse { return }
         writer.println(line)
+        unflushedLines++
+        val critical = entry.type == "event_msg" || entry.type == "session_meta"
+        if (forceFlush || critical || unflushedLines >= FLUSH_EVERY_LINES) {
+            writer.flush()
+            unflushedLines = 0
+        }
         if (writer.checkError()) {
             Log.e(TAG, "Write error in rollout file")
+        }
+    }
+
+    suspend fun flush() = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            currentWriter?.flush()
+            unflushedLines = 0
         }
     }
 
@@ -125,5 +157,6 @@ class RolloutWriter(
         currentWriter?.close()
         currentWriter = null
         currentFile = null
+        unflushedLines = 0
     }
 }

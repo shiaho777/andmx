@@ -76,6 +76,16 @@ class RootfsInstaller(
 
         sentinel.writeText(System.currentTimeMillis().toString())
         tarball.delete()
+        runCatching {
+            val bootstrap = runtime.prootArgv(
+                command = listOf(
+                    "/bin/sh", "-lc",
+                    "command -v apk >/dev/null 2>&1 && apk add --no-cache curl wget ca-certificates >/dev/null 2>&1 || true",
+                ),
+                rootfs = runtime.rootfsDir,
+            )
+            host.execute(ProcessSpec(argv = bootstrap, env = runtime.env(), redirectErrorStream = true))
+        }
         onLog("✓ rootfs 安装完成")
         true
     }

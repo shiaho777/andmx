@@ -71,12 +71,9 @@ data class ProviderSettings(
     /** 代码块字号（sp）。 */
     val codeFontSize: Int = 13,
 
-    // ── 索引库（对标 ZCode Indexing）──
-    /** 自动索引新打开的项目文件夹。 */
-    val indexNewFolders: Boolean = true,
-    /** 索引仓库以实现即时 Grep 搜索（测试版）。 */
+    val indexNewFolders: Boolean = false,
+    val indexNewFoldersUserConfigured: Boolean = false,
     val instantGrep: Boolean = false,
-    /** 自动索引的文件数上限。 */
     val indexFileLimit: Int = 50_000,
 ) {
     /**
@@ -114,6 +111,7 @@ class SettingsStore(private val context: Context) {
     private val wrapLongLinesKey = androidx.datastore.preferences.core.booleanPreferencesKey("wrap_long_lines")
     private val codeFontSizeKey = androidx.datastore.preferences.core.intPreferencesKey("code_font_size")
     private val indexNewFoldersKey = androidx.datastore.preferences.core.booleanPreferencesKey("index_new_folders")
+    private val indexNewFoldersUserConfiguredKey = androidx.datastore.preferences.core.booleanPreferencesKey("index_new_folders_user_configured")
     private val instantGrepKey = androidx.datastore.preferences.core.booleanPreferencesKey("instant_grep")
     private val indexFileLimitKey = androidx.datastore.preferences.core.intPreferencesKey("index_file_limit")
 
@@ -150,6 +148,7 @@ class SettingsStore(private val context: Context) {
             wrapLongLines = p[wrapLongLinesKey] ?: def.wrapLongLines,
             codeFontSize = p[codeFontSizeKey] ?: def.codeFontSize,
             indexNewFolders = p[indexNewFoldersKey] ?: def.indexNewFolders,
+            indexNewFoldersUserConfigured = p[indexNewFoldersUserConfiguredKey] ?: def.indexNewFoldersUserConfigured,
             instantGrep = p[instantGrepKey] ?: def.instantGrep,
             indexFileLimit = p[indexFileLimitKey] ?: def.indexFileLimit,
         )
@@ -181,6 +180,7 @@ class SettingsStore(private val context: Context) {
             p[wrapLongLinesKey] = settings.wrapLongLines
             p[codeFontSizeKey] = settings.codeFontSize
             p[indexNewFoldersKey] = settings.indexNewFolders
+            p[indexNewFoldersUserConfiguredKey] = settings.indexNewFoldersUserConfigured
             p[instantGrepKey] = settings.instantGrep
             p[indexFileLimitKey] = settings.indexFileLimit
         }
@@ -202,55 +202,50 @@ class SettingsStore(private val context: Context) {
         } else null
     }
 
-    // ---- Automations (saved prompts) ----
-    private val automationsKey = stringPreferencesKey("automations")
-    private val automationJson = Json { ignoreUnknownKeys = true }
-
-    val automations: Flow<List<Automation>> = context.dataStore.data.map { p ->
-        p[automationsKey]?.let {
-            runCatching { automationJson.decodeFromString(ListSerializer(Automation.serializer()), it) }.getOrNull()
-        } ?: emptyList()
-    }
-
-    suspend fun saveAutomations(list: List<Automation>) {
-        context.dataStore.edit { p ->
-            p[automationsKey] = automationJson.encodeToString(ListSerializer(Automation.serializer()), list)
-        }
-    }
+    private val settingsJson = Json { ignoreUnknownKeys = true }
 
     // ---- Custom commands（用户自定义 /command）----
     private val commandsKey = stringPreferencesKey("custom_commands")
 
     val customCommands: Flow<List<CustomCommand>> = context.dataStore.data.map { p ->
         p[commandsKey]?.let {
-            runCatching { automationJson.decodeFromString(ListSerializer(CustomCommand.serializer()), it) }.getOrNull()
+            runCatching { settingsJson.decodeFromString(ListSerializer(CustomCommand.serializer()), it) }.getOrNull()
         } ?: emptyList()
     }
 
     suspend fun saveCommands(list: List<CustomCommand>) {
         context.dataStore.edit { p ->
-            p[commandsKey] = automationJson.encodeToString(ListSerializer(CustomCommand.serializer()), list)
+            p[commandsKey] = settingsJson.encodeToString(ListSerializer(CustomCommand.serializer()), list)
         }
     }
 
-    // ---- Custom sub-agents（用户级子智能体定义）----
     private val subAgentsKey = stringPreferencesKey("custom_subagents")
+    private val subAgentStateKey = stringPreferencesKey("subagents_state")
 
     val customSubAgents: Flow<List<CustomSubAgent>> = context.dataStore.data.map { p ->
         p[subAgentsKey]?.let {
-            runCatching { automationJson.decodeFromString(ListSerializer(CustomSubAgent.serializer()), it) }.getOrNull()
+            runCatching { settingsJson.decodeFromString(ListSerializer(CustomSubAgent.serializer()), it) }.getOrNull()
         } ?: emptyList()
     }
 
     suspend fun saveSubAgents(list: List<CustomSubAgent>) {
         context.dataStore.edit { p ->
-            p[subAgentsKey] = automationJson.encodeToString(ListSerializer(CustomSubAgent.serializer()), list)
+            p[subAgentsKey] = settingsJson.encodeToString(ListSerializer(CustomSubAgent.serializer()), list)
+        }
+    }
+
+    val subagentState: Flow<SubagentStateFile> = context.dataStore.data.map { p ->
+        p[subAgentStateKey]?.let {
+            runCatching { settingsJson.decodeFromString(SubagentStateFile.serializer(), it) }.getOrNull()
+        } ?: SubagentStateFile()
+    }
+
+    suspend fun saveSubagentState(state: SubagentStateFile) {
+        context.dataStore.edit { p ->
+            p[subAgentStateKey] = settingsJson.encodeToString(SubagentStateFile.serializer(), state)
         }
     }
 }
-
-@Serializable
-data class Automation(val title: String, val prompt: String)
 
 @Serializable
 data class CustomCommand(
@@ -267,14 +262,24 @@ data class CustomSubAgent(
     val name: String,
     val description: String = "",
     val systemPrompt: String = "",
-    /** "inherit" | "main" | "lite" */
     val model: String = "inherit",
-    /** default | acceptEdits | auto | bypassPermissions | dontAsk | plan */
     val permissionMode: String = "default",
-    /** 颜色标记: blue/cyan/green/orange/pink/purple/red/yellow */
     val color: String = "blue",
-    /** 允许作为后台任务运行。 */
     val background: Boolean = false,
-    /** 是否启用。 */
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val tools: List<String> = listOf("*"),
+    val disallowedTools: List<String> = emptyList(),
+    val skills: List<String> = emptyList(),
+    val maxTurns: Int? = null,
+    val mcpServers: List<String> = emptyList(),
+    val scope: String = "user",
+    val source: String = "user",
+    val path: String = "",
+    val readOnly: Boolean = false,
+)
+
+@Serializable
+data class SubagentStateFile(
+    val builtInModelOverrides: Map<String, String> = emptyMap(),
+    val disabledAgentIds: List<String> = emptyList(),
 )

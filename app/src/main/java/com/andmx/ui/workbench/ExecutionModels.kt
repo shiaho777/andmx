@@ -195,24 +195,6 @@ data class McpServerRecord(
     val error: String = "",
 )
 
-data class AutomationRecord(
-    val id: String,
-    val title: String,
-    val trigger: String = "",
-    val targetThreadId: String = "",
-    val paused: Boolean = false,
-    val nextRunAt: Long = 0L,
-    val lastRunAt: Long = 0L,
-)
-
-data class AutomationRunRecord(
-    val id: String,
-    val automationId: String,
-    val status: String,
-    val startedAt: Long = System.currentTimeMillis(),
-    val completedAt: Long = 0L,
-)
-
 data class BrowserSessionRecord(
     val id: String,
     val url: String,

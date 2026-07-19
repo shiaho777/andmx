@@ -267,6 +267,7 @@ private fun ProviderTab(
         ModelListManager(
             providerId = editingId,
             models = (editing?.models?.keys?.toList() ?: emptyList()),
+            catalogue = if (fetchedForId == editingId) fetchedModels else emptyList(),
             selectedModel = selectedModel,
             fetching = fetchingModels && fetchedForId == editingId,
             fetchError = if (fetchedForId == editingId) fetchModelsError else null,
@@ -618,6 +619,7 @@ private fun ConnectionTestRow(
 private fun ModelListManager(
     providerId: String,
     models: List<String>,
+    catalogue: List<String>,
     selectedModel: String,
     fetching: Boolean,
     fetchError: String?,
@@ -629,10 +631,11 @@ private fun ModelListManager(
     val colors = AndmxTheme.colors
     var newModel by remember(providerId) { mutableStateOf("") }
     var query by remember(providerId) { mutableStateOf("") }
-    val filtered = if (query.isBlank()) models else models.filter { it.contains(query, ignoreCase = true) }
+    val owned = models.toSet()
+    val filteredOwned = if (query.isBlank()) models else models.filter { it.contains(query, ignoreCase = true) }
+    val filteredCatalogue = if (query.isBlank()) catalogue else catalogue.filter { it.contains(query, ignoreCase = true) }
 
     Column(Modifier.fillMaxWidth().clip(Radii.sm).border(1.dp, colors.border, Radii.sm)) {
-        // Search box at the top — filters the model list.
         Box(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.xs),
         ) {
@@ -657,12 +660,101 @@ private fun ModelListManager(
             )
         }
 
-        // Scrollable model list — capped so hundreds of models don't blow up.
+        if (catalogue.isNotEmpty()) {
+            Text(
+                if (query.isBlank()) "可选模型 · ${catalogue.size}"
+                else "可选模型 · ${filteredCatalogue.size}/${catalogue.size}",
+                style = AndmxTheme.typography.labelSmall,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+            )
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()),
+            ) {
+                if (filteredCatalogue.isEmpty()) {
+                    Text(
+                        "无匹配模型",
+                        style = AndmxTheme.typography.labelSmall,
+                        color = colors.textTertiary,
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.md),
+                    )
+                } else {
+                    filteredCatalogue.forEachIndexed { index, id ->
+                        val added = id in owned
+                        val isSelected = id == selectedModel
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    when {
+                                        isSelected -> colors.accentSoft
+                                        added -> colors.surface
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .clickable {
+                                    if (!added) onAdd(id)
+                                    onSelect(id)
+                                }
+                                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                        ) {
+                            Text(
+                                if (added) "✓" else "+",
+                                style = AndmxTheme.typography.labelMedium,
+                                color = if (added) colors.accent else colors.textSecondary,
+                                modifier = Modifier.width(18.dp),
+                            )
+                            Text(
+                                id,
+                                style = AndmxTheme.typography.bodyMedium,
+                                color = if (isSelected || added) colors.textPrimary else colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (index < filteredCatalogue.lastIndex) {
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+                        }
+                    }
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Text(
+                    "全选结果",
+                    style = AndmxTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                    modifier = Modifier
+                        .clip(Radii.sm)
+                        .clickable {
+                            filteredCatalogue.filter { it !in owned }.forEach(onAdd)
+                        }
+                        .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                )
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
+        }
+
+        Text(
+            if (models.isEmpty()) "已选模型"
+            else if (query.isBlank()) "已选模型 · ${models.size}"
+            else "已选模型 · ${filteredOwned.size}/${models.size}",
+            style = AndmxTheme.typography.labelSmall,
+            color = colors.textTertiary,
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        )
         Column(
-            Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()),
         ) {
-            if (filtered.isNotEmpty()) {
-                filtered.forEachIndexed { index, id ->
+            if (filteredOwned.isNotEmpty()) {
+                filteredOwned.forEachIndexed { index, id ->
                     val isSelected = id == selectedModel
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -691,7 +783,7 @@ private fun ModelListManager(
                                 .padding(Spacing.xxs),
                         )
                     }
-                    if (index < filtered.lastIndex) {
+                    if (index < filteredOwned.lastIndex) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
                     }
                 }
@@ -705,7 +797,6 @@ private fun ModelListManager(
             }
         }
 
-        // Inline add-model input.
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -739,7 +830,6 @@ private fun ModelListManager(
             }
         }
 
-        // Batch fetch from API.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -748,7 +838,11 @@ private fun ModelListManager(
                 .padding(horizontal = Spacing.md, vertical = Spacing.sm),
         ) {
             Text(
-                if (fetching) "获取中…" else "从 API 获取模型列表",
+                when {
+                    fetching -> "获取中…"
+                    catalogue.isNotEmpty() -> "重新获取模型列表 · ${catalogue.size}"
+                    else -> "从 API 获取模型列表"
+                },
                 style = AndmxTheme.typography.labelMedium,
                 color = if (fetching) colors.textTertiary else colors.textSecondary,
             )

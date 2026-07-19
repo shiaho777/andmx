@@ -221,7 +221,12 @@ object AnthropicMessagesAdapter : WireAdapter {
      * `{"type": "...", ...}`. We accumulate content blocks by index and emit
      * text deltas live via [onContent].
      */
-    override suspend fun parseStream(lines: Sequence<String>, onContent: suspend (String) -> Unit): ApiMessage {
+    override suspend fun parseStream(
+        lines: Sequence<String>,
+        onContent: suspend (String) -> Unit,
+        onReasoning: suspend (String) -> Unit,
+        onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit,
+    ): ApiMessage {
         // index → (type, id/name for tool_use, accumulated input json string)
         val blocks = sortedMapOf<Int, BlockAcc>()
         val text = StringBuilder()
@@ -240,9 +245,9 @@ object AnthropicMessagesAdapter : WireAdapter {
                     acc.type = block["type"]?.jsonPrimitive?.contentOrNull
                     acc.id = block["id"]?.jsonPrimitive?.contentOrNull
                     acc.name = block["name"]?.jsonPrimitive?.contentOrNull
-                    // The tool_use input arrives incrementally via input_json_delta
-                    // events; the initial `input` in content_block_start is just an
-                    // empty placeholder, so we do NOT seed acc.input from it.
+                    if (acc.type == "tool_use") {
+                        onToolCall(idx, acc.id, acc.name, "")
+                    }
                 }
                 "content_block_delta" -> {
                     val idx = ev["index"]?.jsonPrimitive?.intOrNull ?: continue
@@ -252,9 +257,17 @@ object AnthropicMessagesAdapter : WireAdapter {
                             val piece = delta["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
                             if (piece.isNotEmpty()) { text.append(piece); onContent(piece) }
                         }
+                        "thinking_delta" -> {
+                            val piece = delta["thinking"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                            if (piece.isNotEmpty()) onReasoning(piece)
+                        }
                         "input_json_delta" -> {
                             val piece = delta["partial_json"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                            blocks.getOrPut(idx) { BlockAcc() }.input.append(piece)
+                            val acc = blocks.getOrPut(idx) { BlockAcc() }
+                            if (piece.isNotEmpty()) acc.input.append(piece)
+                            if (acc.type == "tool_use" || acc.name != null) {
+                                onToolCall(idx, acc.id, acc.name, piece)
+                            }
                         }
                     }
                 }
@@ -308,25 +321,25 @@ object AnthropicMessagesAdapter : WireAdapter {
      * [extraHeaders]). Returns an empty list on any failure.
      */
     override suspend fun listModels(def: ProviderDefinition): List<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            val url = URL(def.baseUrl.trimEnd('/') + "/models")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 15_000
-                readTimeout = 20_000
-                authHeader(def.apiKey)?.let { (k, v) -> setRequestProperty(k, v) }
-                extraHeaders().forEach { (k, v) -> setRequestProperty(k, v) }
+        val url = URL(def.baseUrl.trimEnd('/') + "/models")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 20_000
+            authHeader(def.apiKey)?.let { (k, v) -> setRequestProperty(k, v) }
+            extraHeaders().forEach { (k, v) -> setRequestProperty(k, v) }
+            def.httpHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
+        }
+        try {
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                error("HTTP $code: ${text.take(200)}")
             }
-            try {
-                val code = conn.responseCode
-                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code !in 200..299) return@runCatching emptyList()
-                val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@runCatching emptyList()
-                data.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
-            } finally {
-                conn.disconnect()
-            }
-        }.getOrDefault(emptyList())
+            OpenAiChatAdapter.parseModelCatalogue(text)
+        } finally {
+            conn.disconnect()
+        }
     }
 }

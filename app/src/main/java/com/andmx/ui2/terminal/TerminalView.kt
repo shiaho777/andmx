@@ -25,16 +25,14 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andmx.term.TerminalEmulator
-
-private val TermBg = Color(0xFF1A1A1F)
-private val TermFg = Color(0xFFD4D4D4)
 
 @Composable
 fun TerminalView(
     screen: String,
     coloredLines: List<List<Pair<String, Int>>> = emptyList(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    colors: TerminalColors = rememberTerminalColors(),
+    fontFamily: FontFamily = FontFamily.Monospace,
 ) {
     val vScroll = rememberScrollState()
     val hScroll = rememberScrollState()
@@ -44,15 +42,15 @@ fun TerminalView(
         vScroll.animateScrollTo(vScroll.maxValue)
     }
 
-    val annotated = remember(coloredLines, screen) {
+    val annotated = remember(coloredLines, screen, colors) {
         if (coloredLines.isEmpty()) AnnotatedString(screen.ifEmpty { " " })
-        else buildColored(coloredLines)
+        else buildColored(coloredLines, colors)
     }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(TermBg)
+            .background(colors.background)
             .pointerInput(Unit) {
                 detectTransformGestures { _, _, zoom, _ ->
                     fontSize = (fontSize * zoom).coerceIn(7f, 22f)
@@ -65,26 +63,32 @@ fun TerminalView(
         SelectionContainer {
             Text(
                 text = annotated,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = fontFamily,
                 fontSize = fontSize.sp,
                 lineHeight = (fontSize * 1.3f).sp,
-                color = TermFg,
+                color = colors.foreground,
                 softWrap = false
             )
         }
     }
 }
 
-private fun buildColored(lines: List<List<Pair<String, Int>>>): AnnotatedString =
+private fun buildColored(
+    lines: List<List<Pair<String, Int>>>,
+    colors: TerminalColors,
+): AnnotatedString =
     buildAnnotatedString {
         lines.forEachIndexed { idx, spans ->
             if (idx > 0) append('\n')
-            if (spans.isEmpty()) { append(' '); return@forEachIndexed }
+            if (spans.isEmpty()) {
+                append(' ')
+                return@forEachIndexed
+            }
             spans.forEach { (text, colorIndex) ->
                 if (colorIndex == 0) {
                     append(text)
                 } else {
-                    pushStyle(SpanStyle(color = Color(TerminalEmulator.colorArgb(colorIndex))))
+                    pushStyle(SpanStyle(color = Color(colors.colorArgb(colorIndex))))
                     append(text)
                     pop()
                 }

@@ -19,8 +19,18 @@ import kotlinx.serialization.json.jsonObject
 sealed interface AgentEvent {
     /** Incremental assistant text chunk (streaming). */
     data class AssistantDelta(val text: String) : AgentEvent
+    /** Incremental model thinking / reasoning chunk. */
+    data class ReasoningDelta(val text: String) : AgentEvent
+    /** Thinking block finished for the current model step. */
+    data object ReasoningDone : AgentEvent
     /** A fully-committed assistant message (final answer for a turn). */
     data class Assistant(val text: String) : AgentEvent
+    data class ToolCallArgsDelta(
+        val index: Int,
+        val id: String?,
+        val name: String?,
+        val argumentsSoFar: String,
+    ) : AgentEvent
     data class ToolStarted(val id: String, val name: String, val arguments: String) : AgentEvent
     data class ToolFinished(
         val id: String, val name: String, val output: String, val isError: Boolean,
@@ -54,6 +64,7 @@ class AgentEngine(
     private val compactor: ContextCompactor = ContextCompactor(client = client),
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+    private val historyToolOutputLimit: Int = 8_000,
     private val maxSteps: Int = 50,
     /** Steps granted after maxSteps to let the model wrap up; if it still hasn't converged, we fail. */
     private val graceSteps: Int = 3,
@@ -128,6 +139,22 @@ class AgentEngine(
     /** Snapshot of the current history (used to preserve state across engine rebuilds). */
     fun snapshotHistory(): List<ApiMessage> = history.toList()
 
+    suspend fun compactNow(settings: ProviderSettings, turn: TurnContext): String? {
+        hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
+        val result = compactor.compact(history, settings, turn) ?: return null
+        history.clear()
+        history += result.compacted
+        hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_COMPACT)
+        return "已压缩：移除 ${result.removedCount} 条历史 · ${result.tokensBefore}→${result.tokensAfter} tokens"
+    }
+
+    suspend fun checkpointNow(settings: ProviderSettings, turn: TurnContext, goal: String = ""): String? {
+        val result = compactor.createCheckpoint(history, turn, goal) ?: return null
+        history.clear()
+        history += result.compacted
+        return result.summary
+    }
+
     fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
         history += ApiMessage(role = "user", content = userInput, imageUrls = images.ifEmpty { null })
         loop(settings, turn)
@@ -157,10 +184,12 @@ class AgentEngine(
             // ── Context management: soft compact, then hard-limit fallback ──
             val overHardLimit = compactor.isContextWindowExceeded(history, contextWindow)
             if (overHardLimit || compactor.needsCompaction(history, contextWindow)) {
+                hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
                 val result = compactor.compact(history, settings, turn)
                 if (result != null) {
                     history.clear()
                     history += result.compacted
+                    hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_COMPACT)
                     emit(AgentEvent.AssistantDelta("\n_(上下文已自动压缩: 移除 ${result.removedCount} 条历史消息)_\n"))
                 } else if (overHardLimit) {
                     // Compaction failed while over the hard limit — fall back to
@@ -190,7 +219,37 @@ class AgentEngine(
 
             // Stream with retry: a transient stream break / empty reply shouldn't
             // kill the whole turn. Retry up to 2 times with backoff.
-            val msg = streamWithRetry(request) { emit(AgentEvent.AssistantDelta(it)) }
+            var sawReasoning = false
+            val toolArgBuf = sortedMapOf<Int, StringBuilder>()
+            val toolMeta = sortedMapOf<Int, Pair<String?, String?>>()
+            val msg = streamWithRetry(
+                request,
+                onContent = { emit(AgentEvent.AssistantDelta(it)) },
+                onReasoning = {
+                    sawReasoning = true
+                    emit(AgentEvent.ReasoningDelta(it))
+                },
+                onToolCall = { index, id, name, argDelta ->
+                    val meta = toolMeta[index]
+                    val nextId = id ?: meta?.first
+                    val nextName = name ?: meta?.second
+                    toolMeta[index] = nextId to nextName
+                    if (argDelta.isNotEmpty()) {
+                        toolArgBuf.getOrPut(index) { StringBuilder() }.append(argDelta)
+                    } else {
+                        toolArgBuf.getOrPut(index) { StringBuilder() }
+                    }
+                    emit(
+                        AgentEvent.ToolCallArgsDelta(
+                            index = index,
+                            id = nextId,
+                            name = nextName,
+                            argumentsSoFar = toolArgBuf[index].toString(),
+                        ),
+                    )
+                },
+            )
+            if (sawReasoning) emit(AgentEvent.ReasoningDone)
             if (msg == null) {
                 emit(AgentEvent.Failed("多次重试后仍无响应"))
                 emit(AgentEvent.Done)
@@ -220,7 +279,7 @@ class AgentEngine(
                     emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
                     val result = executeToolCall(call)
                     emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
-                    history += ApiMessage(role = "tool", content = result.output, toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
+                    history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
                 }
             } else {
                 // Emit all ToolStarted first (serial, on the flow coroutine).
@@ -236,7 +295,7 @@ class AgentEngine(
                 // Emit ToolFinished in order (serial, on the flow coroutine).
                 for ((call, result) in results) {
                     emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
-                    history += ApiMessage(role = "tool", content = result.output, toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
+                    history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
                 }
             }
         }
@@ -250,7 +309,9 @@ class AgentEngine(
      */
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.streamWithRetry(
         request: ChatRequest,
-        onDelta: suspend (String) -> Unit,
+        onContent: suspend (String) -> Unit,
+        onReasoning: suspend (String) -> Unit = {},
+        onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit = { _, _, _, _ -> },
     ): ApiMessage? {
         val maxRetries = 2
         var lastError: String? = null
@@ -259,7 +320,9 @@ class AgentEngine(
             val gotContent = try {
                 client.chatStream(request).collect { ev ->
                     when (ev) {
-                        is LlmStreamEvent.Content -> onDelta(ev.delta)
+                        is LlmStreamEvent.Content -> onContent(ev.delta)
+                        is LlmStreamEvent.Reasoning -> onReasoning(ev.delta)
+                        is LlmStreamEvent.ToolCallDelta -> onToolCall(ev.index, ev.id, ev.name, ev.argumentsDelta)
                         is LlmStreamEvent.Completed -> message = ev.message
                         is LlmStreamEvent.UsageUpdate -> { /* tracked by LlmClient */ }
                     }
@@ -298,6 +361,14 @@ class AgentEngine(
      * assistant tool_calls without matching tool results get synthesized
      * "interrupted" results so the next model call isn't confused.
      */
+    private fun trimToolOutput(output: String): String {
+        if (output.length <= historyToolOutputLimit) return output
+        val head = historyToolOutputLimit / 2
+        val tail = historyToolOutputLimit - head - 32
+        val omitted = output.length - historyToolOutputLimit
+        return output.take(head) + "\n…[截断 " + omitted + " 字符]…\n" + output.takeLast(tail.coerceAtLeast(0))
+    }
+
     private fun cleanupOrphanToolCalls() {
         if (history.isEmpty()) return
         val last = history.last()
@@ -367,126 +438,9 @@ class AgentEngine(
     }
 
     companion object {
-        val DEFAULT_SYSTEM_PROMPT = buildString {
-            // ── Identity ──
-            appendLine("你是 AndMX,一个运行在 Android 设备上的 AI 编码工作台 agent。")
-            appendLine("你和一个无 root 的 Linux (Alpine/proot) 沙箱协同工作。")
-            appendLine()
-
-            // ── Autonomy & Persistence (mirrors Codex) ──
-            appendLine("# 自主性与持久性")
-            appendLine("在当前轮次内尽可能端到端地完成任务:不要停在分析或部分修复上;")
-            appendLine("将变更贯穿到实现、验证和清晰的结果说明中,除非用户明确暂停或重定向。")
-            appendLine("除非用户明确要求计划、提问、头脑风暴或明确不写代码,否则假设用户希望")
-            appendLine("你直接做代码变更或运行工具来解决问题。不要在消息中输出方案,直接实现。")
-            appendLine("如果遇到挑战或阻塞,尝试自己解决而不是放弃。")
-            appendLine("始终在当前轮次内坚持把工作做完。")
-            appendLine()
-
-            // ── Tool Guidelines (mirrors Codex) ──
-            appendLine("# 工具指南")
-            appendLine()
-            appendLine("## Shell 命令 (run_shell)")
-            appendLine("- 搜索文本或文件时优先用 rg 或 rg --files (比 grep 快得多)")
-            appendLine("- 不要用 python 脚本输出大段文件内容")
-            appendLine("- 尽可能并行工具调用 — 尤其是文件读取 (cat, rg, sed, ls, git show, nl, wc)")
-            appendLine("- 运行命令前考虑风险和当前授权模式")
-            appendLine()
-            appendLine("## apply_patch")
-            appendLine("用 apply_patch 工具编辑文件。支持两种格式:")
-            appendLine()
-            appendLine("格式一 (Codex freeform):")
-            appendLine("*** Begin Patch")
-            appendLine("*** Add File: hello.txt")
-            appendLine("+Hello world")
-            appendLine("*** Update File: src/app.py")
-            appendLine("*** Move to: src/main.py")
-            appendLine("@@ def greet():")
-            appendLine("-print(\"Hi\")")
-            appendLine("+print(\"Hello, world!\")")
-            appendLine("*** Delete File: obsolete.txt")
-            appendLine("*** End Patch")
-            appendLine()
-            appendLine("格式二 (unified diff):")
-            appendLine("@@ def greet():")
-            appendLine("-print(\"Hi\")")
-            appendLine("+print(\"Hello, world!\")")
-            appendLine()
-            appendLine("要点:")
-            appendLine("- 改文件优先用 apply_patch 以便用户审查 diff")
-            appendLine("- 变更会进入 diff 审查面板,用户可以逐个接受或拒绝")
-            appendLine()
-            appendLine("## update_plan")
-            appendLine("有一个 update_plan 工具可用于跟踪任务进度。")
-            appendLine("创建计划时,调用 update_plan 并传入简短步骤列表(每步不超过5-7个词),")
-            appendLine("每个步骤带 status: pending / in_progress / completed。")
-            appendLine("始终保持恰好一个 in_progress 步骤,直到全部完成。")
-            appendLine("不要为简单或单步任务使用计划。不要在调用后重复计划全文。")
-            appendLine()
-            appendLine("## 其他工具")
-            appendLine("- read_file / write_file / edit_file: 读写与精确替换文件")
-            appendLine("- list_dir: 列目录")
-            appendLine("- git: 版本控制 (首次使用自动安装 git)")
-            appendLine("- browse: 抓取网页正文")
-            appendLine("- web_search: DuckDuckGo 联网搜索")
-            appendLine()
-
-            // ── Context Hygiene ──
-            appendLine("# 上下文卫生")
-            appendLine("- 不要重复读取已经读过的文件")
-            appendLine("- 工具输出过长时用摘要 + 精确错误片段 + 指针")
-            appendLine("- 项目根目录的 AGENTS.md (如果存在) 已包含在上下文中,无需重读")
-            appendLine("- 不要用 python 脚本输出大段文件内容")
-            appendLine("- 尽可能并行工具调用 — 尤其是文件读取 (cat, rg, sed, ls, git show, nl, wc)")
-            appendLine()
-
-            // ── Diff ──
-            appendLine("# Diff")
-            appendLine("变更进入 diff 审查。用户可能需要批准你的补丁。")
-            appendLine("保持变更最小且聚焦于请求的范围。不要做无关的重构。")
-            appendLine("遵循已有模式、框架和本地辅助 API,而非发明新的抽象风格。")
-            appendLine("仅在确实需要时添加抽象,且必须移除真正的复杂度或减少有意义的重复。")
-            appendLine()
-
-            // ── Output Format ──
-            appendLine("# 输出格式")
-            appendLine("- 用 GitHub-flavored Markdown 格式化")
-            appendLine("- 简单任务用一行回答。按从通用到具体到支撑的顺序组织")
-            appendLine("- 不要用嵌套列表。保持列表扁平(单层)。需要层次时拆分为多个列表或段落")
-            appendLine("- 标题可选,仅在必要时使用,用短 Title Case (1-3词) 加 ** 包裹")
-            appendLine("- 完成后用简洁中文说明做了什么、验证了什么、还有哪些风险或下一步")
-            appendLine("- 对于简单的问候、确认或一次性的对话消息,自然回应即可,不需要标题或列表")
-            appendLine()
-
-            // ── Working with the user (mirrors Codex) ──
-            appendLine("# 与用户交互")
-            appendLine("在工具调用之间,用一两句话说明你在做什么以及为什么。")
-            appendLine("不要空洞地叙述;解释具体动作和理由。")
-            appendLine("工具的输出不需要重复(用户已能看到),只需总结变更并指出重要的上下文或下一步。")
-            appendLine("完成所有工作后,发送最终消息总结结果。")
-            appendLine()
-
-            // ── Computer Use (screen operation) ──
-            appendLine("# 屏幕操作 (Computer Use)")
-            appendLine("当用户要求操作设备屏幕或其他 app 时,使用 `computer` 工具。这是纯视觉能力:")
-            appendLine("- 先 `screenshot` 看清当前屏幕,再决定下一步动作")
-            appendLine("- 用 `click [x,y]` 点击(坐标基于你最近看到的截图分辨率)")
-            appendLine("- 用 `type` 输入文本、`scroll` 滚动、`swipe` 滑动、`key` 发送返回/主页等")
-            appendLine("- 每次操作后工具会自动返回新截图,务必基于新画面判断是否达到目标")
-            appendLine("- 坐标尽量精确;不确定元素位置时先 screenshot 再行动")
-            appendLine("- 安全:不自动化 AndMX 自身窗口;仅操作用户明确要求的目标;每次动作都会经过审批")
-            appendLine("用户未授权屏幕录制/无障碍权限时,工具会返回引导信息,此时告知用户如何开启。")
-            appendLine()
-
-            // ── Frontend Guidance ──
-            appendLine("# 前端指导")
-            appendLine("做前端任务时,避免落入\"AI 套路\"或安全的平庸布局。")
-            appendLine("追求有意图、大胆、略带惊喜的界面。")
-            appendLine("- 排版: 用有表现力的字体,避免默认字体栈")
-            appendLine("- 色彩: 选择清晰的视觉方向,定义 CSS 变量,避免紫色偏倚")
-            appendLine("- 动效: 用少量有意义的动画而非通用微动效")
-            appendLine("- 背景: 不要依赖扁平单色背景,用渐变、形状或微妙图案营造氛围")
-            appendLine("- 整体: 避免样板布局和可互换的 UI 模式")
-        }
+        val DEFAULT_SYSTEM_PROMPT: String =
+            com.andmx.agent.zcode.ZCodePrompts.IDENTITY + "\n\n" +
+                com.andmx.agent.zcode.ZCodePrompts.CORE + "\n\n" +
+                com.andmx.agent.zcode.ZCodePrompts.CRAFT
     }
 }

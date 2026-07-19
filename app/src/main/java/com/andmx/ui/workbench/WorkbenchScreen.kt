@@ -148,7 +148,6 @@ fun WorkbenchScreen(
     var renameTarget by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     var showPlugins by remember { mutableStateOf(false) }
-    var showAutomations by remember { mutableStateOf(false) }
     var showProgress by remember { mutableStateOf(false) }
     var showGoal by remember { mutableStateOf(false) }
     var showComputerUse by remember { mutableStateOf(false) }
@@ -311,7 +310,6 @@ fun WorkbenchScreen(
             CommandId.EXPORT -> controller.send("/export")
             CommandId.SETTINGS -> showSettings = true
             CommandId.PLUGINS -> showPlugins = true
-            CommandId.AUTOMATIONS -> showAutomations = true
             CommandId.TOGGLE_THEME -> cycleTheme()
             CommandId.TOGGLE_WORK_PANE -> if (showWorkPane) showWorkPane = false else openWorkPane(workPaneTab)
             CommandId.TOGGLE_TERMINAL_DOCK -> showTerminalDock = !showTerminalDock
@@ -447,7 +445,6 @@ fun WorkbenchScreen(
                 onNewChat = { controller.newConversation() },
                 onSearch = { showSearch = true },
                 onPlugins = { showPlugins = true },
-                onAutomations = { showAutomations = true },
                 onSettings = { showSettings = true },
                 onSelectConversation = {
                     controller.load(it)
@@ -769,12 +766,6 @@ fun WorkbenchScreen(
         )
     }
 
-    if (showAutomations) {
-        AutomationsOverlay(
-            onRun = { controller.send(it) },
-            onDismiss = { showAutomations = false },
-        )
-    }
 }
 
 @Composable
