@@ -12,6 +12,7 @@
 *.aab
 
 # 工具/IDE 产物
+.codebuddy/
 .kotlin/
 .trae/
 .zcode/
