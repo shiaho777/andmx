@@ -1,0 +1,54 @@
+# Delivery gate:
+# - Branch protection should require this workflow's merge job on PRs into main.
+# - Issues close via PR body Fixes #N / Closes #N on *merge*, not from this workflow.
+# - Do not merge while this workflow is red; do not close the linked Issue early.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install platform and build-tools
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Gradle compile liteDebug
+        run: ./gradlew :app:compileLiteDebugKotlin --no-daemon --stacktrace
+
+      - name: Delivery policy summary
+        if: always()
+        run: |
+          {
+            echo "## Delivery gate"
+            echo "- Job: \`build\` (workflow **CI**)"
+            echo "- Merge only when this job is green on PRs into \`main\`."
+            echo "- Issues close via PR body \`Fixes #N\` / \`Closes #N\` on **merge**, not from CI."
+            echo "- Do not close the linked Issue while CI is red or only because the PR opened."
+          } >> "$GITHUB_STEP_SUMMARY"
