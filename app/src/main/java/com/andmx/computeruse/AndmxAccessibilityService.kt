@@ -107,4 +107,94 @@ class AndmxAccessibilityService : AccessibilityService() {
         }, null)
         return result.await()
     }
+
+    data class UiNodeHit(
+        val text: String,
+        val desc: String,
+        val id: String,
+        val cls: String,
+        val bounds: String,
+        val clickable: Boolean,
+        val cx: Int,
+        val cy: Int,
+    )
+
+    fun dumpUiTree(maxNodes: Int = 220): String {
+        val root = rootInActiveWindow ?: return "(no accessibility root)"
+        val out = StringBuilder()
+        var count = 0
+        fun walk(node: AccessibilityNodeInfo, depth: Int) {
+            if (count >= maxNodes) return
+            count++
+            val rect = android.graphics.Rect()
+            node.getBoundsInScreen(rect)
+            val indent = "  ".repeat(depth.coerceAtMost(12))
+            val text = node.text?.toString().orEmpty().replace('\n', ' ').take(80)
+            val desc = node.contentDescription?.toString().orEmpty().replace('\n', ' ').take(80)
+            val id = node.viewIdResourceName.orEmpty()
+            val cls = node.className?.toString()?.substringAfterLast('.') ?: ""
+            out.append(indent)
+                .append(cls.ifBlank { "?" })
+                .append(" bounds=").append(rect.toShortString())
+            if (text.isNotBlank()) out.append(" text=\"").append(text).append("\"")
+            if (desc.isNotBlank()) out.append(" desc=\"").append(desc).append("\"")
+            if (id.isNotBlank()) out.append(" id=").append(id)
+            if (node.isClickable) out.append(" clickable")
+            if (node.isEditable) out.append(" editable")
+            out.append('\n')
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                walk(child, depth + 1)
+                child.recycle()
+            }
+        }
+        try {
+            walk(root, 0)
+        } finally {
+            root.recycle()
+        }
+        if (count >= maxNodes) out.append("...(truncated at $maxNodes nodes)\n")
+        return out.toString().ifBlank { "(empty tree)" }
+    }
+
+    fun resolveUi(query: String, maxHits: Int = 20): List<UiNodeHit> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val root = rootInActiveWindow ?: return emptyList()
+        val hits = mutableListOf<UiNodeHit>()
+        fun walk(node: AccessibilityNodeInfo) {
+            if (hits.size >= maxHits) return
+            val text = node.text?.toString().orEmpty()
+            val desc = node.contentDescription?.toString().orEmpty()
+            val id = node.viewIdResourceName.orEmpty()
+            val cls = node.className?.toString().orEmpty()
+            val hay = listOf(text, desc, id, cls).joinToString("\n")
+            if (hay.contains(q, ignoreCase = true)) {
+                val rect = android.graphics.Rect()
+                node.getBoundsInScreen(rect)
+                hits += UiNodeHit(
+                    text = text.take(80),
+                    desc = desc.take(80),
+                    id = id,
+                    cls = cls.substringAfterLast('.'),
+                    bounds = rect.toShortString(),
+                    clickable = node.isClickable,
+                    cx = rect.centerX(),
+                    cy = rect.centerY(),
+                )
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                walk(child)
+                child.recycle()
+            }
+        }
+        try {
+            walk(root)
+        } finally {
+            root.recycle()
+        }
+        return hits
+    }
+
 }

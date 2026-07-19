@@ -317,7 +317,6 @@ private fun commandIcon(id: CommandId): ImageVector = when (id) {
     CommandId.EXPORT -> Icons.Outlined.FileDownload
     CommandId.SETTINGS -> Icons.Outlined.Settings
     CommandId.PLUGINS -> Icons.Outlined.Extension
-    CommandId.AUTOMATIONS -> Icons.Outlined.AutoAwesome
     CommandId.TOGGLE_THEME -> Icons.Outlined.Settings
     CommandId.TOGGLE_WORK_PANE -> Icons.AutoMirrored.Outlined.ViewSidebar
     CommandId.TOGGLE_TERMINAL_DOCK -> Icons.Outlined.Terminal

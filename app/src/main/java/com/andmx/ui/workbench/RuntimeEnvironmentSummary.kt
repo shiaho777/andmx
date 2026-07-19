@@ -1,12 +1,12 @@
 package com.andmx.ui.workbench
 
-internal enum class RuntimeEnvironmentLevel {
+enum class RuntimeEnvironmentLevel {
     READY,
     WATCH,
     LIMITED,
 }
 
-internal data class RuntimeEnvironmentSummary(
+data class RuntimeEnvironmentSummary(
     val level: RuntimeEnvironmentLevel,
     val healthLabel: String,
     val healthDetail: String,
@@ -21,7 +21,7 @@ internal data class RuntimeEnvironmentSummary(
     val primaryCommand: String = "/diag",
 )
 
-internal fun buildRuntimeEnvironmentSummary(
+fun buildRuntimeEnvironmentSummary(
     flavor: String,
     targetSdk: Int,
     abi: String,
@@ -101,7 +101,7 @@ internal fun buildRuntimeEnvironmentSummary(
     }
 }
 
-internal fun runtimeEnvironmentStatusText(summary: RuntimeEnvironmentSummary): String = buildString {
+fun runtimeEnvironmentStatusText(summary: RuntimeEnvironmentSummary): String = buildString {
     appendLine("- 执行环境: `${summary.executionSurface}`")
     appendLine("- 环境健康: **${summary.healthLabel}**")
     appendLine("- 引导: ${summary.bootstrapStatus}")

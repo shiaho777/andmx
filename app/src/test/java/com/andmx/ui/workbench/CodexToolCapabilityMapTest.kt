@@ -47,7 +47,6 @@ class CodexToolCapabilityMapTest {
         assertTrue(text.contains("### 浏览与截图 · 浏览与视觉参考"))
         assertTrue(text.contains("### 桌面操作 · 桌面 GUI 操作"))
         assertTrue(text.contains("### 外部能力 · MCP 与插件扩展"))
-        assertTrue(text.contains("### 自动化 · 长期自动化"))
         assertTrue(text.contains("受保护窗口使用截图证据替代"))
         assertTrue(text.contains("不能自动化 Codex 自身"))
         assertTrue(text.contains("Skills、Plugins 和 MCP"))

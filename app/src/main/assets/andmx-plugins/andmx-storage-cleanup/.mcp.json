@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "device-storage": {
+      "type": "builtin",
+      "description": "AndMX on-device storage scan and cleanup tools"
+    }
+  }
+}

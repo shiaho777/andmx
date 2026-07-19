@@ -112,9 +112,14 @@ class LlmClient(
         }
 
         conn.inputStream.bufferedReader().use { reader ->
-            val message = adapter.parseStream(reader.lineSequence()) { delta ->
-                emit(LlmStreamEvent.Content(delta))
-            }
+            val message = adapter.parseStream(
+                lines = reader.lineSequence(),
+                onContent = { delta -> emit(LlmStreamEvent.Content(delta)) },
+                onReasoning = { delta -> emit(LlmStreamEvent.Reasoning(delta)) },
+                onToolCall = { index, id, name, argDelta ->
+                    emit(LlmStreamEvent.ToolCallDelta(index, id, name, argDelta))
+                },
+            )
             conn.disconnect()
             emit(LlmStreamEvent.Completed(message))
         }

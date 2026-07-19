@@ -26,14 +26,35 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun MarkdownView(markdown: String, modifier: Modifier = Modifier) {
+fun MarkdownView(
+    markdown: String,
+    modifier: Modifier = Modifier,
+    streaming: Boolean = false,
+    contentColor: Color = Color.Unspecified,
+    bodySizeSp: Float = 0f,
+) {
     val blocks = remember(markdown) { MarkdownEngine.parse(markdown) }
     val isDark = isSystemInDarkTheme()
-    
+    val textColor = if (contentColor == Color.Unspecified) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        contentColor
+    }
+    val mutedColor = textColor.copy(alpha = 0.82f)
+    val bodyStyle = if (bodySizeSp > 0f) {
+        MaterialTheme.typography.bodyLarge.copy(
+            fontSize = bodySizeSp.sp,
+            lineHeight = (bodySizeSp + 7f).sp,
+        )
+    } else {
+        MaterialTheme.typography.bodyLarge
+    }
+    val gap = if (streaming) 5.dp else 8.dp
+
     Column(modifier = modifier.fillMaxWidth()) {
         blocks.forEachIndexed { index, block ->
-            if (index > 0) Spacer(Modifier.height(8.dp))
-            
+            if (index > 0) Spacer(modifier.height(gap))
+
             when (block) {
                 is MdBlock.Heading -> {
                     val style = when (block.level) {
@@ -43,60 +64,61 @@ fun MarkdownView(markdown: String, modifier: Modifier = Modifier) {
                         else -> MaterialTheme.typography.titleMedium
                     }
                     Text(
-                        text = InlineParser.parse(block.text, MaterialTheme.colorScheme.onSurface),
+                        text = InlineParser.parse(block.text, textColor),
                         style = style.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = textColor,
                     )
                 }
-                
+
                 is MdBlock.Paragraph -> {
                     Text(
-                        text = InlineParser.parse(block.text, MaterialTheme.colorScheme.onSurface),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = InlineParser.parse(block.text, textColor),
+                        style = bodyStyle,
+                        color = textColor,
                     )
                 }
-                
+
                 is MdBlock.Code -> {
                     CodeBlock(
                         code = block.code,
                         language = block.lang,
-                        isDark = isDark
+                        isDark = isDark,
+                        lightweight = streaming,
                     )
                 }
-                
+
                 is MdBlock.List -> {
                     Column {
                         block.items.forEachIndexed { i, item ->
-                            Row(Modifier.padding(vertical = 2.dp)) {
+                            Row(Modifier.padding(vertical = 1.dp)) {
                                 Text(
                                     text = if (block.ordered) "${i + 1}. " else "• ",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    style = bodyStyle,
+                                    color = mutedColor,
                                 )
                                 Text(
-                                    text = InlineParser.parse(item, MaterialTheme.colorScheme.onSurface),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    text = InlineParser.parse(item, textColor),
+                                    style = bodyStyle,
+                                    color = textColor,
                                 )
                             }
                         }
                     }
                 }
-                
+
                 is MdBlock.Quote -> {
                     Row {
                         Box(
                             Modifier
                                 .width(3.dp)
                                 .height(20.dp)
-                                .background(MaterialTheme.colorScheme.outline)
+                                .background(MaterialTheme.colorScheme.outline),
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = InlineParser.parse(block.text, MaterialTheme.colorScheme.onSurface),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = InlineParser.parse(block.text, textColor),
+                            style = bodyStyle,
+                            color = mutedColor,
                         )
                     }
                 }
@@ -106,10 +128,22 @@ fun MarkdownView(markdown: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CodeBlock(code: String, language: String, isDark: Boolean) {
+fun CodeBlock(
+    code: String,
+    language: String,
+    isDark: Boolean,
+    lightweight: Boolean = false,
+) {
     val config = LocalCodePreviewConfig.current
     val theme = config.themeFor(isDark)
-    CodeBlockThemed(code, theme, config.showLineNumbers, config.wrapLongLines, config.fontSize)
+    CodeBlockThemed(
+        code = code,
+        theme = theme,
+        showLineNumbers = config.showLineNumbers && !lightweight,
+        wrapLongLines = config.wrapLongLines || lightweight,
+        fontSize = config.fontSize,
+        lightweight = lightweight,
+    )
 }
 
 @Composable
@@ -118,9 +152,16 @@ fun CodeBlockThemed(
     theme: CodeTheme,
     showLineNumbers: Boolean,
     wrapLongLines: Boolean,
-    fontSize: Int
+    fontSize: Int,
+    lightweight: Boolean = false,
 ) {
-    val highlighted = remember(code, theme) { CodeHighlight.highlight(code, theme) }
+    val highlighted = remember(code, theme, lightweight) {
+        if (lightweight) {
+            androidx.compose.ui.text.AnnotatedString(code)
+        } else {
+            CodeHighlight.highlight(code, theme)
+        }
+    }
     val lineCount = remember(code) { code.count { it == '\n' } + 1 }
     val gutterWidth = (lineCount.toString().length * fontSize * 0.62f).dp + 12.dp
 
@@ -129,7 +170,7 @@ fun CodeBlockThemed(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(theme.background)
-            .padding(vertical = 10.dp)
+            .padding(vertical = 10.dp),
     ) {
         val inner = @Composable {
             Row(Modifier.padding(horizontal = 12.dp)) {
@@ -140,9 +181,9 @@ fun CodeBlockThemed(
                             fontFamily = FontFamily.Monospace,
                             fontSize = fontSize.sp,
                             lineHeight = (fontSize * 1.5f).sp,
-                            color = theme.comment
+                            color = theme.comment,
                         ),
-                        modifier = Modifier.width(gutterWidth)
+                        modifier = Modifier.width(gutterWidth),
                     )
                 }
                 Text(
@@ -151,8 +192,8 @@ fun CodeBlockThemed(
                         fontFamily = FontFamily.Monospace,
                         fontSize = fontSize.sp,
                         lineHeight = (fontSize * 1.5f).sp,
-                        color = theme.foreground
-                    )
+                        color = theme.foreground,
+                    ),
                 )
             }
         }

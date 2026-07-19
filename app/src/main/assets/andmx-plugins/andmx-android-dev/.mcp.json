@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "android-emulator": {
+      "type": "builtin",
+      "provider": "andmx-native"
+    }
+  }
+}

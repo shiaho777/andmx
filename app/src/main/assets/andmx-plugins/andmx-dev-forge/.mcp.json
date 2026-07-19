@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dev-forge": {
+      "type": "builtin",
+      "description": "AndMX dev forge tools"
+    }
+  }
+}

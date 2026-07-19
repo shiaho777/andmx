@@ -1,0 +1,22 @@
+{
+  "name": "andmx-dev-forge",
+  "version": "0.1.0",
+  "description": "开发环境扫描、配方推荐与工程脚手架（当前工作区）。",
+  "author": "AndMX",
+  "license": "MIT",
+  "skills": [
+    "skills/andmx-dev-forge/SKILL.md"
+  ],
+  "commands": [
+    "commands/andmx-dev-forge.md"
+  ],
+  "tools": [],
+  "hooks": [],
+  "enabled": true,
+  "mcpServers": {
+    "dev-forge": {
+      "type": "builtin",
+      "description": "工程/环境工具（forge_*）"
+    }
+  }
+}

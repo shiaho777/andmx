@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "html-video": {
+      "type": "builtin",
+      "description": "AndMX HTML film tools"
+    }
+  }
+}

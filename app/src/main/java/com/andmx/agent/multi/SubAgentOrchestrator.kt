@@ -6,8 +6,11 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.exec.files.GuestFs
 import com.andmx.llm.ApiMessage
+import com.andmx.settings.CustomSubAgent
 import com.andmx.settings.ProviderSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -55,8 +58,10 @@ class SubAgentOrchestrator(
     private val client: com.andmx.llm.LlmApi,
     private val turnProvider: () -> com.andmx.agent.TurnContext,
     private val maxConcurrentThreads: Int = 3,
-    /** Provides the parent agent's history so a checkpoint can be derived as the sub-agent's initial context. */
     private val parentHistoryProvider: () -> List<com.andmx.llm.ApiMessage> = { emptyList() },
+    private val resolveRun: suspend (modelSpec: String) -> Pair<com.andmx.llm.LlmApi, com.andmx.agent.TurnContext> = { _ ->
+        client to turnProvider()
+    },
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
@@ -88,13 +93,33 @@ class SubAgentOrchestrator(
     private val semaphore = Semaphore(maxConcurrentThreads)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeAgents = mutableMapOf<String, AgentStateInfo>()
+    private val agentJobs = mutableMapOf<String, Job>()
     private val agentLock = kotlinx.coroutines.sync.Mutex()
 
-    /** List all active sub-agents with their states. */
+    data class AgentSnapshot(
+        val id: String,
+        val task: String,
+        val state: AgentState,
+        val result: String,
+        val createdAt: Long,
+    )
+
     fun listAgents(): List<Pair<String, AgentState>> =
         activeAgents.entries.map { (id, info) -> id to info.state }
 
-    /** Get the result of a completed sub-agent. */
+    fun listAgentSnapshots(): List<AgentSnapshot> =
+        activeAgents.entries
+            .map { (id, info) ->
+                AgentSnapshot(
+                    id = id,
+                    task = info.task,
+                    state = info.state,
+                    result = info.result,
+                    createdAt = info.createdAt,
+                )
+            }
+            .sortedByDescending { it.createdAt }
+
     fun getResult(agentId: String): String? = activeAgents[agentId]?.result
 
     /** Get the state of a sub-agent. */
@@ -105,29 +130,63 @@ class SubAgentOrchestrator(
      * Returns the sub-agent's final answer.
      * Mirrors Codex's spawnAgent.
      */
+    data class SpawnSpec(
+        val task: String,
+        val systemHint: String = "",
+        val agentId: String = "subagent-${System.currentTimeMillis()}",
+        val agentName: String = "",
+        val agentDescription: String = "",
+        val agentSystem: String = "",
+        val tools: List<String> = listOf("*"),
+        val disallowedTools: List<String> = emptyList(),
+        val maxTurns: Int? = null,
+        val permissionMode: String = "default",
+        val color: String = "",
+        val background: Boolean = false,
+        val model: String = "inherit",
+    )
+
     suspend fun spawn(task: String, systemHint: String = "", agentId: String = "subagent-${System.currentTimeMillis()}"): String {
-        _events.tryEmit(SubAgentEvent.Started(agentId, task))
+        return spawn(SpawnSpec(task = task, systemHint = systemHint, agentId = agentId))
+    }
 
-        // Derive a lightweight handoff from the parent's recent history so the
-        // sub-agent inherits context (what's been done, what files were touched)
-        // without a full LLM checkpoint round-trip.
+    suspend fun spawn(spec: SpawnSpec): String {
+        val agentId = spec.agentId
+        _events.tryEmit(SubAgentEvent.Started(agentId, spec.task))
+        agentJobs[agentId] = currentCoroutineContext()[Job] ?: Job()
+
         val handoff = buildParentHandoff()
+        val agentDef = CustomSubAgent(
+            id = agentId,
+            name = spec.agentName.ifBlank { "subagent" },
+            description = spec.agentDescription,
+            systemPrompt = spec.agentSystem,
+            permissionMode = spec.permissionMode,
+            tools = spec.tools,
+            disallowedTools = spec.disallowedTools,
+            color = spec.color.ifBlank { "blue" },
+            background = spec.background,
+        )
+        val baseTools = toolsFactory()
+        val tools = SubagentCatalog.filterTools(baseTools, agentDef)
+        val maxSteps = (spec.maxTurns ?: 25).coerceIn(1, 80)
 
+        val (runClient, turn) = resolveRun(spec.model)
         val engine = AgentEngine(
-            tools = toolsFactory(),
-            client = client,
-            systemPrompt = buildSubAgentPrompt(task, systemHint, handoff),
-            maxSteps = 25,  // sub-agents handle a bounded subtask
+            tools = tools,
+            client = runClient,
+            systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef),
+            maxSteps = maxSteps,
         )
 
         agentLock.withLock {
-            activeAgents[agentId] = AgentStateInfo(engine, task, AgentState.RUNNING)
+            activeAgents[agentId] = AgentStateInfo(engine, spec.task, AgentState.RUNNING)
         }
 
         return try {
             semaphore.acquire()
             val result = StringBuilder()
-            engine.runTurn(settings, turnProvider(), task).collect { event ->
+            engine.runTurn(settings, turn, spec.task).collect { event ->
                 when (event) {
                     is AgentEvent.AssistantDelta -> _events.tryEmit(SubAgentEvent.Delta(agentId, event.text))
                     is AgentEvent.Assistant -> {
@@ -154,6 +213,7 @@ class SubAgentOrchestrator(
             }
             "子代理失败: ${t.message}"
         } finally {
+            agentJobs.remove(agentId)
             semaphore.release()
         }
     }
@@ -223,9 +283,25 @@ class SubAgentOrchestrator(
      * Mirrors Codex's closeAgent.
      */
     fun close(agentId: String): Boolean {
-        val info = activeAgents.remove(agentId) ?: return false
+        agentJobs.remove(agentId)?.cancel()
+        val info = activeAgents[agentId] ?: return false
+        activeAgents[agentId] = info.copy(state = AgentState.CLOSED, result = info.result.ifBlank { "(已关闭)" })
         _events.tryEmit(SubAgentEvent.Closed(agentId))
         return true
+    }
+
+    fun cancelAll(reason: String = "已停止") {
+        agentJobs.values.forEach { it.cancel() }
+        agentJobs.clear()
+        val ids = activeAgents.keys.toList()
+        for (id in ids) {
+            val info = activeAgents[id] ?: continue
+            if (info.state == AgentState.RUNNING || info.state == AgentState.WAITING) {
+                activeAgents[id] = info.copy(state = AgentState.CLOSED, result = reason)
+                _events.tryEmit(SubAgentEvent.Failed(id, reason))
+                _events.tryEmit(SubAgentEvent.Closed(id))
+            }
+        }
     }
 
     /**
@@ -244,10 +320,20 @@ class SubAgentOrchestrator(
      * The caller can check status via [listAgents] or wait via [wait].
      */
     fun spawnAsync(task: String, systemHint: String = ""): String {
-        val agentId = "subagent-${System.currentTimeMillis()}"
-        scope.launch {
-            spawn(task, systemHint, agentId)
+        return spawnAsync(SpawnSpec(task = task, systemHint = systemHint))
+    }
+
+    fun spawnAsync(spec: SpawnSpec): String {
+        val agentId = spec.agentId.ifBlank { "subagent-${System.currentTimeMillis()}" }
+        val fixed = if (spec.agentId == agentId) spec else spec.copy(agentId = agentId)
+        val job = scope.launch {
+            try {
+                spawn(fixed)
+            } finally {
+                agentJobs.remove(agentId)
+            }
         }
+        agentJobs[agentId] = job
         return agentId
     }
 
@@ -257,9 +343,19 @@ class SubAgentOrchestrator(
     /** The multi-agent control tool (spawn/resume/wait/close). */
     fun createMultiAgentTool(): Tool = MultiAgentControlTool(this)
 
-    private fun buildSubAgentPrompt(task: String, systemHint: String, handoff: String = ""): String = buildString {
-        appendLine("你是 AndMX 的子代理，负责完成主代理分配给你的特定子任务。")
-        appendLine()
+    private fun buildSubAgentPrompt(
+        task: String,
+        systemHint: String,
+        handoff: String = "",
+        agent: CustomSubAgent? = null,
+    ): String = buildString {
+        if (agent != null && (agent.systemPrompt.isNotBlank() || agent.name.isNotBlank())) {
+            appendLine(SubagentCatalog.agentSystemBlock(agent))
+            appendLine()
+        } else {
+            appendLine("你是 AndMX 的子代理，负责完成主代理分配给你的特定子任务。")
+            appendLine()
+        }
         appendLine("## 任务")
         appendLine(task)
         appendLine()
@@ -301,7 +397,9 @@ class SubAgentOrchestrator(
 
     /** Clean up all active sub-agents. */
     fun shutdown() {
+        cancelAll("已关闭")
         activeAgents.clear()
+        agentJobs.clear()
         scope.cancel()
     }
 }
@@ -428,5 +526,105 @@ class MultiAgentControlTool(private val orchestrator: SubAgentOrchestrator) : To
             }
             else -> ToolResult("未知操作: $action", isError = true)
         }
+    }
+}
+
+
+class ZCodeAgentTool(
+    private val orchestrator: SubAgentOrchestrator,
+    private val resolveAgent: suspend (String?) -> CustomSubAgent? = { null },
+    private val listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
+) : Tool {
+    override val name = "Agent"
+    override val description =
+        "Launch a specialized sub-agent for complex multi-step work. Prefer Explore for broad read-only search; use general-purpose for multi-step research and code tasks; or pass a named custom agent."
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("description") {
+                put("type", "string")
+                put("description", "Short 3-5 word task label")
+            }
+            putJsonObject("prompt") {
+                put("type", "string")
+                put("description", "Full task for the agent")
+            }
+            putJsonObject("run_in_background") {
+                put("type", "boolean")
+                put("description", "Run without blocking the main agent")
+            }
+            putJsonObject("subagent_type") {
+                put("type", "string")
+                put("description", "Agent name: Explore (default), general-purpose, or a user-defined agent")
+            }
+        }
+        putJsonArray("required") { add("description"); add("prompt") }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val prompt = args["prompt"]?.jsonPrimitive?.content
+            ?: return ToolResult("prompt required", isError = true)
+        val description = args["description"]?.jsonPrimitive?.content.orEmpty()
+        val kind = args["subagent_type"]?.jsonPrimitive?.content
+            ?: args["agent_type"]?.jsonPrimitive?.content
+            ?: args["agentType"]?.jsonPrimitive?.content
+        val background = args["run_in_background"]?.let { el ->
+            runCatching { el.jsonPrimitive.content.toBooleanStrict() }.getOrNull()
+                ?: runCatching { el.jsonPrimitive.content.toBoolean() }.getOrNull()
+                ?: false
+        } == true
+
+        val agent = resolveAgent(kind)
+        if (agent != null && !agent.enabled) {
+            return ToolResult("Subagent \"${agent.name}\" is disabled", isError = true)
+        }
+        if (kind != null && kind.isNotBlank() && agent == null) {
+            val available = listTypes().joinToString(", ")
+            return ToolResult(
+                "Unknown subagent_type \"$kind\". Available: $available",
+                isError = true,
+            )
+        }
+
+        val resolved = agent ?: resolveAgent(null)
+        val task = if (description.isNotBlank()) "[$description] $prompt" else prompt
+        val runBg = background || (resolved?.background == true)
+        val agentId = "subagent-${System.currentTimeMillis()}"
+        val spec = SubAgentOrchestrator.SpawnSpec(
+            task = task,
+            systemHint = buildString {
+                if (description.isNotBlank()) appendLine("label: $description")
+                if (resolved != null) appendLine("subagent_type=${resolved.name}")
+                else if (!kind.isNullOrBlank()) appendLine("subagent_type=$kind")
+            }.trim(),
+            agentId = agentId,
+            agentName = resolved?.name.orEmpty().ifBlank { kind.orEmpty().ifBlank { "Explore" } },
+            agentDescription = resolved?.description.orEmpty(),
+            agentSystem = resolved?.systemPrompt.orEmpty(),
+            tools = resolved?.tools ?: listOf("Bash", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "TodoWrite"),
+            disallowedTools = resolved?.disallowedTools.orEmpty(),
+            maxTurns = resolved?.maxTurns,
+            permissionMode = resolved?.permissionMode ?: "default",
+            color = resolved?.color.orEmpty(),
+            background = runBg,
+            model = resolved?.model ?: "inherit",
+        )
+
+        if (runBg) {
+            orchestrator.spawnAsync(spec)
+            return ToolResult(
+                "Agent started in background id=$agentId type=${spec.agentName} description=${description.ifBlank { "(none)" }}",
+            )
+        }
+        val result = orchestrator.spawn(spec)
+        return ToolResult(
+            buildString {
+                appendLine("Agent result:")
+                appendLine("type: ${spec.agentName}")
+                if (description.isNotBlank()) appendLine("description: $description")
+                appendLine(result)
+            }.trim(),
+        )
     }
 }

@@ -58,6 +58,8 @@ fun McpEditPage(
     val canSave = name.isNotBlank() && target.isNotBlank() && !name.contains('|')
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
                 title = { Text(if (initial == null) "新建 MCP 服务器" else "编辑 MCP 服务器") },

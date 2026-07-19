@@ -147,7 +147,7 @@ internal fun buildCodexSelfModel(
             "工具能力: ${toolCapabilityMap?.let { "${it.domainCount} 个能力域 · ${it.toolCount} 个工具" } ?: "内置风险矩阵 ${policy.rows.size} 类"} · MCP ${snapshot.mcpServers} 个",
             "可见指令层: ${instructionSummary.visibleLayers.joinToString(" / ")}",
             "环境契约: ${environmentContract?.title ?: instructionSummary.contractSummary}",
-            "Codex app 表面: 线程/项目模式、命令菜单、任务侧栏、Git/Diff、集成终端、in-app browser、Computer Use、Skills/MCP/Automations",
+            "Codex app 表面: 线程/项目模式、命令菜单、任务侧栏、Git/Diff、集成终端、in-app browser、Computer Use、Skills/MCP",
             "Live UI 限制: 受保护宿主窗口无法由 Computer Use 直接操作时, 使用截图证据继续复刻",
         ),
         primaryCommand = layers.firstOrNull { it.state == SelfModelState.GAP }?.command

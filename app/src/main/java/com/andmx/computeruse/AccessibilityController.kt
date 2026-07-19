@@ -68,4 +68,23 @@ class AccessibilityController(private val context: Context) {
 
     private fun notConnected(): Result<Unit> =
         Result.failure(IllegalStateException("无障碍服务未连接,请到系统设置 → 无障碍中开启 AndMX 服务"))
+
+    fun dumpUiTree(maxNodes: Int = 220): Result<String> {
+        val service = AndmxAccessibilityService.instance ?: return notConnectedResult()
+        return Result.success(service.dumpUiTree(maxNodes))
+    }
+
+    fun resolveUi(query: String): Result<String> {
+        val service = AndmxAccessibilityService.instance ?: return notConnectedResult()
+        val hits = service.resolveUi(query)
+        if (hits.isEmpty()) return Result.success("(no match for $query)")
+        val text = hits.joinToString("\n") { h ->
+            "x=${h.cx} y=${h.cy} bounds=${h.bounds} clickable=${h.clickable} cls=${h.cls} text=\"${h.text}\" desc=\"${h.desc}\" id=${h.id}"
+        }
+        return Result.success(text)
+    }
+
+    private fun <T> notConnectedResult(): Result<T> =
+        Result.failure(IllegalStateException("无障碍服务未连接,请到系统设置 → 无障碍中开启 AndMX 服务"))
+
 }

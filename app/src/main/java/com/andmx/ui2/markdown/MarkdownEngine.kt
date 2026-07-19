@@ -16,7 +16,7 @@ object MarkdownEngine {
 
         while (i < lines.size) {
             val line = lines[i]
-            
+
             when {
                 line.startsWith("```") -> {
                     val lang = line.substring(3).trim()
@@ -26,23 +26,25 @@ object MarkdownEngine {
                         code.add(lines[i])
                         i++
                     }
+                    if (i < lines.size && lines[i].startsWith("```")) {
+                        i++
+                    }
                     blocks.add(MdBlock.Code(lang, code.joinToString("\n")))
-                    i++
                 }
-                
+
                 line.startsWith("#") -> {
                     val level = line.takeWhile { it == '#' }.length
                     val text = line.substring(level).trim()
                     blocks.add(MdBlock.Heading(level.coerceIn(1, 6), text))
                     i++
                 }
-                
+
                 line.startsWith(">") -> {
                     val text = line.substring(1).trim()
                     blocks.add(MdBlock.Quote(text))
                     i++
                 }
-                
+
                 line.matches(Regex("^[*-]\\s+.*")) -> {
                     val items = mutableListOf<String>()
                     while (i < lines.size && lines[i].matches(Regex("^[*-]\\s+.*"))) {
@@ -51,7 +53,7 @@ object MarkdownEngine {
                     }
                     blocks.add(MdBlock.List(false, items))
                 }
-                
+
                 line.matches(Regex("^\\d+\\.\\s+.*")) -> {
                     val items = mutableListOf<String>()
                     while (i < lines.size && lines[i].matches(Regex("^\\d+\\.\\s+.*"))) {
@@ -60,26 +62,29 @@ object MarkdownEngine {
                     }
                     blocks.add(MdBlock.List(true, items))
                 }
-                
+
                 line.isNotBlank() -> {
                     val para = mutableListOf(line)
                     i++
-                    while (i < lines.size && lines[i].isNotBlank() && 
-                           !lines[i].startsWith("#") && 
-                           !lines[i].startsWith(">") &&
-                           !lines[i].startsWith("```") &&
-                           !lines[i].matches(Regex("^[*-]\\s+.*")) &&
-                           !lines[i].matches(Regex("^\\d+\\.\\s+.*"))) {
+                    while (
+                        i < lines.size &&
+                        lines[i].isNotBlank() &&
+                        !lines[i].startsWith("#") &&
+                        !lines[i].startsWith(">") &&
+                        !lines[i].startsWith("```") &&
+                        !lines[i].matches(Regex("^[*-]\\s+.*")) &&
+                        !lines[i].matches(Regex("^\\d+\\.\\s+.*"))
+                    ) {
                         para.add(lines[i])
                         i++
                     }
                     blocks.add(MdBlock.Paragraph(para.joinToString(" ")))
                 }
-                
+
                 else -> i++
             }
         }
-        
+
         return blocks
     }
 }

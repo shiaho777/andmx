@@ -10,7 +10,6 @@ internal enum class ToolCapabilityDomain(val label: String) {
     BROWSE("浏览与截图"),
     GUI("桌面操作"),
     EXTEND("外部能力"),
-    AUTOMATE("自动化"),
     DELIVER("交付"),
 }
 
@@ -33,7 +32,6 @@ internal data class CodexToolCapabilityMap(
     val toolCount: Int get() = items.sumOf { it.tools.size }
     val emptyDomainCount: Int get() = items.count {
         it.tools.isEmpty() &&
-            it.domain != ToolCapabilityDomain.AUTOMATE &&
             it.domain != ToolCapabilityDomain.EXTEND
     }
 }
@@ -103,14 +101,6 @@ internal fun buildCodexToolCapabilityMap(
             safety = if (mcpServerCount > 0) "$mcpServerCount 个 MCP 服务器已连接。" else "MCP 需要在设置中显式配置后才能使用。",
         ),
         ToolCapabilityDomainItem(
-            domain = ToolCapabilityDomain.AUTOMATE,
-            title = "长期自动化",
-            detail = "把重复检查、线程心跳、项目巡检和 skill 驱动流程变成可恢复的自动化入口。",
-            tools = emptyList(),
-            command = "/activity",
-            safety = "自动化应继承沙箱和授权策略; 高风险后台任务需要更窄的规则和可审查提示。",
-        ),
-        ToolCapabilityDomainItem(
             domain = ToolCapabilityDomain.DELIVER,
             title = "交付闭环",
             detail = "把观察、修改、验证、证据和剩余风险汇总成报告或交接摘要。",
@@ -121,8 +111,7 @@ internal fun buildCodexToolCapabilityMap(
     )
     val firstEmpty = items.firstOrNull {
         it.tools.isEmpty() &&
-            it.domain != ToolCapabilityDomain.EXTEND &&
-            it.domain != ToolCapabilityDomain.AUTOMATE
+            it.domain != ToolCapabilityDomain.EXTEND
     }
     return CodexToolCapabilityMap(
         title = when {

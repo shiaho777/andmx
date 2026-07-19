@@ -37,7 +37,6 @@ class CodexCommandReferenceTest {
         assertTrue(text.contains("codex://threads/new"))
         assertTrue(text.contains("codex://settings"))
         assertTrue(text.contains("codex://skills"))
-        assertTrue(text.contains("codex://automations"))
         assertTrue(text.contains("### 安全备注"))
         assertTrue(text.contains("不能自动化 Codex 自身"))
     }

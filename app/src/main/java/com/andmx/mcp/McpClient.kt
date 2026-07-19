@@ -240,7 +240,7 @@ class McpClient(
             when (method) {
                 McpProtocol.ELICITATION_CREATE -> {
                     val handler = elicitationHandler ?: run {
-                        sendResponse(id, error = "elicitation not supported")
+                        sendResponse(id, result = buildJsonObject { put("action", "cancel") })
                         return@launch
                     }
                     val msg = params?.get("message")?.jsonPrimitive?.content ?: ""
@@ -253,7 +253,15 @@ class McpClient(
                 }
                 McpProtocol.SAMPLING_CREATE_MESSAGE -> {
                     // Sampling not yet implemented — decline gracefully
-                    sendResponse(id, error = "sampling not supported")
+                    sendResponse(id, result = buildJsonObject {
+                        put("role", "assistant")
+                        put("model", "andmx-mobile")
+                        put("content", kotlinx.serialization.json.buildJsonObject {
+                            put("type", "text")
+                            put("text", "Sampling declined on AndMX mobile client.")
+                        })
+                        put("stopReason", "endTurn")
+                    })
                 }
                 McpProtocol.PING -> {
                     sendResponse(id, result = buildJsonObject {})

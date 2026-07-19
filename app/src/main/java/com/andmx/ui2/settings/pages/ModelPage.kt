@@ -116,6 +116,8 @@ private fun ModelListView(
     onSetPrimary: (ProviderDefinition) -> Unit
 ) {
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = { backAppBar("模型设置", onBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {
@@ -197,13 +199,10 @@ private fun ProviderCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AssistChip(
-                    onClick = {},
+                    onClick = {}, enabled = false,
                     label = { Text(kindShort(provider)) }
                 )
-                AssistChip(
-                    onClick = {},
-                    label = { Text("${provider.models.size} 个模型") }
-                )
+                AssistChip(onClick = {}, enabled = false, label = { Text("${provider.models.size} 个模型") })
                 if (!isPrimary && provider.enabled) {
                     androidx.compose.material3.TextButton(onClick = onSetPrimary) {
                         Text("设为主要")

@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
@@ -68,7 +67,6 @@ fun Sidebar(
     onNewChat: () -> Unit,
     onSearch: () -> Unit,
     onPlugins: () -> Unit,
-    onAutomations: () -> Unit,
     onSettings: () -> Unit,
     onSelectConversation: (Long) -> Unit,
     onDeleteConversation: (Long) -> Unit,
@@ -105,8 +103,6 @@ fun Sidebar(
         NavRow(Icons.Outlined.ChatBubbleOutline, "新对话", onClick = onNewChat)
         NavRow(Icons.Outlined.Search, "搜索", onClick = onSearch)
         NavRow(Icons.Outlined.Extension, "插件", onClick = onPlugins)
-        NavRow(Icons.Outlined.AutoAwesome, "自动化", onClick = onAutomations)
-
         Spacer(Modifier.height(Spacing.sm))
 
         LazyColumn(

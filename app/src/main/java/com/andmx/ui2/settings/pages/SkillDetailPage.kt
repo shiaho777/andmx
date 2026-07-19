@@ -48,7 +48,10 @@ fun SkillDetailPage(
         } else ""
     }
 
-    Scaffold(topBar = { backAppBar(skill.name, onBack) }) { padding ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        topBar = { backAppBar(skill.name, onBack) }) { padding ->
         Column(
             Modifier
                 .padding(padding)

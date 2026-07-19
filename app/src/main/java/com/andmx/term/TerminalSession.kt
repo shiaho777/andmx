@@ -4,6 +4,9 @@ import android.content.Context
 import com.andmx.exec.proot.ProotRuntime
 import com.andmx.exec.proot.RootfsInstaller
 import com.andmx.exec.pty.PtyProcess
+import com.andmx.workspace.ProjectManager
+import com.andmx.workspace.RemoteWorkspaceStore
+import com.andmx.workspace.WorkspaceKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,6 +53,12 @@ class TerminalSession(
     fun start() {
         if (process != null) return
         scope.launch {
+            val projectManager = ProjectManager(context)
+            if (projectManager.workspaceKind.value == WorkspaceKind.REMOTE) {
+                startRemoteSsh(projectManager)
+                return@launch
+            }
+
             emit(status = "准备 proot…")
             if (!runtime.install().ok) { emit(status = "✗ proot 引导失败"); return@launch }
 
@@ -85,6 +94,82 @@ class TerminalSession(
             process = p
             emit(running = true, status = "已连接 · pid=${p.pid}")
             readLoop(p)
+        }
+    }
+
+
+    private suspend fun startRemoteSsh(projectManager: ProjectManager) {
+        emit(status = "准备 SSH 远程终端…")
+        val spec = projectManager.currentRemoteSpec()
+        if (spec == null) {
+            emit(status = "✗ 未找到远程工作区配置")
+            return
+        }
+        val store = RemoteWorkspaceStore(context)
+        if (store.findSshBinary() == null) {
+            emit(status = "✗ 当前环境没有可用的 ssh 客户端")
+            return
+        }
+        val remotePath = spec.remotePath.ifBlank { "~" }
+        val remoteCmd = "cd " + shellQuote(remotePath) + " 2>/dev/null || cd ~; exec " + 36.toChar() + "SHELL -l"
+        val argvList = try {
+            store.buildSshArgv(spec, remoteCmd, batchMode = false).toMutableList()
+        } catch (t: Throwable) {
+            emit(status = "✗ ${t.message}")
+            return
+        }
+        val sshIndex = argvList.indexOfFirst { it == "ssh" || it.endsWith("/ssh") }
+        if (sshIndex >= 0 && "-tt" !in argvList) {
+            argvList.add(sshIndex + 1, "-tt")
+        }
+        val banner = buildString {
+            append(27.toChar())
+            append("[36mSSH ")
+            append(spec.username)
+            append('@')
+            append(spec.host)
+            append(':')
+            append(spec.port)
+            append("  ")
+            append(remotePath)
+            append(27.toChar())
+            append("[0m")
+            append("\r\n")
+        }
+        feed(banner)
+        val p = try {
+            PtyProcess.start(
+                command = argvList.first(),
+                argv = argvList.toTypedArray(),
+                envp = emptyArray(),
+                cwd = context.filesDir.path,
+                rows = rows,
+                cols = cols,
+            )
+        } catch (t: Throwable) {
+            emit(status = "✗ SSH 启动失败: ${t.message}")
+            return
+        }
+        process = p
+        emit(running = true, status = "远程 SSH · pid=${p.pid}")
+        readLoop(p)
+    }
+
+    private fun shellQuote(value: String): String {
+        val q = 39.toChar()
+        return buildString {
+            append(q)
+            value.forEach { ch ->
+                if (ch == q) {
+                    append(q)
+                    append(92.toChar())
+                    append(q)
+                    append(q)
+                } else {
+                    append(ch)
+                }
+            }
+            append(q)
         }
     }
 

@@ -56,7 +56,10 @@ fun CodePreviewPage(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     fun save(u: ProviderSettings) { scope.launch { store.update(u) } }
 
-    Scaffold(topBar = { backAppBar("代码预览", onBack) }) { padding ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        topBar = { backAppBar("代码预览", onBack) }) { padding ->
         Column(
             Modifier
                 .padding(padding)

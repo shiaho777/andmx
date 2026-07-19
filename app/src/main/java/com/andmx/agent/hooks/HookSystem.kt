@@ -24,11 +24,37 @@ import kotlinx.serialization.json.put
  */
 class HookSystem(
     private val context: Context,
-    private val hooks: List<HookConfig> = emptyList(),
+    hooks: List<HookConfig> = emptyList(),
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
     private val runtime = ProotRuntime(context)
     private val env = LocalProotEnvironment(context, runtime)
+    @Volatile private var hooks: List<HookConfig> = hooks.toList()
+
+    fun replaceHooks(next: List<HookConfig>) {
+        hooks = next.toList()
+    }
+
+    fun appendHooks(more: List<HookConfig>) {
+        if (more.isEmpty()) return
+        hooks = hooks + more
+    }
+
+    companion object {
+        fun parseEvent(raw: String): HookEvent? {
+            val key = raw.trim().lowercase().replace('-', '_')
+            return when (key) {
+                "session_start" -> HookEvent.SESSION_START
+                "user_prompt_submit", "user_prompt" -> HookEvent.USER_PROMPT_SUBMIT
+                "pre_tool_use", "pretooluse" -> HookEvent.PRE_TOOL_USE
+                "post_tool_use", "posttooluse" -> HookEvent.POST_TOOL_USE
+                "pre_compact", "precompact" -> HookEvent.PRE_COMPACT
+                "post_compact", "postcompact" -> HookEvent.POST_COMPACT
+                "stop", "session_stop", "session_end" -> HookEvent.STOP
+                else -> null
+            }
+        }
+    }
 
     enum class HookEvent {
         SESSION_START,

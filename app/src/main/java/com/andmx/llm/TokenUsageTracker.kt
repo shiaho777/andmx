@@ -67,6 +67,17 @@ class TokenUsageTracker {
         _rateLimit.value = RateLimitStatus()
     }
 
+    fun restore(input: Int, output: Int, cached: Int = 0, total: Int = 0) {
+        val usage = TokenUsage(
+            inputTokens = input.coerceAtLeast(0),
+            cachedInputTokens = cached.coerceAtLeast(0),
+            outputTokens = output.coerceAtLeast(0),
+            totalTokens = if (total > 0) total else (input + output).coerceAtLeast(0),
+        )
+        _sessionUsage.value = usage
+        _lastTurnUsage.value = TokenUsage()
+    }
+
     /** Whether rate limit is critically low (< 10%). */
     fun isRateLimitCritical(): Boolean {
         val rl = _rateLimit.value

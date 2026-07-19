@@ -19,9 +19,12 @@ object ToolArgs {
     fun preview(toolName: String, args: String, limit: Int = 100): String = when (toolName) {
         "run_shell" -> value(args, "command")
         "read_file", "write_file", "edit_file", "apply_patch", "list_dir" -> value(args, "path")
+        "grep" -> value(args, "pattern").ifBlank { value(args, "path") }
+        "glob" -> value(args, "pattern").ifBlank { value(args, "path") }
         "browse" -> value(args, "url")
         "web_search" -> value(args, "query")
         "git" -> value(args, "command").ifBlank { value(args, "args") }
+        "update_plan" -> "更新计划"
         else -> args.take(limit)
     }.ifBlank { args.take(limit) }
 

@@ -26,7 +26,7 @@ class SseParserTest {
             "data: [DONE]",
         )
         val collected = StringBuilder()
-        val msg = adapter.parseStream(lines) { collected.append(it) }
+        val msg = adapter.parseStream(lines, onContent = { collected.append(it) })
 
         assertEquals("Hello 世界", collected.toString())
         assertEquals("Hello 世界", msg.content)
@@ -41,7 +41,7 @@ class SseParserTest {
             """data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" -la\"}"}}]}}]}""",
             "data: [DONE]",
         )
-        val msg = adapter.parseStream(lines) {}
+        val msg = adapter.parseStream(lines, onContent = {})
 
         val calls = msg.toolCalls
         assertEquals(1, calls?.size)

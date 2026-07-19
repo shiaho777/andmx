@@ -61,9 +61,13 @@ object OpenAiChatAdapter : WireAdapter {
     override fun extractUsage(body: String): JsonObject? =
         runCatching { json.parseToJsonElement(body).jsonObject["usage"] as? JsonObject }.getOrNull()
 
-    override suspend fun parseStream(lines: Sequence<String>, onContent: suspend (String) -> Unit): ApiMessage {
+    override suspend fun parseStream(
+        lines: Sequence<String>,
+        onContent: suspend (String) -> Unit,
+        onReasoning: suspend (String) -> Unit,
+        onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit,
+    ): ApiMessage {
         val contentBuf = StringBuilder()
-        // tool_calls arrive incrementally, indexed; accumulate by index in order.
         val toolAcc = sortedMapOf<Int, Acc>()
         for (raw in lines) {
             val line = raw.trim()
@@ -73,11 +77,17 @@ object OpenAiChatAdapter : WireAdapter {
             val chunk = runCatching { json.decodeFromString(com.andmx.llm.ChatStreamChunk.serializer(), data) }.getOrNull() ?: continue
             val delta = chunk.choices.firstOrNull()?.delta ?: continue
             delta.content?.let { if (it.isNotEmpty()) { contentBuf.append(it); onContent(it) } }
+            val reasoningPiece = delta.reasoningContent ?: delta.reasoning
+            reasoningPiece?.let { if (it.isNotEmpty()) onReasoning(it) }
             delta.toolCalls?.forEach { tc ->
                 val acc = toolAcc.getOrPut(tc.index) { Acc() }
                 tc.id?.let { acc.id = it }
                 tc.function?.name?.let { acc.name = it }
-                tc.function?.arguments?.let { acc.arguments.append(it) }
+                val argDelta = tc.function?.arguments.orEmpty()
+                if (argDelta.isNotEmpty()) acc.arguments.append(argDelta)
+                if (tc.id != null || tc.function?.name != null || argDelta.isNotEmpty()) {
+                    onToolCall(tc.index, acc.id, acc.name, argDelta)
+                }
             }
         }
         val toolCalls = toolAcc.values
@@ -106,25 +116,57 @@ object OpenAiChatAdapter : WireAdapter {
      * can fall back to manual entry.
      */
     override suspend fun listModels(def: ProviderDefinition): List<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            val url = URL(def.baseUrl.trimEnd('/') + "/models")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 15_000
-                readTimeout = 20_000
-                authHeader(def.apiKey)?.let { (k, v) -> setRequestProperty(k, v) }
-                extraHeaders().forEach { (k, v) -> setRequestProperty(k, v) }
+        val url = URL(def.baseUrl.trimEnd('/') + "/models")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 20_000
+            authHeader(def.apiKey)?.let { (k, v) -> setRequestProperty(k, v) }
+            extraHeaders().forEach { (k, v) -> setRequestProperty(k, v) }
+            def.httpHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
+        }
+        try {
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                error("HTTP $code: ${text.take(200)}")
             }
-            try {
-                val code = conn.responseCode
-                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code !in 200..299) return@runCatching emptyList()
-                val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@runCatching emptyList()
-                data.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
-            } finally {
-                conn.disconnect()
+            parseModelCatalogue(text)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    fun parseModelCatalogue(body: String): List<String> {
+        val root = runCatching { json.parseToJsonElement(body) }.getOrNull() ?: return emptyList()
+        val obj = runCatching { root.jsonObject }.getOrNull()
+        if (obj != null) {
+            obj["data"]?.jsonArray?.let { arr ->
+                val ids = arr.mapNotNull { el ->
+                    runCatching { el.jsonObject["id"]?.jsonPrimitive?.content }.getOrNull()
+                        ?: runCatching { el.jsonPrimitive.content }.getOrNull()
+                }
+                if (ids.isNotEmpty()) return ids.distinct().sorted()
             }
-        }.getOrDefault(emptyList())
+            obj["models"]?.jsonArray?.let { arr ->
+                val ids = arr.mapNotNull { el ->
+                    val o = runCatching { el.jsonObject }.getOrNull()
+                    if (o != null) {
+                        o["id"]?.jsonPrimitive?.content
+                            ?: o["name"]?.jsonPrimitive?.content
+                            ?: o["model"]?.jsonPrimitive?.content
+                    } else {
+                        runCatching { el.jsonPrimitive.content }.getOrNull()
+                    }
+                }
+                if (ids.isNotEmpty()) return ids.distinct().sorted()
+            }
+        }
+        val arr = runCatching { root.jsonArray }.getOrNull() ?: return emptyList()
+        return arr.mapNotNull { el ->
+            runCatching { el.jsonObject["id"]?.jsonPrimitive?.content }.getOrNull()
+                ?: runCatching { el.jsonPrimitive.content }.getOrNull()
+        }.distinct().sorted()
     }
 }

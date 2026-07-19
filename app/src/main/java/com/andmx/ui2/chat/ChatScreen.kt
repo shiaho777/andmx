@@ -7,32 +7,36 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DriveFolderUpload
-import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,16 +46,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.andmx.agent.SlashCommands
+import com.andmx.ui2.drawer.CommandCenterSheet
 import com.andmx.ui2.drawer.ConversationDrawer
+import com.andmx.settings.ProviderSettings
+import com.andmx.settings.SettingsStore
+import com.andmx.ui2.settings.TaskAutoArchive
+import com.andmx.ui2.drawer.defaultCommandCenterItems
+import com.andmx.ui2.settings.SettingsPage
 import com.andmx.ui2.files.FilesScreen
 import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
+import com.andmx.ui2.terminal.rememberTerminalColors
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,33 +74,94 @@ fun ChatScreen(
 ) {
     val messages by viewModel.messages.collectAsState()
     val toolCalls by viewModel.toolCalls.collectAsState()
+    val reasonings by viewModel.reasonings.collectAsState()
+    val approvals by viewModel.approvals.collectAsState()
+    val subAgents by viewModel.subAgents.collectAsState()
+    val subAgentItems by viewModel.subAgentItems.collectAsState()
+    val mcpStatus by viewModel.mcpStatus.collectAsState()
+    val contextTokens by viewModel.contextTokens.collectAsState()
+    val contextWindow by viewModel.contextWindow.collectAsState()
+    val tokenUsage by viewModel.tokenUsage.collectAsState()
+    val goal by viewModel.goal.collectAsState()
     val error by viewModel.error.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val editingMessageId by viewModel.editingMessageId.collectAsState()
+    val context = LocalContext.current
+    val settingsStore = remember { SettingsStore(context) }
+    val appSettings by settingsStore.settings.collectAsState(initial = ProviderSettings())
+    val visibleReasonings = remember(reasonings, appSettings.showReasoning) {
+        if (appSettings.showReasoning) reasonings else emptyList()
+    }
+    val visibleTools = remember(toolCalls, appSettings.showTodos) {
+        if (appSettings.showTodos) toolCalls
+        else toolCalls.filterNot { tool ->
+            val n = tool.name.lowercase()
+            n.contains("todo") || n == "update_plan"
+        }
+    }
+    val timeline = remember(messages, visibleTools, approvals, subAgentItems, visibleReasonings, isLoading) {
+        val hasLiveStream = messages.any { it.isStreaming } || visibleReasonings.any { it.isStreaming }
+        val hasRunningTool = visibleTools.any { it.isRunning }
+        buildTimeline(
+            messages = messages,
+            tools = visibleTools,
+            approvals = approvals,
+            subAgents = subAgentItems,
+            reasonings = visibleReasonings,
+            showWorking = isLoading && !hasLiveStream && !hasRunningTool && visibleReasonings.none { it.isStreaming },
+        )
+    }
+    val timelineReversed = remember(timeline) { timeline.asReversed() }
+    val lastAssistantStableId = remember(timeline) {
+        timeline.lastOrNull {
+            it is TimelineItem.Message &&
+                it.message.role == "assistant" &&
+                !it.message.isStreaming &&
+                !it.message.isProcess
+        }?.stableId
+    }
+    val pendingApproval by viewModel.pendingApproval.collectAsState()
+    val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val config by viewModel.composerConfig.collectAsState()
     val contextChips by viewModel.contextChips.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
     val skills by viewModel.skills.collectAsState()
+    val pluginSlashSpecs by viewModel.pluginSlashSpecs.collectAsState()
 
     // ZCode 对齐：对话为唯一主屏，终端/文件/设置均为浮层
-    val context = LocalContext.current
     val projectName by viewModel.projectName.collectAsState()
     val gitInfo by viewModel.gitInfo.collectAsState()
     val hostPath by viewModel.hostPath.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
     val branch = gitInfo?.branch.orEmpty()
 
+    LaunchedEffect(hostPath) {
+        viewModel.refreshGitInfo()
+    }
+
     var showTerminal by remember { mutableStateOf(false) }
     var showFiles by remember { mutableStateOf(false) }
+    var filesInitialPath by remember { mutableStateOf<String?>(null) }
+    var fileTreeRequestKey by remember { mutableStateOf(0) }
+    var fileTreeRequestPath by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var showCommandCenter by remember { mutableStateOf(false) }
+    var settingsInitialPage by remember { mutableStateOf(SettingsPage.HOME) }
     var showBranchDialog by remember { mutableStateOf(false) }
     var showWorkspacePicker by remember { mutableStateOf(false) }
+    var showGitActions by remember { mutableStateOf(false) }
+    var showRemoteDialog by remember { mutableStateOf(false) }
+    var dirtyFilesCache by remember { mutableStateOf<List<com.andmx.workspace.GitBaseline.ChangedFile>>(emptyList()) }
 
     // 浮层打开时拦截返回键：先关浮层，再走系统返回
     BackHandler(enabled = showTerminal || showFiles || showSettings) {
         when {
             showTerminal -> showTerminal = false
-            showFiles -> showFiles = false
+            showFiles -> {
+                showFiles = false
+                filesInitialPath = null
+            }
             showSettings -> showSettings = false
         }
     }
@@ -96,17 +170,50 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
 
-    // 文件页 @ 引用注入
-    LaunchedEffect(Unit) {
-        ChatComposerBus.inserts.collect { snippet ->
-            val s = snippet.trim()
-            when {
-                // @ 引用 → 进 context chip（不留在输入框，避免发送时重复引用）
-                s.startsWith("@") -> {
-                    val path = s.removePrefix("@").trim()
-                    if (path.isNotBlank()) viewModel.addFileContext(path)
+    LaunchedEffect(appSettings.taskAutoArchive, appSettings.taskAutoArchiveDays) {
+        TaskAutoArchive.runIfEnabled(context, appSettings)
+    }
+
+LaunchedEffect(Unit) {
+        ChatActionBus.actions.collect { action ->
+            when (action) {
+                is ChatActionBus.Action.OpenFile -> {
+                    val path = action.path
+                    viewModel.addFileContext(path)
+                    filesInitialPath = path
+                    showFiles = true
                 }
-                else -> {
+                ChatActionBus.Action.OpenTerminal -> showTerminal = true
+                is ChatActionBus.Action.OpenUrl -> {
+                    runCatching {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(action.url),
+                        )
+                        context.startActivity(intent)
+                    }
+                }
+                ChatActionBus.Action.OpenSettings -> {
+                    settingsInitialPage = SettingsPage.HOME
+                    showSettings = true
+                }
+                ChatActionBus.Action.OpenSkillsSettings -> {
+                    settingsInitialPage = SettingsPage.SKILLS
+                    showSettings = true
+                }
+                ChatActionBus.Action.OpenSearch -> showCommandCenter = true
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        ChatComposerBus.inserts.collect { insert ->
+            when (insert) {
+                is ChatComposerBus.Insert.File -> viewModel.addFileContext(insert.path)
+                is ChatComposerBus.Insert.Skill -> viewModel.addSkillByName(insert.name, insert.path)
+                is ChatComposerBus.Insert.Command -> viewModel.addCommandByName(insert.name, insert.payload)
+                is ChatComposerBus.Insert.Text -> {
+                    val snippet = insert.text
                     inputText = if (inputText.isBlank()) snippet else "$inputText\n$snippet"
                 }
             }
@@ -127,25 +234,31 @@ fun ChatScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            // SAF tree uri → 真实文件系统路径（MANAGE_EXTERNAL_STORAGE 语义）
-            val seg = uri.lastPathSegment.orEmpty()
-            val path = if (seg.startsWith("primary:")) {
-                val base = android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
-                "$base/${seg.removePrefix("primary:")}"
-            } else {
-                seg
+            val base = android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
+            val docId = runCatching {
+                android.provider.DocumentsContract.getTreeDocumentId(uri)
+            }.getOrNull()
+            val raw = docId ?: uri.lastPathSegment.orEmpty()
+            val decoded = android.net.Uri.decode(raw)
+            val path = when {
+                decoded == "primary:" || decoded == "primary" -> base
+                decoded.startsWith("primary:") -> "$base/${decoded.removePrefix("primary:")}"
+                decoded.startsWith("/") -> decoded
+                else -> decoded.substringAfter(':', missingDelimiterValue = decoded)
+                    .takeIf { it.isNotBlank() }
+                    ?.let { if (it.startsWith("/")) it else "$base/$it" }
+                    .orEmpty()
             }
             if (path.isNotBlank()) viewModel.selectProject(path)
         }
     }
 
     // ── 输入触发：/ 与 # 建议 ──
-    val slashSuggestions by remember {
+    val slashSuggestions by remember(inputText, pluginSlashSpecs) {
         derivedStateOf {
             val t = inputText
-            // 仅当整行以 / 开头且尚无空格时给命令建议（ZCode 触发）
             if (t.startsWith("/") && !t.contains(' ')) {
-                SlashCommands.suggestions(t, 6)
+                SlashCommands.suggestions(t, 8, extras = pluginSlashSpecs)
             } else emptyList()
         }
     }
@@ -191,6 +304,10 @@ fun ChatScreen(
         }
     }
 
+    val streamingConversationIds = remember(isLoading, currentConversationId) {
+        if (isLoading && currentConversationId > 0L) setOf(currentConversationId) else emptySet()
+    }
+
     ConversationDrawer(
         open = drawerOpen,
         onDismiss = { drawerOpen = false },
@@ -198,32 +315,55 @@ fun ChatScreen(
             viewModel.switchToConversation(id)
             drawerOpen = false
         },
-        onOpenFiles = {
+        onNewConversation = {
+            viewModel.createConversation()
             drawerOpen = false
-            showFiles = true
+        },
+        onOpenFiles = { projectPath ->
+            fileTreeRequestPath = projectPath
+            fileTreeRequestKey += 1
+            drawerOpen = true
         },
         onOpenSettings = {
             drawerOpen = false
+            settingsInitialPage = SettingsPage.HOME
             showSettings = true
         },
-        workspaceName = projectName,
-        suggestedRoots = remember { viewModel.suggestedRoots() },
-        onSelectWorkspace = { viewModel.selectProject(it); drawerOpen = false },
-        onPickWorkspaceDir = { workspacePicker.launch(null); drawerOpen = false },
+        onOpenSearch = {
+            drawerOpen = false
+            showCommandCenter = true
+        },
+        onOpenSkills = {
+            drawerOpen = false
+            settingsInitialPage = SettingsPage.SKILLS
+            showSettings = true
+        },
+        fileTreeRequestPath = fileTreeRequestPath,
+        fileTreeRequestKey = fileTreeRequestKey,
         currentConversationId = currentConversationId,
+        streamingConversationIds = streamingConversationIds,
     ) {
-        Box(modifier = modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize()) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
 
             // Composer 复用：空状态和对话状态共用同一套调用（局部闭包）
             @Composable
-            fun ComposerBlock() {
+            fun ComposerBlock(flat: Boolean = false) {
                 Composer(
                     value = inputText,
                     onValueChange = { inputText = it },
                     onSend = {
                         if (inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()) {
-                            viewModel.sendMessage(inputText)
+                            viewModel.sendMessage(inputText, attachments = attachments)
                             inputText = ""
                             attachments = emptyList()
                         }
@@ -248,12 +388,26 @@ fun ChatScreen(
                         attachments = attachments.filterIndexed { idx, _ -> idx != i }
                     },
                     onAddAttachment = { imagePicker.launch("image/*") },
-                    onInsertMention = { showFiles = true },
+                    onInsertMention = {
+                        fileTreeRequestPath = null
+                        fileTreeRequestKey += 1
+                        drawerOpen = true
+                    },
                     onInsertConversation = { insertAtCursor("#") },
                     onInsertCommand = { insertAtCursor("/") },
                     onInsertSkill = { insertAtCursor("\$") },
                     slashSuggestions = slashSuggestions,
-                    onPickSlash = { spec -> inputText = SlashCommands.complete(spec) },
+                    onPickSlash = { spec ->
+                        val raw = spec.name.trim()
+                        val bare = raw.removePrefix("/")
+                        inputText = Regex("""^/\S*$""").replace(inputText, "").trimEnd()
+                        val skill = skills.firstOrNull { it.name.equals(bare, ignoreCase = true) }
+                        if (skill != null) {
+                            viewModel.addSkillByName(skill.name, skill.path)
+                        } else {
+                            viewModel.addCommandByName(raw)
+                        }
+                    },
                     conversationSuggestions = conversationSuggestions,
                     onPickConversation = { pick ->
                         inputText = Regex("""(?:^|\s)#[^\s#]*$""").replace(inputText) { mr ->
@@ -268,62 +422,76 @@ fun ChatScreen(
                         }.trimEnd()
                         viewModel.addSkillByName(skill.name, skill.path)
                     },
+                    flat = flat,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .imePadding()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .then(if (flat) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 8.dp)),
                 )
             }
 
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable(
-                            enabled = branch.isNotBlank(),
-                        ) { showBranchDialog = true },
-                    ) {
-                        Text(
-                            projectName,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        )
-                        if (branch.isNotBlank()) {
-                            Text(
-                                "  ⎇ $branch",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                            )
-                        }
-                    }
+                    Text(
+                        if (timeline.isEmpty()) "新任务"
+                        else projectName.ifBlank { "AndMX" },
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { drawerOpen = true }) {
-                        Icon(Icons.Outlined.Menu, "菜单")
+                    IconButton(onClick = { drawerOpen = !drawerOpen }) {
+                        Icon(Icons.Outlined.Menu, "切换侧边栏")
                     }
                 },
-                // ZCode：终端从对话头部右上角唤起
+                // ZCode：终端从对话头部右上角唤起（再点收起）
                 actions = {
-                    IconButton(onClick = { showTerminal = true }) {
-                        Icon(Icons.Outlined.Terminal, "终端")
+                    IconButton(onClick = { showCommandCenter = true }) {
+                        Icon(Icons.Outlined.Search, "搜索")
+                    }
+                    IconButton(onClick = {
+                        fileTreeRequestPath = null
+                        fileTreeRequestKey += 1
+                        drawerOpen = true
+                    }) {
+                        Icon(Icons.Outlined.FolderOpen, "查看文件")
+                    }
+                    IconButton(onClick = { showTerminal = !showTerminal }) {
+                        Icon(
+                            Icons.Outlined.Terminal,
+                            if (showTerminal) "关闭终端" else "终端",
+                            tint = if (showTerminal) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 },
             )
 
             // ZCode 对齐：无消息时 Composer 居中 + 欢迎语；有消息时 Composer 在底部
-            val isEmpty = messages.isEmpty() && toolCalls.isEmpty()
+            val isEmpty = timeline.isEmpty()
 
             if (isEmpty) {
                 EmptyConversationState(
                     hasWorkspace = hostPath != null,
                     projectName = projectName,
+                    hostPath = hostPath,
                     branch = branch,
-                    onPickWorkspace = { workspacePicker.launch(null) },
+                    isGitRepo = gitInfo?.isRepo == true,
+                    hasChanges = gitInfo?.hasChanges == true,
+                    dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
+                    ahead = gitInfo?.ahead ?: 0,
+                    candidates = remember(hostPath) { viewModel.workspaceCandidates() },
+                    onSelectWorkspace = { viewModel.selectProject(it) },
+                    onOpenFolder = { workspacePicker.launch(null) },
+                    onOpenRemote = { showRemoteDialog = true },
                     onPickBranch = { showBranchDialog = true },
+                    onGitActions = {
+                        dirtyFilesCache = emptyList()
+                        viewModel.refreshGitInfo()
+                        showGitActions = true
+                    },
                     modifier = Modifier.weight(1f),
                 ) {
-                    ComposerBlock()
+                    ComposerBlock(flat = true)
                 }
             } else {
                 LazyColumn(
@@ -333,24 +501,63 @@ fun ChatScreen(
                     reverseLayout = true,
                 ) {
                     items(
-                        items = (messages + toolCalls.map { it as Any }).reversed(),
-                        key = { item ->
-                            when (item) {
-                                is ChatMessage -> item.id
-                                is ToolCall -> item.id
-                                else -> System.currentTimeMillis()
-                            }
-                        },
+                        items = timelineReversed,
+                        key = { it.stableId },
                     ) { item ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + slideInVertically { it / 2 },
-                            exit = fadeOut() + slideOutVertically(),
-                        ) {
-                            when (item) {
-                                is ChatMessage -> MessageBubble(item)
-                                is ToolCall -> ToolCallCard(item)
+                        when (item) {
+                            is TimelineItem.Message -> {
+                                val isLastAssistant = item.message.role == "assistant" &&
+                                    !item.message.isStreaming &&
+                                    item.stableId == lastAssistantStableId
+                                MessageBubble(
+                                    message = item.message,
+                                    onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
+                                        {
+                                            if (item.message.role == "user") {
+                                                viewModel.copyMessage(item.message.content)
+                                            } else {
+                                                viewModel.copyTurnLog(item.message.id)
+                                            }
+                                        }
+                                    } else null,
+                                    onBranch = if (
+                                        item.message.role == "assistant" &&
+                                        !item.message.isStreaming &&
+                                        !item.message.isProcess &&
+                                        !isLoading
+                                    ) {
+                                        { viewModel.branchFromMessage(item.message.id) }
+                                    } else null,
+                                    onRegenerate = if (isLastAssistant && !isLoading) {
+                                        { viewModel.regenerate() }
+                                    } else null,
+                                    onEdit = if (
+                                        item.message.role == "user" &&
+                                        !isLoading &&
+                                        item.message.content.isNotBlank()
+                                    ) {
+                                        {
+                                            val text = viewModel.beginEditUserMessage(item.message.id)
+                                            if (text != null) inputText = text
+                                        }
+                                    } else null,
+                                    isEditing = item.message.id == editingMessageId,
+                                )
                             }
+                            is TimelineItem.Tool -> ToolCallCard(item.tool)
+                            is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)
+                            is TimelineItem.Reasoning -> ReasoningCard(item.item)
+                            is TimelineItem.Working -> WorkingIndicator()
+                            is TimelineItem.Approval -> ApprovalTimelineCard(
+                                item = item.item,
+                                onAllow = if (item.item.status == "pending") {
+                                    { viewModel.resolveApproval(true) }
+                                } else null,
+                                onDeny = if (item.item.status == "pending") {
+                                    { viewModel.resolveApproval(false) }
+                                } else null,
+                            )
+                            is TimelineItem.SubAgent -> SubAgentTimelineCard(item = item.agent)
                         }
                     }
                 }
@@ -375,6 +582,39 @@ fun ChatScreen(
                     }
                 }
 
+                if (goal.hasGoal) {
+                    GoalStrip(goal = goal)
+                }
+                if (planSteps.isNotEmpty()) {
+                    PlanStrip(steps = planSteps)
+                }
+                if (subAgents.isNotEmpty()) {
+                    SubAgentStrip(agents = subAgents)
+                }
+                if (mcpStatus.isNotEmpty()) {
+                    McpStatusStrip(servers = mcpStatus)
+                }
+                ContextUsageBar(tokens = contextTokens, window = contextWindow, lastTurnTokens = tokenUsage.lastTotal)
+                pendingApproval?.let { req ->
+                    when (req.kind) {
+                        "ask_user" -> AskUserQuestionPanel(
+                            request = req,
+                            onSubmit = { viewModel.resolveUserQuestion(it) },
+                            onCancel = { viewModel.resolveApproval(false) },
+                        )
+                        "exit_plan" -> ExitPlanApprovalPanel(
+                            request = req,
+                            onAllow = { viewModel.resolveApproval(true) },
+                            onDeny = { viewModel.resolveApproval(false) },
+                        )
+                        else -> ApprovalBanner(
+                            request = req,
+                            onAllow = { viewModel.resolveApproval(true) },
+                            onDeny = { viewModel.resolveApproval(false) },
+                        )
+                    }
+                }
+
                 if (queue.isNotEmpty()) {
                     QueueStrip(
                         queue = queue,
@@ -391,128 +631,238 @@ fun ChatScreen(
             }
         } // end Column
 
-            // ── 浮层：终端 / 文件 / 设置（ZCode 对齐：非独占 TAB，从对话唤起）──
-            if (showTerminal) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 1f)),
-                ) {
-                    TerminalScreen(modifier = Modifier.fillMaxSize())
-                    IconButton(
-                        onClick = { showTerminal = false },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                    ) { Icon(Icons.Outlined.Close, "关闭终端", tint = Color.White) }
-                }
-            }
+            // ── 浮层：文件 / 设置（全屏）；终端用底部 sheet，见下方 ──
             if (showFiles) {
-                FilesScreen(modifier = Modifier.fillMaxSize().background(Color.Black))
+                FilesScreen(
+                    modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                    initialPath = filesInitialPath,
+                )
             }
             if (showSettings) {
-                SettingsScreen(modifier = Modifier.fillMaxSize().background(Color.Black))
+                SettingsScreen(
+                    modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                    onClose = {
+                        showSettings = false
+                        settingsInitialPage = SettingsPage.HOME
+                    },
+                    initialPage = settingsInitialPage,
+                )
             }
+
+            CommandCenterSheet(
+                open = showCommandCenter,
+                onDismiss = { showCommandCenter = false },
+                items = defaultCommandCenterItems(
+                    onNewTask = {
+                        showCommandCenter = false
+                        viewModel.createConversation()
+                    },
+                    onOpenFiles = {
+                        showCommandCenter = false
+                        fileTreeRequestPath = null
+                        fileTreeRequestKey += 1
+                        drawerOpen = true
+                    },
+                    onOpenSettings = {
+                        showCommandCenter = false
+                        settingsInitialPage = SettingsPage.HOME
+                        showSettings = true
+                    },
+                    onOpenSkills = {
+                        showCommandCenter = false
+                        settingsInitialPage = SettingsPage.SKILLS
+                        showSettings = true
+                    },
+                    onOpenTerminal = {
+                        showCommandCenter = false
+                        showTerminal = !showTerminal
+                    },
+                    onToggleSidebar = {
+                        showCommandCenter = false
+                        drawerOpen = !drawerOpen
+                    }
+                ),
+            )
         } // end Box
+
+        if (showTerminal) {
+            val terminalColors = rememberTerminalColors()
+            val terminalSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val terminalHeight = LocalConfiguration.current.screenHeightDp.dp * 0.72f
+            ModalBottomSheet(
+                onDismissRequest = { showTerminal = false },
+                sheetState = terminalSheetState,
+                containerColor = terminalColors.background,
+                contentColor = terminalColors.foreground,
+                dragHandle = null,
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+            ) {
+                TerminalScreen(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(terminalHeight),
+                    onClose = { showTerminal = false },
+                    colors = terminalColors,
+                )
+            }
+        }
 
         // ── 分支切换对话框（ZCode：分支作为工作区上下文）──
         if (showBranchDialog) {
             BranchSwitchDialog(
                 currentBranch = branch,
+                dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
+                hasIdentity = gitInfo?.hasIdentity != false,
                 onListBranches = { viewModel.listBranches() },
-                onCheckout = { name, create, cb -> viewModel.checkoutBranch(name, create, cb) },
+                onSwitchBranch = { name, create, cb -> viewModel.switchBranch(name, create, cb) },
+                onCommitAndSwitch = { name, create, msg, cb ->
+                    viewModel.commitAndSwitchBranch(name, create, msg, cb)
+                },
+                onGenerateCommitMessage = { target, cb ->
+                    viewModel.generateCommitMessage(targetBranch = target, onDone = cb)
+                },
                 onDismiss = { showBranchDialog = false },
+            )
+        }
+
+        if (showGitActions && gitInfo != null) {
+            GitActionDialog(
+                gitInfo = gitInfo!!,
+                dirtyFiles = dirtyFilesCache,
+                onListDirty = {
+                    val files = viewModel.listChangedFiles()
+                    dirtyFilesCache = files
+                    files
+                },
+                onGenerateCommitMessage = { cb ->
+                    viewModel.generateCommitMessage(onDone = cb)
+                },
+                onCommit = { message, cb -> viewModel.commitWorkspace(message, cb) },
+                onPush = { cb -> viewModel.pushBranch(cb) },
+                onCommitAndPush = { message, cb -> viewModel.commitAndPush(message, cb) },
+                onDismiss = { showGitActions = false },
+            )
+        }
+
+        if (showRemoteDialog) {
+            val remoteProfiles by viewModel.remoteProfiles.collectAsState()
+            val activeRemoteId by viewModel.activeRemoteId.collectAsState()
+            RemoteWorkspaceDialog(
+                profiles = remoteProfiles,
+                activeRemoteId = activeRemoteId,
+                onSave = { viewModel.saveRemoteProfile(it) },
+                onDelete = { viewModel.deleteRemoteProfile(it) },
+                onConnect = { spec, cb -> viewModel.connectRemote(spec, cb) },
+                onListDir = { spec, path, cb -> viewModel.listRemoteDir(spec, path, cb) },
+                onOpenWorkspace = { spec, path, cb -> viewModel.openRemoteWorkspace(spec, path, cb) },
+                onDismiss = { showRemoteDialog = false },
             )
         }
     }
 }
 
 /**
- * ZCode 对齐空状态：无消息时 Composer 居中，上方有工作区/分支信息和欢迎语。
- * 未选工作区时显示「选择文件夹」引导。
+ * ZCode 对齐空状态：问候语 + 与 Composer 直接相连的工作区/分支条（左项目、右分支）。
  */
 @Composable
 private fun EmptyConversationState(
     hasWorkspace: Boolean,
     projectName: String,
+    hostPath: String?,
     branch: String,
-    onPickWorkspace: () -> Unit,
+    isGitRepo: Boolean,
+    hasChanges: Boolean,
+    dirtyFileCount: Int,
+    ahead: Int = 0,
+    candidates: List<String>,
+    onSelectWorkspace: (String) -> Unit,
+    onOpenFolder: () -> Unit,
+    onOpenRemote: () -> Unit = {},
     onPickBranch: () -> Unit,
+    onGitActions: () -> Unit = {},
     modifier: Modifier = Modifier,
     composer: @Composable () -> Unit,
 ) {
-    Column(
-        modifier = modifier.fillMaxSize().fillMaxWidth(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+    // 问候语 + 输入卡片作为同一主体居中。
+    // 键盘只依赖父级连续 imePadding，不做可见性分支/布局切换，避免收起时回弹闪一下。
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        if (hasWorkspace) {
-            // 工作区 + 分支上下文条（可点击切换分支）
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .padding(bottom = 16.dp)
-                    .clickable(enabled = branch.isNotBlank(), onClick = onPickBranch),
-            ) {
-                Icon(
-                    Icons.Outlined.Folder,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 560.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                emptyGreeting(),
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            if (hasWorkspace) {
                 Text(
-                    projectName,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 6.dp),
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    buildString {
+                        append("开始在 ")
+                        append(projectName)
+                        append(" 项目新建任务")
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 20.dp),
                 )
-                if (branch.isNotBlank()) {
-                    Text(
-                        "⎇ $branch",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 8.dp),
-                        maxLines = 1,
-                    )
-                }
+            } else {
+                Text(
+                    "选择一个工作区后开始新任务",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 20.dp),
+                )
             }
-            Text(
-                "开始一个新任务",
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            Text(
-                "描述你的目标，Agent 会帮你规划并实现",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
-            )
-        } else {
-            // 未选工作区：引导选择文件夹
-            Icon(
-                Icons.Outlined.DriveFolderUpload,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp),
-            )
-            Text(
-                "选择工作区开始",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            Text(
-                "选择一个项目文件夹，Agent 将在它的真实文件上工作",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
-            )
-            androidx.compose.material3.FilledTonalButton(onClick = onPickWorkspace) {
-                Icon(Icons.Outlined.Folder, null, Modifier.size(18.dp))
-                Text("  选择文件夹", modifier = Modifier.padding(start = 6.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                EmptyWorkspaceHeader(
+                    hasWorkspace = hasWorkspace,
+                    projectName = projectName,
+                    hostPath = hostPath,
+                    branch = branch,
+                    isGitRepo = isGitRepo,
+                    hasChanges = hasChanges,
+                    dirtyFileCount = dirtyFileCount,
+                    ahead = ahead,
+                    candidates = candidates,
+                    onSelectWorkspace = onSelectWorkspace,
+                    onOpenFolder = onOpenFolder,
+                    onOpenRemote = onOpenRemote,
+                    onPickBranch = onPickBranch,
+                    onGitActions = onGitActions,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                composer()
             }
-            androidx.compose.material3.HorizontalDivider(
-                Modifier.padding(vertical = 20.dp, horizontal = 40.dp),
-            )
         }
-        composer()
     }
 }
+
+private fun emptyGreeting(): String {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when (hour) {
+        in 5..8 -> "早上好呀，新的一天开始啦"
+        in 9..11 -> "上午好呀，有什么想让我帮忙的吗"
+        in 12..13 -> "中午好呀，要不要先休息一下"
+        in 14..17 -> "下午好呀，继续加油，好不好"
+        in 18..22 -> "晚上好呀，今天辛苦啦"
+        else -> "夜深啦，困了也要照顾好自己哦"
+    }
+}
+

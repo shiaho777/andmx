@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -55,6 +56,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
@@ -116,6 +120,7 @@ fun Composer(
     skillSuggestions: List<SkillSuggestion> = emptyList(),
     onPickSkill: (SkillSuggestion) -> Unit = {},
     placeholder: String = DEFAULT_PLACEHOLDER,
+    flat: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val canSend = value.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()
@@ -219,20 +224,25 @@ fun Composer(
             }
         }
 
-        Box(
+        val cardModifier = if (flat) {
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp, vertical = 2.dp)
+        } else {
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
                 .border(1.dp, borderColor, shape)
                 .background(cardBg)
-                .padding(horizontal = 10.dp, vertical = 10.dp),
-        ) {
+                .padding(horizontal = 10.dp, vertical = 10.dp)
+        }
+        Box(cardModifier) {
             Column {
-                if (attachments.isNotEmpty() || contextChips.isNotEmpty()) {
+                if (attachments.isNotEmpty()) {
                     FlowRow(
                         Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp),
+                            .padding(bottom = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -243,40 +253,52 @@ fun Composer(
                                 onRemove = { onRemoveAttachment(i) },
                             )
                         }
-                        contextChips.forEach { chip ->
-                            ContextChipView(
-                                icon = chip.kind.icon(),
-                                label = chip.label,
-                                onRemove = { onRemoveContextChip(chip.id) },
-                            )
-                        }
                     }
                 }
 
-                Box(
+                Column(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                 ) {
-                    if (value.isEmpty()) {
-                        Text(
-                            placeholder,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (contextChips.isNotEmpty()) {
+                        FlowRow(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            contextChips.forEach { chip ->
+                                MentionChipView(
+                                    kind = chip.kind,
+                                    label = chip.label,
+                                    onRemove = { onRemoveContextChip(chip.id) },
+                                )
+                            }
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth()) {
+                        if (value.isEmpty() && contextChips.isEmpty()) {
+                            Text(
+                                placeholder,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        BasicTextField(
+                            value = value,
+                            onValueChange = onValueChange,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            maxLines = 8,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 28.dp, max = 168.dp),
                         )
                     }
-                    BasicTextField(
-                        value = value,
-                        onValueChange = onValueChange,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        maxLines = 8,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 28.dp, max = 168.dp),
-                    )
                 }
 
                 Spacer(Modifier.size(8.dp))
@@ -840,6 +862,76 @@ private fun ContextChipView(
 }
 
 @Composable
+private fun MentionChipView(
+    kind: ContextChipKind,
+    label: String,
+    onRemove: () -> Unit,
+) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val (fg, bg) = when (kind) {
+        ContextChipKind.SKILL -> {
+            val c = if (isDark) Color(0xFFE8E8E8) else Color(0xFF1A1A1A)
+            val bg = if (isDark) Color(0xFF2B2B2B) else Color(0xFF161616).copy(alpha = 0.08f)
+            c to bg
+        }
+        ContextChipKind.COMMAND -> {
+            val c = if (isDark) Color(0xFFCAD5E2) else Color(0xFF475569)
+            c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
+        }
+        ContextChipKind.FILE -> {
+            val c = if (isDark) Color(0xFF8FC5EF) else Color(0xFF1A70B8)
+            c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
+        }
+        ContextChipKind.CONVERSATION -> {
+            val c = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0284C7)
+            c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
+        }
+        ContextChipKind.ATTACHMENT -> {
+            val c = MaterialTheme.colorScheme.onSurfaceVariant
+            c to MaterialTheme.colorScheme.surfaceContainerHighest
+        }
+    }
+    val display = when (kind) {
+        ContextChipKind.SKILL -> label.removePrefix("$")
+        ContextChipKind.COMMAND -> label.removePrefix("/")
+        else -> label
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .padding(start = 6.dp, end = 2.dp, top = 3.dp, bottom = 3.dp),
+    ) {
+        Icon(
+            kind.icon(),
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = fg,
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            display,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+            color = fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 180.dp),
+        )
+        Box(
+            Modifier
+                .padding(start = 2.dp)
+                .size(18.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Close, "移除", Modifier.size(12.dp), tint = fg.copy(alpha = 0.75f))
+        }
+    }
+}
+
+@Composable
 private fun SuggestionPanel(content: @Composable () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
     Box(
@@ -897,7 +989,7 @@ private fun ContextChipKind.icon(): ImageVector = when (this) {
     ContextChipKind.FILE -> Icons.AutoMirrored.Outlined.InsertDriveFile
     ContextChipKind.CONVERSATION -> Icons.AutoMirrored.Outlined.Chat
     ContextChipKind.COMMAND -> Icons.Outlined.Terminal
-    ContextChipKind.SKILL -> Icons.Outlined.Bolt
+    ContextChipKind.SKILL -> Icons.Outlined.AutoAwesome
     ContextChipKind.ATTACHMENT -> Icons.Outlined.AttachFile
 }
 

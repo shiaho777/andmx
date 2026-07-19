@@ -71,8 +71,7 @@ class SessionResumer(
                     val content = item.content ?: ""
                     messages.add(ApiMessage(role = role, content = content))
                 }
-                "tool_call" -> {
-                    // Reconstruct assistant message with tool_calls
+                "tool_call", "function_call" -> {
                     val callId = item.toolCallId ?: continue
                     val toolName = item.toolName ?: continue
                     val args = item.toolArgs ?: "{}"
@@ -85,7 +84,7 @@ class SessionResumer(
                         )),
                     ))
                 }
-                "tool_output" -> {
+                "tool_output", "function_call_output" -> {
                     val callId = item.toolCallId ?: continue
                     val output = item.toolOutput ?: ""
                     messages.add(ApiMessage(
@@ -122,25 +121,80 @@ class SessionResumer(
         // Get the last turn context
         lastTurnCtx = replay.turns.lastOrNull()?.context
 
-        // Crash recovery: check if the last turn is incomplete
-        // (has response_items but no corresponding task_completed event)
         val lastTurn = replay.turns.lastOrNull()
         if (lastTurn != null) {
-            val hasCompletion = lastTurn.events.any { it.type == "task_completed" }
+            val hasCompletion = lastTurn.events.any {
+                it.type == "task_completed" || it.type == "task_failed"
+            }
             val hasItems = lastTurn.items.isNotEmpty()
             if (hasItems && !hasCompletion) {
                 wasTruncated = true
-                Log.w(TAG, "Last turn appears incomplete (crash recovery), marking as truncated")
-                // Truncate messages: remove the last incomplete turn's messages
-                val lastTurnItemIds = lastTurn.items.mapNotNull { it.turnId }.toSet()
-                // Keep messages that aren't part of the last incomplete turn
-                // This is best-effort since we can't perfectly map response items to ApiMessages
+                Log.w(TAG, "Last turn incomplete — truncating for crash recovery")
+                val incompleteTurnId = lastTurn.context?.turnId
+                    ?: lastTurn.items.firstNotNullOfOrNull { it.turnId }
+                if (!incompleteTurnId.isNullOrBlank()) {
+                    val keepItems = replay.responseItems.filter { it.turnId != incompleteTurnId }
+                    messages.clear()
+                    for (item in keepItems) {
+                        when (item.type) {
+                            "message" -> {
+                                val role = item.role ?: continue
+                                messages.add(ApiMessage(role = role, content = item.content ?: ""))
+                            }
+                            "tool_call", "function_call" -> {
+                                val callId = item.toolCallId ?: continue
+                                val toolName = item.toolName ?: continue
+                                messages.add(
+                                    ApiMessage(
+                                        role = "assistant",
+                                        content = null,
+                                        toolCalls = listOf(
+                                            com.andmx.llm.ApiToolCall(
+                                                id = callId,
+                                                function = com.andmx.llm.ApiFunctionCall(
+                                                    name = toolName,
+                                                    arguments = item.toolArgs ?: "{}",
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                )
+                            }
+                            "tool_output", "function_call_output" -> {
+                                val callId = item.toolCallId ?: continue
+                                messages.add(
+                                    ApiMessage(
+                                        role = "tool",
+                                        content = item.toolOutput ?: "",
+                                        toolCallId = callId,
+                                        name = item.toolName,
+                                    ),
+                                )
+                            }
+                            "compaction" -> {
+                                val summary = item.content ?: continue
+                                messages.add(ApiMessage(role = "user", content = "[上下文摘要] $summary"))
+                            }
+                        }
+                    }
+                    lastTurnCtx = replay.turns.dropLast(1).lastOrNull()?.context
+                    turnCount = (turnCount - 1).coerceAtLeast(0)
+                } else {
+                    while (messages.isNotEmpty() && messages.last().role != "user") {
+                        messages.removeAt(messages.lastIndex)
+                    }
+                }
+                while (messages.isNotEmpty() &&
+                    (messages.last().role == "assistant" && !messages.last().toolCalls.isNullOrEmpty())
+                ) {
+                    messages.removeAt(messages.lastIndex)
+                }
             }
         }
 
         ResumedSession(
             sessionMeta = replay.sessionMeta,
-            messages = messages,
+            messages = coalesceToolCalls(messages),
             lastTurnContext = lastTurnCtx,
             totalInputTokens = totalInput,
             totalOutputTokens = totalOutput,
@@ -149,6 +203,33 @@ class SessionResumer(
             rolloutFile = file,
             wasTruncated = wasTruncated,
         )
+    }
+
+
+    private fun coalesceToolCalls(input: List<ApiMessage>): List<ApiMessage> {
+        if (input.isEmpty()) return input
+        val out = mutableListOf<ApiMessage>()
+        var i = 0
+        while (i < input.size) {
+            val m = input[i]
+            if (m.role == "assistant" && !m.toolCalls.isNullOrEmpty()) {
+                val batch = m.toolCalls!!.toMutableList()
+                var j = i + 1
+                while (j < input.size) {
+                    val n = input[j]
+                    if (n.role == "assistant" && !n.toolCalls.isNullOrEmpty() && n.content.isNullOrBlank()) {
+                        batch += n.toolCalls!!
+                        j++
+                    } else break
+                }
+                out += m.copy(toolCalls = batch)
+                i = j
+            } else {
+                out += m
+                i++
+            }
+        }
+        return out
     }
 
     /** Find the most recent rollout file for a given session ID. */
