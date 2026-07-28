@@ -41,9 +41,9 @@
 ## 实际完成情况（核对于代码）
 
 - Markdown 引擎、文件图标、对话流、工具卡片、终端、会话抽屉均已落地，对应代码在 `ui2/` 各子目录。
-- ui2 总计约 7,460 行 Kotlin（早期文档曾给出更低的估算值，与实际实现规模不符，以代码为准）。
-- ui2 与旧版 `ui/workbench/`（~10,000 行）并存，通过 `AndroidManifest.xml` 的 launcher activity 配置切换。
-- 设置页（`ui2/settings/`，~3,695 行）规模超出早期预估，包含 provider/model/mcp/plugin/skill/sub-agent/usage 等多页。
+- ui2 总计约 23,300 行 Kotlin。历次文档给出的 7,460 及更低估算均已过时，以 `find app/src/main/java/com/andmx/ui2 -name '*.kt' | xargs wc -l` 为准。
+- ui2 与旧版 `ui/`（含 `ui/workbench/`，约 22,400 行）并存，通过 `AndroidManifest.xml` 的 launcher activity 配置切换。早期「~10,000 行」的估算偏低约一半。
+- 对话（`ui2/chat/`，约 10,600 行）与设置页（`ui2/settings/`，约 7,400 行）是两个最大的子模块，均远超早期预估。
 
 ## 早期文档中的不可验证声明
 
@@ -51,7 +51,10 @@
 
 ## 待完善
 
-- 与真实 agent 引擎端到端对接
-- Computer Use 集成
+- ui2 的自动化测试（`app/src/test/` 下目前没有 ui2 覆盖）
+- Computer Use 与对话流的深度集成
 - 图片消息支持
 - 会话搜索
+
+> 「与真实 agent 引擎端到端对接」一项已完成：`ui2/chat/ChatController.kt` 构造真实
+> `AgentEngine` + `LlmClient` 并调用 `runTurn`。缺的是自动化回归覆盖，不是接线。

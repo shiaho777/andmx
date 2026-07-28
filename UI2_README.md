@@ -4,7 +4,7 @@
 
 ## 设计目标
 
-- 单手友好的底部导航（对话 / 文件 / 终端 / 设置）
+- 单手友好：对话是唯一主屏，终端 / 文件 / 设置以浮层唤起，不占底部 TAB
 - Material You 动态主题（跟随系统壁纸）
 - 自研 Markdown 引擎与 ANSI 终端渲染，不引入重型第三方 UI 库
 - 流式对话 + 工具调用可视化
@@ -19,7 +19,7 @@
 | `files/` | 目录导航、文件查看 |
 | `drawer/` | 会话列表抽屉 |
 | `settings/` | provider/model/mcp/plugin/skill/sub-agent/usage 多页设置 |
-| `nav/` | 底部导航 |
+| `nav/` | 路由常量 + 进程级导航总线 NavBus（底部 TAB 结构已移除） |
 | `theme/` | Material You 动态主题 |
 | `icons/` | 文件类型图标映射 |
 
@@ -34,6 +34,9 @@
 
 ## 待完善
 
-- 与真实 agent 引擎端到端对接
-- Computer Use 集成
-- 图片消息、会话搜索
+- ui2 的自动化测试（`app/src/test/` 下目前没有 ui2 覆盖；`tools/mock_llm_server.py` 可用于离线端到端验证）
+- Computer Use 与对话流的深度集成
+- 会话搜索
+
+> 对话已通过 `ChatController` 接入真实 `AgentEngine` + `LlmClient`（含 MCP、插件工具集、SubAgent 编排）。
+> 早期文档中「与真实 agent 引擎端到端对接」一项已完成，缺的是自动化回归覆盖。
