@@ -13,7 +13,7 @@ class CodexToolCapabilityMapTest {
         val map = buildCodexToolCapabilityMap(sampleTools(), mcpServerCount = 1)
 
         assertEquals("Codex 工具能力地图已成形", map.title)
-        assertEquals(8, map.domainCount)
+        assertEquals(ToolCapabilityDomain.entries.size, map.domainCount)
         assertEquals(0, map.emptyDomainCount)
         assertEquals("/tools", map.primaryCommand)
         assertTrue(map.items.first { it.domain == ToolCapabilityDomain.OBSERVE }.tools.any { it.name == "read_file" })
@@ -50,7 +50,7 @@ class CodexToolCapabilityMapTest {
         assertTrue(text.contains("受保护窗口使用截图证据替代"))
         assertTrue(text.contains("不能自动化 Codex 自身"))
         assertTrue(text.contains("Skills、Plugins 和 MCP"))
-        assertTrue(map.summaryLines().any { it.contains("能力域: 8") })
+        assertTrue(map.summaryLines().any { it.contains("能力域: ${ToolCapabilityDomain.entries.size}") })
     }
 
     private fun sampleTools(): List<ToolCapability> = listOf(

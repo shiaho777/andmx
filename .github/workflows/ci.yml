@@ -42,12 +42,38 @@ jobs:
       - name: Gradle compile liteDebug
         run: ./gradlew :app:compileLiteDebugKotlin --no-daemon --stacktrace
 
+      # The proot flavor drops targetSdk to 28 so guest binaries stay exec-able.
+      # It compiles from the same sources but is a separate variant, so a
+      # lite-only gate can go green while this one is broken.
+      - name: Gradle compile prootDebug
+        run: ./gradlew :app:compileProotDebugKotlin --no-daemon --stacktrace
+
+      # pty.c backs PersistentShell and TerminalSession. Kotlin compilation
+      # never touches it, so without this step C breakage ships unnoticed.
+      - name: Build native (CMake/NDK)
+        run: ./gradlew :app:externalNativeBuildLiteDebug --no-daemon --stacktrace
+
+      - name: Unit tests
+        run: ./gradlew :app:testLiteDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: |
+            app/build/reports/tests/testLiteDebugUnitTest
+            app/build/test-results/testLiteDebugUnitTest
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Delivery policy summary
         if: always()
         run: |
           {
             echo "## Delivery gate"
             echo "- Job: \`build\` (workflow **CI**)"
+            echo "- Verifies: lite Kotlin · proot Kotlin · native (CMake/NDK) · unit tests"
             echo "- Merge only when this job is green on PRs into \`main\`."
             echo "- Issues close via PR body \`Fixes #N\` / \`Closes #N\` on **merge**, not from CI."
             echo "- Do not close the linked Issue while CI is red or only because the PR opened."

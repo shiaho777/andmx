@@ -7,7 +7,6 @@ import com.andmx.exec.proot.ProotRuntime
 import com.andmx.exec.pty.PtyProcess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 /**
@@ -41,6 +40,11 @@ class PersistentShell(
         private const val READ_TIMEOUT_MS = 30_000L
         private const val READ_INTERVAL_MS = 20L
         private const val MAX_OUTPUT = 64_000
+        private const val READ_CHUNK = 8192
+        private const val INITIAL_CAPACITY = 8192
+        private const val MAX_CAPTURE = 256 * 1024
+        private const val TAIL_KEEP = 4096
+        private const val MAX_START_ATTEMPTS = 3
 
         // Matches ANSI escape sequences: ESC [ ... letter, ESC ] ... BEL, ESC ( B, etc.
         private val ANSI_ESCAPE_REGEX = Regex(
@@ -59,17 +63,24 @@ class PersistentShell(
     private val promptMarker = "__ANDMX_PROMPT_${markerId}"
     private var initialized = false
     private var dead = false
+    private var destroyed = false
+    private var failedStarts = 0
 
     /**
      * Start the persistent shell. Idempotent — safe to call multiple times.
+     * A shell that died mid-session is torn down and restarted here, up to
+     * [MAX_START_ATTEMPTS] consecutive failures; [destroy] is permanent.
      */
     suspend fun start(): Boolean = withContext(Dispatchers.IO) {
-        if (initialized && pty?.let { true } == true) return@withContext true
-        if (dead) return@withContext false
+        if (destroyed) return@withContext false
+        if (initialized && !dead && pty != null) return@withContext true
+        if (failedStarts >= MAX_START_ATTEMPTS) return@withContext false
+        if (dead || pty != null) resetSession()
 
         val install = runtime.install()
         if (!install.ok) {
             Log.e(TAG, "proot install failed: ${install.message}")
+            failedStarts++
             return@withContext false
         }
 
@@ -97,10 +108,13 @@ class PersistentShell(
             p.output.flush()
             readUntilMarker(promptMarker, timeoutMs = 3_000)
             initialized = true
+            dead = false
+            failedStarts = 0
             Log.i(TAG, "PersistentShell started (pid=${p.pid})")
             true
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to start persistent shell", t)
+            failedStarts++
             dead = true
             false
         }
@@ -146,58 +160,50 @@ class PersistentShell(
     }
 
     /** Check if the shell is alive and ready. */
-    val isAlive: Boolean get() = initialized && !dead && pty != null
+    val isAlive: Boolean get() = initialized && !dead && !destroyed && pty != null
 
-    /** Destroy the shell session. */
+    /** Destroy the shell session permanently; [start] will not revive it. */
     fun destroy() {
-        pty?.destroy()
-        pty = null
-        initialized = false
-        dead = true
+        resetSession()
+        destroyed = true
     }
 
     // ── Internal ──────────────────────────────────────
 
+    private fun resetSession() {
+        runCatching { pty?.destroy() }
+        pty = null
+        initialized = false
+        dead = false
+    }
+
     private fun readUntilMarker(marker: String, timeoutMs: Long): String {
         val p = pty ?: return ""
-        val buffer = ByteArrayOutputStream()
-        val startTime = System.currentTimeMillis()
-        val markerBytes = marker.toByteArray()
+        val capture = MarkerCapture(
+            marker = marker,
+            maxCapture = MAX_CAPTURE,
+            tailKeep = TAIL_KEEP,
+            initialCapacity = INITIAL_CAPACITY,
+        )
+        val chunk = ByteArray(READ_CHUNK)
+        val deadline = System.currentTimeMillis() + timeoutMs
 
-        while (System.currentTimeMillis() - startTime < timeoutMs) {
+        while (System.currentTimeMillis() < deadline) {
             val available = p.input.available()
-            if (available > 0) {
-                val b = p.input.read()
-                if (b >= 0) buffer.write(b)
-
-                // Check if marker appeared in the last bytes
-                val data = buffer.toByteArray()
-                if (containsMarker(data, markerBytes)) {
-                    return String(data)
-                }
-            } else {
+            if (available <= 0) {
                 try {
                     Thread.sleep(READ_INTERVAL_MS)
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
                 }
+                continue
             }
+            val n = p.input.read(chunk, 0, available.coerceAtMost(chunk.size))
+            if (n < 0) break
+            if (capture.append(chunk, n)) break
         }
-        // Timeout — return what we have
-        return String(buffer.toByteArray())
-    }
-
-    private fun containsMarker(data: ByteArray, marker: ByteArray): Boolean {
-        if (data.size < marker.size) return false
-        for (i in 0..data.size - marker.size) {
-            var match = true
-            for (j in marker.indices) {
-                if (data[i + j] != marker[j]) { match = false; break }
-            }
-            if (match) return true
-        }
-        return false
+        return capture.text()
     }
 
     private fun parseExitCode(output: String): Int {

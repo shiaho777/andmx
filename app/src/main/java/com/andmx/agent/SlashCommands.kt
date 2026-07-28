@@ -41,7 +41,7 @@ object SlashCommands {
         Spec("/full", "授权:完全访问", keywords = listOf("full access", "完全访问")),
         Spec("/ask", "授权:按需批准", keywords = listOf("approval", "批准")),
         Spec("/readonly", "授权:只读", aliases = listOf("/read"), keywords = listOf("只读", "sandbox")),
-        Spec("/tools", "显示工具能力", keywords = listOf("工具")),
+        Spec("/tools", "显示工具能力", aliases = listOf("/capabilities"), keywords = listOf("工具")),
         Spec("/handoff", "生成交接摘要", aliases = listOf("/summary"), keywords = listOf("交接")),
         Spec("/export", "导出当前对话", keywords = listOf("导出")),
         Spec("/regen", "重新生成上一轮回复", aliases = listOf("/retry", "/regenerate"), keywords = listOf("重试")),
