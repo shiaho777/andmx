@@ -12,33 +12,39 @@ object CodeHighlight {
         "true", "false", "null", "None", "True", "False", "in", "is", "as", "try", "catch", "throw"
     )
 
+    // Compiled once. These used to be built inside highlight(), which recompiled
+    // five patterns per call — and ToolCallCard highlights diffs line by line.
+    private val commentRegex = Regex("//.*|#.*|/\\*[\\s\\S]*?\\*/")
+    private val stringRegex = Regex("\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'|`([^`\\\\]|\\\\.)*`")
+    private val wordRegex = Regex("\\b\\w+\\b")
+    private val callRegex = Regex("\\b(\\w+)\\s*\\(")
+    private val numberRegex = Regex("\\b\\d+(\\.\\d+)?\\b")
+
     fun highlight(code: String, theme: CodeTheme): AnnotatedString = buildAnnotatedString {
         append(code)
 
-        val commentRegex = Regex("//.*|#.*|/\\*[\\s\\S]*?\\*/")
         commentRegex.findAll(code).forEach { m ->
             addStyle(SpanStyle(color = theme.comment), m.range.first, m.range.last + 1)
         }
 
-        val stringRegex = Regex("\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'|`([^`\\\\]|\\\\.)*`")
         stringRegex.findAll(code).forEach { m ->
             addStyle(SpanStyle(color = theme.string), m.range.first, m.range.last + 1)
         }
 
-        Regex("\\b\\w+\\b").findAll(code).forEach { m ->
+        wordRegex.findAll(code).forEach { m ->
             if (m.value in keywords) {
                 addStyle(SpanStyle(color = theme.keyword), m.range.first, m.range.last + 1)
             }
         }
 
-        Regex("\\b(\\w+)\\s*\\(").findAll(code).forEach { m ->
+        callRegex.findAll(code).forEach { m ->
             val name = m.groupValues[1]
             if (name !in keywords) {
                 addStyle(SpanStyle(color = theme.function), m.range.first, m.range.first + name.length)
             }
         }
 
-        Regex("\\b\\d+(\\.\\d+)?\\b").findAll(code).forEach { m ->
+        numberRegex.findAll(code).forEach { m ->
             addStyle(SpanStyle(color = theme.number), m.range.first, m.range.last + 1)
         }
     }

@@ -197,6 +197,9 @@ private object StorageScanner {
     private val SKIP_DIR_NAMES = setOf(
         ".", "..", "proc", "sys", "dev", "apex", "acct", "cfg",
     )
+
+    /** Hidden dirs worth scanning anyway; hoisted out of the walk loop. */
+    private val HIDDEN_DIR_ALLOWLIST = setOf(".thumbnails", ".cache", ".tmp")
     private val SENSITIVE_HINTS = listOf(
         "/DCIM/", "/Pictures/", "/Movies/", "/Music/", "/Documents/",
         "/Android/media/", "/WhatsApp/", "/Telegram/", "/WeChat/", "/MicroMsg/",
@@ -345,7 +348,7 @@ private object StorageScanner {
                 if (child.isDirectory) {
                     val name = child.name
                     if (name in SKIP_DIR_NAMES) continue
-                    if (name.startsWith(".") && name !in setOf(".thumbnails", ".cache", ".tmp")) {
+                    if (name.startsWith(".") && name !in HIDDEN_DIR_ALLOWLIST) {
                         if (name != ".thumbnails" && name != ".cache" && !name.contains("cache")) {
                             if (!name.contains("tmp") && !name.contains("temp")) continue
                         }
