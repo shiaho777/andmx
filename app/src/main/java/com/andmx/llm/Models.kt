@@ -35,6 +35,7 @@ data class ChatRequest(
     val temperature: Double? = null,
     @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     val stream: Boolean = false,
+    @SerialName("max_tokens") val maxTokens: Int? = null,
 )
 
 /**

@@ -64,7 +64,8 @@ class AgentEngine(
     private val compactor: ContextCompactor = ContextCompactor(client = client),
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
-    private val historyToolOutputLimit: Int = 8_000,
+    systemParts: List<String>? = null,
+    private val historyToolOutputLimit: Int = Int.MAX_VALUE,
     private val maxSteps: Int = 50,
     /** Steps granted after maxSteps to let the model wrap up; if it still hasn't converged, we fail. */
     private val graceSteps: Int = 3,
@@ -73,7 +74,12 @@ class AgentEngine(
     /** Gate consulted before running each tool; return false to refuse. */
     private val approve: suspend (Tool, JsonObject) -> Boolean = { _, _ -> true },
 ) {
-    private val history = mutableListOf(ApiMessage(role = "system", content = systemPrompt))
+    private val baseSystemParts: List<String> =
+        systemParts?.map { it.trimEnd() }?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
+            ?: listOf(systemPrompt)
+    private val history = mutableListOf<ApiMessage>().apply {
+        addAll(baseSystemParts.map { ApiMessage(role = "system", content = it) })
+    }
     private var extraTools: List<Tool> = emptyList()
     private val allTools get() = tools + extraTools
     private val toolsByName get() = allTools.associateBy { it.name }
@@ -108,32 +114,49 @@ class AgentEngine(
         }
     }
 
-    /** Append project/custom instructions to the system prompt. */
     fun setCustomInstructions(text: String) {
         systemSuffix = text.trim()
-        history[0] = ApiMessage(role = "system", content = composedSystem())
+        rewriteSystemMessages()
     }
 
-    /** Set the assistant persona/tone. */
     fun setPersona(p: String) {
         persona = p.trim()
-        history[0] = ApiMessage(role = "system", content = composedSystem())
+        rewriteSystemMessages()
     }
 
-    private fun composedSystem(): String = buildString {
-        append(systemPrompt)
-        if (persona.isNotBlank()) append("\n\n# 语气\n以「").append(persona).append("」的风格回应。")
-        if (systemSuffix.isNotBlank()) append("\n\n# 用户自定义指令\n").append(systemSuffix)
+    private fun composedSystemParts(): List<String> {
+        val parts = baseSystemParts.toMutableList()
+        val tail = buildString {
+            append(parts.last())
+            if (persona.isNotBlank()) {
+                append("\n\n# Tone\nRespond in the style of 「")
+                append(persona)
+                append("」.")
+            }
+            if (systemSuffix.isNotBlank()) {
+                append("\n\n# User custom instructions\n")
+                append(systemSuffix)
+            }
+        }
+        parts[parts.lastIndex] = tail
+        return parts
     }
 
-    /** Public access to the composed system prompt (for rollout recording). */
+    private fun composedSystem(): String = composedSystemParts().joinToString("\n\n")
+
+    private fun rewriteSystemMessages() {
+        while (history.isNotEmpty() && history.first().role == "system") {
+            history.removeAt(0)
+        }
+        history.addAll(0, composedSystemParts().map { ApiMessage(role = "system", content = it) })
+    }
+
     fun composedSystemPrompt(): String = composedSystem()
 
-    /** Reset the conversation history (used when loading a saved conversation). */
     fun seed(messages: List<ApiMessage>) {
         history.clear()
-        history += ApiMessage(role = "system", content = composedSystem())
-        history += messages
+        history += composedSystemParts().map { ApiMessage(role = "system", content = it) }
+        history += messages.filter { it.role != "system" }
     }
 
     /** Snapshot of the current history (used to preserve state across engine rebuilds). */
@@ -155,7 +178,19 @@ class AgentEngine(
         return result.summary
     }
 
-    fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
+    fun runTurn(
+        settings: ProviderSettings,
+        turn: TurnContext,
+        userInput: String,
+        images: List<String> = emptyList(),
+        harnessUserMessages: List<String> = emptyList(),
+    ): Flow<AgentEvent> = flow {
+        for (msg in harnessUserMessages) {
+            val body = msg.trim()
+            if (body.isNotEmpty()) {
+                history += ApiMessage(role = "user", content = body)
+            }
+        }
         history += ApiMessage(role = "user", content = userInput, imageUrls = images.ifEmpty { null })
         loop(settings, turn)
     }

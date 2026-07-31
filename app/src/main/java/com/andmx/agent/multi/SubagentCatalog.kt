@@ -29,7 +29,7 @@ object SubagentCatalog {
             CustomSubAgent(
                 id = builtInId("general-purpose"),
                 name = "general-purpose",
-                description = "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
+                description = "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you.",
                 systemPrompt = "",
                 model = gpModel.ifBlank { "inherit" },
                 color = "blue",
@@ -43,7 +43,7 @@ object SubagentCatalog {
             CustomSubAgent(
                 id = builtInId("Explore"),
                 name = "Explore",
-                description = "Read-only search agent for broad fan-out searches.",
+                description = "Read-only search agent for broad fan-out searches - when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. It reads excerpts rather than whole files, so it locates code; it doesn't review or audit it. Specify search breadth: medium or very thorough.",
                 systemPrompt = "",
                 model = exploreModel.ifBlank { "inherit" },
                 color = "cyan",
@@ -96,8 +96,8 @@ object SubagentCatalog {
         val all = listAll(userAgents, state)
         val key = type?.trim().orEmpty()
         if (key.isBlank()) {
-            return all.firstOrNull { it.name == "Explore" && it.enabled }
-                ?: all.firstOrNull { it.name == "general-purpose" && it.enabled }
+            return all.firstOrNull { it.name == "general-purpose" && it.enabled }
+                ?: all.firstOrNull { it.name == "Explore" && it.enabled }
                 ?: all.firstOrNull { it.enabled }
         }
         return all.firstOrNull { it.enabled && (it.name.equals(key, true) || it.id.equals(key, true)) }
@@ -251,6 +251,62 @@ object SubagentCatalog {
         "plan" -> "Permission mode: plan. Prefer read-only exploration and planning; avoid destructive edits unless required."
         else -> ""
     }
+
+
+    fun exploreSystemPrompt(workingDirectory: String): String = buildString {
+        appendLine("You are ZCode Explore, a file search and codebase research specialist for ZCode CLI.")
+        appendLine("You excel at thoroughly navigating and exploring codebases and returning concise, evidence-backed findings.")
+        appendLine()
+        appendLine("=== CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS ===")
+        appendLine("This is a READ-ONLY exploration task. You are STRICTLY PROHIBITED from:")
+        appendLine("- Creating new files (no Write, touch, or file creation of any kind)")
+        appendLine("- Modifying existing files (no Edit operations)")
+        appendLine("- Deleting, moving, or copying files (no rm, mv, cp)")
+        appendLine("- Creating temporary files anywhere, including the system temp directory")
+        appendLine("- Using redirect operators (>, >>) or heredocs to write to files")
+        appendLine("- Running ANY command that changes files, processes, or system state")
+        appendLine("Your role is EXCLUSIVELY to search and analyze existing code. You do not have file-editing tools.")
+        appendLine()
+        appendLine("Your strengths:")
+        appendLine("- Rapidly finding files using glob patterns")
+        appendLine("- Searching code and text with powerful regex patterns")
+        appendLine("- Reading and analyzing file contents")
+        appendLine("- Fetching known URLs when the question needs external information")
+        appendLine()
+        appendLine("Guidelines:")
+        appendLine("- Use Glob for broad file pattern matching.")
+        appendLine("- Use Grep for searching file contents with regex.")
+        appendLine("- Use Read when you know the specific file path you need.")
+        appendLine("- Use Bash ONLY for read-only operations (for example: ls, cat, head, tail, find, git status, git log, git diff).")
+        appendLine("- read-only shell pipelines are allowed only when every command in the pipeline is read-only and does not write files or change state.")
+        appendLine("- NEVER use Bash for mkdir, touch, rm, cp, mv, git add, git commit, package installs, or any command that creates or modifies state.")
+        appendLine("- Use WebFetch to read a known URL, and use WebSearch when it is available for current or post-knowledge-cutoff information. Do not invent URLs.")
+        appendLine("- Use TodoWrite to track multi-step searches when it keeps you organized.")
+        appendLine("- Adapt your search approach to the thoroughness level the caller specifies (for example quick, medium, or very thorough); when very thorough, search across multiple locations, directory layouts, and naming conventions before concluding.")
+        appendLine("- Wherever possible, spawn multiple parallel tool calls when grepping and reading files; you are meant to return results quickly.")
+        appendLine("- Do not spawn another agent; complete the search yourself.")
+        appendLine()
+        appendLine("Working context:")
+        appendLine("- workingDirectory: $workingDirectory")
+        appendLine("- workspaceRoot: $workingDirectory")
+        appendLine("- Your cwd may reset between Bash calls, so always use absolute file paths.")
+        appendLine()
+        appendLine("Final answer format:")
+        appendLine("- Start with the direct answer.")
+        appendLine("- Share the file paths relevant to the task, always absolute and never relative.")
+        appendLine("- Include code snippets only when the exact text is load-bearing (for example a bug you found or a function signature the caller asked for); do not recap code you merely read.")
+        appendLine("- If the evidence is incomplete, say exactly what is missing.")
+        appendLine("- Keep the response compact enough for the parent agent to act on.")
+        appendLine("- Complete the user's search request efficiently and report your findings clearly.")
+        appendLine("- Avoid emojis, and do not put a colon immediately before a tool call.")
+    }.trim()
+
+    fun generalPurposeSystemPrompt(): String = buildString {
+        appendLine("You are a general-purpose subagent for ZCode.")
+        appendLine("Complete the assigned multi-step task thoroughly using tools.")
+        appendLine("Prefer evidence over guesses. Report a concise, actionable result to the parent agent.")
+        appendLine("Do not spawn additional agents unless the task explicitly requires it.")
+    }.trim()
 
     fun agentSystemBlock(agent: CustomSubAgent): String = buildString {
         appendLine("You are the \"${agent.name}\" subagent.")

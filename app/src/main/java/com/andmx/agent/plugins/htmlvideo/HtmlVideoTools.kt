@@ -45,6 +45,8 @@ class HtmlVideoToolset(private val context: Context) {
     fun tools(): List<Tool> = listOf(
         HtmlVideoWorkspaceScanTool(context),
         HtmlVideoInitTool(context),
+        HtmlVideoListRecipesTool(context),
+        HtmlVideoApplyRecipeTool(context),
         HtmlVideoWriteTool(context),
         HtmlVideoBuildTool(context),
         HtmlVideoAttachAudioTool(context),
@@ -223,7 +225,7 @@ private class HtmlVideoInitTool(private val context: Context) : Tool {
     private val fs = HtmlVideoFs(context)
     override val name = "html_video_init"
     override val description =
-        "Create an HTML video project in the current workspace. No global default folder beyond workspace."
+        "Create an HTML video project in the current workspace only. Seeds storyboard/timeline/player with getStateAtTime motion shell, scene stubs, tokens, and audio phase map. Next: html_video_apply_recipe or html_video_write."
     override val risk = ToolRisk.WRITE
     override val parameters = buildJsonObject {
         put("type", "object")
@@ -279,36 +281,103 @@ private class HtmlVideoInitTool(private val context: Context) : Tool {
             """.trimIndent()
             val storyboard = """
                 {
-                  "version": 1,
-                  "scenes": []
+                  "version": 2,
+                  "designTokens": {
+                    "bg": "#0b0d10",
+                    "fg": "#f4f6f8",
+                    "muted": "#9aa3ad",
+                    "accent": "#7dd3fc",
+                    "ease": "cubic-bezier(0.2, 0.8, 0.2, 1)"
+                  },
+                  "scenes": [
+                    {
+                      "id": "hook",
+                      "name": "hook",
+                      "startMs": 0,
+                      "endMs": ${durationMs / 4},
+                      "intent": "title reveal + anticipation",
+                      "recipe": "typewriter",
+                      "beats": ["anticipation", "commit", "hold"]
+                    },
+                    {
+                      "id": "body",
+                      "name": "body",
+                      "startMs": ${durationMs / 4},
+                      "endMs": ${(durationMs * 3) / 4},
+                      "intent": "core narrative motion",
+                      "recipe": "spotlight",
+                      "beats": ["travel", "secondary", "settle"]
+                    },
+                    {
+                      "id": "outro",
+                      "name": "outro",
+                      "startMs": ${(durationMs * 3) / 4},
+                      "endMs": $durationMs,
+                      "intent": "final frame hold + CTA",
+                      "recipe": "logo",
+                      "beats": ["settle", "hold"]
+                    }
+                  ]
                 }
             """.trimIndent()
             val timeline = """
                 {
-                  "version": 1,
-                  "clips": [],
-                  "subtitles": [],
-                  "audio": []
+                  "version": 2,
+                  "durationMs": $durationMs,
+                  "fps": $fps,
+                  "clips": [
+                    {"id": "sc-hook", "sceneId": "hook", "startMs": 0, "endMs": ${durationMs / 4}, "src": "scenes/hook.html"},
+                    {"id": "sc-body", "sceneId": "body", "startMs": ${durationMs / 4}, "endMs": ${(durationMs * 3) / 4}, "src": "scenes/body.html"},
+                    {"id": "sc-outro", "sceneId": "outro", "startMs": ${(durationMs * 3) / 4}, "endMs": $durationMs, "src": "scenes/outro.html"}
+                  ],
+                  "subtitles": [
+                    {"id": "sub-0", "startMs": 200, "endMs": ${durationMs / 5}, "text": ${jsonStr(title)}},
+                    {"id": "sub-1", "startMs": ${durationMs / 3}, "endMs": ${durationMs / 2}, "text": "Keep motion continuous"},
+                    {"id": "sub-2", "startMs": ${(durationMs * 4) / 5}, "endMs": ${durationMs - 200}, "text": "AndMX HTML Film"}
+                  ],
+                  "audio": [],
+                  "transitions": [
+                    {"atMs": ${durationMs / 4}, "type": "crossfade", "ms": 420},
+                    {"atMs": ${(durationMs * 3) / 4}, "type": "crossfade", "ms": 420}
+                  ]
                 }
             """.trimIndent()
             val audioPlan = """
                 {
-                  "version": 1,
+                  "version": 2,
                   "defaultStrategy": "procedural",
+                  "phaseMap": [
+                    {"phase": "anticipation", "kind": "click", "offsetMs": 0},
+                    {"phase": "commit", "kind": "hit", "offsetMs": 80},
+                    {"phase": "travel", "kind": "whoosh", "offsetMs": 0},
+                    {"phase": "settle", "kind": "blip", "offsetMs": 0}
+                  ],
                   "clips": []
                 }
+            """.trimIndent()
+            val readme = """
+                # HTML Film
+                entry: index.html
+                pipeline: scan -> init -> apply_recipe/write -> audio -> build -> preview -> deliver
+                motion: getStateAtTime(t); no static poster pages
             """.trimIndent()
             fs.writeText("$projectDir/project.json", projectJson)
             fs.writeText("$projectDir/storyboard.json", storyboard)
             fs.writeText("$projectDir/timeline.json", timeline)
             fs.writeText("$projectDir/audio/plan.json", audioPlan)
+            fs.writeText("$projectDir/README.md", readme)
             fs.writeText("$projectDir/scenes/.gitkeep", "")
             fs.writeText("$projectDir/css/.gitkeep", "")
             fs.writeText("$projectDir/js/.gitkeep", "")
             fs.writeText("$projectDir/assets/.gitkeep", "")
             fs.writeText("$projectDir/audio/.gitkeep", "")
+            fs.writeText("$projectDir/js/timeline-engine.js", defaultTimelineEngineJs())
+            fs.writeText("$projectDir/css/tokens.css", defaultTokensCss())
             val player = defaultPlayerHtml(title, width, height, durationMs)
             fs.writeText("$projectDir/index.html", player)
+            fs.writeText("$projectDir/scenes/hook.html", sceneStubHtml("hook", title, "Typewriter hook — rewrite via html_video_write or apply_recipe"))
+            fs.writeText("$projectDir/scenes/body.html", sceneStubHtml("body", title, "Body motion — spotlight / assembly / ruler"))
+            fs.writeText("$projectDir/scenes/outro.html", sceneStubHtml("outro", title, "Outro hold — logo settle"))
             ToolResult(
                 buildString {
                     appendLine("type: html_video_init")
@@ -320,7 +389,8 @@ private class HtmlVideoInitTool(private val context: Context) : Tool {
                     appendLine("fps: $fps")
                     appendLine("durationMs: $durationMs")
                     appendLine("title: $title")
-                    appendLine("uiHint: Proceed to write storyboard/scenes/audio and build; minimize questions; deliver full film.")
+                    appendLine("recipes: typewriter,spotlight,ruler,assembly,logo")
+                    appendLine("uiHint: Prefer html_video_apply_recipe then iterate with write/build until motion QA passes; deliver full film in one loop.")
                 },
             )
         }.getOrElse { ToolResult("init failed: ${it.message}", isError = true) }
@@ -331,7 +401,7 @@ private class HtmlVideoWriteTool(private val context: Context) : Tool {
     private val fs = HtmlVideoFs(context)
     override val name = "html_video_write"
     override val description =
-        "Write or overwrite a text file inside an HTML video project (html/css/js/json/md). Prefer this for scenes and styles."
+        "Write or overwrite a text file inside an HTML video project (html/css/js/json/md). Prefer this for scenes, motion recipes, and styles. Keep getStateAtTime timeline motion, not static pages."
     override val risk = ToolRisk.WRITE
     override val parameters = buildJsonObject {
         put("type", "object")
@@ -378,7 +448,7 @@ private class HtmlVideoBuildTool(private val context: Context) : Tool {
     private val fs = HtmlVideoFs(context)
     override val name = "html_video_build"
     override val description =
-        "Validate project files and refresh index.html entry metadata. Call after writing scenes/timeline/audio."
+        "Validate project, score motion quality (getStateAtTime/rAF/keyframes/phases/subs/audio), report staticRisk and hard fails. Call after write/apply_recipe/audio."
     override val risk = ToolRisk.WRITE
     override val parameters = buildJsonObject {
         put("type", "object")
@@ -412,10 +482,30 @@ private class HtmlVideoBuildTool(private val context: Context) : Tool {
                 }
             } else emptyList()
             val index = "$project/index.html"
-            val indexText = runCatching { fs.readText(index, 64_000) }.getOrDefault("")
-            val motionHints = listOf("animation", "@keyframes", "transition", "requestAnimationFrame", "Web Audio", "webaudio")
-            val motionScore = motionHints.count { indexText.contains(it, ignoreCase = true) }
-            val staticRisk = indexText.isNotBlank() && motionScore == 0 && scenes.isEmpty()
+            val indexText = runCatching { fs.readText(index, 120_000) }.getOrDefault("")
+            val sceneParts = mutableListOf<String>()
+            for (name in scenes.take(12)) {
+                sceneParts += runCatching { fs.readText("$project/scenes/$name", 48_000) }.getOrDefault("")
+            }
+            val sceneBlob = sceneParts.joinToString("\n")
+            val engineJs = runCatching { fs.readText("$project/js/timeline-engine.js", 64_000) }.getOrDefault("")
+            val corpus = listOf(indexText, sceneBlob, engineJs).joinToString("\n")
+            val hasTimeline = fs.exists("$project/timeline.json")
+            val hasAudioPlan = fs.exists("$project/audio/plan.json")
+            val checks = linkedMapOf(
+                "getStateAtTime" to corpus.contains("getStateAtTime"),
+                "requestAnimationFrame" to corpus.contains("requestAnimationFrame", ignoreCase = true),
+                "keyframes" to (corpus.contains("@keyframes", ignoreCase = true) || corpus.contains("keyframes", ignoreCase = true)),
+                "transition" to corpus.contains("transition", ignoreCase = true),
+                "phaseTimeline" to (corpus.contains("phase", ignoreCase = true) && (corpus.contains("timeline", ignoreCase = true) || corpus.contains("startMs"))),
+                "subtitleCues" to (corpus.contains("subtitle", ignoreCase = true) || corpus.contains("cues") || hasTimeline),
+                "audioPlan" to (corpus.contains("AudioContext", ignoreCase = true) || hasAudioPlan || audioFiles.isNotEmpty()),
+                "multiScene" to (scenes.size >= 2 || corpus.contains("scenes") || corpus.contains("layer")),
+            )
+            val motionScore = checks.values.count { it }
+            val hardFail = !checks.getValue("getStateAtTime") && !checks.getValue("requestAnimationFrame") && !checks.getValue("keyframes")
+            val staticRisk = indexText.isNotBlank() && (hardFail || motionScore < 3)
+            val weakMotion = !staticRisk && motionScore < 5
             ToolResult(
                 buildString {
                     appendLine("type: html_video_build")
@@ -427,12 +517,18 @@ private class HtmlVideoBuildTool(private val context: Context) : Tool {
                     scenes.take(40).forEach { appendLine("- scenes/$it") }
                     appendLine("audioFiles: ${audioFiles.size}")
                     audioFiles.take(40).forEach { appendLine("- audio/$it") }
-                    appendLine("motionHintScore: $motionScore")
+                    appendLine("motionChecks:")
+                    checks.forEach { (k, v) -> appendLine("  $k: $v") }
+                    appendLine("motionScore: $motionScore/${checks.size}")
                     appendLine("staticRisk: $staticRisk")
-                    if (staticRisk) {
-                        appendLine("warning: entry looks static; add keyframes/timeline motion before deliver")
+                    appendLine("weakMotion: $weakMotion")
+                    appendLine("hardFail: $hardFail")
+                    if (staticRisk || hardFail) {
+                        appendLine("warning: motion QA failed — require getStateAtTime or rAF timeline + multi-phase motion before deliver")
+                    } else if (weakMotion) {
+                        appendLine("warning: motion thin — add phase map, subtitles, audio stingers, scene transitions")
                     }
-                    appendLine("uiHint: If staticRisk, improve motion then rebuild; else preview and deliver.")
+                    appendLine("uiHint: Fix staticRisk/hardFail first; then preview and deliver Chinese summary.")
                 },
             )
         }.getOrElse { ToolResult("build failed: ${it.message}", isError = true) }
@@ -917,12 +1013,17 @@ private class HtmlVideoDeliverTool(private val context: Context) : Tool {
                 }
             } else emptyList()
             val summary = args.str("summary").orEmpty()
+            val indexText = if (hasEntry) runCatching { fs.readText(entry, 80_000) }.getOrDefault("") else ""
+            val hasMotion = indexText.contains("getStateAtTime") || indexText.contains("requestAnimationFrame")
+            val ready = hasEntry && hasMotion
             val delivery = buildString {
                 appendLine("# Delivery")
                 appendLine("project: $project")
                 appendLine("entry: $entry")
                 appendLine("scenes: ${scenes.size}")
                 appendLine("audioClips: ${audio.size}")
+                appendLine("hasMotion: $hasMotion")
+                appendLine("ready: $ready")
                 if (summary.isNotBlank()) {
                     appendLine()
                     appendLine(summary)
@@ -935,10 +1036,12 @@ private class HtmlVideoDeliverTool(private val context: Context) : Tool {
                     appendLine("projectDir: $project")
                     appendLine("entry: $entry")
                     appendLine("entryExists: $hasEntry")
+                    appendLine("hasMotion: $hasMotion")
                     appendLine("sceneCount: ${scenes.size}")
                     appendLine("audioCount: ${audio.size}")
                     appendLine("deliveryDoc: $project/DELIVERY.md")
-                    appendLine("ready: ${hasEntry}")
+                    appendLine("ready: $ready")
+                    if (!ready) appendLine("warning: not ready — missing entry or motion timeline")
                     appendLine("uiHint: Present Chinese delivery: path, how to preview, duration/style, what audio used. Do not dump raw fields.")
                 },
             )
@@ -946,6 +1049,141 @@ private class HtmlVideoDeliverTool(private val context: Context) : Tool {
     }
 }
 
+
+private class HtmlVideoListRecipesTool(private val context: Context) : Tool {
+    override val name = "html_video_list_recipes"
+    override val description =
+        "List builtin motion recipes shipped with andmx-html-video (typewriter/spotlight/ruler/assembly/logo)."
+    override val risk = ToolRisk.READ
+    override val parameters = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {}
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult = withContext(Dispatchers.IO) {
+        val recipes = HtmlVideoRecipes.all()
+        ToolResult(
+            buildString {
+                appendLine("type: html_video_list_recipes")
+                appendLine("count: ${recipes.size}")
+                recipes.forEach { r ->
+                    appendLine("- id: ${r.id}")
+                    appendLine("  title: ${r.title}")
+                    appendLine("  file: ${r.assetFile}")
+                    appendLine("  useWhen: ${r.useWhen}")
+                }
+                appendLine("uiHint: Pick 1-2 recipes; html_video_apply_recipe into project; customize with write.")
+            },
+        )
+    }
+}
+
+private class HtmlVideoApplyRecipeTool(private val context: Context) : Tool {
+    private val fs = HtmlVideoFs(context)
+    override val name = "html_video_apply_recipe"
+    override val description =
+        "Seed a builtin motion recipe into the current html-video project as a scene or replace index.html. Offline pure HTML/CSS/JS (no CDN)."
+    override val risk = ToolRisk.WRITE
+    override val parameters = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("projectDir") { put("type", "string") }
+            putJsonObject("recipe") {
+                put("type", "string")
+                put("description", "typewriter | spotlight | ruler | assembly | logo")
+            }
+            putJsonObject("target") {
+                put("type", "string")
+                put("description", "scene file rel path e.g. scenes/body.html, or index.html")
+            }
+            putJsonObject("asEntry") {
+                put("type", "boolean")
+                put("description", "If true write recipe to index.html")
+            }
+            putJsonObject("title") { put("type", "string") }
+            putJsonObject("label") { put("type", "string") }
+            putJsonObject("accent") { put("type", "string") }
+            putJsonObject("bg") { put("type", "string") }
+            putJsonObject("durationMs") { put("type", "integer") }
+            putJsonObject("width") { put("type", "integer") }
+            putJsonObject("height") { put("type", "integer") }
+        }
+        putJsonArray("required") { add("recipe") }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val project = fs.requireProject(args.str("projectDir"))
+            val recipeId = args.str("recipe")?.trim()?.lowercase().orEmpty()
+            val recipe = HtmlVideoRecipes.find(recipeId)
+                ?: return@withContext ToolResult(
+                    "unknown recipe: $recipeId; known: ${HtmlVideoRecipes.all().joinToString { it.id }}",
+                    isError = true,
+                )
+            val meta = runCatching { fs.readText("$project/project.json", 16_000) }.getOrDefault("")
+            fun metaInt(key: String, fallback: Int): Int {
+                val token = "\"$key\":"
+                val i = meta.indexOf(token)
+                if (i < 0) return fallback
+                val rest = meta.substring(i + token.length).trimStart()
+                val num = rest.takeWhile { it.isDigit() }
+                return num.toIntOrNull() ?: fallback
+            }
+            fun metaStr(key: String, fallback: String): String {
+                val token = "\"$key\":"
+                val i = meta.indexOf(token)
+                if (i < 0) return fallback
+                val rest = meta.substring(i + token.length).trimStart()
+                if (!rest.startsWith("\"")) return fallback
+                val end = rest.indexOf('"', 1)
+                if (end <= 1) return fallback
+                return rest.substring(1, end)
+            }
+            val title = args.str("title")?.trim().orEmpty().ifBlank { metaStr("title", "AndMX Film") }
+            val label = args.str("label")?.trim().orEmpty().ifBlank { title }
+            val width = args.int("width") ?: metaInt("width", 1080)
+            val height = args.int("height") ?: metaInt("height", 1920)
+            val durationMs = args.long("durationMs") ?: metaInt("durationMs", 30000).toLong()
+            val accent = args.str("accent")?.trim().orEmpty().ifBlank { "#7dd3fc" }
+            val bg = args.str("bg")?.trim().orEmpty().ifBlank { "#0b0d10" }
+            var html = HtmlVideoRecipes.loadHtml(context, recipe)
+            html = html
+                .replace("__TITLE__", title.replace("<", ""))
+                .replace("__LABEL_TEXT__", label.replace("<", ""))
+                .replace("__LABEL__", label.replace("<", ""))
+                .replace("__BACKGROUND_COLOR__", bg)
+                .replace("__BG__", bg)
+                .replace("__ACCENT__", accent)
+                .replace("__TEXT_COLOR__", "#f4f6f8")
+                .replace("__MASK_COLOR__", accent)
+                .replace("__GLOW_OPACITY__", "0.85")
+                .replace("__LAMP_SCALE__", "1")
+                .replace("__VIDEO_WIDTH__", width.toString())
+                .replace("__VIDEO_HEIGHT__", height.toString())
+                .replace("__DURATION_MS__", durationMs.toString())
+            val asEntry = args.bool("asEntry") == true
+            val targetArg = args.str("target")?.trim().orEmpty()
+            val rel = when {
+                asEntry -> "index.html"
+                targetArg.isNotBlank() -> targetArg.trimStart('/')
+                else -> "scenes/${recipe.id}.html"
+            }
+            val target = if (rel.startsWith(project)) rel else "$project/$rel"
+            fs.writeText(target, html)
+            ToolResult(
+                buildString {
+                    appendLine("type: html_video_apply_recipe")
+                    appendLine("projectDir: $project")
+                    appendLine("recipe: ${recipe.id}")
+                    appendLine("path: $target")
+                    appendLine("asEntry: ${rel == "index.html"}")
+                    appendLine("bytes: ${html.toByteArray().size}")
+                    appendLine("uiHint: Customize labels/timing with html_video_write; keep getStateAtTime; then build.")
+                },
+            )
+        }.getOrElse { ToolResult("apply_recipe failed: ${it.message}", isError = true) }
+    }
+}
 private object WavSynth {
     fun render(kind: String, durationMs: Int, frequencyHz: Double): ByteArray {
         val sampleRate = 22050
@@ -1034,74 +1272,273 @@ private fun jsonStr(s: String): String =
         append('"')
     }
 
+private fun defaultTokensCss(): String = """
+:root{
+  --bg:#0b0d10; --fg:#f4f6f8; --muted:#9aa3ad; --accent:#7dd3fc;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --danger:#fb7185; --ok:#4ade80;
+}
+""".trimIndent()
+
+private fun defaultTimelineEngineJs(): String = """
+export function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+export function easeOutCubic(x){return 1-Math.pow(1-x,3);}
+export function easeInOut(x){return x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
+export function getPhase(t, segments){
+  let acc=0;
+  for(const s of segments){
+    const d=s.duration||0;
+    if(t < acc+d) return {name:s.name, local:t-acc, duration:d, t:d? (t-acc)/d : 1, start:acc};
+    acc+=d;
+  }
+  const last=segments[segments.length-1]||{name:'hold',duration:0};
+  return {name:last.name, local:last.duration, duration:last.duration, t:1, start:Math.max(0,acc-last.duration)};
+}
+export function getStateAtTime(t, timeline, inputs){
+  const phase = getPhase(t, timeline);
+  const primary = typeof inputs.primary==='function' ? inputs.primary(t, phase) : (inputs.primary||{});
+  const velocity = typeof inputs.velocity==='function' ? inputs.velocity(t, phase, primary) : (inputs.velocity||0);
+  const pose = typeof inputs.pose==='function' ? inputs.pose(t, phase, primary, velocity) : (inputs.pose||{});
+  const secondary = typeof inputs.secondary==='function' ? inputs.secondary(t, phase, primary, velocity) : {};
+  return {t, phase, primary, velocity, pose, secondary};
+}
+""".trimIndent()
+
+private fun sceneStubHtml(id: String, title: String, hint: String): String {
+    val safeTitle = title.replace("<", "")
+    val safeHint = hint.replace("<", "")
+    return """
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>$id</title>
+<style>
+html,body{margin:0;height:100%;background:transparent;color:#f4f6f8;font-family:ui-sans-serif,system-ui,sans-serif}
+.wrap{height:100%;display:grid;place-items:center;text-align:center;padding:8%}
+h2{margin:0;font-size:clamp(22px,5vw,42px);letter-spacing:.04em}
+p{color:#9aa3ad;margin-top:1rem}
+.dot{width:10px;height:10px;border-radius:50%;background:#7dd3fc;margin:1.2rem auto 0;
+animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(.8);opacity:.5}50%{transform:scale(1.2);opacity:1}}
+</style></head>
+<body><div class="wrap"><div>
+<h2>$safeTitle</h2>
+<p>$safeHint</p>
+<div class="dot" data-scene="$id"></div>
+</div></div>
+<script>
+(()=>{const t0=performance.now();function getStateAtTime(t){return{t,phase:{name:"stub"},opacity:0.6+0.4*Math.sin(t/400)};}
+function frame(now){const s=getStateAtTime(now-t0);const d=document.querySelector(".dot");if(d)d.style.opacity=s.opacity;requestAnimationFrame(frame);}
+requestAnimationFrame(frame);})();
+</script></body></html>
+""".trimIndent()
+}
+
+private object HtmlVideoRecipes {
+    data class Recipe(val id: String, val title: String, val assetFile: String, val useWhen: String)
+
+    private val catalog = listOf(
+        Recipe("typewriter", "Typewriter / CLI reveal", "typewriter-cli.html", "prompt demo, CLI, line-by-line typing"),
+        Recipe("spotlight", "Spotlight text reveal", "spotlight-text-reveal.html", "glow scan, brand wordmark reveal"),
+        Recipe("ruler", "Ruler progress", "ruler-progress.html", "progress narrative, loading story"),
+        Recipe("assembly", "SVG assembly", "svg-assembly.html", "parts fly-in, product explode/assemble"),
+        Recipe("logo", "Logo intro", "logo-intro.html", "brand intro, anticipation to hold"),
+    )
+
+    fun all(): List<Recipe> = catalog
+    fun find(id: String): Recipe? = catalog.find { it.id == id || it.assetFile.removeSuffix(".html") == id }
+
+    fun loadHtml(context: Context, recipe: Recipe): String {
+        val assetPath = "andmx-plugins/andmx-html-video/skills/andmx-html-video/recipes/${recipe.assetFile}"
+        return runCatching {
+            context.assets.open(assetPath).bufferedReader().use { it.readText() }
+        }.getOrElse {
+            offlineFallback(recipe.id)
+        }
+    }
+
+    private fun offlineFallback(id: String): String = when (id) {
+        "typewriter" -> offlineTypewriter()
+        "ruler" -> offlineRuler()
+        "assembly" -> offlineAssembly()
+        "logo" -> offlineLogo()
+        else -> offlineSpotlight()
+    }
+
+    private fun offlineShell(body: String): String = """
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>__TITLE__</title>
+<style>html,body{margin:0;height:100%;background:__BG__;color:#f4f6f8;font-family:ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+#stage{width:min(100vw,calc(100vh*__VIDEO_WIDTH__/__VIDEO_HEIGHT__));aspect-ratio:__VIDEO_WIDTH__/__VIDEO_HEIGHT__;margin:0 auto;position:relative;overflow:hidden;background:__BG__}
+</style></head><body><div id="stage">$body</div></body></html>
+""".trimIndent()
+
+    private fun offlineTypewriter(): String = offlineShell("""
+<div style="height:100%;display:grid;place-items:center;padding:8%"><pre id="out" style="font:600 clamp(18px,4vw,36px)/1.5 ui-monospace,monospace;white-space:pre-wrap"></pre></div>
+<script>(function(){const text="__LABEL__";const D=+("__DURATION_MS__")||8000;const t0=performance.now();
+function getStateAtTime(t){const p=Math.min(1,t/(D*0.7));const n=Math.floor(p*text.length);return{n,cursor:Math.floor(t/400)%2};}
+function frame(now){const s=getStateAtTime(now-t0);const el=document.getElementById("out");
+el.textContent=text.slice(0,s.n)+(s.cursor?"|":" ");if(now-t0<D)requestAnimationFrame(frame);}requestAnimationFrame(frame);})();</script>
+""")
+
+    private fun offlineSpotlight(): String = offlineShell("""
+<div style="height:100%;display:grid;place-items:center"><h1 id="t" style="font-size:clamp(36px,8vw,72px);letter-spacing:.06em;background:radial-gradient(circle at var(--x,0%) 50%,__ACCENT__,#222 42%);-webkit-background-clip:text;color:transparent">__LABEL__</h1></div>
+<script>(function(){const D=+("__DURATION_MS__")||8000;const t0=performance.now();function getStateAtTime(t){return{x:(t/D)*120};}
+function frame(now){const s=getStateAtTime(now-t0);document.getElementById("t").style.setProperty("--x",s.x+"%");if(now-t0<D)requestAnimationFrame(frame);}requestAnimationFrame(frame);})();</script>
+""")
+
+    private fun offlineRuler(): String = offlineShell("""
+<div style="height:100%;display:grid;place-items:center;padding:10%"><div style="width:80%"><div id="track" style="height:14px;background:#ffffff22;border-radius:999px;overflow:hidden"><i id="fill" style="display:block;height:100%;width:0;background:__ACCENT__"></i></div>
+<div id="pct" style="margin-top:1rem;text-align:center;font-size:clamp(28px,6vw,48px)">0%</div></div></div>
+<script>(function(){const D=+("__DURATION_MS__")||8000;const t0=performance.now();function getStateAtTime(t){const p=Math.min(1,t/(D*0.85));return{p};}
+function frame(now){const s=getStateAtTime(now-t0);document.getElementById("fill").style.width=(s.p*100).toFixed(1)+"%";document.getElementById("pct").textContent=Math.round(s.p*100)+"%";if(now-t0<D)requestAnimationFrame(frame);}requestAnimationFrame(frame);})();</script>
+""")
+
+    private fun offlineAssembly(): String = offlineShell("""
+<svg viewBox="0 0 200 200" width="70%" height="70%" style="margin:15% auto;display:block">
+<rect id="a" x="40" y="40" width="50" height="50" fill="__ACCENT__" opacity=".9"/>
+<rect id="b" x="110" y="40" width="50" height="50" fill="#94a3b8"/>
+<rect id="c" x="40" y="110" width="50" height="50" fill="#64748b"/>
+<rect id="d" x="110" y="110" width="50" height="50" fill="#cbd5e1"/></svg>
+<script>(function(){const D=+("__DURATION_MS__")||8000;const t0=performance.now();const ids=["a","b","c","d"];const from=[[-80,-60],[90,-70],[-70,90],[100,80]];
+function ease(x){return 1-Math.pow(1-x,3);}function getStateAtTime(t){return{p:ease(Math.min(1,t/(D*0.6)))};}
+function frame(now){const s=getStateAtTime(now-t0);ids.forEach((id,i)=>{const el=document.getElementById(id);const x=from[i][0]*(1-s.p);const y=from[i][1]*(1-s.p);el.setAttribute("transform","translate("+x+","+y+")");});if(now-t0<D)requestAnimationFrame(frame);}requestAnimationFrame(frame);})();</script>
+""")
+
+    private fun offlineLogo(): String = offlineShell("""
+<div style="height:100%;display:grid;place-items:center"><div id="logo" style="width:min(42vw,180px);height:min(42vw,180px);border:2px solid __ACCENT__;border-radius:28%;display:grid;place-items:center;font-weight:700;letter-spacing:.14em;transform:scale(.2);opacity:0">AMX</div></div>
+<script>(function(){const D=+("__DURATION_MS__")||8000;const t0=performance.now();function easeOutBack(x){const c1=1.70158;const c3=c1+1;return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2);}
+function getStateAtTime(t){const a=Math.min(1,Math.max(0,(t-200)/(D*0.45)));return{s:easeOutBack(a),o:Math.min(1,a*1.2)};}
+function frame(now){const s=getStateAtTime(now-t0);const el=document.getElementById("logo");el.style.transform="scale("+s.s+")";el.style.opacity=s.o;if(now-t0<D)requestAnimationFrame(frame);}requestAnimationFrame(frame);})();</script>
+""")
+}
+
 private fun defaultPlayerHtml(title: String, width: Int, height: Int, durationMs: Long): String {
+    val safe = title.replace("<", "").replace("`", "")
+    val d = maxOf(durationMs, 1000L)
+    val titleJs = jsonStr(safe)
     return """
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<title>${title.replace("<", "")}</title>
+<title>$safe</title>
 <style>
   :root{
     --bg:#0b0d10; --fg:#f4f6f8; --muted:#9aa3ad; --accent:#7dd3fc;
-    --w:${width}px; --h:${height}px;
+    --w:${width}px; --h:${height}px; --ease:cubic-bezier(.2,.8,.2,1);
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:#000;color:var(--fg);font-family:ui-sans-serif,system-ui,sans-serif}
+  html,body{margin:0;height:100%;background:#000;color:var(--fg);font-family:ui-sans-serif,system-ui,sans-serif;overflow:hidden}
   #stage{
     width:min(100vw, calc(100vh * ${width}.0 / ${height}));
     aspect-ratio:${width}/${height};
     margin:0 auto; position:relative; overflow:hidden; background:var(--bg);
   }
-  .layer{position:absolute;inset:0;display:grid;place-items:center;opacity:0}
-  .layer.active{opacity:1}
-  h1{font-size:clamp(28px,6vw,56px);letter-spacing:.04em;margin:0;text-align:center;padding:0 8%}
-  .sub{color:var(--muted);margin-top:1rem;text-align:center;padding:0 10%}
-  #bar{position:absolute;left:0;right:0;bottom:0;height:4px;background:#ffffff22}
+  .layer{position:absolute;inset:0;display:grid;place-items:center;opacity:0;pointer-events:none;}
+  .card{text-align:center;padding:0 8%;max-width:92%}
+  h1{font-size:clamp(28px,6.2vw,58px);letter-spacing:.04em;margin:0;line-height:1.15}
+  .sub{color:var(--muted);margin-top:1rem;font-size:clamp(14px,3vw,20px)}
+  .cursor{display:inline-block;width:.55ch;height:1.05em;background:var(--accent);margin-left:.1ch;vertical-align:-.08em}
+  #bar{position:absolute;left:0;right:0;bottom:0;height:4px;background:#ffffff18}
   #bar>i{display:block;height:100%;width:0;background:var(--accent)}
-  #subs{position:absolute;left:6%;right:6%;bottom:8%;text-align:center;font-size:clamp(14px,3.2vw,22px);
-    text-shadow:0 2px 8px #000; min-height:1.4em}
-  @keyframes rise{from{transform:translateY(24px);opacity:0}to{transform:translateY(0);opacity:1}}
-  @keyframes drift{from{transform:scale(1.08)}to{transform:scale(1)}}
-  .rise{animation:rise .9s cubic-bezier(.2,.8,.2,1) both}
-  .drift{animation:drift ${maxOf(durationMs, 1000)}ms linear both}
+  #subs{position:absolute;left:6%;right:6%;bottom:8%;text-align:center;font-size:clamp(14px,3.2vw,22px);text-shadow:0 2px 10px #000;min-height:1.4em}
+  .glow{position:absolute;inset:-20%;background:radial-gradient(circle at var(--gx,50%) var(--gy,40%), color-mix(in srgb, var(--accent) 28%, transparent), transparent 42%);opacity:.55;pointer-events:none}
+  .mark{width:min(42vw,180px);height:min(42vw,180px);border:2px solid var(--accent);border-radius:28%;display:grid;place-items:center;font-weight:700;letter-spacing:.12em}
+  @keyframes blink{50%{opacity:0}}
+  .cursor.on{animation:blink 1s steps(1) infinite}
 </style>
 </head>
 <body>
 <div id="stage">
-  <div class="layer active drift" id="sc0">
-    <div>
-      <h1 class="rise">${title.replace("<", "")}</h1>
-      <p class="sub rise">AndMX HTML Film — replace scenes for final delivery</p>
-    </div>
-  </div>
+  <div class="glow" id="glow"></div>
+  <div class="layer" id="sc0"><div class="card"><h1 id="type"></h1><span class="cursor on" id="cur"></span>
+    <p class="sub" id="sub0">AndMX HTML Film</p></div></div>
+  <div class="layer" id="sc1"><div class="card"><h1 id="bodyTitle">Motion Continuity</h1>
+    <p class="sub" id="bodySub">Timeline-driven scenes</p></div></div>
+  <div class="layer" id="sc2"><div class="card"><div class="mark" id="logo">AMX</div>
+    <p class="sub" id="outSub">Final frame hold</p></div></div>
   <div id="subs"></div>
   <div id="bar"><i id="prog"></i></div>
 </div>
 <script>
 (() => {
-  const duration = ${durationMs};
-  const start = performance.now();
-  const prog = document.getElementById('prog');
-  const subs = document.getElementById('subs');
-  const cues = [];
-  function tick(now){
-    const t = Math.min(duration, now - start);
-    prog.style.width = (t / duration * 100).toFixed(2) + '%';
-    const cue = cues.find(c => t >= c.start && t < c.end);
-    subs.textContent = cue ? cue.text : '';
-    if (t < duration) requestAnimationFrame(tick);
+  const D = $d;
+  const TITLE = $titleJs;
+  const phases = [
+    {name:'anticipation', duration: D*0.08},
+    {name:'type', duration: D*0.22},
+    {name:'body', duration: D*0.45},
+    {name:'outro', duration: D*0.25},
+  ];
+  const cues = [
+    {start: 200, end: D*0.28, text: TITLE},
+    {start: D*0.32, end: D*0.62, text: 'Keep motion continuous'},
+    {start: D*0.78, end: D-200, text: 'AndMX HTML Film'},
+  ];
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+  function easeOutCubic(x){return 1-Math.pow(1-x,3);}
+  function getPhase(t){
+    let acc=0;
+    for (const s of phases){
+      if (t < acc + s.duration) return {name:s.name, local:t-acc, duration:s.duration, t:s.duration?(t-acc)/s.duration:1};
+      acc += s.duration;
+    }
+    return {name:'outro', local:phases[3].duration, duration:phases[3].duration, t:1};
   }
-  requestAnimationFrame(tick);
-  // WebAudio subtle bed
+  function getStateAtTime(t){
+    const phase = getPhase(t);
+    const typeN = phase.name==="type" ? Math.floor(easeOutCubic(phase.t)*TITLE.length) : (["body","outro"].includes(phase.name)?TITLE.length:0);
+    const scene = phase.name==="outro" ? 2 : (phase.name==="body" ? 1 : 0);
+    const opacity = [
+      scene===0 ? 1 : 0,
+      scene===1 ? 1 : 0,
+      scene===2 ? 1 : 0,
+    ];
+    if (phase.name==="body") {
+      const x = phase.t;
+      opacity[0] = Math.max(0, 1-x*3);
+      opacity[1] = Math.min(1, x*2.2);
+    }
+    if (phase.name==="outro") {
+      const x = phase.t;
+      opacity[1] = Math.max(0, 1-x*3);
+      opacity[2] = Math.min(1, x*2);
+    }
+    const gx = 30 + 40*Math.sin(t/900);
+    const gy = 35 + 20*Math.cos(t/1100);
+    const logoScale = phase.name==="outro" ? (0.2 + 0.8*easeOutCubic(phase.t)) : 0.2;
+    const bodyY = phase.name==="body" ? (24*(1-easeOutCubic(phase.t))) : 0;
+    return {t, phase, typeN, opacity, gx, gy, logoScale, bodyY, progress: clamp(t/D,0,1)};
+  }
+  function apply(s){
+    document.getElementById("type").textContent = TITLE.slice(0, s.typeN);
+    document.getElementById("cur").style.opacity = (s.phase.name==="type" || s.phase.name==="anticipation") ? 1 : 0;
+    ["sc0","sc1","sc2"].forEach((id,i)=>{document.getElementById(id).style.opacity = s.opacity[i];});
+    document.getElementById("bodyTitle").style.transform = "translateY("+s.bodyY+"px)";
+    document.getElementById("logo").style.transform = "scale("+s.logoScale+")";
+    const glow = document.getElementById("glow");
+    glow.style.setProperty("--gx", s.gx+"%");
+    glow.style.setProperty("--gy", s.gy+"%");
+    document.getElementById("prog").style.width = (s.progress*100).toFixed(2)+"%";
+    const cue = cues.find(c => s.t >= c.start && s.t < c.end);
+    document.getElementById("subs").textContent = cue ? cue.text : "";
+  }
+  const t0 = performance.now();
+  function frame(now){
+    const t = Math.min(D, now - t0);
+    apply(getStateAtTime(t));
+    if (t < D) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.type = 'sine'; o.frequency.value = 96;
-    g.gain.value = 0.02; o.connect(g); g.connect(ctx.destination); o.start();
-    setTimeout(() => { try { o.stop(); ctx.close(); } catch(e){} }, duration);
+    g.gain.value = 0.018; o.connect(g); g.connect(ctx.destination); o.start();
+    setTimeout(() => { try { o.stop(); ctx.close(); } catch(e){} }, D);
   } catch (e) {}
 })();
 </script>

@@ -5,7 +5,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/** Shared helpers for interpreting tool-call arguments across workbench panes. */
 object ToolArgs {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -16,35 +15,59 @@ object ToolArgs {
             fallbackStringValue(args, keyName)
         }
 
-    fun preview(toolName: String, args: String, limit: Int = 100): String = when (toolName) {
-        "run_shell" -> value(args, "command")
-        "read_file", "write_file", "edit_file", "apply_patch", "list_dir" -> value(args, "path")
-        "grep" -> value(args, "pattern").ifBlank { value(args, "path") }
-        "glob" -> value(args, "pattern").ifBlank { value(args, "path") }
-        "browse" -> value(args, "url")
-        "web_search" -> value(args, "query")
-        "git" -> value(args, "command").ifBlank { value(args, "args") }
-        "update_plan" -> "更新计划"
+    fun firstValue(args: String, vararg keys: String): String {
+        for (key in keys) {
+            val v = value(args, key)
+            if (v.isNotBlank()) return v
+        }
+        return ""
+    }
+
+    fun pathOf(args: String): String =
+        firstValue(args, "file_path", "path", "target_path", "targetPath", "filename", "file")
+
+    fun preview(toolName: String, args: String, limit: Int = 100): String = when (normalize(toolName)) {
+        "Bash", "run_shell", "git" -> firstValue(args, "command", "cmd", "args")
+        "Read", "read_file", "Write", "write_file", "Edit", "edit_file", "apply_patch", "list_dir" ->
+            pathOf(args)
+        "Grep", "grep" -> firstValue(args, "pattern").ifBlank { pathOf(args) }
+        "Glob", "glob" -> firstValue(args, "pattern").ifBlank { pathOf(args) }
+        "WebFetch", "browse" -> firstValue(args, "url")
+        "WebSearch", "web_search" -> firstValue(args, "query")
+        "TodoWrite", "update_plan" -> "更新计划"
         else -> args.take(limit)
     }.ifBlank { args.take(limit) }
 
-    fun filePath(toolName: String, args: String): String = when (toolName) {
-        "read_file", "write_file", "edit_file", "apply_patch", "list_dir" -> value(args, "path")
+    fun filePath(toolName: String, args: String): String = when (normalize(toolName)) {
+        "Read", "read_file", "Write", "write_file", "Edit", "edit_file", "apply_patch", "list_dir" ->
+            pathOf(args)
+        else -> pathOf(args).takeIf { isFileTool(toolName) }.orEmpty()
+    }
+
+    fun editedPath(toolName: String, args: String): String = when (normalize(toolName)) {
+        "Write", "write_file", "Edit", "edit_file", "apply_patch" -> pathOf(args)
         else -> ""
     }
 
-    fun editedPath(toolName: String, args: String): String = when (toolName) {
-        "write_file", "edit_file", "apply_patch" -> value(args, "path")
-        else -> ""
-    }
-
-    fun webUrl(toolName: String, args: String): String = when (toolName) {
-        "browse" -> value(args, "url")
-        "web_search" -> value(args, "query").takeIf { it.isNotBlank() }?.let {
+    fun webUrl(toolName: String, args: String): String = when (normalize(toolName)) {
+        "WebFetch", "browse" -> firstValue(args, "url")
+        "WebSearch", "web_search" -> firstValue(args, "query").takeIf { it.isNotBlank() }?.let {
             "https://duckduckgo.com/?q=" + URLEncoder.encode(it, "UTF-8")
         }.orEmpty()
         else -> ""
     }
+
+    fun isFileTool(toolName: String): Boolean = when (normalize(toolName)) {
+        "Read", "read_file", "Write", "write_file", "Edit", "edit_file", "apply_patch", "list_dir" -> true
+        else -> false
+    }
+
+    fun isWriteTool(toolName: String): Boolean = when (normalize(toolName)) {
+        "Write", "write_file", "Edit", "edit_file", "apply_patch" -> true
+        else -> false
+    }
+
+    fun normalize(toolName: String): String = toolName.trim()
 
     private fun fallbackStringValue(args: String, keyName: String): String {
         val key = "\"$keyName\""
@@ -78,6 +101,6 @@ object ToolArgs {
                 else -> out.append(c)
             }
         }
-        return ""
+        return out.toString()
     }
 }

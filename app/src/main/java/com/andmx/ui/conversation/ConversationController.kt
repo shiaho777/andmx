@@ -7,6 +7,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.andmx.BuildConfig
 import com.andmx.agent.AgentEngine
+import com.andmx.agent.zcode.ZCodeToolSurface
+import com.andmx.agent.zcode.buildZCodeToolSurface
+import com.andmx.agent.zcode.PlanModeState
+import com.andmx.agent.zcode.TodoState
+import com.andmx.agent.multi.ZCodeAgentTool
+import com.andmx.agent.multi.TaskStopTool
+import com.andmx.agent.multi.SendMessageTool
+import com.andmx.agent.GlobTool
+import com.andmx.agent.GrepTool
 import com.andmx.agent.AgentEvent
 import com.andmx.agent.AgentMethodologyContext
 import com.andmx.agent.ApplyPatchTool
@@ -275,16 +284,23 @@ class ConversationController(
         if (_orchestrator == null && isProviderReady) {
             val def = primaryProvider ?: return
             _orchestrator = com.andmx.agent.multi.SubAgentOrchestrator(
-                toolsFactory = { builtInTools.filter { it.name != "spawn_agent" && it.name != "multi_agent" } },
+                toolsFactory = {
+                    builtInTools.filter {
+                        it.name !in setOf("spawn_agent", "multi_agent", "Agent", "SendMessage", "TaskStop", "ComputerUse", "computer_use")
+                    } + listOf(GrepTool(context), GlobTool(context))
+                },
                 settings = settings,
                 client = com.andmx.llm.LlmClient(def, tokenUsageTracker),
                 turnProvider = { currentTurn!! },
                 parentHistoryProvider = { engine.snapshotHistory() },
             )
-            // Register both the convenience spawn tool and the full lifecycle
-            // control tool (resume/wait/close/list), so the model can manage
-            // sub-agent state, not just fire-and-forget.
-            engine.addTools(listOf(_orchestrator!!.createSubAgentTool(), _orchestrator!!.createMultiAgentTool()))
+            engine.addTools(
+                listOf(
+                    ZCodeAgentTool(_orchestrator!!),
+                    SendMessageTool(_orchestrator!!),
+                    TaskStopTool(_orchestrator!!),
+                ),
+            )
             scope.launch {
                 _orchestrator!!.events.collectLatest { event ->
                     updateBackgroundTask(event)
@@ -323,23 +339,20 @@ class ConversationController(
     /** Set by /goal edit to request the UI to open the goal overlay. */
     var showGoalCommand by mutableStateOf(false)
 
-    private val builtInTools = listOf(
-        shellTool,
-        ReadFileTool(context),
-        WriteFileTool(context),
-        EditFileTool(context),
-        ApplyPatchTool(context),
-        GitTool(context, cwdProvider = { workspaceAccess.guestCwd() }),
-        BrowseTool(networkPolicy, onBrowseUrl = { url -> browseMirrorUrl = url }),
-        ListDirTool(context),
-        WebSearchTool(networkPolicy),
-        updatePlanTool,
-        // Codex-style goal management: the agent can create, update, and query
-        // the current objective + token budget autonomously.
-        com.andmx.agent.CreateGoalTool(goalToolState),
-        com.andmx.agent.UpdateGoalTool(goalToolState),
-        com.andmx.agent.GetGoalTool(goalToolState),
-        ComputerUseTool(context),
+    private val legacyTodoState = TodoState()
+    private val legacyPlanModeState = PlanModeState()
+    private val builtInTools: List<com.andmx.agent.Tool> = buildZCodeToolSurface(
+        context = context,
+        networkPolicy = networkPolicy,
+        planTool = updatePlanTool,
+        goalState = goalToolState,
+        todo = legacyTodoState,
+        planMode = legacyPlanModeState,
+        cwdProvider = { workspaceAccess.guestCwd() },
+        surface = ZCodeToolSurface.MAIN,
+        includeGoals = false,
+        includeLegacyAliases = false,
+        includeExtras = false,
     )
 
     /** The currently-bound provider; drives LlmClient + TurnContext. */

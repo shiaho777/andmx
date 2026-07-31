@@ -780,7 +780,7 @@ suspend fun uninstall(pluginName: String): Boolean = withContext(Dispatchers.IO)
     }
 
     suspend fun listInvocableSkills(): List<Pair<String, String>> {
-        return listPluginSkills(includeDisabled = false).map { it.name to it.path }
+        return listPluginSkills(includeDisabled = false).map { it.id to it.path }
     }
 
     
@@ -987,12 +987,9 @@ suspend fun uninstall(pluginName: String): Boolean = withContext(Dispatchers.IO)
         for (plugin in discovery.plugins.filter { it.enabled }) {
             for (script in plugin.manifest.tools) {
                 if (script.isBlank()) continue
-                val safeName = plugin.manifest.name.filter { it.isLetterOrDigit() || it == '_' || it == '-' }
-                val safeScript = script.filter { it.isLetterOrDigit() || it in "._-/" }
-                    .replace('/', '_')
-                val toolName = "plugin_${safeName}_${safeScript}"
-                val desc = "插件 ${plugin.manifest.name} 工具 ($script)。" +
-                    if (plugin.manifest.description.isNotBlank()) " ${plugin.manifest.description}" else ""
+                val leaf = script.substringAfterLast('/').substringBeforeLast('.').ifBlank { script }
+                val toolName = com.andmx.agent.McpWireNames.pluginTool(plugin.manifest.name, "tools", leaf)
+                val desc = "[${plugin.manifest.name}/tools] ${plugin.manifest.description.ifBlank { script }}"
                 tools += PluginTool(context, toolName, plugin.dir, script, desc)
             }
         }

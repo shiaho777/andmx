@@ -20,11 +20,28 @@ class LocalProotEnvironment(
     override val id: String = "local-proot"
     override val displayName: String = "本地 proot"
 
+    /**
+     * Cached successful install. [ProotRuntime.install] touches the filesystem
+     * (mkdirs + libtalloc symlink) and is idempotent, so once it succeeds there
+     * is nothing left to do — re-running it on every command only adds syscalls
+     * to the hot path. Failures are never cached, so a fixable cause (missing
+     * binaries) is retried on the next call.
+     */
+    @Volatile
+    private var installed = false
+
+    private suspend fun ensureInstalled(): InstallResult {
+        if (installed) return InstallResult(true, "proot 就绪")
+        val result = runtime.install()
+        if (result.ok) installed = true
+        return result
+    }
+
     override suspend fun isAvailable(): Boolean =
-        runtime.isBundled() && runtime.install().ok
+        runtime.isBundled() && ensureInstalled().ok
 
     override suspend fun execute(spec: ProcessSpec): ProcessResult {
-        val install = runtime.install()
+        val install = ensureInstalled()
         if (!install.ok) {
             return ProcessResult(-1, "", "", 0, error = install.message)
         }

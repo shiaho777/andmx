@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>__TITLE__</title>
+<style>
+  :root{--bg:__BG__;--fg:#f4f6f8;--muted:#9aa3ad;--accent:__ACCENT__;}
+  html,body{margin:0;height:100%;background:#000;color:var(--fg);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden}
+  #stage{width:min(100vw,calc(100vh * __VIDEO_WIDTH__ / __VIDEO_HEIGHT__));aspect-ratio:__VIDEO_WIDTH__/__VIDEO_HEIGHT__;margin:0 auto;position:relative;background:var(--bg);display:grid;place-items:center}
+  .panel{width:min(88%,720px);padding:clamp(16px,4vw,28px);border:1px solid #ffffff18;border-radius:16px;background:#0f141a;box-shadow:0 20px 60px #0008}
+  .row{color:var(--muted);font-size:clamp(12px,2.4vw,14px);margin-bottom:1rem}
+  #out{font-size:clamp(18px,4.2vw,34px);line-height:1.55;white-space:pre-wrap;min-height:3.2em}
+  .cur{display:inline-block;width:.55ch;background:var(--accent);margin-left:2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  #bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:#fff2}
+  #bar>i{display:block;height:100%;width:0;background:var(--accent)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="panel">
+    <div class="row">andmx@film ~ % typewrite</div>
+    <div id="out"></div>
+  </div>
+  <div id="bar"><i id="prog"></i></div>
+</div>
+<script>
+(() => {
+  const D = +("__DURATION_MS__") || 10000;
+  const text = "__LABEL__";
+  const t0 = performance.now();
+  const timeline = [
+    {name:"anticipation", duration: D*0.08},
+    {name:"type", duration: D*0.62},
+    {name:"hold", duration: D*0.30},
+  ];
+  function getPhase(t){
+    let acc=0;
+    for (const s of timeline){
+      if (t < acc+s.duration) return {name:s.name, t:s.duration?(t-acc)/s.duration:1};
+      acc+=s.duration;
+    }
+    return {name:"hold", t:1};
+  }
+  function ease(x){return 1-Math.pow(1-x,3);}
+  function getStateAtTime(t){
+    const phase = getPhase(t);
+    let n = 0;
+    if (phase.name==="type") n = Math.floor(ease(phase.t)*text.length);
+    if (phase.name==="hold") n = text.length;
+    return {phase, n, progress: Math.min(1,t/D)};
+  }
+  function apply(s){
+    const shown = text.slice(0,s.n);
+    document.getElementById("out").innerHTML = shown + '<span class="cur"></span>';
+    document.getElementById("prog").style.width = (s.progress*100).toFixed(2)+"%";
+  }
+  function frame(now){
+    const t = Math.min(D, now-t0);
+    apply(getStateAtTime(t));
+    if (t < D) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

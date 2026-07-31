@@ -509,40 +509,69 @@ LaunchedEffect(Unit) {
                                 val isLastAssistant = item.message.role == "assistant" &&
                                     !item.message.isStreaming &&
                                     item.stableId == lastAssistantStableId
-                                MessageBubble(
-                                    message = item.message,
-                                    onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
-                                        {
-                                            if (item.message.role == "user") {
-                                                viewModel.copyMessage(item.message.content)
-                                            } else {
-                                                viewModel.copyTurnLog(item.message.id)
+                                val turnTools = if (isLastAssistant) {
+                                    toolCalls.filter { !it.isRunning }
+                                } else emptyList()
+                                val previewCards = if (isLastAssistant) {
+                                    ChatPreviewCards.fromAssistantText(item.message.content, turnTools)
+                                } else emptyList()
+                                val turnChanges = if (isLastAssistant) {
+                                    TurnChangeSummary.collect(turnTools)
+                                } else emptyList()
+                                Column(Modifier.fillMaxWidth()) {
+                                    MessageBubble(
+                                        message = item.message,
+                                        onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
+                                            {
+                                                if (item.message.role == "user") {
+                                                    viewModel.copyMessage(item.message.content)
+                                                } else {
+                                                    viewModel.copyTurnLog(item.message.id)
+                                                }
                                             }
-                                        }
-                                    } else null,
-                                    onBranch = if (
-                                        item.message.role == "assistant" &&
-                                        !item.message.isStreaming &&
-                                        !item.message.isProcess &&
-                                        !isLoading
-                                    ) {
-                                        { viewModel.branchFromMessage(item.message.id) }
-                                    } else null,
-                                    onRegenerate = if (isLastAssistant && !isLoading) {
-                                        { viewModel.regenerate() }
-                                    } else null,
-                                    onEdit = if (
-                                        item.message.role == "user" &&
-                                        !isLoading &&
-                                        item.message.content.isNotBlank()
-                                    ) {
-                                        {
-                                            val text = viewModel.beginEditUserMessage(item.message.id)
-                                            if (text != null) inputText = text
-                                        }
-                                    } else null,
-                                    isEditing = item.message.id == editingMessageId,
-                                )
+                                        } else null,
+                                        onBranch = if (
+                                            item.message.role == "assistant" &&
+                                            !item.message.isStreaming &&
+                                            !item.message.isProcess &&
+                                            !isLoading
+                                        ) {
+                                            { viewModel.branchFromMessage(item.message.id) }
+                                        } else null,
+                                        onRegenerate = if (isLastAssistant && !isLoading) {
+                                            { viewModel.regenerate() }
+                                        } else null,
+                                        onEdit = if (
+                                            item.message.role == "user" &&
+                                            !isLoading &&
+                                            item.message.content.isNotBlank()
+                                        ) {
+                                            {
+                                                val text = viewModel.beginEditUserMessage(item.message.id)
+                                                if (text != null) inputText = text
+                                            }
+                                        } else null,
+                                        isEditing = item.message.id == editingMessageId,
+                                    )
+                                    if (previewCards.isNotEmpty()) {
+                                        PreviewCardsRow(
+                                            cards = previewCards,
+                                            onOpenFile = { path ->
+                                                filesInitialPath = path
+                                                showFiles = true
+                                            },
+                                        )
+                                    }
+                                    if (turnChanges.isNotEmpty()) {
+                                        ChangeSummaryBar(
+                                            changes = turnChanges,
+                                            onOpenFile = { path ->
+                                                filesInitialPath = path
+                                                showFiles = true
+                                            },
+                                        )
+                                    }
+                                }
                             }
                             is TimelineItem.Tool -> ToolCallCard(item.tool)
                             is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)

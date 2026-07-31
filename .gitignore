@@ -16,3 +16,6 @@
 .kotlin/
 .trae/
 .zcode/
+
+# 本地参考资料（不进入产品/仓库依赖）
+skills-main/

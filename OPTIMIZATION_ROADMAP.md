@@ -41,17 +41,19 @@
 ## 实际完成情况（核对于代码）
 
 - Markdown 引擎、文件图标、对话流、工具卡片、终端、会话抽屉均已落地，对应代码在 `ui2/` 各子目录。
-- ui2 总计约 7,460 行 Kotlin（早期文档曾给出更低的估算值，与实际实现规模不符，以代码为准）。
-- ui2 与旧版 `ui/workbench/`（~10,000 行）并存，通过 `AndroidManifest.xml` 的 launcher activity 配置切换。
-- 设置页（`ui2/settings/`，~3,695 行）规模超出早期预估，包含 provider/model/mcp/plugin/skill/sub-agent/usage 等多页。
+- ui2 总计约 24,000 行 Kotlin。历次文档给出的 7,460 / 更低估算均已过时，以 `find app/src/main/java/com/andmx/ui2 -name '*.kt' | xargs wc -l` 为准。
+- ui2 与旧版 `ui/workbench/`（含 `ui/` 其余部分约 22,400 行）并存，通过 `AndroidManifest.xml` 的 launcher activity 配置切换。
+- 设置页（`ui2/settings/`，约 7,400 行）与对话（`ui2/chat/`，约 11,300 行）是两个最大的子模块，均远超早期预估。
 
 ## 早期文档中的不可验证声明
 
 早期版本曾列出「启动提升 50%+」「内存减少 60%+」「APK 20MB」等性能数字。这些数字没有测量来源，已移除。如需性能基线，应使用 Android Studio Profiler 实测。
 
+同理，本文档中的行数会随代码漂移。引用规模时请重新实测，不要照抄。
+
 ## 待完善
 
-- 与真实 agent 引擎端到端对接
+- ui2 的自动化端到端测试（`tools/mock_llm_server.py` 已就位，但尚无测试驱动它；ui2 运行时链路本身已接真实引擎）
 - Computer Use 集成
 - 图片消息支持
 - 会话搜索

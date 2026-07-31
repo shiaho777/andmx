@@ -24,6 +24,8 @@ object FileTypeIcons {
         "yml" to Icons.Outlined.DataObject,
         "toml" to Icons.Outlined.DataObject,
         
+        "html" to Icons.Outlined.Language,
+        "htm" to Icons.Outlined.Language,
         "md" to Icons.Outlined.Description,
         "txt" to Icons.Outlined.Description,
         "pdf" to Icons.Outlined.PictureAsPdf,

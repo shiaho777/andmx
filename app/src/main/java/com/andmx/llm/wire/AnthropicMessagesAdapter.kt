@@ -62,15 +62,10 @@ object AnthropicMessagesAdapter : WireAdapter {
     // ── Request encoding ──────────────────────────────────────────────────────
 
     override fun encodeRequest(req: ChatRequest, provider: ProviderDefinition): String {
-        // Split off the leading system message(s); Anthropic wants them top-level.
-        val systemText = req.messages
+        val systemParts = req.messages
             .filter { it.role == "system" }
-            .joinToString("\n\n") { it.content.orEmpty() }
-            .ifBlank { null }
+            .mapNotNull { it.content?.takeIf { c -> c.isNotBlank() } }
 
-        // Translate the remaining OpenAI-style message flow into Anthropic
-        // content blocks. tool messages become tool_result blocks under a user
-        // turn; assistant tool_calls become tool_use blocks.
         val userAssistant = req.messages.filter { it.role != "system" }
         val anthropicMessages = buildJsonArray {
             userAssistant.forEach { m ->
@@ -80,9 +75,25 @@ object AnthropicMessagesAdapter : WireAdapter {
 
         val root = buildJsonObject {
             put("model", req.model)
-            // Anthropic requires max_tokens; default to a generous cap when unset.
-            put("max_tokens", provider.models[req.model]?.maxOutputTokens?.takeIf { it > 0 } ?: 8_192)
-            if (systemText != null) put("system", systemText)
+            put(
+                "max_tokens",
+                req.maxTokens?.takeIf { it > 0 }
+                    ?: provider.models[req.model]?.maxOutputTokens?.takeIf { it > 0 }
+                    ?: 8_192,
+            )
+            if (systemParts.isNotEmpty()) {
+                putJsonArray("system") {
+                    systemParts.forEach { part ->
+                        addJsonObject {
+                            put("type", "text")
+                            put("text", part)
+                            putJsonObject("cache_control") {
+                                put("type", "ephemeral")
+                            }
+                        }
+                    }
+                }
+            }
             put("messages", anthropicMessages)
             req.stream.let { if (it) put("stream", true) }
             // Extended thinking — only when the model declares the THINKING style.

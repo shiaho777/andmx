@@ -15,7 +15,7 @@ Android 原生的 AI 编程 agent。把「能真正改代码、跑命令、操�
 | **工具系统** | Shell / File / Patch / Git / Browse / ComputerUse / Goal / MCP 等，按风险分级（READ/WRITE/EXECUTE/NETWORK）走批准策略 |
 | **proot 沙盒** | App 内运行 Linux guest，Alpine rootfs 自动下载，PTY 交互终端，项目目录 bind-mount 到手机真实存储 |
 | **Computer Use** | MediaProjection 截屏 + AccessibilityService 派发手势（tap/swipe/type），构成 screenshot→action→screenshot 纯视觉循环 |
-| **多 Provider** | 统一抽象 OpenAI / Anthropic / GLM(BigModel) / DeepSeek / Ollama / vLLM…，三种 wire 协议（OpenAI Chat / OpenAI Responses / Anthropic Messages），reasoning 元数据驱动 |
+| **多 Provider** | 统一抽象 OpenAI / Anthropic / GLM(BigModel) / DeepSeek / Ollama / vLLM…，`ProviderKind` → `WireAdapter` 单点分发，reasoning 元数据驱动。已完整实现两套协议：OpenAI Chat Completions 与 Anthropic Messages；`OPENAI_RESPONSES` 目前仅改写 endpoint 路径并复用 Chat 的编解码，尚未按 Responses 信封（`input`/`output`、`response.output_text.delta`）实现 |
 | **MCP** | 内置 JSON-RPC client，可挂载外部 MCP 服务器作为额外工具 |
 
 ## 两个构建变体（flavor）
@@ -37,7 +37,7 @@ agent/        agent 循环 + 工具系统（ShellTool/FileTools/PatchTool/GitToo
               上下文压缩、hooks、automations、plugins、memory、多 agent
 llm/          LLM 客户端、流式模型、token 跟踪
 llm/provider/ ProviderDefinition / ModelDefinition / ReasoningConfig
-llm/wire/     WireAdapter 三协议实现（OpenAiChat/OpenAiResponses/Anthropic）
+llm/wire/     WireAdapter 实现（OpenAiChat / Anthropic 完整；OpenAiResponses 为改路径的别名）
 exec/         执行环境抽象（LocalProcess/LocalProot）、PersistentShell、PTY
 exec/proot/   proot runtime、rootfs 安装器
 exec/policy/  ExecPolicy / NetworkPolicy
@@ -49,7 +49,7 @@ diff/         Diff / Patch 引擎
 term/         终端模拟器
 workspace/    项目管理、change tracker、guest 路径
 settings/     ProviderStore / ProviderSettings
-ui2/          新版极简 UI（Material You + 底部导航），默认 launcher
+ui2/          新版极简 UI（Material You，对话为唯一主屏），默认 launcher
 ui/workbench/ 旧版三栏 workbench UI（保留）
 ```
 
@@ -62,8 +62,8 @@ ui/workbench/ 旧版三栏 workbench UI（保留）
 ./gradlew assembleLiteDebug      # lite flavor（默认）
 ./gradlew assembleProotDebug     # proot flavor（需 sideload）
 
-# 运行单元测试（63 个测试文件）
-./gradlew test
+# 运行单元测试（66 个测试文件 / 287 个测试）
+./gradlew :app:testLiteDebugUnitTest
 
 # 安装到已连接设备
 ./gradlew installLiteDebug

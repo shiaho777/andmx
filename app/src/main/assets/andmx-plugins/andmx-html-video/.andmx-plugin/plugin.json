@@ -1,7 +1,7 @@
 {
   "name": "andmx-html-video",
-  "version": "0.1.0",
-  "description": "在当前工作区用 HTML/CSS/JS 与程序音频一次交付完整可播影片工程。",
+  "version": "0.3.0",
+  "description": "在当前工作区用 HTML/CSS/JS 与程序音频交付完整可播影片；内置 getStateAtTime 播放器壳、动效配方与程序动画原则（自包含）。",
   "author": "AndMX",
   "license": "MIT",
   "skills": [

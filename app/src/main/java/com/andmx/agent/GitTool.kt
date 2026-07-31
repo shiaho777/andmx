@@ -41,6 +41,6 @@ class GitTool(
             append(res.stdout.ifBlank { "(无输出)" })
             append("\n[exit=${res.exitCode}]")
         }
-        return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+        return ToolResult(out, isError = res.exitCode != 0)
     }
 }

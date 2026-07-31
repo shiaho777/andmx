@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>__TITLE__</title>
+<style>
+  :root{--bg:__BG__;--accent:__ACCENT__;--fg:#f4f6f8;--muted:#9aa3ad}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;color:var(--fg);font-family:ui-sans-serif,system-ui,sans-serif}
+  #stage{width:min(100vw,calc(100vh * __VIDEO_WIDTH__ / __VIDEO_HEIGHT__));aspect-ratio:__VIDEO_WIDTH__/__VIDEO_HEIGHT__;margin:0 auto;background:var(--bg);display:grid;place-items:center;position:relative}
+  .mark{width:min(46vw,200px);height:min(46vw,200px);border:2px solid var(--accent);border-radius:30%;display:grid;place-items:center;font-weight:800;letter-spacing:.16em;font-size:clamp(28px,6vw,42px);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%, transparent)}
+  .sub{position:absolute;bottom:18%;left:0;right:0;text-align:center;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;font-size:clamp(12px,2.6vw,16px)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="mark" id="logo">AMX</div>
+  <div class="sub" id="sub">__LABEL__</div>
+</div>
+<script>
+(() => {
+  const D = +("__DURATION_MS__") || 10000;
+  const t0 = performance.now();
+  const timeline = [
+    {name:"anticipation", duration:D*0.12},
+    {name:"commit", duration:D*0.08},
+    {name:"travel", duration:D*0.35},
+    {name:"settle", duration:D*0.20},
+    {name:"hold", duration:D*0.25},
+  ];
+  function getPhase(t){
+    let acc=0;
+    for (const s of timeline){
+      if (t < acc+s.duration) return {name:s.name, t:s.duration?(t-acc)/s.duration:1};
+      acc+=s.duration;
+    }
+    return {name:"hold", t:1};
+  }
+  function easeOutBack(x){const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2);}
+  function getStateAtTime(t){
+    const phase = getPhase(t);
+    let scale = 0.2, opacity = 0, y = 0, glow = 0;
+    if (phase.name==="anticipation"){ scale = 0.2 - 0.04*phase.t; opacity = 0.2+0.3*phase.t; y = 10*phase.t; }
+    if (phase.name==="commit"){ scale = 0.16; opacity = 0.6; y = 8; }
+    if (phase.name==="travel"){ scale = 0.16 + 0.84*easeOutBack(phase.t); opacity = 0.6+0.4*phase.t; y = 8*(1-phase.t); glow = phase.t; }
+    if (phase.name==="settle" || phase.name==="hold"){ scale = 1; opacity = 1; y = 0; glow = 1-phase.t*0.4; }
+    return {phase, scale, opacity, y, glow};
+  }
+  function apply(s){
+    const el = document.getElementById("logo");
+    el.style.transform = `translateY(${s.y}px) scale(${s.scale})`;
+    el.style.opacity = s.opacity;
+    el.style.boxShadow = `0 0 ${40*s.glow}px ${12*s.glow}px color-mix(in srgb, var(--accent) 45%, transparent)`;
+    document.getElementById("sub").style.opacity = Math.min(1, s.opacity);
+  }
+  function frame(now){
+    const t=Math.min(D,now-t0);
+    apply(getStateAtTime(t));
+    if (t<D) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

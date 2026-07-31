@@ -117,7 +117,8 @@ fun buildTimeline(
 private fun shouldGroupTool(tool: ToolCall): Boolean {
     if (tool.isRunning || tool.isError) return false
     return tool.name in setOf(
-        "read_file", "list_dir", "grep", "glob", "git", "get_goal",
+        "Read", "read_file", "list_dir", "Grep", "grep", "Glob", "glob", "git", "get_goal",
+        "TodoRead",
     )
 }
 

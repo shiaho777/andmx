@@ -30,8 +30,10 @@ class ZCodeAlignmentTest {
         assertTrue(prompt.contains("You are ZCode"))
         assertTrue(prompt.contains("# Harness"))
         assertTrue(prompt.contains("Primary working directory: /root/project"))
-        assertTrue(prompt.contains("Mode: build"))
         assertTrue(prompt.contains("Current branch: main"))
+        assertTrue(prompt.contains("powered by the model named test/model"))
+        // Only plan mode injects a mode overlay; the edit modes stay silent.
+        assertFalse(prompt.contains("# Mode:"))
     }
 
     @Test

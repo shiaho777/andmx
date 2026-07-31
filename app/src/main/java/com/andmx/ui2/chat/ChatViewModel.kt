@@ -206,24 +206,55 @@ class ChatViewModel @Inject constructor(
             val msgs = mutableListOf<ChatMessage>()
             val tools = mutableListOf<ToolCall>()
             val subItems = mutableListOf<SubAgentItem>()
+            val reasonItems = mutableListOf<ReasoningItem>()
+            val approvalItems = mutableListOf<ApprovalItem>()
             for (msg in history) {
+                val key = msg.id
+                val ts = if (msg.createdAt > 0L) msg.createdAt else msg.id
                 when (msg.role) {
                     "user" -> msgs += ChatMessage(
                         id = msg.id,
                         role = "user",
                         content = msg.content,
-                        sortKey = msg.createdAt,
-                        createdAt = msg.createdAt,
+                        sortKey = key,
+                        createdAt = ts,
                     )
                     "assistant" -> msgs += ChatMessage(
                         id = msg.id,
                         role = "assistant",
                         content = msg.content,
-                        sortKey = msg.createdAt,
+                        sortKey = key,
                         isProcess = false,
-                        createdAt = msg.createdAt,
-                        completedAt = msg.createdAt,
+                        createdAt = ts,
+                        completedAt = ts,
                     )
+                    "reasoning" -> {
+                        if (msg.content.isNotBlank()) {
+                            reasonItems += ReasoningItem(
+                                id = "hist-think-${msg.id}",
+                                content = msg.content,
+                                isStreaming = false,
+                                sortKey = key,
+                            )
+                        }
+                    }
+                    "approval" -> {
+                        val status = msg.toolArgs.trim().lowercase().ifBlank { "resolved" }.let {
+                            when (it) {
+                                "pending" -> "resolved"
+                                "allowed", "denied", "resolved" -> it
+                                else -> "resolved"
+                            }
+                        }
+                        approvalItems += ApprovalItem(
+                            id = "hist-appr-${msg.id}",
+                            toolName = msg.toolName ?: "tool",
+                            summary = msg.content,
+                            modeLabel = msg.approvalModeLabel.ifBlank { msg.approvalRisk },
+                            status = status,
+                            sortKey = key,
+                        )
+                    }
                     "tool" -> {
                         tools += ToolCall(
                             id = "hist-${msg.id}",
@@ -232,9 +263,11 @@ class ChatViewModel @Inject constructor(
                             output = msg.content,
                             isRunning = false,
                             isError = msg.toolError,
-                            sortKey = msg.createdAt,
+                            sortKey = key,
                         )
-                        if (msg.toolName == "spawn_agent" || msg.toolName == "multi_agent") {
+                        if (msg.toolName == "spawn_agent" || msg.toolName == "multi_agent" ||
+                            msg.toolName == "agent" || msg.toolName == "spawn"
+                        ) {
                             val task = runCatching {
                                 val el = kotlinx.serialization.json.Json.parseToJsonElement(msg.toolArgs)
                                 (el as? kotlinx.serialization.json.JsonObject)
@@ -246,7 +279,7 @@ class ChatViewModel @Inject constructor(
                                 task = task,
                                 state = if (msg.toolError) "FAILED" else "COMPLETED",
                                 result = msg.content,
-                                sortKey = msg.createdAt,
+                                sortKey = key,
                             )
                         }
                     }
@@ -256,8 +289,15 @@ class ChatViewModel @Inject constructor(
             _messages.value = annotated
             _toolCalls.value = tools
             _subAgentItems.value = subItems
-            processSortCursor = (annotated.maxOfOrNull { it.sortKey } ?: 0L)
-                .coerceAtLeast(tools.maxOfOrNull { it.sortKey } ?: 0L)
+            _reasonings.value = reasonItems
+            _approvals.value = approvalItems
+            processSortCursor = listOfNotNull(
+                annotated.maxOfOrNull { it.sortKey },
+                tools.maxOfOrNull { it.sortKey },
+                reasonItems.maxOfOrNull { it.sortKey },
+                approvalItems.maxOfOrNull { it.sortKey },
+                subItems.maxOfOrNull { it.sortKey },
+            ).maxOrNull() ?: 0L
             runCatching { controller.focusConversation(id) }
             refreshContextUsage()
         }

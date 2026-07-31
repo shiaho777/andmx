@@ -51,8 +51,17 @@ class AnthropicMessagesAdapterTest {
             ),
         )
         val body = json.parseToJsonElement(adapter.encodeRequest(req, provider)).jsonObject
-        // system must be a top-level field, NOT a message in the array.
-        assertEquals("你是助手", body["system"]?.jsonPrimitive?.content)
+        // system must be a top-level field, NOT a message in the array. It is
+        // encoded as an array of text blocks so each part can carry
+        // cache_control for Anthropic prompt caching.
+        val system = body["system"]?.jsonArray ?: error("missing system")
+        assertEquals(1, system.size)
+        assertEquals("text", system[0].jsonObject["type"]?.jsonPrimitive?.content)
+        assertEquals("你是助手", system[0].jsonObject["text"]?.jsonPrimitive?.content)
+        assertEquals(
+            "ephemeral",
+            system[0].jsonObject["cache_control"]?.jsonObject?.get("type")?.jsonPrimitive?.content,
+        )
         val messages = body["messages"]?.jsonArray ?: error("missing messages")
         assertEquals(1, messages.size)
         assertEquals("user", messages[0].jsonObject["role"]?.jsonPrimitive?.content)

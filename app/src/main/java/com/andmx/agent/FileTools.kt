@@ -17,14 +17,14 @@ class ReadFileTool(context: Context) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "read_file"
     override val description =
-        "读取当前工作区中某个文件的文本内容。大文件会被截断:用 offset/limit 分页读取。"
+        "Reads a file from the local filesystem. Default up to 2000 lines in cat -n format. Optional offset/limit for large files."
     override val risk = ToolRisk.READ
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("path") { put("type", "string"); put("description", "文件路径，相对或绝对") }
-            putJsonObject("offset") { put("type", "integer"); put("description", "起始行号(从 0 开始),默认 0"); put("default", 0) }
-            putJsonObject("limit") { put("type", "integer"); put("description", "最多返回的行数,默认 2000"); put("default", 2000) }
+            putJsonObject("path") { put("type", "string"); put("description", "Absolute or workspace-relative file path") }
+            putJsonObject("offset") { put("type", "integer"); put("description", "Line number to start reading from (0-based index)"); put("default", 0) }
+            putJsonObject("limit") { put("type", "integer"); put("description", "Max lines to return (default 2000)"); put("default", 2000) }
         }
         putJsonArray("required") { add("path") }
     }
@@ -34,27 +34,37 @@ class ReadFileTool(context: Context) : Tool {
         val offset = (args["offset"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
         val limit = (args["limit"]?.jsonPrimitive?.content?.toIntOrNull() ?: DEFAULT_LINE_LIMIT).coerceIn(1, MAX_LINE_LIMIT)
         return runCatching {
+            if (access.isDirectory(path)) {
+                return@runCatching ToolResult("<system-reminder>Read target is a directory, not a file: $path</system-reminder>", isError = true)
+            }
             val text = access.readText(path)
             val lines = text.split('\n')
             val total = lines.size
-            if (total <= limit) {
-                ToolResult(text)
-            } else {
-                val end = (offset + limit).coerceAtMost(total)
-                val slice = lines.subList(offset, end).joinToString("\n")
-                val note = buildString {
-                    append("\n\n... (已截断: 显示第 ${offset + 1}-$end 行, 共 $total 行)")
-                    if (end < total) append("; 用 offset=$end 继续读取后续内容")
-                    if (offset > 0) append("; 用 offset=${(offset - limit).coerceAtLeast(0)} 读取前面内容")
-                }
-                ToolResult(slice + note)
+            if (total == 0 || (total == 1 && lines[0].isEmpty())) {
+                return@runCatching ToolResult("<system-reminder>File is empty: $path</system-reminder>", isError = true)
             }
+            val end = (offset + limit).coerceAtMost(total)
+            if (offset >= total) {
+                return@runCatching ToolResult("<system-reminder>offset $offset beyond end of file ($total lines)</system-reminder>", isError = true)
+            }
+            val body = buildString {
+                for (i in offset until end) {
+                    val ln = i + 1
+                    append(String.format("%6d\t%s", ln, lines[i]))
+                    if (i < end - 1) append('\n')
+                }
+                if (end < total || offset > 0) {
+                    append("\n\n... (lines ${offset + 1}-$end of $total)")
+                    if (end < total) append("; continue with offset=$end")
+                }
+            }
+            ToolResult(body)
         }.getOrElse { ToolResult("读取失败: ${it.message}", isError = true) }
     }
 
     companion object {
         const val DEFAULT_LINE_LIMIT = 2000
-        const val MAX_LINE_LIMIT = 5000
+        const val MAX_LINE_LIMIT = 100_000
     }
 }
 

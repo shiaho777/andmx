@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>__TITLE__</title>
+<style>
+  :root{--bg:__BACKGROUND_COLOR__;--accent:__MASK_COLOR__;--fg:__TEXT_COLOR__}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;color:var(--fg);font-family:ui-sans-serif,system-ui,sans-serif}
+  #stage{width:min(100vw,calc(100vh * __VIDEO_WIDTH__ / __VIDEO_HEIGHT__));aspect-ratio:__VIDEO_WIDTH__/__VIDEO_HEIGHT__;margin:0 auto;background:var(--bg);display:grid;place-items:center;position:relative}
+  h1{font-size:clamp(40px,10vw,96px);letter-spacing:.04em;margin:0;font-weight:800;
+    background:radial-gradient(circle at var(--x,0%) 50%, var(--accent), #1a1f26 38%, #1a1f26 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 35%, transparent))}
+  .beam{position:absolute;top:0;bottom:0;width:18%;left:var(--x,0%);transform:translateX(-50%);
+    background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--accent) 22%,transparent),transparent);pointer-events:none;opacity:.9}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="beam" id="beam"></div>
+  <h1 id="t">__LABEL_TEXT__</h1>
+</div>
+<script>
+(() => {
+  const D = +("__DURATION_MS__") || 10000;
+  const t0 = performance.now();
+  function easeInOut(x){return x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
+  function getStateAtTime(t){
+    const p = easeInOut(Math.min(1, t/(D*0.85)));
+    return {x: p*120, progress: Math.min(1,t/D)};
+  }
+  function apply(s){
+    document.getElementById("t").style.setProperty("--x", s.x+"%");
+    document.getElementById("beam").style.setProperty("--x", s.x+"%");
+  }
+  function frame(now){
+    const t=Math.min(D,now-t0);
+    apply(getStateAtTime(t));
+    if (t<D) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

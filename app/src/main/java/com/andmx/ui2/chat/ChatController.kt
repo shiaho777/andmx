@@ -5,6 +5,8 @@ import android.content.Context
 import com.andmx.agent.AgentEngine
 import com.andmx.agent.AgentEvent
 import com.andmx.agent.ApplyPatchTool
+import com.andmx.agent.McpWireNames
+import com.andmx.agent.RenamedTool
 import com.andmx.agent.ApprovalMode
 import com.andmx.agent.ApprovalPolicy
 import com.andmx.agent.BrowseTool
@@ -21,6 +23,7 @@ import com.andmx.agent.ToolRisk
 import com.andmx.agent.TurnContext
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.zcode.isPlanModeAllowed
+import com.andmx.agent.zcode.ZCodeToolSurface
 import com.andmx.agent.zcode.buildZCodeToolSurface
 import com.andmx.agent.zcode.PlanModeState
 import com.andmx.agent.zcode.TodoState
@@ -43,6 +46,8 @@ import com.andmx.ui.conversation.GoalPhase
 import com.andmx.ui.conversation.GoalStatus
 import com.andmx.agent.multi.SubAgentOrchestrator
 import com.andmx.agent.multi.SubagentCatalog
+import com.andmx.agent.multi.SendMessageTool
+import com.andmx.agent.multi.TaskStopTool
 import com.andmx.agent.multi.ZCodeAgentTool
 import com.andmx.agent.plugins.PluginSystem
 import com.andmx.agent.plugins.BuiltinPluginSeeder
@@ -60,8 +65,9 @@ import com.andmx.exec.files.GuestFs
 import com.andmx.exec.policy.NetworkPolicy
 import com.andmx.exec.proot.ProotRuntime
 import com.andmx.llm.ApiFunctionCall
-import com.andmx.llm.ApiMessage
 import com.andmx.llm.ApiToolCall
+import com.andmx.llm.ApiMessage
+import com.andmx.llm.ChatRequest
 import com.andmx.llm.LlmClient
 import com.andmx.llm.TokenUsage
 import com.andmx.llm.TokenUsageTracker
@@ -89,9 +95,6 @@ import java.util.concurrent.ConcurrentHashMap
 
 class ChatController(private val context: Context) {
     companion object {
-        private const val TOOL_OUTPUT_DB_LIMIT = 12_000
-        private const val TOOL_OUTPUT_ROLLOUT_LIMIT = 4_096
-        private const val TOOL_OUTPUT_MEMORY_LIMIT = 4_000
         private const val MAX_CACHED_SESSIONS = 4
     }
     private val settingsStore = SettingsStore(context)
@@ -136,20 +139,66 @@ class ChatController(private val context: Context) {
         return LlmClient(provider, trackerFor(conversationId)) to TurnContext(provider, model)
     }
 
-    private fun createZCodeAgentTool(orch: SubAgentOrchestrator): ZCodeAgentTool {
+    private suspend fun createZCodeAgentTool(orch: SubAgentOrchestrator): ZCodeAgentTool {
+        val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
+        val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
+        val enabled = SubagentCatalog.listAll(users, state).filter { it.enabled }
+        val catalog = buildString {
+            appendLine("Available agent types and the tools they have access to:")
+            for (agent in enabled) {
+                val toolsLabel = when {
+                    agent.name == "general-purpose" || SubagentCatalog.isAllTools(agent.tools) -> "*"
+                    agent.name == "Explore" -> "Read, Bash, WebFetch, WebSearch, TodoWrite"
+                    else -> agent.tools.joinToString(", ").ifBlank { "*" }
+                }
+                appendLine("- ${agent.name}: ${agent.description} (Tools: $toolsLabel)")
+            }
+            appendLine()
+            append("When using the Agent tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.")
+        }
         return ZCodeAgentTool(
             orchestrator = orch,
             resolveAgent = { type ->
-                val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
-                val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
-                SubagentCatalog.resolve(type, users, state)
+                val u = settingsStore.customSubAgents.firstOrNull().orEmpty()
+                val s = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
+                SubagentCatalog.resolve(type, u, s)
             },
             listTypes = {
-                val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
-                val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
-                SubagentCatalog.listAll(users, state).filter { it.enabled }.map { it.name }
+                val u = settingsStore.customSubAgents.firstOrNull().orEmpty()
+                val s = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
+                SubagentCatalog.listAll(u, s).filter { it.enabled }.map { it.name }
             },
+            typeCatalog = catalog,
         )
+    }
+
+    private suspend fun resolveActiveProvider(): com.andmx.llm.provider.ProviderDefinition? {
+        val settings = settingsStore.settings.firstOrNull() ?: return null
+        val providers = providerStore.providers.firstOrNull().orEmpty()
+        return providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
+            ?: providerStore.primary.firstOrNull()
+    }
+
+    private suspend fun answerWebFetchPage(conversationId: Long, userMessage: String): String {
+        val settings = settingsStore.settings.firstOrNull() ?: return ""
+        val provider = resolveActiveProvider() ?: return ""
+        val model = settings.model.ifBlank { provider.models.keys.firstOrNull().orEmpty() }
+        if (model.isBlank() || userMessage.isBlank()) return ""
+        val client = LlmClient(provider, trackerFor(conversationId))
+        val req = ChatRequest(
+            model = model,
+            messages = listOf(
+                ApiMessage(
+                    role = "user",
+                    content = userMessage,
+                ),
+            ),
+            temperature = null,
+            tools = null,
+            stream = false,
+            maxTokens = 4096,
+        )
+        return client.chat(req).getOrNull()?.content?.trim().orEmpty()
     }
 
 
@@ -223,6 +272,7 @@ class ChatController(private val context: Context) {
         val kind: String = "tool",
         val questions: List<AskQuestion> = emptyList(),
         val planText: String = "",
+        val dbMessageId: Long = 0L,
     )
 
     private class Session(
@@ -240,6 +290,7 @@ class ChatController(private val context: Context) {
         val turnToolOutputs: MutableList<Pair<String, String>> = mutableListOf(),
         var lastUserText: String = "",
         var lastAssistantText: String = "",
+        var harnessInjected: Boolean = false,
     )
 
     fun resolveApproval(allow: Boolean) {
@@ -254,6 +305,13 @@ class ChatController(private val context: Context) {
             )
             session.pendingAnswer = null
         }
+        if (req != null && req.dbMessageId > 0L) {
+            controllerScope.launch {
+                runCatching {
+                    repo.updateMessageToolArgs(req.dbMessageId, if (allow) "allowed" else "denied")
+                }
+            }
+        }
     }
 
     fun resolveUserQuestion(answersJson: String) {
@@ -264,10 +322,56 @@ class ChatController(private val context: Context) {
         session?.pendingAnswer = null
         session?.pending?.complete(true)
         session?.pending = null
+        if (req != null && req.dbMessageId > 0L) {
+            controllerScope.launch {
+                runCatching {
+                    repo.updateMessageToolArgs(req.dbMessageId, "allowed")
+                }
+            }
+        }
     }
 
     fun resolvePlanApproval(allow: Boolean) {
         resolveApproval(allow)
+    }
+
+    private suspend fun persistApprovalRequest(
+        conversationId: Long,
+        toolName: String,
+        risk: ToolRisk,
+        summary: String,
+        modeLabel: String,
+        kind: String = "tool",
+        questions: List<AskQuestion> = emptyList(),
+        planText: String = "",
+    ): ApprovalRequest {
+        val createdAt = System.currentTimeMillis()
+        val dbId = runCatching {
+            repo.addMessage(
+                conversationId = conversationId,
+                role = "approval",
+                content = summary,
+                toolName = toolName,
+                toolArgs = "pending",
+                approvalRisk = risk.name,
+                approvalModeLabel = modeLabel,
+                approvalRiskDescription = kind,
+                createdAt = createdAt,
+            )
+        }.getOrDefault(0L)
+        return ApprovalRequest(
+            conversationId = conversationId,
+            toolName = toolName,
+            risk = risk,
+            summary = summary,
+            modeLabel = modeLabel,
+            id = if (dbId > 0L) "appr-$dbId" else "appr-$createdAt",
+            createdAt = createdAt,
+            kind = kind,
+            questions = questions,
+            planText = planText,
+            dbMessageId = dbId,
+        )
     }
 
     fun reloadPlugins() {
@@ -449,6 +553,7 @@ class ChatController(private val context: Context) {
         }
         val turn = TurnContext(provider, settings.model)
         val toolArgsById = mutableMapOf<String, String>()
+        val reasoningBuf = StringBuilder()
         ensureRolloutSession(conversationId, provider, settings)
         val writer = writerFor(conversationId)
         val turnId = "turn-${System.currentTimeMillis()}"
@@ -472,13 +577,22 @@ class ChatController(private val context: Context) {
         }
 
         try {
-            session.engine.runTurn(settings, turn, modelInput, images = images).collect { event ->
+            val harnessMsgs = if (session.harnessInjected) emptyList() else buildHarnessSystemReminders()
+            if (harnessMsgs.isNotEmpty()) session.harnessInjected = true
+            session.engine.runTurn(
+                settings = settings,
+                turn = turn,
+                userInput = modelInput,
+                images = images,
+                harnessUserMessages = harnessMsgs,
+            ).collect { event ->
                 handleAgentEvent(
                     conversationId = conversationId,
                     session = session,
                     writer = writer,
                     turnId = turnId,
                     toolArgsById = toolArgsById,
+                    reasoningBuf = reasoningBuf,
                     event = event,
                     userTextForTitle = text,
                 )
@@ -502,13 +616,29 @@ class ChatController(private val context: Context) {
         writer: RolloutWriter,
         turnId: String,
         toolArgsById: MutableMap<String, String>,
+        reasoningBuf: StringBuilder,
         event: AgentEvent,
         userTextForTitle: String? = null,
     ) {
         when (event) {
             is AgentEvent.AssistantDelta -> emit(ChatEvent.AssistantChunk(event.text))
-            is AgentEvent.ReasoningDelta -> emit(ChatEvent.ReasoningChunk(event.text))
-            is AgentEvent.ReasoningDone -> emit(ChatEvent.ReasoningDone)
+            is AgentEvent.ReasoningDelta -> {
+                reasoningBuf.append(event.text)
+                emit(ChatEvent.ReasoningChunk(event.text))
+            }
+            is AgentEvent.ReasoningDone -> {
+                val thought = reasoningBuf.toString()
+                reasoningBuf.setLength(0)
+                if (thought.isNotBlank()) {
+                    repo.addMessage(conversationId, "reasoning", thought)
+                    runCatching {
+                        writer.writeResponseItem(
+                            ResponseItem(type = "reasoning", content = thought, turnId = turnId),
+                        )
+                    }
+                }
+                emit(ChatEvent.ReasoningDone)
+            }
             is AgentEvent.ToolCallArgsDelta -> emit(ChatEvent.ToolCallArgsDelta(event.index, event.id, event.name, event.argumentsSoFar))
             is AgentEvent.Assistant -> {
                 emit(ChatEvent.AssistantComplete(event.text))
@@ -540,17 +670,15 @@ class ChatController(private val context: Context) {
             is AgentEvent.ToolFinished -> {
                 val args = toolArgsById.remove(event.id).orEmpty()
                 val out = event.output
-                val outDb = out.take(TOOL_OUTPUT_DB_LIMIT)
-                val outMem = out.take(TOOL_OUTPUT_MEMORY_LIMIT)
-                session.turnToolOutputs += event.name to outMem
+                session.turnToolOutputs += event.name to out
                 if (session.turnToolOutputs.size > 24) {
                     session.turnToolOutputs.subList(0, session.turnToolOutputs.size - 24).clear()
                 }
-                emit(ChatEvent.ToolCallFinished(event.id, outDb, event.isError))
+                emit(ChatEvent.ToolCallFinished(event.id, out, event.isError))
                 repo.addMessage(
                     conversationId,
                     "tool",
-                    outDb,
+                    out,
                     toolName = event.name,
                     toolArgs = args,
                     toolError = event.isError,
@@ -562,7 +690,7 @@ class ChatController(private val context: Context) {
                             toolCallId = event.id,
                             toolName = event.name,
                             toolArgs = args,
-                            toolOutput = out.take(TOOL_OUTPUT_ROLLOUT_LIMIT),
+                            toolOutput = out,
                             isError = event.isError,
                             turnId = turnId,
                         ),
@@ -639,6 +767,7 @@ class ChatController(private val context: Context) {
         val turnId = "turn-regen-${System.currentTimeMillis()}"
         val turn = TurnContext(provider, settings.model)
         val toolArgsById = mutableMapOf<String, String>()
+        val reasoningBuf = StringBuilder()
         runCatching {
             writer.writeTurnContext(
                 com.andmx.data.rollout.TurnContext(
@@ -662,6 +791,7 @@ class ChatController(private val context: Context) {
                     writer = writer,
                     turnId = turnId,
                     toolArgsById = toolArgsById,
+                    reasoningBuf = reasoningBuf,
                     event = event,
                 )
             }
@@ -757,23 +887,27 @@ class ChatController(private val context: Context) {
             pluginTools = runCatching { pluginSystem.loadPluginTools(context) }.getOrDefault(emptyList())
             mobileDevTools = runCatching {
                 val enabled = pluginSystem.discover().plugins.filter { it.enabled }
-                val androidOn = enabled.any {
-                    PluginSystem.BuiltinNativeMcp.providesAndroidTools(it.manifest.name)
-                }
-                val storageOn = enabled.any {
-                    PluginSystem.BuiltinNativeMcp.providesStorageTools(it.manifest.name)
-                }
-                val htmlVideoOn = enabled.any {
-                    PluginSystem.BuiltinNativeMcp.providesHtmlVideoTools(it.manifest.name)
-                }
-                val forgeOn = enabled.any {
-                    PluginSystem.BuiltinNativeMcp.providesForgeTools(it.manifest.name)
-                }
+                fun wrapNative(wirePlugin: String, wireServer: String, tools: List<Tool>): List<Tool> =
+                    tools.map { tool ->
+                        RenamedTool(
+                            inner = tool,
+                            name = McpWireNames.pluginTool(wirePlugin, wireServer, tool.name),
+                            description = tool.description,
+                        )
+                    }
                 buildList {
-                    if (androidOn) addAll(AndroidDevToolset(context).tools())
-                    if (storageOn) addAll(StorageCleanupToolset(context).tools())
-                    if (htmlVideoOn) addAll(HtmlVideoToolset(context).tools())
-                    if (forgeOn) addAll(DevForgeToolset(context).tools())
+                    if (enabled.any { PluginSystem.BuiltinNativeMcp.providesAndroidTools(it.manifest.name) }) {
+                        addAll(wrapNative("android-emulator", "android-emulator", AndroidDevToolset(context).tools()))
+                    }
+                    enabled.firstOrNull { PluginSystem.BuiltinNativeMcp.providesStorageTools(it.manifest.name) }?.let { p ->
+                        addAll(wrapNative(p.manifest.name, "device-storage", StorageCleanupToolset(context).tools()))
+                    }
+                    enabled.firstOrNull { PluginSystem.BuiltinNativeMcp.providesHtmlVideoTools(it.manifest.name) }?.let { p ->
+                        addAll(wrapNative(p.manifest.name, "html-video", HtmlVideoToolset(context).tools()))
+                    }
+                    enabled.firstOrNull { PluginSystem.BuiltinNativeMcp.providesForgeTools(it.manifest.name) }?.let { p ->
+                        addAll(wrapNative(p.manifest.name, "dev-forge", DevForgeToolset(context).tools()))
+                    }
                 }
             }.getOrDefault(emptyList())
         }
@@ -811,7 +945,7 @@ class ChatController(private val context: Context) {
             if (!orchestrators.containsKey(conversationId)) {
                 val orch = SubAgentOrchestrator(
                     toolsFactory = {
-                        buildTools(existing.planTool, existing.goalState, existing.todoState, existing.planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" } + sharedExtraTools
+                        buildTools(existing.planTool, existing.goalState, existing.todoState, existing.planModeState, conversationId, ZCodeToolSurface.WORKER).filter { it.name !in setOf("Agent", "SendMessage", "TaskStop") } + sharedExtraTools
                     },
                     settings = settings,
                     client = LlmClient(provider, trackerFor(conversationId)),
@@ -823,7 +957,7 @@ class ChatController(private val context: Context) {
                 )
                 orchestrators[conversationId] = orch
                 val known = existing.engine.listTools().map { it.first }.toSet()
-                val multi = listOf(orch.createSubAgentTool(), orch.createMultiAgentTool(), createZCodeAgentTool(orch)).filter { it.name !in known }
+                val multi = listOf(createZCodeAgentTool(orch), SendMessageTool(orch), TaskStopTool(orch)).filter { it.name !in known }
                 if (multi.isNotEmpty()) existing.engine.addTools(multi)
                 watchSubAgents(conversationId, orch)
             } else {
@@ -859,7 +993,7 @@ class ChatController(private val context: Context) {
         }
         val tools = buildTools(planTool, goalState, todoState, planModeState, conversationId)
         val client = LlmClient(provider, trackerFor(conversationId))
-        val system = buildZCodeSystemPrompt(
+        val systemParts = buildZCodeSystemParts(
             settings = settings,
             provider = provider,
             mode = execMode,
@@ -867,7 +1001,8 @@ class ChatController(private val context: Context) {
         val engine = AgentEngine(
             tools = tools,
             client = client,
-            systemPrompt = system,
+            systemPrompt = systemParts.joinToString("\n\n"),
+            systemParts = systemParts,
             hooks = hookSystem,
             approve = { tool, args ->
                 val liveMode = sessions[conversationId]?.approvalMode ?: execMode
@@ -879,19 +1014,19 @@ class ChatController(private val context: Context) {
         }
         val orch = SubAgentOrchestrator(
             toolsFactory = {
-                buildTools(planTool, goalState, todoState, planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" } + sharedExtraTools
+                buildTools(planTool, goalState, todoState, planModeState, conversationId, ZCodeToolSurface.WORKER).filter { it.name !in setOf("Agent", "SendMessage", "TaskStop") } + sharedExtraTools
             },
             settings = settings,
             client = client,
             turnProvider = { TurnContext(provider, settings.model) },
             parentHistoryProvider = { engine.snapshotHistory() },
-        
             resolveRun = { modelSpec ->
                 resolveSubAgentRun(modelSpec, provider, conversationId)
             },
+            cwdProvider = { access.guestCwd() },
         )
         orchestrators[conversationId] = orch
-        engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool(), createZCodeAgentTool(orch)))
+        engine.addTools(listOf(createZCodeAgentTool(orch), SendMessageTool(orch), TaskStopTool(orch)))
         engine.setCustomInstructions(settings.customInstructions)
         engine.setPersona(settings.persona)
 
@@ -971,6 +1106,7 @@ class ChatController(private val context: Context) {
         todo: TodoState = TodoState(),
         planMode: PlanModeState = PlanModeState(),
         conversationId: Long = 0L,
+        surface: ZCodeToolSurface = ZCodeToolSurface.MAIN,
     ): List<Tool> {
         val cwd = { access.guestCwd() }
         return buildZCodeToolSurface(
@@ -981,6 +1117,10 @@ class ChatController(private val context: Context) {
             todo = todo,
             planMode = planMode,
             cwdProvider = cwd,
+            surface = surface,
+            includeGoals = false,
+            includeLegacyAliases = false,
+            includeExtras = false,
             onPlanModeChange = { mode ->
                 sessions[conversationId]?.approvalMode = mode
                 controllerScope.launch {
@@ -997,7 +1137,7 @@ class ChatController(private val context: Context) {
                 val summary = questions.joinToString(" · ") { q ->
                     q.header.ifBlank { q.question.take(24) }
                 }.ifBlank { "需要你的决定" }
-                _pendingApproval.value = ApprovalRequest(
+                _pendingApproval.value = persistApprovalRequest(
                     conversationId = conversationId,
                     toolName = "AskUserQuestion",
                     risk = ToolRisk.READ,
@@ -1018,7 +1158,7 @@ class ChatController(private val context: Context) {
                 val session = sessions[conversationId] ?: return@enter false
                 val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
                 session.pending = deferred
-                _pendingApproval.value = ApprovalRequest(
+                _pendingApproval.value = persistApprovalRequest(
                     conversationId = conversationId,
                     toolName = "EnterPlanMode",
                     risk = ToolRisk.READ,
@@ -1032,7 +1172,7 @@ class ChatController(private val context: Context) {
                 val session = sessions[conversationId] ?: return@exit false
                 val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
                 session.pending = deferred
-                _pendingApproval.value = ApprovalRequest(
+                _pendingApproval.value = persistApprovalRequest(
                     conversationId = conversationId,
                     toolName = "ExitPlanMode",
                     risk = ToolRisk.READ,
@@ -1042,6 +1182,9 @@ class ChatController(private val context: Context) {
                     planText = plan,
                 )
                 deferred.await()
+            },
+            answerPage = { userMessage ->
+                answerWebFetchPage(conversationId, userMessage)
             },
         )
     }
@@ -1073,6 +1216,50 @@ class ChatController(private val context: Context) {
         }
         val header = "session=$sessionId strategy=$strategy query=$query"
         return (header + "\n" + filtered).take(maxTokens.coerceIn(500, 12000) * 4)
+    }
+
+    private suspend fun buildHarnessSystemReminders(): List<String> {
+        val installed = runCatching {
+            com.andmx.agent.plugins.SkillInstaller(guestFs).listInstalled()
+        }.getOrDefault(emptyList())
+        val pluginSkills = runCatching {
+            pluginSystem.listPluginSkills(includeDisabled = false)
+        }.getOrDefault(emptyList())
+        val skillLines = buildString {
+            for (skill in installed) {
+                val desc = skill.description.ifBlank { "Installed user skill" }
+                appendLine("- ${skill.name}: $desc (file: ${skill.path}/SKILL.md)")
+            }
+            for (skill in pluginSkills) {
+                val desc = skill.description.ifBlank { skill.pluginName }
+                val also = if (skill.name != skill.id && !skill.id.endsWith(":${skill.name}")) {
+                    " (also loadable as ${skill.name})"
+                } else if (skill.id.contains(':')) {
+                    " (also loadable as ${skill.name})"
+                } else ""
+                appendLine("- ${skill.id}: $desc$also (file: ${skill.path})")
+            }
+        }.trim()
+        val out = mutableListOf<String>()
+        if (skillLines.isNotEmpty()) {
+            out += buildString {
+                appendLine("<system-reminder>")
+                appendLine("The following skills are available for use with the Skill tool:")
+                appendLine()
+                appendLine(skillLines)
+                append("</system-reminder>")
+            }
+        }
+        out += buildString {
+            appendLine("<system-reminder>")
+            appendLine("As you answer the user's questions, you can use the following context:")
+            appendLine("# currentDate")
+            appendLine("Today's date is ${java.time.LocalDate.now()}.")
+            appendLine()
+            appendLine("IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.")
+            append("</system-reminder>")
+        }
+        return out
     }
 
     private suspend fun invokeSkillTool(skill: String, args: String?): String {
@@ -1218,12 +1405,13 @@ class ChatController(private val context: Context) {
                 val deferred = CompletableDeferred<Boolean>()
                 session.pending = deferred
                 val summary = buildApprovalSummary(tool, args)
-                _pendingApproval.value = ApprovalRequest(
+                _pendingApproval.value = persistApprovalRequest(
                     conversationId = conversationId,
                     toolName = tool.name,
                     risk = tool.risk,
                     summary = summary,
                     modeLabel = mode.label,
+                    kind = "tool",
                 )
                 deferred.await()
             }
@@ -1245,11 +1433,11 @@ class ChatController(private val context: Context) {
     }
 
 
-    private suspend fun buildZCodeSystemPrompt(
+    private suspend fun buildZCodeSystemParts(
         settings: ProviderSettings,
         provider: ProviderDefinition,
         mode: ExecMode,
-    ): String {
+    ): List<String> {
         val gitPath = if (projectManager.isRemote) {
             projectManager.currentRemoteSpec()?.remotePath
                 ?: projectManager.hostPath.value
@@ -1277,18 +1465,7 @@ class ChatController(private val context: Context) {
             git.hasChanges -> "${git.dirtyFileCount} files dirty"
             else -> "clean"
         }
-        val skills = runCatching {
-            com.andmx.agent.plugins.SkillInstaller(guestFs).listInstalled()
-        }.getOrDefault(emptyList())
-        val pluginSkills = runCatching { pluginSystem.listInvocableSkills() }.getOrDefault(emptyList())
-        val skillsHint = buildString {
-            skills.forEach { skill ->
-                appendLine("- ${skill.name}: invoke via Skill tool with skill=\"${skill.name}\" (slash form /${skill.name})")
-            }
-            pluginSkills.forEach { (id, _) ->
-                appendLine("- $id: invoke via Skill tool with skill=\"$id\" (plugin skill)")
-            }
-        }.trim()
+        val skillsHint = ""
         val agents = runCatching {
             val cwd = access.guestCwd()
             val candidates = listOf("AGENTS.md", "CLAUDE.md", "CODEX.md", ".zcode/AGENTS.md")
@@ -1322,7 +1499,7 @@ class ChatController(private val context: Context) {
             isGitRepo = git?.isRepo == true,
             platform = "android",
             shell = "sh",
-            osVersion = "Android (proot Alpine guest)",
+            osVersion = "Android",
             modelLabel = provider.name + "/" + settings.model,
             branch = git?.branch.orEmpty(),
             mainBranch = "main",
@@ -1330,12 +1507,10 @@ class ChatController(private val context: Context) {
             gitStatus = gitStatus,
             skillsHint = skillsHint,
         )
-        return ZCodePrompts.assemble(
+        return ZCodePrompts.assembleParts(
             mode = mode,
             env = env,
             projectDocs = agents,
-            customInstructions = settings.customInstructions,
-            persona = settings.persona,
             extra = extra,
         )
     }
@@ -1362,8 +1537,8 @@ class ChatController(private val context: Context) {
             appendLine(workspaceLine)
             appendLine("工作目录：${access.guestCwd()}")
             appendLine("执行模式：${ExecMode.from(settings.approvalMode).label}")
-            appendLine("优先工具：run_shell / read_file / write_file / edit_file / apply_patch / grep / glob / git / list_dir / browse / web_search / update_plan / create_goal / update_goal / get_goal / spawn_agent / multi_agent。")
-            appendLine("复杂可并行子任务可用 spawn_agent 委派；需要多线程协作时用 multi_agent。")
+            appendLine("优先工具：Read / Write / Edit / Bash / WebFetch / WebSearch / TodoWrite / EnterPlanMode / ExitPlanMode / AskUserQuestion / Skill / Agent / SendMessage / TaskStop。")
+            appendLine("复杂可并行子任务用 Agent（subagent_type=general-purpose 或 Explore）；后台任务用 TaskStop/SendMessage 协调。")
             appendLine("搜索代码用 grep/glob，不要用 python 整文件 dump。")
             appendLine("改文件前先读再写；提交前用 git status/diff 自检。")
             if (agents.isNotBlank()) {

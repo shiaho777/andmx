@@ -16,22 +16,33 @@ data class ToolEditPreview(
 }
 
 object ToolEditDiff {
-    private val editTools = setOf("write_file", "edit_file", "apply_patch")
+    private val writeNames = setOf("Write", "write_file")
+    private val editNames = setOf("Edit", "edit_file")
+    private val patchNames = setOf("apply_patch", "ApplyPatch")
 
-    fun isEditTool(name: String): Boolean = name in editTools
+    fun isEditTool(name: String): Boolean {
+        val n = name.trim()
+        return n in writeNames || n in editNames || n in patchNames
+    }
 
     fun preview(name: String, args: String): ToolEditPreview? {
-        return when (name) {
-            "write_file" -> writePreview(args)
-            "edit_file" -> editPreview(args)
-            "apply_patch" -> patchPreview(args)
+        val n = name.trim()
+        return when {
+            n in writeNames -> writePreview(args)
+            n in editNames -> editPreview(args)
+            n in patchNames -> patchPreview(args)
             else -> null
         }
     }
 
     private fun writePreview(args: String): ToolEditPreview? {
-        val path = ToolArgs.value(args, "path").ifBlank { return null }
-        val content = contentOf(args) ?: return null
+        val path = ToolArgs.pathOf(args).ifBlank { return null }
+        val content = contentOf(args) ?: return ToolEditPreview(
+            path = path,
+            operation = ToolEditPreview.Operation.WRITE,
+            stats = DiffStats(0, 0),
+            lines = emptyList(),
+        )
         val lines = DiffEngine.diff("", content)
         return ToolEditPreview(
             path = path,
@@ -42,12 +53,17 @@ object ToolEditDiff {
     }
 
     private fun editPreview(args: String): ToolEditPreview? {
-        val path = ToolArgs.value(args, "path").ifBlank { return null }
-        val oldStr = ToolArgs.value(args, "old_str")
-            .ifBlank { ToolArgs.value(args, "old_string") }
-        val newStr = ToolArgs.value(args, "new_str")
-            .ifBlank { ToolArgs.value(args, "new_string") }
-        if (oldStr.isBlank() && newStr.isBlank()) return null
+        val path = ToolArgs.pathOf(args).ifBlank { return null }
+        val oldStr = ToolArgs.firstValue(args, "old_string", "old_str", "oldString", "old_text", "oldText")
+        val newStr = ToolArgs.firstValue(args, "new_string", "new_str", "newString", "new_text", "newText")
+        if (oldStr.isBlank() && newStr.isBlank()) {
+            return ToolEditPreview(
+                path = path,
+                operation = ToolEditPreview.Operation.EDIT,
+                stats = DiffStats(0, 0),
+                lines = emptyList(),
+            )
+        }
         val lines = DiffEngine.diff(oldStr, newStr)
         return ToolEditPreview(
             path = path,
@@ -58,13 +74,11 @@ object ToolEditDiff {
     }
 
     private fun patchPreview(args: String): ToolEditPreview? {
-        val pathHint = ToolArgs.value(args, "path")
-        val patch = ToolArgs.value(args, "patch")
-            .ifBlank { ToolArgs.value(args, "diff") }
-            .ifBlank {
-                val raw = args.trim()
-                if (raw.contains("@@") || raw.contains("*** Begin Patch") || raw.startsWith("diff ")) raw else ""
-            }
+        val pathHint = ToolArgs.pathOf(args)
+        val patch = ToolArgs.firstValue(args, "patch", "diff", "patch_text").ifBlank {
+            val raw = args.trim()
+            if (raw.contains("@@") || raw.contains("*** Begin Patch") || raw.startsWith("diff ")) raw else ""
+        }
         if (patch.isBlank()) return null
 
         val unified = normalizePatch(patch, pathHint)
@@ -96,10 +110,7 @@ object ToolEditDiff {
     }
 
     private fun contentOf(args: String): String? {
-        val content = ToolArgs.value(args, "content")
-            .ifBlank { ToolArgs.value(args, "new_str") }
-            .ifBlank { ToolArgs.value(args, "new_string") }
-            .ifBlank { ToolArgs.value(args, "text") }
+        val content = ToolArgs.firstValue(args, "content", "new_string", "new_str", "newString", "text", "new_text", "newText")
         return content.takeIf { it.isNotBlank() }
     }
 
@@ -135,39 +146,34 @@ object ToolEditDiff {
                 out.appendLine("+++ b/$fileName")
                 out.appendLine("@@ -0,0 +1,${newLines.size} @@")
                 newLines.forEach { out.appendLine("+$it") }
-            } else if (newLines.isEmpty() && oldLines.isNotEmpty()) {
-                out.appendLine("diff --git a/$fileName b/$fileName")
-                out.appendLine("--- a/$fileName")
-                out.appendLine("+++ /dev/null")
-                out.appendLine("@@ -1,${oldLines.size} +0,0 @@")
-                oldLines.forEach { out.appendLine("-$it") }
             } else {
-                val diff = DiffEngine.diff(oldLines.joinToString("\n"), newLines.joinToString("\n"))
                 out.appendLine("diff --git a/$fileName b/$fileName")
                 out.appendLine("--- a/$fileName")
                 out.appendLine("+++ b/$fileName")
-                out.appendLine("@@")
-                for (line in diff) {
-                    when (line.kind) {
-                        DiffLine.Kind.ADD -> out.appendLine("+${line.text}")
-                        DiffLine.Kind.REMOVE -> out.appendLine("-${line.text}")
-                        DiffLine.Kind.CONTEXT -> out.appendLine(" ${line.text}")
-                    }
-                }
+                out.appendLine("@@ -1,${oldLines.size.coerceAtLeast(1)} +1,${newLines.size.coerceAtLeast(1)} @@")
+                oldLines.forEach { out.appendLine("-$it") }
+                newLines.forEach { out.appendLine("+$it") }
             }
             oldLines = ArrayList()
             newLines = ArrayList()
         }
-        for (raw in lines) {
-            val line = raw.trimEnd()
+        var mode = ""
+        for (line in lines) {
             when {
-                line.startsWith("*** Update File:") || line.startsWith("*** Add File:") || line.startsWith("*** Delete File:") -> {
+                line.startsWith("*** Add File:") -> {
                     flush()
-                    path = line.substringAfter(':').trim().ifBlank { pathHint }
+                    path = line.substringAfter(':').trim()
+                    mode = "add"
                 }
-                line.startsWith("+") && !line.startsWith("+++") -> newLines += line.drop(1)
-                line.startsWith("-") && !line.startsWith("---") -> oldLines += line.drop(1)
-                line.startsWith(" ") -> {
+                line.startsWith("*** Update File:") || line.startsWith("*** Delete File:") -> {
+                    flush()
+                    path = line.substringAfter(':').trim()
+                    mode = "update"
+                }
+                line.startsWith("*** End Patch") || line.startsWith("*** Begin Patch") -> Unit
+                line.startsWith("+") && mode.isNotBlank() -> newLines += line.drop(1)
+                line.startsWith("-") && mode.isNotBlank() -> oldLines += line.drop(1)
+                line.startsWith(" ") && mode.isNotBlank() -> {
                     oldLines += line.drop(1)
                     newLines += line.drop(1)
                 }
@@ -205,8 +211,11 @@ object ToolEditDiff {
         return ""
     }
 
-    fun focusedPreview(lines: List<DiffLine>, limit: Int = 48): List<DiffLine> {
+    fun focusedPreview(lines: List<DiffLine>, limit: Int = 56): List<DiffLine> {
         if (lines.isEmpty()) return emptyList()
+        if (lines.all { it.kind == DiffLine.Kind.ADD }) {
+            return lines.take(limit)
+        }
         val first = lines.indexOfFirst { it.kind != DiffLine.Kind.CONTEXT }
         if (first < 0) return lines.take(limit)
         val start = (first - 2).coerceAtLeast(0)

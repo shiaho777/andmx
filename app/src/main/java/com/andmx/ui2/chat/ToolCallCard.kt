@@ -72,6 +72,9 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import com.andmx.diff.DiffLine
+import com.andmx.ui2.markdown.CodeTheme
+import com.andmx.ui2.markdown.CodeHighlight
+import com.andmx.ui2.icons.FileTypeIcons
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -183,7 +186,18 @@ fun ToolCallCard(toolCall: ToolCall) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (summary.isNotBlank()) {
+            if (editPreview != null && summary.isNotBlank()) {
+                Spacer(Modifier.width(8.dp))
+                FileNameChip(
+                    path = editPreview.path,
+                    name = summary,
+                    onClick = {
+                        val p = editPreview.path
+                        if (p.isNotBlank()) ChatActionBus.openFile(p)
+                    },
+                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 220.dp),
+                )
+            } else if (summary.isNotBlank()) {
                 Text(
                     text = " · ",
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
@@ -210,7 +224,7 @@ fun ToolCallCard(toolCall: ToolCall) {
                     modifier = Modifier.padding(start = 8.dp).widthIn(max = 96.dp),
                 )
             }
-            if (editPreview != null) {
+            if (editPreview != null && (editPreview.stats.added > 0 || editPreview.stats.removed > 0)) {
                 AnimatedDiffCounts(
                     added = editPreview.stats.added,
                     removed = editPreview.stats.removed,
@@ -219,7 +233,8 @@ fun ToolCallCard(toolCall: ToolCall) {
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
-            if (toolCall.isRunning) {
+            // ZCode ToolLayout: no spinner on edit write summary; animated label is enough
+            if (toolCall.isRunning && editPreview == null) {
                 CircularProgressIndicator(
                     Modifier
                         .padding(start = 8.dp)
@@ -283,7 +298,7 @@ fun ToolCallCard(toolCall: ToolCall) {
                     .fillMaxWidth()
                     .padding(start = 23.dp, top = 2.dp, bottom = 6.dp),
             ) {
-                if (editPreview != null && editPreview.lines.isNotEmpty()) {
+                if (editPreview != null && (editPreview.lines.isNotEmpty() || toolCall.isRunning)) {
                     InlineEditDiffPreview(
                         preview = editPreview,
                         isRunning = toolCall.isRunning,
@@ -436,32 +451,41 @@ private data class ToolFamily(
     val icon: ImageVector,
 )
 
-private fun toolFamily(name: String): ToolFamily = when {
-    name == "run_shell" || name == "git" -> ToolFamily("Shell", Icons.Outlined.Terminal)
-    name in setOf("read_file", "list_dir", "glob") -> ToolFamily("读取", Icons.Outlined.Description)
-    name in setOf("write_file", "edit_file", "apply_patch") -> ToolFamily("写入", Icons.Outlined.Edit)
-    name == "grep" -> ToolFamily("搜索", Icons.Outlined.Search)
-    name in setOf("browse", "web_search") -> ToolFamily("网络", Icons.Outlined.Language)
-    name == "update_plan" -> ToolFamily("计划", Icons.Outlined.Checklist)
-    name in setOf("spawn_agent", "multi_agent") -> ToolFamily("子代理", Icons.Outlined.Build)
-    name.startsWith("plugin_") -> ToolFamily("插件", Icons.Outlined.Build)
-    name.contains("__") || (name.contains("_") && name.count { it == '_' } >= 2) ->
-        ToolFamily("MCP", Icons.Outlined.Code)
-    else -> ToolFamily(name, Icons.Outlined.Build)
+private fun toolFamily(name: String): ToolFamily = when (name) {
+    "Bash", "run_shell", "git" -> ToolFamily("Shell", Icons.Outlined.Terminal)
+    "Read", "read_file", "list_dir", "Glob", "glob" -> ToolFamily("读取", Icons.Outlined.Description)
+    "Write", "write_file", "Edit", "edit_file", "apply_patch", "ApplyPatch" ->
+        ToolFamily("写入", Icons.Outlined.Edit)
+    "Grep", "grep" -> ToolFamily("搜索", Icons.Outlined.Search)
+    "WebFetch", "browse", "WebSearch", "web_search" -> ToolFamily("网络", Icons.Outlined.Language)
+    "TodoWrite", "TodoRead", "update_plan", "EnterPlanMode", "ExitPlanMode" ->
+        ToolFamily("计划", Icons.Outlined.Checklist)
+    "Agent", "spawn_agent", "multi_agent", "SendMessage", "TaskStop" ->
+        ToolFamily("子代理", Icons.Outlined.Build)
+    "Skill" -> ToolFamily("技能", Icons.Outlined.Build)
+    else -> when {
+        name.startsWith("plugin_") || name.startsWith("mcp__") -> ToolFamily("MCP", Icons.Outlined.Code)
+        name.contains("__") -> ToolFamily("MCP", Icons.Outlined.Code)
+        else -> ToolFamily(name, Icons.Outlined.Build)
+    }
 }
 
 private fun toolKindLabel(toolCall: ToolCall): String {
     if (toolCall.isError) return "失败"
     return when (toolCall.name) {
-        "run_shell", "git" -> if (toolCall.isRunning) "执行中" else "已执行"
-        "read_file" -> if (toolCall.isRunning) "读取中" else "已读取"
-        "list_dir", "glob" -> if (toolCall.isRunning) "浏览中" else "已浏览"
-        "write_file" -> if (toolCall.isRunning) "写入中" else "已写入"
-        "edit_file", "apply_patch" -> if (toolCall.isRunning) "编辑中" else "已编辑"
-        "grep" -> if (toolCall.isRunning) "搜索中" else "已搜索"
-        "browse", "web_search" -> if (toolCall.isRunning) "检索中" else "已检索"
-        "update_plan" -> if (toolCall.isRunning) "更新计划" else "计划已更新"
-        "spawn_agent", "multi_agent" -> if (toolCall.isRunning) "子代理运行中" else "子代理完成"
+        "Bash", "run_shell", "git" -> if (toolCall.isRunning) "执行中" else "已执行"
+        "Read", "read_file" -> if (toolCall.isRunning) "读取中" else "已读取"
+        "list_dir", "Glob", "glob" -> if (toolCall.isRunning) "浏览中" else "已浏览"
+        "Write", "write_file" -> if (toolCall.isRunning) "写入中" else "已写入"
+        "Edit", "edit_file", "apply_patch", "ApplyPatch" ->
+            if (toolCall.isRunning) "编辑中" else "已编辑"
+        "Grep", "grep" -> if (toolCall.isRunning) "搜索中" else "已搜索"
+        "WebFetch", "browse", "WebSearch", "web_search" ->
+            if (toolCall.isRunning) "检索中" else "已检索"
+        "TodoWrite", "update_plan" -> if (toolCall.isRunning) "更新待办" else "已更新待办"
+        "Agent", "spawn_agent", "multi_agent" ->
+            if (toolCall.isRunning) "子代理运行中" else "子代理完成"
+        "Skill" -> if (toolCall.isRunning) "运行技能" else "已运行技能"
         else -> if (toolCall.isRunning) "运行中" else toolFamily(toolCall.name).label
     }
 }
@@ -508,18 +532,19 @@ private sealed class ToolUiAction(val label: String) {
 private fun toolActions(toolCall: ToolCall): List<ToolUiAction> {
     val out = mutableListOf<ToolUiAction>()
     when (toolCall.name) {
-        "run_shell", "git" -> out += ToolUiAction.OpenTerminal
-        "read_file", "write_file", "edit_file", "apply_patch", "list_dir" -> {
+        "Bash", "run_shell", "git" -> out += ToolUiAction.OpenTerminal
+        "Read", "read_file", "Write", "write_file", "Edit", "edit_file",
+        "apply_patch", "ApplyPatch", "list_dir" -> {
             val path = ToolArgs.filePath(toolCall.name, toolCall.args)
-                .ifBlank { ToolArgs.value(toolCall.args, "path") }
+                .ifBlank { ToolArgs.pathOf(toolCall.args) }
             if (path.isNotBlank()) out += ToolUiAction.OpenFile(path)
         }
-        "browse", "web_search" -> {
+        "WebFetch", "browse", "WebSearch", "web_search" -> {
             val url = ToolArgs.webUrl(toolCall.name, toolCall.args)
             if (url.isNotBlank()) out += ToolUiAction.OpenUrl(url)
         }
-        "grep", "glob" -> {
-            val path = ToolArgs.value(toolCall.args, "path")
+        "Grep", "grep", "Glob", "glob" -> {
+            val path = ToolArgs.pathOf(toolCall.args)
             if (path.isNotBlank()) out += ToolUiAction.OpenFile(path)
         }
     }
@@ -670,6 +695,41 @@ private fun AnimatedMetricNumber(
 }
 
 @Composable
+private fun FileNameChip(
+    path: String,
+    name: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 2.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            FileTypeIcons.iconFor(name.ifBlank { path }),
+            null,
+            Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = name.ifBlank { fileNameOf(path) },
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun InlineEditDiffPreview(
     preview: ToolEditPreview,
     isRunning: Boolean,
@@ -682,63 +742,35 @@ private fun InlineEditDiffPreview(
             scroll.animateScrollTo(scroll.maxValue)
         }
     }
+    val theme = codeTheme()
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onOpen,
-            ),
+            )
+            .heightIn(max = 240.dp)
+            .verticalScroll(scroll),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f))
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Outlined.Edit,
-                null,
-                Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            )
-            Spacer(Modifier.width(6.dp))
+        if (lines.isEmpty()) {
             Text(
-                text = fileNameOf(preview.path).ifBlank { "变更" },
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                text = if (isRunning) "写入中…" else "无预览",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             )
-            AnimatedDiffCounts(
-                added = preview.stats.added,
-                removed = preview.stats.removed,
-                active = isRunning,
-                animationKey = "preview:${preview.path}:${preview.stats.added}:${preview.stats.removed}",
-            )
-            if (preview.path.isNotBlank()) {
-                Text(
-                    "打开",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 10.dp),
+        } else {
+            lines.forEachIndexed { index, line ->
+                ZCodeDiffLine(
+                    line = line,
+                    displayLineNo = index + 1,
+                    theme = theme,
                 )
-            }
-        }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = 240.dp)
-                .verticalScroll(scroll),
-        ) {
-            lines.forEach { line ->
-                DiffPreviewLine(line)
             }
             if (preview.lines.size > lines.size) {
                 Text(
@@ -753,28 +785,78 @@ private fun InlineEditDiffPreview(
 }
 
 @Composable
-private fun DiffPreviewLine(line: DiffLine) {
+private fun codeTheme(): CodeTheme {
+    val scheme = MaterialTheme.colorScheme
+    val isDark = (scheme.surface.red * 0.299f + scheme.surface.green * 0.587f + scheme.surface.blue * 0.114f) < 0.5f
+    return if (isDark) {
+        CodeTheme(
+            id = "andmx-diff-dark",
+            name = "AndMX Diff Dark",
+            dark = true,
+            background = scheme.surface,
+            foreground = Color(0xFFEEFFFF),
+            keyword = Color(0xFFC792EA),
+            string = Color(0xFFC3E88D),
+            comment = Color(0xFF546E7A),
+            number = Color(0xFFF78C6C),
+            function = Color(0xFF82AAFF),
+        )
+    } else {
+        CodeTheme(
+            id = "andmx-diff-light",
+            name = "AndMX Diff Light",
+            dark = false,
+            background = scheme.surface,
+            foreground = Color(0xFF111827),
+            keyword = Color(0xFF7C3AED),
+            string = Color(0xFF059669),
+            comment = Color(0xFF6B7280),
+            number = Color(0xFFD97706),
+            function = Color(0xFF2563EB),
+        )
+    }
+}
+
+@Composable
+private fun ZCodeDiffLine(
+    line: DiffLine,
+    displayLineNo: Int,
+    theme: CodeTheme,
+) {
     val add = diffAddColor()
     val del = diffDelColor()
-    val (bg, fg, gutter, sign) = when (line.kind) {
-        DiffLine.Kind.ADD -> Quad(
-            add.copy(alpha = 0.14f),
-            add,
-            add.copy(alpha = 0.18f),
-            "+",
+    val bg = when (line.kind) {
+        DiffLine.Kind.ADD -> add.copy(alpha = 0.14f)
+        DiffLine.Kind.REMOVE -> del.copy(alpha = 0.14f)
+        DiffLine.Kind.CONTEXT -> Color.Transparent
+    }
+    val gutterBg = when (line.kind) {
+        DiffLine.Kind.ADD -> Color(
+            red = add.red * 0.18f + MaterialTheme.colorScheme.surface.red * 0.82f,
+            green = add.green * 0.18f + MaterialTheme.colorScheme.surface.green * 0.82f,
+            blue = add.blue * 0.18f + MaterialTheme.colorScheme.surface.blue * 0.82f,
+            alpha = 1f,
         )
-        DiffLine.Kind.REMOVE -> Quad(
-            del.copy(alpha = 0.14f),
-            del,
-            del.copy(alpha = 0.18f),
-            "-",
+        DiffLine.Kind.REMOVE -> Color(
+            red = del.red * 0.18f + MaterialTheme.colorScheme.surface.red * 0.82f,
+            green = del.green * 0.18f + MaterialTheme.colorScheme.surface.green * 0.82f,
+            blue = del.blue * 0.18f + MaterialTheme.colorScheme.surface.blue * 0.82f,
+            alpha = 1f,
         )
-        DiffLine.Kind.CONTEXT -> Quad(
-            Color.Transparent,
-            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
-            MaterialTheme.colorScheme.surface,
-            " ",
-        )
+        DiffLine.Kind.CONTEXT -> MaterialTheme.colorScheme.surface
+    }
+    val numColor = when (line.kind) {
+        DiffLine.Kind.ADD -> add
+        DiffLine.Kind.REMOVE -> del
+        DiffLine.Kind.CONTEXT -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    }
+    val bar = when (line.kind) {
+        DiffLine.Kind.ADD -> add
+        DiffLine.Kind.REMOVE -> del
+        DiffLine.Kind.CONTEXT -> Color.Transparent
+    }
+    val highlighted = remember(line.text, theme) {
+        CodeHighlight.highlight(line.text.ifEmpty { " " }, theme)
     }
     Row(
         Modifier
@@ -786,60 +868,34 @@ private fun DiffPreviewLine(line: DiffLine) {
             Modifier
                 .width(3.dp)
                 .height(18.dp)
-                .background(if (line.kind == DiffLine.Kind.CONTEXT) Color.Transparent else fg),
+                .background(bar),
         )
         Text(
-            text = (line.oldNo?.toString() ?: "").padStart(3),
+            text = displayLineNo.toString(),
             style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            ),
-            color = if (line.kind == DiffLine.Kind.REMOVE) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-            textAlign = TextAlign.End,
-            modifier = Modifier
-                .width(28.dp)
-                .background(gutter)
-                .padding(end = 4.dp),
-        )
-        Text(
-            text = (line.newNo?.toString() ?: "").padStart(3),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            ),
-            color = if (line.kind == DiffLine.Kind.ADD) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-            textAlign = TextAlign.End,
-            modifier = Modifier
-                .width(28.dp)
-                .background(gutter)
-                .padding(end = 4.dp),
-        )
-        Text(
-            text = sign,
-            style = MaterialTheme.typography.bodySmall.copy(
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
             ),
-            color = fg,
-            modifier = Modifier.padding(start = 4.dp),
+            color = numColor,
+            textAlign = TextAlign.End,
+            modifier = Modifier
+                .width(40.dp)
+                .background(gutterBg)
+                .padding(end = 8.dp),
         )
         Text(
-            text = line.text.ifEmpty { " " },
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 11.sp,
+            text = highlighted,
+            style = TextStyle(
                 fontFamily = FontFamily.Monospace,
-                lineHeight = 15.sp,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = theme.foreground,
             ),
-            color = if (line.kind == DiffLine.Kind.CONTEXT) {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f)
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f)
-            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
-                .padding(start = 4.dp, end = 8.dp, top = 1.dp, bottom = 1.dp),
+                .padding(start = 10.dp, end = 10.dp, top = 1.dp, bottom = 1.dp),
         )
     }
 }

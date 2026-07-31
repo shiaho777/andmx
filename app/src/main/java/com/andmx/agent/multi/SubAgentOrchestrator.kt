@@ -2,6 +2,7 @@ package com.andmx.agent.multi
 
 import com.andmx.agent.AgentEngine
 import com.andmx.agent.AgentEvent
+import com.andmx.agent.BackgroundTasks
 import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.exec.files.GuestFs
@@ -62,6 +63,7 @@ class SubAgentOrchestrator(
     private val resolveRun: suspend (modelSpec: String) -> Pair<com.andmx.llm.LlmApi, com.andmx.agent.TurnContext> = { _ ->
         client to turnProvider()
     },
+    private val cwdProvider: () -> String = { "/root" },
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
@@ -133,7 +135,7 @@ class SubAgentOrchestrator(
     data class SpawnSpec(
         val task: String,
         val systemHint: String = "",
-        val agentId: String = "subagent-${System.currentTimeMillis()}",
+        val agentId: String = BackgroundTasks.newAgentId(),
         val agentName: String = "",
         val agentDescription: String = "",
         val agentSystem: String = "",
@@ -146,7 +148,7 @@ class SubAgentOrchestrator(
         val model: String = "inherit",
     )
 
-    suspend fun spawn(task: String, systemHint: String = "", agentId: String = "subagent-${System.currentTimeMillis()}"): String {
+    suspend fun spawn(task: String, systemHint: String = "", agentId: String = BackgroundTasks.newAgentId()): String {
         return spawn(SpawnSpec(task = task, systemHint = systemHint, agentId = agentId))
     }
 
@@ -172,10 +174,12 @@ class SubAgentOrchestrator(
         val maxSteps = (spec.maxTurns ?: 25).coerceIn(1, 80)
 
         val (runClient, turn) = resolveRun(spec.model)
+        val systemParts = buildSubAgentSystemParts(spec.task, spec.systemHint, handoff, agentDef)
         val engine = AgentEngine(
             tools = tools,
             client = runClient,
-            systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef),
+            systemPrompt = systemParts.joinToString("\n\n"),
+            systemParts = systemParts,
             maxSteps = maxSteps,
         )
 
@@ -324,17 +328,46 @@ class SubAgentOrchestrator(
     }
 
     fun spawnAsync(spec: SpawnSpec): String {
-        val agentId = spec.agentId.ifBlank { "subagent-${System.currentTimeMillis()}" }
+        val agentId = spec.agentId.ifBlank { BackgroundTasks.newAgentId() }
         val fixed = if (spec.agentId == agentId) spec else spec.copy(agentId = agentId)
         val job = scope.launch {
             try {
-                spawn(fixed)
+                val result = spawn(fixed)
+                BackgroundTasks.markAgentDone(agentId, result)
+            } catch (t: Throwable) {
+                BackgroundTasks.markAgentDone(agentId, t.message ?: "failed", failed = true)
+                throw t
             } finally {
                 agentJobs.remove(agentId)
             }
         }
         agentJobs[agentId] = job
+        BackgroundTasks.registerAgentJob(agentId, fixed.task, job)
         return agentId
+    }
+
+    fun stopTask(taskId: String): Boolean {
+        val stoppedBg = BackgroundTasks.stop(taskId)
+        val closed = close(taskId)
+        return stoppedBg || closed
+    }
+
+    fun queueMessage(to: String, summary: String, message: String): String {
+        val info = activeAgents[to]
+            ?: return "Unknown local agent id=$to. Success only if the target is a running local agent."
+        if (info.state == AgentState.CLOSED) {
+            return "Agent $to is closed; message not queued."
+        }
+        scope.launch {
+            runCatching {
+                resume(to, buildString {
+                    appendLine("[SendMessage summary=$summary]")
+                    append(message)
+                })
+            }
+        }
+        return "Message queued for local agent id=$to summary=$summary. " +
+            "Queued does not mean the agent has read, accepted, or replied."
     }
 
     /** The sub-agent tool that the main agent can call. */
@@ -343,37 +376,52 @@ class SubAgentOrchestrator(
     /** The multi-agent control tool (spawn/resume/wait/close). */
     fun createMultiAgentTool(): Tool = MultiAgentControlTool(this)
 
-    private fun buildSubAgentPrompt(
+    private fun buildSubAgentSystemParts(
         task: String,
         systemHint: String,
         handoff: String = "",
         agent: CustomSubAgent? = null,
-    ): String = buildString {
-        if (agent != null && (agent.systemPrompt.isNotBlank() || agent.name.isNotBlank())) {
-            appendLine(SubagentCatalog.agentSystemBlock(agent))
-            appendLine()
-        } else {
-            appendLine("你是 AndMX 的子代理，负责完成主代理分配给你的特定子任务。")
-            appendLine()
+    ): List<String> {
+        val workingDirectory = runCatching { cwdProvider() }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: systemHint
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.startsWith("workingDirectory:") || it.startsWith("cwd:") }
+                ?.substringAfter(":")
+                ?.trim()
+                .orEmpty()
+                .ifBlank { "/root" }
+        val rolePrompt = when {
+            agent?.name.equals("Explore", true) ->
+                SubagentCatalog.exploreSystemPrompt(workingDirectory = workingDirectory)
+            agent?.name.equals("general-purpose", true) && (agent?.systemPrompt.orEmpty()).isBlank() ->
+                SubagentCatalog.generalPurposeSystemPrompt()
+            agent != null && (agent.systemPrompt.isNotBlank() || agent.name.isNotBlank()) ->
+                SubagentCatalog.agentSystemBlock(agent)
+            else -> "You are a focused subagent. Complete only the assigned task."
         }
-        appendLine("## 任务")
-        appendLine(task)
-        appendLine()
-        if (systemHint.isNotBlank()) {
-            appendLine("## 上下文")
-            appendLine(systemHint)
+        val tail = buildString {
+            appendLine(rolePrompt.trimEnd())
             appendLine()
-        }
-        if (handoff.isNotBlank()) {
-            appendLine("## 主代理进度交接")
-            appendLine(handoff)
+            appendLine("## Task")
+            appendLine(task)
+            if (systemHint.isNotBlank()) {
+                appendLine()
+                appendLine("## Context")
+                appendLine(systemHint)
+            }
+            if (handoff.isNotBlank()) {
+                appendLine()
+                appendLine("## Parent handoff")
+                appendLine(handoff)
+            }
             appendLine()
-        }
-        appendLine("## 规则")
-        appendLine("- 专注完成分配的子任务，不要扩展范围")
-        appendLine("- 使用工具验证事实，不要猜测")
-        appendLine("- 完成后简洁报告结果")
-        appendLine("- 你与主代理共享同一个 Linux 沙箱")
+            appendLine("## Rules")
+            appendLine("- Stay scoped to the assigned sub-task")
+            appendLine("- Verify with tools; do not guess")
+            appendLine("- Return a concise report the parent can act on")
+        }.trim()
+        return listOf(com.andmx.agent.zcode.ZCodePrompts.IDENTITY, tail)
     }
 
     /**
@@ -533,30 +581,49 @@ class MultiAgentControlTool(private val orchestrator: SubAgentOrchestrator) : To
 class ZCodeAgentTool(
     private val orchestrator: SubAgentOrchestrator,
     private val resolveAgent: suspend (String?) -> CustomSubAgent? = { null },
-    private val listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
+    private val listTypes: suspend () -> List<String> = { listOf("general-purpose", "Explore") },
+    private val typeCatalog: String =
+        "Available agent types and the tools they have access to:\n" +
+            "- general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. (Tools: *)\n" +
+            "- Explore: Read-only search agent for broad fan-out searches. (Tools: Bash, Glob, Grep, Read, WebFetch, WebSearch, TodoWrite)\n\n" +
+            "When using the Agent tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.",
 ) : Tool {
     override val name = "Agent"
-    override val description =
-        "Launch a specialized sub-agent for complex multi-step work. Prefer Explore for broad read-only search; use general-purpose for multi-step research and code tasks; or pass a named custom agent."
+    override val description: String =
+        "Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.\n\n" +
+            typeCatalog.trim() + "\n\n" +
+            "## When to use\n" +
+            "Reach for this when the task matches an available agent type, when you have independent work to run in parallel, " +
+            "or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. " +
+            "For a single-fact lookup where you already know the file, symbol, or value, search directly. " +
+            "Once you've delegated a search, don't also run it yourself — wait for the result.\n\n" +
+            "- The agent's final message is returned to you as the tool result; it is not shown to the user — relay what matters.\n" +
+            "- A new Agent call starts fresh, so the prompt must be self-contained.\n" +
+            "- `run_in_background: true` runs the agent asynchronously; you'll be notified when it completes.\n" +
+            "- When you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently."
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
             putJsonObject("description") {
                 put("type", "string")
-                put("description", "Short 3-5 word task label")
+                put("description", "A short (3-5 word) description of the task")
             }
             putJsonObject("prompt") {
                 put("type", "string")
-                put("description", "Full task for the agent")
+                put("description", "The task for the agent to perform")
             }
             putJsonObject("run_in_background") {
                 put("type", "boolean")
-                put("description", "Run without blocking the main agent")
+                put("description", "Set to true to run this agent in the background. You will be notified when it completes.")
             }
             putJsonObject("subagent_type") {
                 put("type", "string")
-                put("description", "Agent name: Explore (default), general-purpose, or a user-defined agent")
+                put("description", "The type of specialized agent to use for this task")
+            }
+            putJsonObject("model") {
+                put("type", "string")
+                put("description", "Optional model override for this agent. Takes precedence over the agent definition. If omitted, uses the agent definition model, or inherits from the parent.")
             }
         }
         putJsonArray("required") { add("description"); add("prompt") }
@@ -569,6 +636,7 @@ class ZCodeAgentTool(
         val kind = args["subagent_type"]?.jsonPrimitive?.content
             ?: args["agent_type"]?.jsonPrimitive?.content
             ?: args["agentType"]?.jsonPrimitive?.content
+        val modelOverride = args["model"]?.jsonPrimitive?.content?.trim().orEmpty()
         val background = args["run_in_background"]?.let { el ->
             runCatching { el.jsonPrimitive.content.toBooleanStrict() }.getOrNull()
                 ?: runCatching { el.jsonPrimitive.content.toBoolean() }.getOrNull()
@@ -590,7 +658,12 @@ class ZCodeAgentTool(
         val resolved = agent ?: resolveAgent(null)
         val task = if (description.isNotBlank()) "[$description] $prompt" else prompt
         val runBg = background || (resolved?.background == true)
-        val agentId = "subagent-${System.currentTimeMillis()}"
+        val agentId = BackgroundTasks.newAgentId()
+        val model = when {
+            modelOverride.isNotBlank() -> modelOverride
+            !resolved?.model.isNullOrBlank() -> resolved!!.model
+            else -> "inherit"
+        }
         val spec = SubAgentOrchestrator.SpawnSpec(
             task = task,
             systemHint = buildString {
@@ -599,7 +672,7 @@ class ZCodeAgentTool(
                 else if (!kind.isNullOrBlank()) appendLine("subagent_type=$kind")
             }.trim(),
             agentId = agentId,
-            agentName = resolved?.name.orEmpty().ifBlank { kind.orEmpty().ifBlank { "Explore" } },
+            agentName = resolved?.name.orEmpty().ifBlank { kind.orEmpty().ifBlank { "general-purpose" } },
             agentDescription = resolved?.description.orEmpty(),
             agentSystem = resolved?.systemPrompt.orEmpty(),
             tools = resolved?.tools ?: listOf("Bash", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "TodoWrite"),
@@ -608,7 +681,7 @@ class ZCodeAgentTool(
             permissionMode = resolved?.permissionMode ?: "default",
             color = resolved?.color.orEmpty(),
             background = runBg,
-            model = resolved?.model ?: "inherit",
+            model = model,
         )
 
         if (runBg) {
@@ -626,5 +699,78 @@ class ZCodeAgentTool(
                 appendLine(result)
             }.trim(),
         )
+    }
+}
+
+
+class SendMessageTool(
+    private val orchestrator: SubAgentOrchestrator,
+) : Tool {
+    override val name = "SendMessage"
+    override val description =
+        "Send a message to a running local agent by agent id. Success only means the message was queued for the target local agent.\n\n" +
+            "Usage:\n" +
+            "- Use only for explicit local_agent coordination or handoff.\n" +
+            "- Do not claim the target agent has read, accepted, or replied to the message.\n" +
+            "- Include enough context for the target agent to understand the request.\n" +
+            "- Use { to, summary, message } with the agent id returned by the Agent tool."
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("to") {
+                put("type", "string")
+                put("description", "Target local agent id, such as agent_<uuid>.")
+            }
+            putJsonObject("summary") {
+                put("type", "string")
+                put("description", "Short summary of the message for logs and model-visible delivery status.")
+            }
+            putJsonObject("message") {
+                put("type", "string")
+                put("description", "Message content to send to the target local agent.")
+            }
+        }
+        putJsonArray("required") { add("to"); add("summary"); add("message") }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val to = args["to"]?.jsonPrimitive?.content?.trim().orEmpty()
+        val summary = args["summary"]?.jsonPrimitive?.content?.trim().orEmpty()
+        val message = args["message"]?.jsonPrimitive?.content?.trim().orEmpty()
+        if (to.isBlank() || summary.isBlank() || message.isBlank()) {
+            return ToolResult("to, summary, and message are required", isError = true)
+        }
+        return ToolResult(orchestrator.queueMessage(to, summary, message))
+    }
+}
+
+class TaskStopTool(
+    private val orchestrator: SubAgentOrchestrator,
+) : Tool {
+    override val name = "TaskStop"
+    override val description = "Stop a running background task by ID"
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("task_id") {
+                put("type", "string")
+                put("description", "The ID of the background task to stop")
+            }
+            putJsonObject("shell_id") {
+                put("type", "string")
+                put("description", "Deprecated: use task_id instead")
+            }
+        }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val id = args["task_id"]?.jsonPrimitive?.content?.trim().orEmpty()
+            .ifBlank { args["shell_id"]?.jsonPrimitive?.content?.trim().orEmpty() }
+        if (id.isBlank()) return ToolResult("task_id required", isError = true)
+        val ok = orchestrator.stopTask(id)
+        return if (ok) ToolResult("Stopped task_id=$id")
+        else ToolResult("No running task with id=$id", isError = true)
     }
 }

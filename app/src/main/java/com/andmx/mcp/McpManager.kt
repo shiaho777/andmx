@@ -2,6 +2,7 @@ package com.andmx.mcp
 
 import android.content.Context
 import com.andmx.agent.McpTool
+import com.andmx.agent.McpWireNames
 import com.andmx.agent.Tool
 import com.andmx.exec.proot.ProotRuntime
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,7 +77,7 @@ class McpManager(private val context: Context) {
                         // Wrap HTTP transport tools — need an adapter
                         descs.forEach { desc ->
                             tools += object : Tool {
-                                override val name = "${cfg.name}__${desc.name}"
+                                override val name = McpWireNames.serverTool(cfg.name, desc.name)
                                 override val description = "[${cfg.name}] ${desc.description}"
                                 override val risk = com.andmx.agent.ToolRisk.EXECUTE
                                 override val parameters = desc.inputSchema

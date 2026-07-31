@@ -82,6 +82,9 @@ interface AndmxDao {
     @Insert
     suspend fun insertMessage(m: MessageEntity): Long
 
+    @Query("UPDATE messages SET toolArgs = :toolArgs WHERE id = :id")
+    suspend fun updateMessageToolArgs(id: Long, toolArgs: String)
+
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY id ASC")
     suspend fun messagesFor(conversationId: Long): List<MessageEntity>
 

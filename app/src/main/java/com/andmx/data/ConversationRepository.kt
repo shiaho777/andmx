@@ -30,7 +30,8 @@ class ConversationRepository(context: Context) {
         approvalModeLabel: String = "",
         approvalRiskDescription: String = "",
         imageUrls: List<String> = emptyList(),
-    ) {
+        createdAt: Long = 0L,
+    ): Long {
         val safeId = if (conversationId > 0 && dao.getConversation(conversationId) != null) {
             conversationId
         } else {
@@ -41,7 +42,8 @@ class ConversationRepository(context: Context) {
                 ),
             )
         }
-        dao.insertMessage(
+        val ts = if (createdAt > 0L) createdAt else System.currentTimeMillis()
+        val rowId = dao.insertMessage(
             MessageEntity(
                 conversationId = safeId,
                 role = role,
@@ -53,9 +55,16 @@ class ConversationRepository(context: Context) {
                 approvalModeLabel = approvalModeLabel,
                 approvalRiskDescription = approvalRiskDescription,
                 imageUrlsJson = Json.encodeToString(imageUrls),
+                createdAt = ts,
             ),
         )
         dao.touchConversation(safeId, titleKeep(safeId), System.currentTimeMillis())
+        return rowId
+    }
+
+    suspend fun updateMessageToolArgs(messageId: Long, toolArgs: String) {
+        if (messageId <= 0L) return
+        dao.updateMessageToolArgs(messageId, toolArgs)
     }
 
     private suspend fun titleKeep(id: Long): String = dao.getConversation(id)?.title ?: "对话"

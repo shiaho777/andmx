@@ -9,6 +9,7 @@ import com.andmx.exec.proot.RootfsInstaller
 import com.andmx.exec.pty.PtyProcess
 import com.andmx.workspace.WorkspaceAccess
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.withContext
@@ -31,13 +32,14 @@ import java.nio.charset.StandardCharsets
  * shell is unavailable or for commands that need a fresh environment.
  */
 class ShellTool(
-    private val context: Context,
-    private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
+    private val appContext: Context,
+    cwdProvider: (() -> String)? = null,
 ) : Tool, ExecutionAwareTool {
-    private val access = WorkspaceAccess(context)
-    private val runtime = ProotRuntime(context)
-    private val env = LocalProotEnvironment(context, runtime)
-    private val persistentShell = PersistentShell(context, runtime)
+    private val cwdProvider = cwdProvider ?: { WorkspaceAccess(appContext).guestCwd() }
+    private val access = WorkspaceAccess(appContext)
+    private val runtime = ProotRuntime(appContext)
+    private val env = LocalProotEnvironment(appContext, runtime)
+    private val persistentShell = PersistentShell(appContext, runtime)
     private var usePersistent = false
     private val _events = MutableSharedFlow<ShellEvent>(extraBufferCapacity = 128)
     val events: SharedFlow<ShellEvent> = _events
@@ -71,11 +73,57 @@ class ShellTool(
     override suspend fun execute(callId: String, args: JsonObject): ToolResult {
         val command = args["command"]?.jsonPrimitive?.content
             ?: return ToolResult("缺少参数 command", isError = true)
+        val runInBackground = args["run_in_background"]?.jsonPrimitive?.content
+            ?.let { runCatching { it.toBooleanStrict() }.getOrNull() ?: it.equals("true", true) } == true
+        val disableSandbox = args["dangerouslyDisableSandbox"]?.jsonPrimitive?.content
+            ?.let { runCatching { it.toBooleanStrict() }.getOrNull() ?: it.equals("true", true) } == true
+        val timeoutMs = args["timeout"]?.jsonPrimitive?.content?.toLongOrNull()
+            ?.coerceIn(1L, 600_000L)
         val prepared = ensureNetworkTools(command)
+        val effective = if (disableSandbox) {
+            "# dangerouslyDisableSandbox=true (host proot guest unrestricted)\n$prepared"
+        } else prepared
 
+        if (runInBackground) {
+            val taskId = BackgroundTasks.newBashId()
+            BackgroundTasks.startBash(command, taskId) {
+                runShellOnce(callId = "", command = command, prepared = effective, timeoutMs = timeoutMs)
+            }
+            return ToolResult(
+                "Command running in background with task_id=$taskId. " +
+                    "You will not receive the output in this tool result. Use TaskStop with task_id to stop it.",
+            )
+        }
+
+        return runShellOnce(callId, command, effective, timeoutMs)
+    }
+
+    private suspend fun runShellOnce(
+        callId: String,
+        command: String,
+        prepared: String,
+        timeoutMs: Long?,
+    ): ToolResult {
         val cwd = cwdProvider().ifBlank { access.guestCwd() }
         val cdCommand = if (cwd.isNotBlank()) "cd '$cwd' 2>/dev/null || cd ~; $prepared" else prepared
+        val run = suspend {
+            executeCore(callId, command, cwd, cdCommand, prepared)
+        }
+        return if (timeoutMs != null) {
+            withTimeoutOrNull(timeoutMs) { run() }
+                ?: ToolResult("Command timed out after ${timeoutMs}ms", isError = true)
+        } else {
+            run()
+        }
+    }
 
+    private suspend fun executeCore(
+        callId: String,
+        command: String,
+        cwd: String,
+        cdCommand: String,
+        prepared: String,
+    ): ToolResult {
         if (access.isRemote) {
             if (callId.isNotBlank()) {
                 _events.tryEmit(ShellEvent.Started(callId, command, cwd))
@@ -96,7 +144,7 @@ class ShellTool(
                     ShellEvent.Finished(callId, command, res.exitCode, isError = res.exitCode != 0),
                 )
             }
-            return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+            return ToolResult(out, isError = res.exitCode != 0)
         }
 
         if (callId.isNotBlank()) {
@@ -110,7 +158,7 @@ class ShellTool(
                     append(res.stdout.ifBlank { "(无输出)" })
                     append("\n[exit=${res.exitCode}]")
                 }
-                return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+                return ToolResult(out, isError = res.exitCode != 0)
             }
             // Persistent shell failed — fall through to fork+exec
         }
@@ -124,7 +172,7 @@ class ShellTool(
             append(res.stdout.ifBlank { "(无输出)" })
             append("\n[exit=${res.exitCode}]")
         }
-        return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+        return ToolResult(out, isError = res.exitCode != 0)
     }
 
     private suspend fun executeBound(
@@ -160,7 +208,7 @@ class ShellTool(
                 command = runtime.prootBin.path,
                 argv = argv.toTypedArray(),
                 envp = envp,
-                cwd = context.filesDir.path,
+                cwd = appContext.filesDir.path,
                 rows = 24,
                 cols = 80,
             )
@@ -177,7 +225,7 @@ class ShellTool(
                 buildString {
                     append(combined.trimEnd())
                     append("\n[exit=${res.exitCode}]")
-                }.take(16_000),
+                },
                 isError = res.exitCode != 0 || res.error != null,
             )
         }
@@ -202,7 +250,7 @@ class ShellTool(
             append(cleaned.ifBlank { "(无输出)" })
             append("\n[exit=$exitCode]")
         }
-        ToolResult(finalOutput.take(16_000), isError = exitCode != 0)
+        ToolResult(finalOutput, isError = exitCode != 0)
     }
 
 

@@ -13,7 +13,7 @@ object BuiltinPluginSeeder {
     private const val ASSET_ROOT = "andmx-plugins"
     private const val PREFS = "andmx_builtin_plugins"
     private const val KEY_VERSION = "seeded_version"
-    private const val VERSION = 9
+    private const val VERSION = 12
 
     suspend fun ensureSeeded(context: Context, fs: GuestFs = GuestFs(ProotRuntime(context))): List<String> =
         withContext(Dispatchers.IO) {

@@ -150,7 +150,9 @@ class GrepTool(context: Context) : Tool {
         val outputMode = args["output_mode"]?.jsonPrimitive?.content ?: "content"
         val max = (args["max_results"]?.jsonPrimitive?.content?.toIntOrNull()
             ?: args["head_limit"]?.jsonPrimitive?.content?.toIntOrNull()
-            ?: 80).let { if (it == 0) 400 else it.coerceIn(1, 400) }
+            ?: 250).let {
+            if (it == 0) 100_000 else it.coerceIn(1, 100_000)
+        }
         val offset = (args["offset"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
         val before = args["before_context"]?.jsonPrimitive?.content?.toIntOrNull()
             ?: args["-B"]?.jsonPrimitive?.content?.toIntOrNull()
@@ -215,7 +217,7 @@ class GrepTool(context: Context) : Tool {
                 if (hits != null) {
                     val out = hits.joinToString("\n")
                     return if (out.isBlank()) ToolResult("(无匹配)")
-                    else ToolResult(out.take(16_000))
+                    else ToolResult(out)
                 }
             }
         }
@@ -231,7 +233,7 @@ class GrepTool(context: Context) : Tool {
         lines = lines.take(max)
         val out = lines.joinToString("\n")
         return if (out.isBlank()) ToolResult("(无匹配)")
-        else ToolResult(out.take(16_000), isError = res.exitCode !in setOf(0, 1))
+        else ToolResult(out, isError = res.exitCode !in setOf(0, 1))
     }
 }
 
@@ -288,7 +290,7 @@ class GlobTool(context: Context) : Tool {
                     }
                     val out = filtered.take(max).joinToString("\n")
                     return if (out.isBlank()) ToolResult("(无匹配文件)")
-                    else ToolResult(out.take(16_000))
+                    else ToolResult(out)
                 }
             }
         }
@@ -301,6 +303,6 @@ class GlobTool(context: Context) : Tool {
         if (res.error != null) return ToolResult("glob 失败: ${res.error}", isError = true)
         val out = res.stdout.trim()
         return if (out.isBlank()) ToolResult("(无匹配文件)")
-        else ToolResult(out.take(16_000))
+        else ToolResult(out)
     }
 }

@@ -2,31 +2,23 @@ package com.andmx.agent.zcode
 
 import com.andmx.ui2.chat.ExecMode
 
-/**
- * System-prompt fragments reverse-engineered from ZCode desktop model-io traces
- * (GLM / anthropic-messages path). Kept as separate layers so ChatController can
- * assemble the same stack: identity → core → session → mode → project docs.
- */
 object ZCodePrompts {
 
     const val IDENTITY = "You are ZCode, an interactive coding agent"
 
-    /** Core agent behavior — matches ZCode body.system[1]. */
     val CORE = """
 You are an interactive ZCode agent that helps users with software engineering tasks.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
 
 # Harness
-- Text you output outside of tool use is displayed to the user as Github-flavored markdown.
+- Text you output outside of tool use is displayed to the user as Github-flavored markdown in a terminal.
 - Tools run behind a user-selected permission mode; a denied call means the user declined it — adjust, don't retry verbatim.
 - `<system-reminder>` tags in messages and tool results are injected by the harness, not the user. Hooks may intercept tool calls; treat hook output as user feedback.
 - Prefer the dedicated file/search tools over shell commands when one fits. Independent tool calls can run in parallel in one response.
 - Reference code as `file_path:line_number` — it's clickable.
-- On Android/AndMX the shell runs inside a proot Alpine guest (or remote SSH). Paths under `/root/project` map to the selected workspace.
 """.trimIndent()
 
-    /** Coding style / irreversibility — matches ZCode body.system[2] lead. */
     val CRAFT = """
 Write code that reads like the surrounding code: match its comment density, naming, and idiom.
 
@@ -34,8 +26,6 @@ For actions that are hard to reverse or outward-facing, confirm first unless dur
 
 # Session-specific guidance
 - When the user types `/<skill-name>`, invoke it via Skill. Only use skills listed in the user-invocable skills section — don't guess.
-- Prefer TodoWrite for multi-step work; keep exactly one item in_progress.
-- For non-trivial implementation, call EnterPlanMode first when approaches/architecture/multi-file scope are unclear.
 """.trimIndent()
 
     val CONTEXT_MGMT = """
@@ -50,21 +40,9 @@ You are in plan mode. Explore with read-only tools, design an approach, and use 
 Do NOT write/edit/patch files or run destructive shell commands until ExitPlanMode is approved.
 AskUserQuestion only for decisions the user must make.
 """.trimIndent()
-        ExecMode.AUTO_EDIT -> """
-# Mode: build (accept edits)
-File reads/writes/edits apply automatically. Shell/network still may require confirmation depending on risk.
-Implement end-to-end; don't stop at analysis unless the user asked for a plan only.
-""".trimIndent()
-        ExecMode.FULL -> """
-# Mode: yolo / full access
-Operate with maximum autonomy. Prefer completing the task without pausing for routine approvals.
-Still refuse unauthorized destructive security requests. Report outcomes faithfully.
-""".trimIndent()
-        ExecMode.CONFIRM -> """
-# Mode: confirm before changes
-Reads auto-run. Writes, patches, shell, and network may require user approval.
-When blocked, adjust the approach rather than retrying the same denied call.
-""".trimIndent()
+        ExecMode.AUTO_EDIT -> ""
+        ExecMode.FULL -> ""
+        ExecMode.CONFIRM -> ""
     }
 
     data class SessionEnv(
@@ -72,7 +50,7 @@ When blocked, adjust the approach rather than retrying the same denied call.
         val isGitRepo: Boolean,
         val platform: String = "android",
         val shell: String = "sh",
-        val osVersion: String = "Android (proot Alpine guest)",
+        val osVersion: String = "Android",
         val modelLabel: String,
         val branch: String = "",
         val mainBranch: String = "main",
@@ -92,7 +70,7 @@ When blocked, adjust the approach rather than retrying the same denied call.
         appendLine("- OS Version: ${env.osVersion}")
         appendLine("- You are powered by the model named ${env.modelLabel}.")
         appendLine()
-        appendLine(CONTEXT_MGMT)
+        append(CONTEXT_MGMT)
         if (env.isGitRepo || env.branch.isNotBlank() || env.gitStatus.isNotBlank()) {
             appendLine()
             appendLine("gitStatus: This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.")
@@ -118,6 +96,34 @@ When blocked, adjust the approach rather than retrying the same denied call.
         }
     }
 
+    fun assembleParts(
+        mode: ExecMode,
+        env: SessionEnv,
+        projectDocs: String = "",
+        extra: String = "",
+    ): List<String> {
+        val third = buildString {
+            appendLine(CRAFT)
+            appendLine()
+            append(sessionBlock(env))
+            val modeText = modeOverlay(mode)
+            if (modeText.isNotBlank()) {
+                appendLine()
+                appendLine(modeText)
+            }
+            if (projectDocs.isNotBlank()) {
+                appendLine()
+                appendLine("# Project instructions")
+                appendLine(projectDocs.trimEnd())
+            }
+            if (extra.isNotBlank()) {
+                appendLine()
+                append(extra.trimEnd())
+            }
+        }.trimEnd()
+        return listOf(IDENTITY, CORE, third)
+    }
+
     fun assemble(
         mode: ExecMode,
         env: SessionEnv,
@@ -125,34 +131,26 @@ When blocked, adjust the approach rather than retrying the same denied call.
         customInstructions: String = "",
         persona: String = "",
         extra: String = "",
-    ): String = buildString {
-        appendLine(IDENTITY)
-        appendLine()
-        appendLine(CORE)
-        appendLine()
-        appendLine(CRAFT)
-        appendLine()
-        appendLine(sessionBlock(env))
-        appendLine()
-        appendLine(modeOverlay(mode))
-        if (projectDocs.isNotBlank()) {
-            appendLine()
-            appendLine("# Project instructions")
-            appendLine(projectDocs.trimEnd())
-        }
-        if (customInstructions.isNotBlank()) {
-            appendLine()
-            appendLine("# User custom instructions")
-            appendLine(customInstructions.trimEnd())
-        }
-        if (persona.isNotBlank()) {
-            appendLine()
-            appendLine("# Tone")
-            appendLine("Respond in the style of 「$persona」.")
-        }
-        if (extra.isNotBlank()) {
-            appendLine()
-            append(extra.trimEnd())
-        }
+    ): String {
+        val parts = assembleParts(mode = mode, env = env, projectDocs = projectDocs, extra = extra).toMutableList()
+        val tail = buildString {
+            append(parts.last())
+            if (customInstructions.isNotBlank()) {
+                appendLine()
+                appendLine()
+                appendLine("# User custom instructions")
+                append(customInstructions.trimEnd())
+            }
+            if (persona.isNotBlank()) {
+                appendLine()
+                appendLine()
+                appendLine("# Tone")
+                append("Respond in the style of 「")
+                append(persona)
+                append("」.")
+            }
+        }.trimEnd()
+        parts[parts.lastIndex] = tail
+        return parts.joinToString("\n\n")
     }
 }
