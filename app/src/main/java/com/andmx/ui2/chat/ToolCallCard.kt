@@ -15,6 +15,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,13 +32,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.Checklist
-import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -57,19 +56,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andmx.agent.ToolArgs
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.withFrameMillis
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import com.andmx.diff.DiffLine
 import kotlinx.coroutines.delay
@@ -80,24 +80,23 @@ private val prettyJson = Json { prettyPrint = true }
 
 @Composable
 fun ToolCallCard(toolCall: ToolCall) {
-    val isEditTool = ToolEditDiff.isEditTool(toolCall.name)
-    val autoExpand = toolCall.isRunning || toolCall.isError || isEditTool
+    val isEditTool = ToolPresentation.isEditTool(toolCall.name)
+    val collapsible = ToolPresentation.isCollapsible(toolCall)
     var expanded by remember(toolCall.id) {
-        mutableStateOf(toolCall.isRunning || toolCall.isError || isEditTool)
+        mutableStateOf(ToolPresentation.defaultExpanded(toolCall))
     }
     var userToggled by remember(toolCall.id) { mutableStateOf(false) }
     var wasRunning by remember(toolCall.id) { mutableStateOf(toolCall.isRunning) }
     var contentMounted by remember(toolCall.id) { mutableStateOf(expanded) }
 
     LaunchedEffect(toolCall.isRunning, toolCall.isError, isEditTool) {
-        if (userToggled) {
+        if (userToggled || !collapsible) {
             wasRunning = toolCall.isRunning
             return@LaunchedEffect
         }
         if (toolCall.isRunning || toolCall.isError) {
             expanded = true
         } else if (wasRunning) {
-            // ZCode keeps edit diffs open after completion so users can review +N/-N.
             if (!isEditTool) {
                 delay(300)
                 if (!userToggled) expanded = false
@@ -116,29 +115,37 @@ fun ToolCallCard(toolCall: ToolCall) {
     }
 
     val editPreview = remember(toolCall.id, toolCall.name, toolCall.args) {
-        if (ToolEditDiff.isEditTool(toolCall.name)) ToolEditDiff.preview(toolCall.name, toolCall.args) else null
+        if (isEditTool) ToolEditDiff.preview(toolCall.name, toolCall.args) else null
     }
-    val family = toolFamily(toolCall.name)
+    val family = ToolPresentation.family(toolCall.name)
     val kindLabel = if (editPreview != null) {
         editKindLabel(editPreview.operation, toolCall.isRunning, toolCall.isError)
     } else {
-        toolKindLabel(toolCall)
+        ToolPresentation.kindLabel(toolCall)
     }
     val summary = if (editPreview != null) {
-        fileNameOf(editPreview.path).ifBlank { toolSummary(toolCall) }
+        fileNameOf(editPreview.path).ifBlank { ToolPresentation.summary(toolCall) }
     } else {
-        toolSummary(toolCall)
+        ToolPresentation.summary(toolCall)
     }
     val secondary = if (editPreview != null) {
         pathDirHint(editPreview.path)
     } else {
-        toolSecondary(toolCall)
+        ToolPresentation.secondary(toolCall)
     }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
         animationSpec = tween(180),
         label = "toolChevron",
     )
+
+    val headerInteraction = remember { MutableInteractionSource() }
+    val pressed by headerInteraction.collectIsPressedAsState()
+    val headerBg = if (pressed) {
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
+    } else {
+        Color.Transparent
+    }
 
     Column(
         Modifier
@@ -148,14 +155,13 @@ fun ToolCallCard(toolCall: ToolCall) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {
+                .clip(RoundedCornerShape(10.dp))
+                .background(headerBg)
+                .clickable(enabled = collapsible, interactionSource = headerInteraction, indication = null) {
                     userToggled = true
                     expanded = !expanded
                 }
-                .padding(vertical = 5.dp),
+                .padding(vertical = 5.dp, horizontal = if (collapsible) 2.dp else 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -228,22 +234,25 @@ fun ToolCallCard(toolCall: ToolCall) {
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                 )
             }
-            Icon(
-                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                null,
-                Modifier
-                    .padding(start = 4.dp)
-                    .size(16.dp)
-                    .rotate(chevronRotation)
-                    .alpha(if (expanded || toolCall.isRunning || toolCall.isError) 0.85f else 0.45f),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            )
+            if (collapsible) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                    null,
+                    Modifier
+                        .padding(start = 4.dp)
+                        .size(16.dp)
+                        .rotate(chevronRotation)
+                        .alpha(if (expanded || toolCall.isRunning || toolCall.isError) 0.85f else 0.55f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
         }
 
-        val actions = remember(toolCall.id, toolCall.name, toolCall.args) {
-            toolActions(toolCall)
+        val actions = remember(toolCall.id, toolCall.name, toolCall.args, toolCall.output) {
+            ToolPresentation.actions(toolCall)
         }
         if (actions.isNotEmpty() && (expanded || toolCall.isRunning)) {
+            val clipboard = LocalClipboardManager.current
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -254,9 +263,10 @@ fun ToolCallCard(toolCall: ToolCall) {
                     TextButton(
                         onClick = {
                             when (action) {
-                                is ToolUiAction.OpenFile -> ChatActionBus.openFile(action.path)
-                                is ToolUiAction.OpenTerminal -> ChatActionBus.openTerminal()
-                                is ToolUiAction.OpenUrl -> ChatActionBus.openUrl(action.url)
+                                is ToolPresentation.Action.OpenFile -> ChatActionBus.openFile(action.path)
+                                is ToolPresentation.Action.OpenTerminal -> ChatActionBus.openTerminal()
+                                is ToolPresentation.Action.OpenUrl -> ChatActionBus.openUrl(action.url)
+                                is ToolPresentation.Action.Copy -> clipboard.setText(AnnotatedString(action.text))
                             }
                         },
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -264,6 +274,18 @@ fun ToolCallCard(toolCall: ToolCall) {
                             vertical = 0.dp,
                         ),
                     ) {
+                        Icon(
+                            when (action) {
+                                is ToolPresentation.Action.OpenFile -> Icons.Outlined.Description
+                                is ToolPresentation.Action.OpenTerminal -> Icons.Outlined.Terminal
+                                is ToolPresentation.Action.OpenUrl -> Icons.AutoMirrored.Outlined.OpenInNew
+                                is ToolPresentation.Action.Copy -> Icons.Outlined.ContentCopy
+                            },
+                            null,
+                            Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             action.label,
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
@@ -431,63 +453,6 @@ private fun GradientRunningLabel(text: String) {
     )
 }
 
-private data class ToolFamily(
-    val label: String,
-    val icon: ImageVector,
-)
-
-private fun toolFamily(name: String): ToolFamily = when {
-    name == "run_shell" || name == "git" -> ToolFamily("Shell", Icons.Outlined.Terminal)
-    name in setOf("read_file", "list_dir", "glob") -> ToolFamily("读取", Icons.Outlined.Description)
-    name in setOf("write_file", "edit_file", "apply_patch") -> ToolFamily("写入", Icons.Outlined.Edit)
-    name == "grep" -> ToolFamily("搜索", Icons.Outlined.Search)
-    name in setOf("browse", "web_search") -> ToolFamily("网络", Icons.Outlined.Language)
-    name == "update_plan" -> ToolFamily("计划", Icons.Outlined.Checklist)
-    name in setOf("spawn_agent", "multi_agent") -> ToolFamily("子代理", Icons.Outlined.Build)
-    name.startsWith("plugin_") -> ToolFamily("插件", Icons.Outlined.Build)
-    name.contains("__") || (name.contains("_") && name.count { it == '_' } >= 2) ->
-        ToolFamily("MCP", Icons.Outlined.Code)
-    else -> ToolFamily(name, Icons.Outlined.Build)
-}
-
-private fun toolKindLabel(toolCall: ToolCall): String {
-    if (toolCall.isError) return "失败"
-    return when (toolCall.name) {
-        "run_shell", "git" -> if (toolCall.isRunning) "执行中" else "已执行"
-        "read_file" -> if (toolCall.isRunning) "读取中" else "已读取"
-        "list_dir", "glob" -> if (toolCall.isRunning) "浏览中" else "已浏览"
-        "write_file" -> if (toolCall.isRunning) "写入中" else "已写入"
-        "edit_file", "apply_patch" -> if (toolCall.isRunning) "编辑中" else "已编辑"
-        "grep" -> if (toolCall.isRunning) "搜索中" else "已搜索"
-        "browse", "web_search" -> if (toolCall.isRunning) "检索中" else "已检索"
-        "update_plan" -> if (toolCall.isRunning) "更新计划" else "计划已更新"
-        "spawn_agent", "multi_agent" -> if (toolCall.isRunning) "子代理运行中" else "子代理完成"
-        else -> if (toolCall.isRunning) "运行中" else toolFamily(toolCall.name).label
-    }
-}
-
-private fun toolSummary(toolCall: ToolCall): String {
-    val preview = ToolArgs.preview(toolCall.name, toolCall.args).ifBlank {
-        toolCall.args.take(120)
-    }.trim()
-    return preview
-        .replace('\n', ' ')
-        .replace(Regex("\\s+"), " ")
-        .take(140)
-}
-
-private fun toolSecondary(toolCall: ToolCall): String? {
-    if (toolCall.isRunning) return null
-    if (toolCall.isError) return "失败"
-    val out = toolCall.output ?: return null
-    val lines = out.lineSequence().count { it.isNotBlank() }
-    return when {
-        lines <= 0 -> null
-        lines == 1 -> "1 行"
-        else -> "$lines 行"
-    }
-}
-
 private fun prettyArgs(raw: String): String {
     val t = raw.trim()
     if (t.length < 2) return t
@@ -499,32 +464,6 @@ private fun prettyArgs(raw: String): String {
     }
 }
 
-private sealed class ToolUiAction(val label: String) {
-    class OpenFile(val path: String) : ToolUiAction("打开文件")
-    data object OpenTerminal : ToolUiAction("打开终端")
-    class OpenUrl(val url: String) : ToolUiAction("打开链接")
-}
-
-private fun toolActions(toolCall: ToolCall): List<ToolUiAction> {
-    val out = mutableListOf<ToolUiAction>()
-    when (toolCall.name) {
-        "run_shell", "git" -> out += ToolUiAction.OpenTerminal
-        "read_file", "write_file", "edit_file", "apply_patch", "list_dir" -> {
-            val path = ToolArgs.filePath(toolCall.name, toolCall.args)
-                .ifBlank { ToolArgs.value(toolCall.args, "path") }
-            if (path.isNotBlank()) out += ToolUiAction.OpenFile(path)
-        }
-        "browse", "web_search" -> {
-            val url = ToolArgs.webUrl(toolCall.name, toolCall.args)
-            if (url.isNotBlank()) out += ToolUiAction.OpenUrl(url)
-        }
-        "grep", "glob" -> {
-            val path = ToolArgs.value(toolCall.args, "path")
-            if (path.isNotBlank()) out += ToolUiAction.OpenFile(path)
-        }
-    }
-    return out
-}
 
 
 
@@ -874,7 +813,7 @@ fun ToolGroupCard(tools: List<ToolCall>) {
         wasRunning = running
     }
 
-    val labels = tools.map { toolFamily(it.name).label }.distinct().take(3)
+    val labels = tools.map { ToolPresentation.family(it.name).label }.distinct().take(3)
     val title = buildString {
         append(tools.size)
         append(" 步")
@@ -961,9 +900,9 @@ fun ToolGroupCard(tools: List<ToolCall>) {
 
 @Composable
 private fun CompactToolProcessRow(tool: ToolCall) {
-    val family = toolFamily(tool.name)
-    val summary = toolSummary(tool)
-    val label = toolKindLabel(tool)
+    val family = ToolPresentation.family(tool.name)
+    val summary = ToolPresentation.summary(tool)
+    val label = ToolPresentation.kindLabel(tool)
     Row(
         Modifier
             .fillMaxWidth()
@@ -1001,6 +940,14 @@ private fun CompactToolProcessRow(tool: ToolCall) {
 
 @Composable
 fun WorkingIndicator() {
+    var elapsed by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        elapsed = 0
+        while (true) {
+            kotlinx.coroutines.delay(1000L)
+            elapsed += 1
+        }
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -1014,5 +961,16 @@ fun WorkingIndicator() {
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
         )
         GradientRunningLabel("思考中…")
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = formatElapsed(elapsed),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
     }
+}
+
+private fun formatElapsed(seconds: Int): String {
+    val s = seconds % 60
+    return if (seconds < 60) "${s}s" else "${seconds / 60}m ${s.toString().padStart(2, '0')}s"
 }

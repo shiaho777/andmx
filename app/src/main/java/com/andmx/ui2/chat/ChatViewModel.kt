@@ -158,7 +158,10 @@ class ChatViewModel @Inject constructor(
             }
 
         val execMode: ExecMode get() = ExecMode.from(settings.approvalMode)
+            .let { if (it == ExecMode.PLAN) ExecMode.CONFIRM else it }
     }
+
+    val planOverlayActive: StateFlow<Boolean> = controller.planOverlayActive
 
     val composerConfig: StateFlow<ComposerConfig> =
         combine(
@@ -206,6 +209,7 @@ class ChatViewModel @Inject constructor(
             val msgs = mutableListOf<ChatMessage>()
             val tools = mutableListOf<ToolCall>()
             val subItems = mutableListOf<SubAgentItem>()
+            val reasonings = mutableListOf<ReasoningItem>()
             for (msg in history) {
                 when (msg.role) {
                     "user" -> msgs += ChatMessage(
@@ -234,7 +238,7 @@ class ChatViewModel @Inject constructor(
                             isError = msg.toolError,
                             sortKey = msg.createdAt,
                         )
-                        if (msg.toolName == "spawn_agent" || msg.toolName == "multi_agent") {
+                        if (msg.toolName in setOf("spawn_agent", "multi_agent", "Agent", "Task", "TaskOutput", "TaskStop")) {
                             val task = runCatching {
                                 val el = kotlinx.serialization.json.Json.parseToJsonElement(msg.toolArgs)
                                 (el as? kotlinx.serialization.json.JsonObject)
@@ -250,14 +254,22 @@ class ChatViewModel @Inject constructor(
                             )
                         }
                     }
+                    "reasoning" -> reasonings += ReasoningItem(
+                        id = "hist-think-${msg.id}",
+                        content = msg.content,
+                        isStreaming = false,
+                        sortKey = msg.createdAt,
+                    )
                 }
             }
             val annotated = annotateProcessMessages(msgs, tools)
             _messages.value = annotated
             _toolCalls.value = tools
             _subAgentItems.value = subItems
+            _reasonings.value = reasonings
             processSortCursor = (annotated.maxOfOrNull { it.sortKey } ?: 0L)
                 .coerceAtLeast(tools.maxOfOrNull { it.sortKey } ?: 0L)
+                .coerceAtLeast(reasonings.maxOfOrNull { it.sortKey } ?: 0L)
             runCatching { controller.focusConversation(id) }
             refreshContextUsage()
         }
@@ -1341,6 +1353,88 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /** Manually compress the current conversation's context. */
+    fun compressContext() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            val id = ensureConversationReady()
+            val msg = controller.compactConversation(id)
+            appendLocalAssistant(msg)
+            refreshContextUsage()
+        }
+    }
+
+    val fileChanges: StateFlow<List<com.andmx.workspace.FileChange>> = com.andmx.workspace.ChangeTracker.changes
+
+    private val _rewindResult = MutableStateFlow<com.andmx.ui2.chat.ChatController.RewindResult?>(null)
+    val rewindResult: StateFlow<com.andmx.ui2.chat.ChatController.RewindResult?> = _rewindResult.asStateFlow()
+
+    fun rewindFiles() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            val res = controller.revertFileChanges()
+            _rewindResult.value = res
+            refreshGitInfo()
+        }
+    }
+
+    fun clearRewindResult() { _rewindResult.value = null }
+
+    // ── 切模型上下文守卫 ───────────────────────────────────────────────────
+    data class ModelSwitchGuard(
+        val providerId: String,
+        val modelId: String,
+        val modelLabel: String,
+        val used: Int,
+        val target: Int,
+        val running: Boolean,
+    )
+
+    private val _modelSwitchGuard = MutableStateFlow<ModelSwitchGuard?>(null)
+    val modelSwitchGuard: StateFlow<ModelSwitchGuard?> = _modelSwitchGuard.asStateFlow()
+
+    fun requestSwitchModel(providerId: String, modelId: String) {
+        viewModelScope.launch {
+            val providers = providerStore.providers.firstOrNull().orEmpty()
+            val provider = providers.firstOrNull { it.id == providerId }
+            val target = provider?.models?.get(modelId)
+            val window = target?.contextWindow?.takeIf { it > 0 } ?: 0
+            val maxOut = target?.maxOutputTokens ?: 0
+            val effective = if (window > 0) (window - maxOut).coerceAtLeast(1) else 0
+            val used = _contextTokens.value
+            if (effective > 0 && used > effective) {
+                _modelSwitchGuard.value = ModelSwitchGuard(
+                    providerId = providerId,
+                    modelId = modelId,
+                    modelLabel = target?.displayName?.takeIf { it.isNotBlank() } ?: modelId,
+                    used = used,
+                    target = effective,
+                    running = _isLoading.value,
+                )
+            } else {
+                switchModel(providerId, modelId)
+                _modelSwitchGuard.value = null
+            }
+        }
+    }
+
+    fun confirmSwitchModel(compressFirst: Boolean) {
+        val g = _modelSwitchGuard.value ?: return
+        _modelSwitchGuard.value = null
+        if (compressFirst && !g.running) {
+            viewModelScope.launch {
+                val id = ensureConversationReady()
+                runCatching { controller.compactConversation(id) }
+                refreshContextUsage()
+                switchModel(g.providerId, g.modelId)
+            }
+        } else {
+            switchModel(g.providerId, g.modelId)
+        }
+    }
+
+    fun cancelSwitchModel() { _modelSwitchGuard.value = null }
+
     private fun drainQueue() {
         val next = _queue.value.firstOrNull() ?: return
         _queue.value = _queue.value.drop(1)
@@ -1384,10 +1478,24 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setExecMode(mode: ExecMode) {
-        viewModelScope.launch {
-            val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
-            settingsStore.update(cur.copy(approvalMode = mode.id))
+        val id = _currentConversationId.value
+        if (id > 0L) {
+            controller.applyExecMode(mode, id)
+        } else if (mode != ExecMode.PLAN) {
+            viewModelScope.launch {
+                val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+                settingsStore.update(cur.copy(approvalMode = mode.id))
+            }
         }
+    }
+
+    /** Leave the plan overlay for the current session, back to the baseline mode. */
+    fun exitPlanMode() {
+        val id = _currentConversationId.value
+        if (id <= 0L) return
+        val baseline = ExecMode.from(composerConfig.value.settings.approvalMode)
+            .let { if (it == ExecMode.PLAN) ExecMode.CONFIRM else it }
+        controller.applyExecMode(baseline, id)
     }
 
     // ── 上下文 chips ───────────────────────────────────────────────────────
@@ -1487,6 +1595,7 @@ class ChatViewModel @Inject constructor(
     private fun finalizeReasoning() {
         val id = currentReasoningId ?: return
         val text = currentReasoningText
+        val convId = _currentConversationId.value
         currentReasoningId = null
         currentReasoningText = ""
         lastReasoningUiAt = 0L
@@ -1496,6 +1605,11 @@ class ChatViewModel @Inject constructor(
         }
         _reasonings.value = _reasonings.value.map {
             if (it.id == id) it.copy(content = text, isStreaming = false) else it
+        }
+        if (convId > 0L) {
+            viewModelScope.launch {
+                runCatching { repo.addMessage(convId, role = "reasoning", content = text) }
+            }
         }
     }
 

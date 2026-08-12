@@ -205,14 +205,67 @@ object SubagentStorage {
     fun loadMarkdownAgents(context: Context): List<CustomSubAgent> {
         val dir = agentsDir(context)
         if (!dir.isDirectory) return emptyList()
-        return dir.listFiles()
-            ?.filter { it.isFile && it.name.endsWith(".md", true) && !it.name.equals("README.md", true) }
-            ?.sortedBy { it.name.lowercase() }
-            ?.mapNotNull { f ->
+        return collectMarkdownAgents(dir, "user")
+    }
+
+    fun loadWorkspaceAgents(workspacePath: String?): List<CustomSubAgent> {
+        val root = workspacePath?.trim().orEmpty()
+        if (root.isBlank()) return emptyList()
+        val dir = File(root, ".zcode/agents")
+        if (!dir.isDirectory) return emptyList()
+        return collectMarkdownAgents(dir, "workspace").map {
+            it.copy(projectPath = root)
+        }
+    }
+
+    fun loadPluginAgents(context: Context): List<CustomSubAgent> {
+        val roots = listOf(
+            File(context.filesDir, "plugins"),
+            File(context.filesDir, "andmx-plugins"),
+            File(context.getExternalFilesDir(null), "plugins"),
+        )
+        val out = mutableListOf<CustomSubAgent>()
+        roots.filter { it.isDirectory }.forEach { root ->
+            root.walkTopDown().maxDepth(4).forEach { f ->
+                if (!f.isDirectory) return@forEach
+                val isPluginRoot = listOf(
+                    File(f, ".zcode-plugin/plugin.json"),
+                    File(f, ".claude-plugin/plugin.json"),
+                    File(f, ".codex-plugin/plugin.json"),
+                    File(f, "plugin.json"),
+                ).any { it.isFile }
+                if (!isPluginRoot) return@forEach
+                val agentsDir = File(f, "agents")
+                if (agentsDir.isDirectory) {
+                    out += collectMarkdownAgents(agentsDir, "plugin")
+                }
+                f.listFiles()
+                    ?.filter { it.isFile && it.name.endsWith(".md", true) && it.name.contains("agent", true) }
+                    ?.forEach { md ->
+                        runCatching {
+                            SubagentCatalog.parseMarkdown(md.readText(Charsets.UTF_8), md.absolutePath, "plugin")
+                        }.getOrNull()?.let { out += it }
+                    }
+            }
+        }
+        return out.distinctBy { it.name.lowercase() }
+    }
+
+    fun loadDiscoveredAgents(context: Context, workspacePath: String? = null): List<CustomSubAgent> {
+        return (loadMarkdownAgents(context) + loadWorkspaceAgents(workspacePath) + loadPluginAgents(context))
+            .distinctBy { "${it.scope}:${it.name.lowercase()}" }
+    }
+
+    private fun collectMarkdownAgents(dir: File, scope: String): List<CustomSubAgent> {
+        if (!dir.isDirectory) return emptyList()
+        return dir.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".md", true) && !it.name.equals("README.md", true) }
+            .sortedBy { it.absolutePath.lowercase() }
+            .mapNotNull { f ->
                 runCatching {
-                    SubagentCatalog.parseMarkdown(f.readText(Charsets.UTF_8), f.absolutePath, "user")
+                    SubagentCatalog.parseMarkdown(f.readText(Charsets.UTF_8), f.absolutePath, scope)
                 }.getOrNull()
             }
-            .orEmpty()
+            .toList()
     }
 }

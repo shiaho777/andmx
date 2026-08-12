@@ -124,6 +124,10 @@ fun ChatScreen(
     val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val config by viewModel.composerConfig.collectAsState()
+    val planOverlay by viewModel.planOverlayActive.collectAsState()
+    val fileChanges by viewModel.fileChanges.collectAsState()
+    val rewindResult by viewModel.rewindResult.collectAsState()
+    val modelSwitchGuard by viewModel.modelSwitchGuard.collectAsState()
     val contextChips by viewModel.contextChips.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
     val skills by viewModel.skills.collectAsState()
@@ -375,12 +379,14 @@ LaunchedEffect(Unit) {
                     activeProviderId = config.settings.activeProviderId
                         .ifBlank { config.primary?.id.orEmpty() },
                     providers = config.providers,
-                    onSwitchModel = { pid, mid -> viewModel.switchModel(pid, mid) },
+                    onSwitchModel = { pid, mid -> viewModel.requestSwitchModel(pid, mid) },
                     reasoningEffort = config.settings.reasoningEffort,
                     reasoning = config.reasoning,
                     onReasoningSelected = { viewModel.setReasoningEffort(it) },
-                    execMode = config.execMode,
+                    execMode = if (planOverlay) ExecMode.PLAN else config.execMode,
                     onExecModeSelected = { viewModel.setExecMode(it) },
+                    planOverlayActive = planOverlay,
+                    onExitPlanMode = { viewModel.exitPlanMode() },
                     contextChips = contextChips,
                     onRemoveContextChip = { viewModel.removeContextChip(it) },
                     attachments = attachments,
@@ -582,19 +588,32 @@ LaunchedEffect(Unit) {
                     }
                 }
 
-                if (goal.hasGoal) {
-                    GoalStrip(goal = goal)
-                }
-                if (planSteps.isNotEmpty()) {
-                    PlanStrip(steps = planSteps)
-                }
-                if (subAgents.isNotEmpty()) {
-                    SubAgentStrip(agents = subAgents)
+                StatusCapsule(
+                    goal = goal,
+                    planSteps = planSteps,
+                    subAgents = subAgentItems,
+                    gitInfo = gitInfo,
+                    contextTokens = contextTokens,
+                    contextWindow = contextWindow,
+                    onCompress = { viewModel.compressContext() },
+                )
+                RewindBar(
+                    changes = fileChanges,
+                    rewindResult = rewindResult,
+                    onRewind = { viewModel.rewindFiles() },
+                    onDismissResult = { viewModel.clearRewindResult() },
+                )
+                modelSwitchGuard?.let { g ->
+                    ModelSwitchGuardDialog(
+                        guard = g,
+                        onCompressAndSwitch = { viewModel.confirmSwitchModel(compressFirst = true) },
+                        onForceSwitch = { viewModel.confirmSwitchModel(compressFirst = false) },
+                        onCancel = { viewModel.cancelSwitchModel() },
+                    )
                 }
                 if (mcpStatus.isNotEmpty()) {
                     McpStatusStrip(servers = mcpStatus)
                 }
-                ContextUsageBar(tokens = contextTokens, window = contextWindow, lastTurnTokens = tokenUsage.lastTotal)
                 pendingApproval?.let { req ->
                     when (req.kind) {
                         "ask_user" -> AskUserQuestionPanel(

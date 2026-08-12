@@ -36,6 +36,8 @@ For actions that are hard to reverse or outward-facing, confirm first unless dur
 - When the user types `/<skill-name>`, invoke it via Skill. Only use skills listed in the user-invocable skills section — don't guess.
 - Prefer TodoWrite for multi-step work; keep exactly one item in_progress.
 - For non-trivial implementation, call EnterPlanMode first when approaches/architecture/multi-file scope are unclear.
+- Use Agent or Task for specialized multi-step subwork; Explore for broad read-only fan-out. Background launches return an id — use TaskOutput to read progress and TaskStop to cancel.
+- Model inherit is default for subagents unless a provider/model override is configured.
 """.trimIndent()
 
     val CONTEXT_MGMT = """

@@ -220,7 +220,6 @@ fun ConversationDrawer(
                             DrawerQuickAction(
                                 icon = Icons.Outlined.Search,
                                 label = "搜索",
-                                trailing = "K",
                                 onClick = { closeAnd(onOpenSearch) },
                             )
                             DrawerQuickAction(
@@ -662,8 +661,8 @@ private fun TaskList(
 
                 orderedKeys.forEach { gid ->
                     val items = assigned[gid].orEmpty()
-                    if (items.isEmpty()) return@forEach
                     val group = groupMap[gid]
+                    if (items.isEmpty() && group == null) return@forEach
                     val title = group?.name ?: if (gid.isBlank()) "最近任务" else gid
                     val color = group?.let { groupColors[it.color] } ?: Color.Transparent
                     val key = "grp_${gid.ifBlank { "recent" }}"
@@ -690,7 +689,16 @@ private fun TaskList(
                             } else null,
                         )
                     }
-                    if (key !in collapsedGroups) {
+                    if (items.isEmpty()) {
+                        item(key = "empty_$key") {
+                            Text(
+                                "暂无任务，长按会话可移入此分组",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(start = 56.dp, top = 2.dp, bottom = 8.dp),
+                            )
+                        }
+                    } else if (key !in collapsedGroups) {
                         items(visible, key = { it.id }) { conv ->
                             ConversationRow(
                                 conversation = conv,

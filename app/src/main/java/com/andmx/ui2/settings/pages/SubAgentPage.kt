@@ -130,8 +130,14 @@ fun SubAgentPage(onBack: () -> Unit) {
     var folderFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var folderPath by remember { mutableStateOf("") }
 
-    val allAgents = remember(userAgents, state, refreshTick) {
-        SubagentCatalog.listAll(userAgents, state)
+    val extras = remember(refreshTick) {
+        runCatching {
+            val workspace = com.andmx.workspace.ProjectManager(context).hostPath.value
+            SubagentStorage.loadDiscoveredAgents(context, workspace)
+        }.getOrDefault(emptyList())
+    }
+    val allAgents = remember(userAgents, state, refreshTick, extras) {
+        SubagentCatalog.listAll(userAgents, state, extras)
     }
 
     val modelOptions = remember(providers, primary, settings) {

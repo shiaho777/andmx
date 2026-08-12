@@ -62,6 +62,7 @@ class SubAgentOrchestrator(
     private val resolveRun: suspend (modelSpec: String) -> Pair<com.andmx.llm.LlmApi, com.andmx.agent.TurnContext> = { _ ->
         client to turnProvider()
     },
+    private val agentsMdProvider: suspend () -> String = { "" },
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
@@ -144,6 +145,8 @@ class SubAgentOrchestrator(
         val color: String = "",
         val background: Boolean = false,
         val model: String = "inherit",
+        val thoughtLevel: String = "",
+        val injectAgentsMd: Boolean = true,
     )
 
     suspend fun spawn(task: String, systemHint: String = "", agentId: String = "subagent-${System.currentTimeMillis()}"): String {
@@ -161,21 +164,29 @@ class SubAgentOrchestrator(
             name = spec.agentName.ifBlank { "subagent" },
             description = spec.agentDescription,
             systemPrompt = spec.agentSystem,
+            model = spec.model,
+            thoughtLevel = spec.thoughtLevel,
             permissionMode = spec.permissionMode,
             tools = spec.tools,
             disallowedTools = spec.disallowedTools,
             color = spec.color.ifBlank { "blue" },
             background = spec.background,
+            injectAgentsMd = spec.injectAgentsMd,
         )
         val baseTools = toolsFactory()
         val tools = SubagentCatalog.filterTools(baseTools, agentDef)
         val maxSteps = (spec.maxTurns ?: 25).coerceIn(1, 80)
 
         val (runClient, turn) = resolveRun(spec.model)
+        val agentsMd = if (spec.injectAgentsMd) {
+            runCatching { agentsMdProvider() }.getOrDefault("").trim()
+        } else {
+            ""
+        }
         val engine = AgentEngine(
             tools = tools,
             client = runClient,
-            systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef),
+            systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef, agentsMd),
             maxSteps = maxSteps,
         )
 
@@ -343,17 +354,35 @@ class SubAgentOrchestrator(
     /** The multi-agent control tool (spawn/resume/wait/close). */
     fun createMultiAgentTool(): Tool = MultiAgentControlTool(this)
 
+    fun createTaskTools(
+        resolveAgent: suspend (String?) -> CustomSubAgent? = { null },
+        listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
+    ): List<Tool> {
+        val agent = ZCodeAgentTool(this, resolveAgent, listTypes)
+        return listOf(
+            agent,
+            ZCodeTaskTool(this, resolveAgent, listTypes),
+            TaskOutputTool(this),
+            TaskStopTool(this),
+        )
+    }
+
     private fun buildSubAgentPrompt(
         task: String,
         systemHint: String,
         handoff: String = "",
         agent: CustomSubAgent? = null,
+        agentsMd: String = "",
     ): String = buildString {
         if (agent != null && (agent.systemPrompt.isNotBlank() || agent.name.isNotBlank())) {
             appendLine(SubagentCatalog.agentSystemBlock(agent))
             appendLine()
         } else {
             appendLine("你是 AndMX 的子代理，负责完成主代理分配给你的特定子任务。")
+            appendLine()
+        }
+        if (agentsMd.isNotBlank()) {
+            appendLine(agentsMd.trim())
             appendLine()
         }
         appendLine("## 任务")
@@ -609,6 +638,8 @@ class ZCodeAgentTool(
             color = resolved?.color.orEmpty(),
             background = runBg,
             model = resolved?.model ?: "inherit",
+            thoughtLevel = resolved?.thoughtLevel.orEmpty(),
+            injectAgentsMd = resolved?.injectAgentsMd ?: (resolved?.name != "Explore"),
         )
 
         if (runBg) {
@@ -626,5 +657,106 @@ class ZCodeAgentTool(
                 appendLine(result)
             }.trim(),
         )
+    }
+}
+
+
+class ZCodeTaskTool(
+    private val orchestrator: SubAgentOrchestrator,
+    private val resolveAgent: suspend (String?) -> CustomSubAgent? = { null },
+    private val listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
+) : Tool {
+    private val agentTool = ZCodeAgentTool(orchestrator, resolveAgent, listTypes)
+    override val name = "Task"
+    override val description =
+        "Launch a specialized task agent for multi-step work. Equivalent to Agent; prefer Explore for broad read-only search."
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = agentTool.parameters
+    override suspend fun execute(args: JsonObject): ToolResult = agentTool.execute(args)
+}
+
+class TaskOutputTool(
+    private val orchestrator: SubAgentOrchestrator,
+) : Tool {
+    override val name = "TaskOutput"
+    override val description =
+        "Read the current status or final output of a background Agent/Task by id. " +
+            "Use after launching with run_in_background=true."
+    override val risk = com.andmx.agent.ToolRisk.READ
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("task_id") {
+                put("type", "string")
+                put("description", "Background agent/task id returned by Agent or Task")
+            }
+            putJsonObject("agent_id") {
+                put("type", "string")
+                put("description", "Alias of task_id")
+            }
+            putJsonObject("timeout_ms") {
+                put("type", "integer")
+                put("description", "Optional wait timeout in milliseconds before returning current status")
+            }
+        }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val id = args["task_id"]?.jsonPrimitive?.content
+            ?: args["agent_id"]?.jsonPrimitive?.content
+            ?: return ToolResult("task_id required", isError = true)
+        val timeout = args["timeout_ms"]?.jsonPrimitive?.content?.toLongOrNull()?.coerceIn(0L, 120_000L) ?: 0L
+        val snap = orchestrator.listAgentSnapshots().firstOrNull { it.id == id }
+            ?: return ToolResult("Task not found: $id", isError = true)
+        val result = if (timeout > 0L && snap.state == SubAgentOrchestrator.AgentState.RUNNING) {
+            orchestrator.wait(id, timeout)
+        } else {
+            snap.result
+        }
+        val state = orchestrator.getState(id)?.name ?: snap.state.name
+        return ToolResult(
+            buildString {
+                appendLine("task_id: $id")
+                appendLine("state: $state")
+                appendLine("task: ${snap.task}")
+                appendLine("output:")
+                append(result.ifBlank { "(no output yet)" })
+            }.trim(),
+        )
+    }
+}
+
+class TaskStopTool(
+    private val orchestrator: SubAgentOrchestrator,
+) : Tool {
+    override val name = "TaskStop"
+    override val description =
+        "Stop a running background Agent/Task by id and free its slot."
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("task_id") {
+                put("type", "string")
+                put("description", "Background agent/task id")
+            }
+            putJsonObject("agent_id") {
+                put("type", "string")
+                put("description", "Alias of task_id")
+            }
+        }
+        putJsonArray("required") { add("task_id") }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val id = args["task_id"]?.jsonPrimitive?.content
+            ?: args["agent_id"]?.jsonPrimitive?.content
+            ?: return ToolResult("task_id required", isError = true)
+        val ok = orchestrator.close(id)
+        return if (ok) {
+            ToolResult("Task stopped: $id")
+        } else {
+            ToolResult("Task not found: $id", isError = true)
+        }
     }
 }
