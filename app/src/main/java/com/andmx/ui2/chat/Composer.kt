@@ -104,6 +104,8 @@ fun Composer(
     onReasoningSelected: (String) -> Unit,
     execMode: ExecMode,
     onExecModeSelected: (ExecMode) -> Unit,
+    planOverlayActive: Boolean = false,
+    onExitPlanMode: () -> Unit = {},
     contextChips: List<ContextChip> = emptyList(),
     onRemoveContextChip: (String) -> Unit = {},
     attachments: List<Attachment> = emptyList(),
@@ -316,6 +318,9 @@ fun Composer(
                         onInsertSkill = onInsertSkill,
                     )
                     ExecModePill(mode = execMode, onSelect = onExecModeSelected)
+                    if (planOverlayActive) {
+                        PlanOverlayChip(onExit = onExitPlanMode)
+                    }
                     Spacer(Modifier.weight(1f))
                     ModelPill(
                         modelLabel = modelLabel,
@@ -482,6 +487,34 @@ private fun ExecModePill(
                 )
             }
         }
+    }
+}
+
+// ── 计划模式 overlay 退出入口 ──────────────────────────────────────────────
+
+@Composable
+private fun PlanOverlayChip(onExit: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f))
+            .clickable(onClick = onExit)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Icon(
+            Icons.Outlined.Close,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            "退出计划",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
     }
 }
 

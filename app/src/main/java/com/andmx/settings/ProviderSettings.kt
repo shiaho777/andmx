@@ -263,10 +263,12 @@ data class CustomSubAgent(
     val description: String = "",
     val systemPrompt: String = "",
     val model: String = "inherit",
+    val thoughtLevel: String = "",
     val permissionMode: String = "default",
     val color: String = "blue",
     val background: Boolean = false,
     val enabled: Boolean = true,
+    val injectAgentsMd: Boolean = true,
     val tools: List<String> = listOf("*"),
     val disallowedTools: List<String> = emptyList(),
     val skills: List<String> = emptyList(),
@@ -276,10 +278,12 @@ data class CustomSubAgent(
     val source: String = "user",
     val path: String = "",
     val readOnly: Boolean = false,
+    val projectPath: String = "",
 )
 
 @Serializable
 data class SubagentStateFile(
     val builtInModelOverrides: Map<String, String> = emptyMap(),
+    val builtInThoughtLevelOverrides: Map<String, String> = emptyMap(),
     val disabledAgentIds: List<String> = emptyList(),
 )

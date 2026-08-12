@@ -92,11 +92,6 @@ fun NewTaskButton(onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Text(
-            "N",
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-        )
     }
 }
 
@@ -104,7 +99,6 @@ fun NewTaskButton(onClick: () -> Unit) {
 fun DrawerQuickAction(
     icon: ImageVector,
     label: String,
-    trailing: String? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -131,13 +125,6 @@ fun DrawerQuickAction(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        if (trailing != null) {
-            Text(
-                trailing,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            )
-        }
     }
 }
 

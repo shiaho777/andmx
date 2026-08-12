@@ -22,9 +22,14 @@ object SubagentCatalog {
 
     fun builtInId(name: String): String = "built-in:$name"
 
-    fun createBuiltIns(overrides: Map<String, String> = emptyMap()): List<CustomSubAgent> {
-        val gpModel = overrides["general-purpose"]?.trim().orEmpty()
-        val exploreModel = overrides["Explore"]?.trim().orEmpty()
+    fun createBuiltIns(
+        modelOverrides: Map<String, String> = emptyMap(),
+        thoughtOverrides: Map<String, String> = emptyMap(),
+    ): List<CustomSubAgent> {
+        val gpModel = modelOverrides["general-purpose"]?.trim().orEmpty()
+        val exploreModel = modelOverrides["Explore"]?.trim().orEmpty()
+        val gpThought = if (gpModel.isNotBlank()) thoughtOverrides["general-purpose"]?.trim().orEmpty() else ""
+        val exploreThought = if (exploreModel.isNotBlank()) thoughtOverrides["Explore"]?.trim().orEmpty() else ""
         return listOf(
             CustomSubAgent(
                 id = builtInId("general-purpose"),
@@ -32,7 +37,9 @@ object SubagentCatalog {
                 description = "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
                 systemPrompt = "",
                 model = gpModel.ifBlank { "inherit" },
+                thoughtLevel = gpThought,
                 color = "blue",
+                injectAgentsMd = true,
                 tools = listOf("*"),
                 path = "built-in:general-purpose",
                 scope = "built-in",
@@ -46,7 +53,9 @@ object SubagentCatalog {
                 description = "Read-only search agent for broad fan-out searches.",
                 systemPrompt = "",
                 model = exploreModel.ifBlank { "inherit" },
+                thoughtLevel = exploreThought,
                 color = "cyan",
+                injectAgentsMd = false,
                 tools = listOf("Bash", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "TodoWrite"),
                 path = "built-in:Explore",
                 scope = "built-in",
@@ -73,8 +82,9 @@ object SubagentCatalog {
     fun listAll(
         userAgents: List<CustomSubAgent>,
         state: SubagentStateFile,
+        extraAgents: List<CustomSubAgent> = emptyList(),
     ): List<CustomSubAgent> {
-        val builtIns = createBuiltIns(state.builtInModelOverrides)
+        val builtIns = createBuiltIns(state.builtInModelOverrides, state.builtInThoughtLevelOverrides)
         val users = userAgents
             .filter { it.scope == "user" || it.scope.isBlank() }
             .map {
@@ -85,15 +95,40 @@ object SubagentCatalog {
                 )
             }
             .sortedBy { it.name.lowercase() }
-        return attachEnabledState(builtIns + users, state)
+        val extras = extraAgents
+            .filter { it.scope != "built-in" }
+            .map {
+                it.copy(
+                    source = if (it.source.isBlank()) it.scope.ifBlank { "plugin" } else it.source,
+                    readOnly = it.scope != "user",
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+        val merged = LinkedHashMap<String, CustomSubAgent>()
+        (builtIns + users + extras).forEach { agent ->
+            val key = agent.name.lowercase()
+            val prev = merged[key]
+            if (prev == null || precedence(agent) >= precedence(prev)) {
+                merged[key] = agent
+            }
+        }
+        return attachEnabledState(merged.values.toList(), state)
+    }
+
+    private fun precedence(agent: CustomSubAgent): Int = when (agent.scope) {
+        "user" -> 3
+        "workspace" -> 2
+        "plugin" -> 1
+        else -> 0
     }
 
     fun resolve(
         type: String?,
         userAgents: List<CustomSubAgent>,
         state: SubagentStateFile,
+        extraAgents: List<CustomSubAgent> = emptyList(),
     ): CustomSubAgent? {
-        val all = listAll(userAgents, state)
+        val all = listAll(userAgents, state, extraAgents)
         val key = type?.trim().orEmpty()
         if (key.isBlank()) {
             return all.firstOrNull { it.name == "Explore" && it.enabled }
@@ -145,6 +180,15 @@ object SubagentCatalog {
         "WebFetch" -> setOf("WebFetch", "browse")
         "TodoWrite" -> setOf("TodoWrite")
         "TodoRead" -> setOf("TodoRead")
+        "Agent" -> setOf("Agent", "Task", "spawn_agent")
+        "Task" -> setOf("Task", "Agent", "spawn_agent")
+        "TaskOutput" -> setOf("TaskOutput")
+        "TaskStop" -> setOf("TaskStop")
+        "Skill" -> setOf("Skill")
+        "ReadSessionContext" -> setOf("ReadSessionContext")
+        "AskUserQuestion" -> setOf("AskUserQuestion")
+        "ExitPlanMode" -> setOf("ExitPlanMode")
+        "EnterPlanMode" -> setOf("EnterPlanMode")
         else -> setOf(name)
     }
 
@@ -155,6 +199,8 @@ object SubagentCatalog {
         )
         if (agent.color.isNotBlank()) lines += "color: ${agent.color}"
         if (agent.model.isNotBlank() && agent.model != "inherit") lines += "model: ${agent.model}"
+        if (agent.thoughtLevel.isNotBlank()) lines += "thoughtLevel: ${agent.thoughtLevel}"
+        if (!agent.injectAgentsMd) lines += "injectAgentsMd: false"
         if (!isAllTools(agent.tools)) {
             lines += "tools: [${agent.tools.joinToString(", ") { "\"$it\"" }}]"
         }
@@ -189,24 +235,43 @@ object SubagentCatalog {
             ?: return null
         val color = map["color"]?.trim()?.takeIf { it in COLORS }
         val model = map["model"]?.trim().orEmpty().ifBlank { "inherit" }
+        val thoughtLevel = map["thoughtLevel"]?.trim().orEmpty()
         val permissionMode = map["permissionMode"]?.trim()?.takeIf { it in PERMISSION_MODES } ?: "default"
         val tools = parseStringList(map["tools"]) ?: listOf("*")
         val disallowed = parseStringList(map["disallowedTools"]).orEmpty()
         val skills = parseStringList(map["skills"]).orEmpty()
         val maxTurns = map["maxTurns"]?.trim()?.toIntOrNull()
         val background = map["background"]?.trim()?.lowercase() == "true"
+        val injectAgentsMd = when (map["injectAgentsMd"]?.trim()?.lowercase()) {
+            "false", "0", "no" -> false
+            "true", "1", "yes" -> true
+            else -> scope != "plugin"
+        }
         val mcpServers = parseStringList(map["mcpServers"]).orEmpty()
-        val source = if (scope == "built-in") "built-in" else "user"
+        val source = when (scope) {
+            "built-in" -> "built-in"
+            "workspace" -> "workspace"
+            "plugin" -> "plugin"
+            else -> "user"
+        }
+        val idPrefix = when (scope) {
+            "built-in" -> "built-in"
+            "workspace" -> "workspace"
+            "plugin" -> "plugin"
+            else -> "user"
+        }
         return CustomSubAgent(
-            id = if (scope == "built-in") builtInId(name) else "user:$name",
+            id = if (scope == "built-in") builtInId(name) else "$idPrefix:$name",
             name = name,
             description = description,
             systemPrompt = body,
             model = model,
+            thoughtLevel = thoughtLevel,
             permissionMode = permissionMode,
             color = color ?: "blue",
             background = background,
             enabled = true,
+            injectAgentsMd = injectAgentsMd,
             tools = tools,
             disallowedTools = disallowed,
             skills = skills,
@@ -272,6 +337,12 @@ object SubagentCatalog {
         }
         if (agent.disallowedTools.isNotEmpty()) {
             appendLine("Disallowed tools: ${agent.disallowedTools.joinToString(", ")}")
+        }
+        if (agent.thoughtLevel.isNotBlank()) {
+            appendLine("Thought level: ${agent.thoughtLevel}")
+        }
+        if (!agent.injectAgentsMd) {
+            appendLine("Do not rely on AGENTS.md project instructions unless the task explicitly requires them.")
         }
     }.trim()
 }

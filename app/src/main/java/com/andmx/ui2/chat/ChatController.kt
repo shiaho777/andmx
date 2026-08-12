@@ -136,20 +136,25 @@ class ChatController(private val context: Context) {
         return LlmClient(provider, trackerFor(conversationId)) to TurnContext(provider, model)
     }
 
-    private fun createZCodeAgentTool(orch: SubAgentOrchestrator): ZCodeAgentTool {
-        return ZCodeAgentTool(
-            orchestrator = orch,
-            resolveAgent = { type ->
-                val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
-                val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
-                SubagentCatalog.resolve(type, users, state)
-            },
-            listTypes = {
-                val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
-                val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
-                SubagentCatalog.listAll(users, state).filter { it.enabled }.map { it.name }
-            },
-        )
+    private suspend fun loadSubagentExtras(): List<com.andmx.settings.CustomSubAgent> {
+        val workspace = projectManager.hostPath.value
+        return com.andmx.agent.multi.SubagentStorage.loadDiscoveredAgents(context, workspace)
+    }
+
+    private fun createZCodeAgentTools(orch: SubAgentOrchestrator): List<Tool> {
+        val resolveAgent: suspend (String?) -> com.andmx.settings.CustomSubAgent? = { type ->
+            val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
+            val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
+            val extras = loadSubagentExtras()
+            SubagentCatalog.resolve(type, users, state, extras)
+        }
+        val listTypes: suspend () -> List<String> = {
+            val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
+            val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
+            val extras = loadSubagentExtras()
+            SubagentCatalog.listAll(users, state, extras).filter { it.enabled }.map { it.name }
+        }
+        return orch.createTaskTools(resolveAgent, listTypes)
     }
 
 
@@ -184,6 +189,41 @@ class ChatController(private val context: Context) {
 
     private val _goal = MutableStateFlow(ConversationGoal())
     val goal: StateFlow<ConversationGoal> = _goal.asStateFlow()
+
+    @Volatile private var focusedConversationId: Long = 0L
+    private val _planOverlayActive = MutableStateFlow(false)
+    val planOverlayActive: StateFlow<Boolean> = _planOverlayActive.asStateFlow()
+
+    private fun syncPlanOverlay() {
+        val id = focusedConversationId
+        _planOverlayActive.value = sessions[id]?.planModeState?.active == true
+    }
+
+    /**
+     * Unified exec-mode application. PLAN is a session-scoped overlay: it never
+     * persists, so new conversations always start in the baseline mode. Any
+     * non-PLAN mode persists as the new baseline and exits the overlay for the
+     * given session. This is the single entry point for both the composer pill
+     * and the Enter/ExitPlanMode tools, keeping plan-ness sourced only from
+     * [Session.planModeState] instead of two divergent flags.
+     */
+    fun applyExecMode(mode: ExecMode, conversationId: Long) {
+        val session = sessions[conversationId]
+        if (mode == ExecMode.PLAN) {
+            session?.planModeState?.enter()
+            syncPlanOverlay()
+            return
+        }
+        session?.planModeState?.exit()
+        if (session != null) session.approvalMode = mode
+        controllerScope.launch {
+            runCatching {
+                val s = settingsStore.settings.firstOrNull() ?: return@runCatching
+                settingsStore.update(s.copy(approvalMode = mode.id))
+            }
+        }
+        syncPlanOverlay()
+    }
 
     val ambient: StateFlow<List<AmbientSuggestions.Suggestion>> = ambientSuggestions.suggestions
 
@@ -365,9 +405,11 @@ class ChatController(private val context: Context) {
     }
 
     suspend fun focusConversation(conversationId: Long) {
+        focusedConversationId = conversationId
         val existing = sessions[conversationId]
         refreshSubAgents(conversationId)
         refreshTokenUsage(conversationId)
+        syncPlanOverlay()
         if (existing != null) {
             _planSteps.value = existing.planTool.state.value
             _goal.value = existing.goalState.goal
@@ -693,6 +735,44 @@ class ChatController(private val context: Context) {
         return msg
     }
 
+    data class RewindResult(
+        val reverted: Int,
+        val unsafe: Int,
+        val unsafePaths: List<String>,
+    )
+
+    /**
+     * Revert agent-made file changes back to their pre-edit origin. Mirrors
+     * ZCode's rewind safety model: each tracked file is re-read first; only
+     * those whose current content still matches the recorded post-edit content
+     * are restored. Anything changed afterwards (by bash, the user, or another
+     * tool) is reported as unsafe and left untouched.
+     */
+    suspend fun revertFileChanges(): RewindResult {
+        val pending = com.andmx.workspace.ChangeTracker.changes.value
+        if (pending.isEmpty()) return RewindResult(0, 0, emptyList())
+        var reverted = 0
+        val unsafe = mutableListOf<String>()
+        for (change in pending) {
+            val resolved = runCatching { access.resolvePath(change.path) }.getOrDefault(change.path)
+            val current = runCatching { access.readText(resolved) }.getOrNull()
+            if (current == null || current != change.newContent) {
+                unsafe += change.path
+                continue
+            }
+            runCatching {
+                if (change.isNew) {
+                    access.deleteFile(resolved)
+                } else {
+                    access.writeText(resolved, change.oldContent)
+                }
+                com.andmx.workspace.ChangeTracker.remove(change.path)
+                reverted++
+            }.onFailure { unsafe += change.path }
+        }
+        return RewindResult(reverted, unsafe.size, unsafe)
+    }
+
     suspend fun statusText(conversationId: Long): String {
         val settings = settingsStore.settings.firstOrNull()
         val conv = repo.conversation(conversationId)
@@ -794,7 +874,9 @@ class ChatController(private val context: Context) {
         provider: ProviderDefinition,
         settings: ProviderSettings,
     ): Session {
-        val execMode = ExecMode.from(settings.approvalMode)
+        val execMode = ExecMode.from(settings.approvalMode).let {
+            if (it == ExecMode.PLAN) ExecMode.CONFIRM else it
+        }
         val existing = sessions[conversationId]
         if (existing != null &&
             existing.providerId == provider.id &&
@@ -811,7 +893,7 @@ class ChatController(private val context: Context) {
             if (!orchestrators.containsKey(conversationId)) {
                 val orch = SubAgentOrchestrator(
                     toolsFactory = {
-                        buildTools(existing.planTool, existing.goalState, existing.todoState, existing.planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" } + sharedExtraTools
+                        buildTools(existing.planTool, existing.goalState, existing.todoState, existing.planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" && it.name != "Task" && it.name != "TaskOutput" && it.name != "TaskStop" } + sharedExtraTools
                     },
                     settings = settings,
                     client = LlmClient(provider, trackerFor(conversationId)),
@@ -820,10 +902,13 @@ class ChatController(private val context: Context) {
                     resolveRun = { modelSpec ->
                         resolveSubAgentRun(modelSpec, provider, conversationId)
                     },
+                    agentsMdProvider = {
+                        runCatching { access.loadAgentsMdFragment() }.getOrDefault("")
+                    },
                 )
                 orchestrators[conversationId] = orch
                 val known = existing.engine.listTools().map { it.first }.toSet()
-                val multi = listOf(orch.createSubAgentTool(), orch.createMultiAgentTool(), createZCodeAgentTool(orch)).filter { it.name !in known }
+                val multi = (listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch)).filter { it.name !in known }
                 if (multi.isNotEmpty()) existing.engine.addTools(multi)
                 watchSubAgents(conversationId, orch)
             } else {
@@ -840,7 +925,6 @@ class ChatController(private val context: Context) {
         val goalState = existing?.goalState ?: GoalToolState()
         val todoState = existing?.todoState ?: TodoState()
         val planModeState = existing?.planModeState ?: PlanModeState()
-        if (execMode == ExecMode.PLAN) planModeState.enter()
         if (!goalState.goal.hasGoal) {
             val fromDb = restoreGoalFromDb(conversationId)
             if (fromDb.hasGoal) {
@@ -879,7 +963,7 @@ class ChatController(private val context: Context) {
         }
         val orch = SubAgentOrchestrator(
             toolsFactory = {
-                buildTools(planTool, goalState, todoState, planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" } + sharedExtraTools
+                buildTools(planTool, goalState, todoState, planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" && it.name != "Task" && it.name != "TaskOutput" && it.name != "TaskStop" } + sharedExtraTools
             },
             settings = settings,
             client = client,
@@ -889,9 +973,12 @@ class ChatController(private val context: Context) {
             resolveRun = { modelSpec ->
                 resolveSubAgentRun(modelSpec, provider, conversationId)
             },
+            agentsMdProvider = {
+                runCatching { access.loadAgentsMdFragment() }.getOrDefault("")
+            },
         )
         orchestrators[conversationId] = orch
-        engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool(), createZCodeAgentTool(orch)))
+        engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch))
         engine.setCustomInstructions(settings.customInstructions)
         engine.setPersona(settings.persona)
 
@@ -914,6 +1001,8 @@ class ChatController(private val context: Context) {
         )
         _goal.value = goalState.goal
         sessions[conversationId] = session
+        if (focusedConversationId == 0L) focusedConversationId = conversationId
+        syncPlanOverlay()
         touchSession(conversationId)
         trimSessionCache(conversationId)
         if (hookSystem.hasHooksFor(HookSystem.HookEvent.SESSION_START)) {
@@ -981,15 +1070,7 @@ class ChatController(private val context: Context) {
             todo = todo,
             planMode = planMode,
             cwdProvider = cwd,
-            onPlanModeChange = { mode ->
-                sessions[conversationId]?.approvalMode = mode
-                controllerScope.launch {
-                    runCatching {
-                        val s = settingsStore.settings.firstOrNull() ?: return@launch
-                        settingsStore.update(s.copy(approvalMode = mode.id))
-                    }
-                }
-            },
+            onPlanModeChange = { mode -> applyExecMode(mode, conversationId) },
             askUser = ask@{ questions, rawArgs ->
                 val session = sessions[conversationId] ?: return@ask "会话不可用"
                 val deferred = kotlinx.coroutines.CompletableDeferred<String>()
@@ -1194,7 +1275,7 @@ class ChatController(private val context: Context) {
         args: JsonObject,
     ): Boolean {
         val sessionLive = sessions[conversationId]
-        val planActive = sessionLive?.planModeState?.active == true || mode == ExecMode.PLAN
+        val planActive = sessionLive?.planModeState?.active == true
         if (planActive && !isPlanModeAllowed(tool.name)) {
             return false
         }
@@ -1362,8 +1443,8 @@ class ChatController(private val context: Context) {
             appendLine(workspaceLine)
             appendLine("工作目录：${access.guestCwd()}")
             appendLine("执行模式：${ExecMode.from(settings.approvalMode).label}")
-            appendLine("优先工具：run_shell / read_file / write_file / edit_file / apply_patch / grep / glob / git / list_dir / browse / web_search / update_plan / create_goal / update_goal / get_goal / spawn_agent / multi_agent。")
-            appendLine("复杂可并行子任务可用 spawn_agent 委派；需要多线程协作时用 multi_agent。")
+            appendLine("优先工具：Read / Write / Edit / Bash / Grep / Glob / WebFetch / WebSearch / TodoWrite / Agent / Task / TaskOutput / TaskStop / Skill / AskUserQuestion / EnterPlanMode / ExitPlanMode。")
+            appendLine("复杂可并行子任务用 Agent 或 Task；后台任务用 TaskOutput 读结果、TaskStop 停止。")
             appendLine("搜索代码用 grep/glob，不要用 python 整文件 dump。")
             appendLine("改文件前先读再写；提交前用 git status/diff 自检。")
             if (agents.isNotBlank()) {

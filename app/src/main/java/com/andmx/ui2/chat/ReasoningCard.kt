@@ -55,14 +55,21 @@ fun ReasoningCard(item: ReasoningItem) {
     var userToggled by remember(item.id) { mutableStateOf(false) }
     var startedAt by remember(item.id) { mutableLongStateOf(0L) }
     var durationSec by remember(item.id) { mutableStateOf<Int?>(null) }
+    var liveSec by remember(item.id) { mutableStateOf<Int?>(null) }
     var contentMounted by remember(item.id) { mutableStateOf(item.isStreaming) }
 
     LaunchedEffect(item.isStreaming) {
         if (item.isStreaming) {
             if (startedAt == 0L) startedAt = System.currentTimeMillis()
             durationSec = null
+            liveSec = 0
             if (!userToggled) expanded = true
+            while (true) {
+                delay(1000L)
+                liveSec = ((System.currentTimeMillis() - startedAt) / 1000L).toInt()
+            }
         } else {
+            liveSec = null
             if (startedAt > 0L) {
                 durationSec = ((System.currentTimeMillis() - startedAt) / 1000L)
                     .toInt()
@@ -118,7 +125,7 @@ fun ReasoningCard(item: ReasoningItem) {
             )
             Spacer(Modifier.width(8.dp))
             if (item.isStreaming) {
-                ThinkingLabel()
+                ThinkingLabel(liveSec)
             } else {
                 val sec = durationSec
                 Text(
@@ -175,7 +182,7 @@ fun ReasoningCard(item: ReasoningItem) {
 }
 
 @Composable
-private fun ThinkingLabel() {
+private fun ThinkingLabel(liveSec: Int?) {
     val infinite = rememberInfiniteTransition(label = "think-grad")
     val shift by infinite.animateFloat(
         initialValue = 0f,
@@ -195,7 +202,7 @@ private fun ThinkingLabel() {
         end = Offset(shift * 240f + 180f, 40f),
     )
     Text(
-        text = "思考中",
+        text = if (liveSec != null && liveSec >= 1) "思考中 · ${liveSec}s" else "思考中",
         style = TextStyle(
             brush = brush,
             fontSize = 13.sp,

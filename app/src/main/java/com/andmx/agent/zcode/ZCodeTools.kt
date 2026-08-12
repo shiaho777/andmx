@@ -806,7 +806,7 @@ fun isPlanModeAllowed(toolName: String): Boolean {
         "webfetch", "browse", "websearch", "web_search",
         "todoread", "todowrite", "update_plan",
         "enterplanmode", "exitplanmode", "askuserquestion",
-        "readsessioncontext", "skill", "agent", "spawn_agent",
+        "readsessioncontext", "skill", "agent", "task", "taskoutput", "taskstop", "spawn_agent", "multi_agent",
         "get_goal", "create_goal", "update_goal",
         "android_preflight", "android_discover_project", "android_list_devices",
         "android_list_avds", "android_ui_status", "android_ui_describe", "android_ui_resolve",

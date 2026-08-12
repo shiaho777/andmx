@@ -16,21 +16,17 @@ data class ToolEditPreview(
 }
 
 object ToolEditDiff {
-    private val editTools = setOf("write_file", "edit_file", "apply_patch")
+    fun isEditTool(name: String): Boolean = ToolArgs.isEditTool(name)
 
-    fun isEditTool(name: String): Boolean = name in editTools
-
-    fun preview(name: String, args: String): ToolEditPreview? {
-        return when (name) {
-            "write_file" -> writePreview(args)
-            "edit_file" -> editPreview(args)
-            "apply_patch" -> patchPreview(args)
-            else -> null
-        }
+    fun preview(name: String, args: String): ToolEditPreview? = when (ToolArgs.canonical(name)) {
+        "write" -> writePreview(args)
+        "edit", "multiedit" -> editPreview(args)
+        "patch" -> patchPreview(args)
+        else -> null
     }
 
     private fun writePreview(args: String): ToolEditPreview? {
-        val path = ToolArgs.value(args, "path").ifBlank { return null }
+        val path = ToolArgs.pathOf(args).ifBlank { return null }
         val content = contentOf(args) ?: return null
         val lines = DiffEngine.diff("", content)
         return ToolEditPreview(
@@ -42,11 +38,9 @@ object ToolEditDiff {
     }
 
     private fun editPreview(args: String): ToolEditPreview? {
-        val path = ToolArgs.value(args, "path").ifBlank { return null }
-        val oldStr = ToolArgs.value(args, "old_str")
-            .ifBlank { ToolArgs.value(args, "old_string") }
-        val newStr = ToolArgs.value(args, "new_str")
-            .ifBlank { ToolArgs.value(args, "new_string") }
+        val path = ToolArgs.pathOf(args).ifBlank { return null }
+        val oldStr = ToolArgs.firstValue(args, "old_string", "old_str")
+        val newStr = ToolArgs.firstValue(args, "new_string", "new_str")
         if (oldStr.isBlank() && newStr.isBlank()) return null
         val lines = DiffEngine.diff(oldStr, newStr)
         return ToolEditPreview(
@@ -58,9 +52,8 @@ object ToolEditDiff {
     }
 
     private fun patchPreview(args: String): ToolEditPreview? {
-        val pathHint = ToolArgs.value(args, "path")
-        val patch = ToolArgs.value(args, "patch")
-            .ifBlank { ToolArgs.value(args, "diff") }
+        val pathHint = ToolArgs.pathOf(args)
+        val patch = ToolArgs.firstValue(args, "patch", "diff")
             .ifBlank {
                 val raw = args.trim()
                 if (raw.contains("@@") || raw.contains("*** Begin Patch") || raw.startsWith("diff ")) raw else ""
@@ -96,10 +89,7 @@ object ToolEditDiff {
     }
 
     private fun contentOf(args: String): String? {
-        val content = ToolArgs.value(args, "content")
-            .ifBlank { ToolArgs.value(args, "new_str") }
-            .ifBlank { ToolArgs.value(args, "new_string") }
-            .ifBlank { ToolArgs.value(args, "text") }
+        val content = ToolArgs.firstValue(args, "content", "new_string", "new_str", "text")
         return content.takeIf { it.isNotBlank() }
     }
 
