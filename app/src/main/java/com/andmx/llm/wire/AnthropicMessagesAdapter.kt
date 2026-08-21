@@ -226,10 +226,13 @@ object AnthropicMessagesAdapter : WireAdapter {
         onContent: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit,
         onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit,
+        onUsage: suspend (JsonObject) -> Unit,
     ): ApiMessage {
         // index → (type, id/name for tool_use, accumulated input json string)
         val blocks = sortedMapOf<Int, BlockAcc>()
         val text = StringBuilder()
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
 
         for (raw in lines) {
             val line = raw.trim()
@@ -238,6 +241,10 @@ object AnthropicMessagesAdapter : WireAdapter {
             if (data.isEmpty() || data == "[DONE]") continue
             val ev = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
             when (ev["type"]?.jsonPrimitive?.contentOrNull) {
+                "message_start" -> {
+                    val usage = ev["message"]?.jsonObject?.get("usage")?.jsonObject
+                    usage?.get("input_tokens")?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
+                }
                 "content_block_start" -> {
                     val idx = ev["index"]?.jsonPrimitive?.intOrNull ?: continue
                     val block = ev["content_block"]?.jsonObject ?: continue
@@ -272,7 +279,14 @@ object AnthropicMessagesAdapter : WireAdapter {
                     }
                 }
                 "content_block_stop" -> { /* block complete; nothing to do */ }
-                "message_delta" -> { /* final usage may arrive here */ }
+                "message_delta" -> {
+                    ev["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
+                    val merged = buildJsonObject {
+                        inputTokens?.let { put("input_tokens", it) }
+                        outputTokens?.let { put("output_tokens", it) }
+                    }
+                    if (merged.isNotEmpty()) onUsage(merged)
+                }
                 "message_stop" -> break
             }
         }

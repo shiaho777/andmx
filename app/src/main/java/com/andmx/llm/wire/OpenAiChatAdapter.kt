@@ -66,6 +66,7 @@ object OpenAiChatAdapter : WireAdapter {
         onContent: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit,
         onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit,
+        onUsage: suspend (JsonObject) -> Unit,
     ): ApiMessage {
         val contentBuf = StringBuilder()
         val toolAcc = sortedMapOf<Int, Acc>()
@@ -75,6 +76,7 @@ object OpenAiChatAdapter : WireAdapter {
             val data = line.removePrefix("data:").trim()
             if (data == "[DONE]") break
             val chunk = runCatching { json.decodeFromString(com.andmx.llm.ChatStreamChunk.serializer(), data) }.getOrNull() ?: continue
+            chunk.usage?.let { onUsage(it) }
             val delta = chunk.choices.firstOrNull()?.delta ?: continue
             delta.content?.let { if (it.isNotEmpty()) { contentBuf.append(it); onContent(it) } }
             val reasoningPiece = delta.reasoningContent ?: delta.reasoning

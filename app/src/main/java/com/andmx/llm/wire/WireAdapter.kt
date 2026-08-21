@@ -33,12 +33,15 @@ interface WireAdapter {
      * Parse an SSE line sequence into a fully-assembled assistant [ApiMessage].
      * [onContent] is invoked for each incremental text delta so the caller can
      * stream it to the UI live. [onReasoning] receives thinking/reasoning deltas.
+     * [onUsage] receives the token-usage object carried by the stream's terminal
+     * event/chunk, when the protocol provides one ([emitsUsageInStream]).
      */
     suspend fun parseStream(
         lines: Sequence<String>,
         onContent: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit = {},
         onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit = { _, _, _, _ -> },
+        onUsage: suspend (JsonObject) -> Unit = {},
     ): ApiMessage
 
     /** Parse a non-streaming response body into an assistant [ApiMessage]. */

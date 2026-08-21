@@ -201,6 +201,7 @@ object OpenAiResponsesAdapter : WireAdapter {
         onContent: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit,
         onToolCall: suspend (index: Int, id: String?, name: String?, argumentsDelta: String) -> Unit,
+        onUsage: suspend (JsonObject) -> Unit,
     ): ApiMessage {
         val text = StringBuilder()
         val calls = sortedMapOf<Int, CallAcc>()
@@ -244,8 +245,9 @@ object OpenAiResponsesAdapter : WireAdapter {
                     onToolCall(idx, acc.callId, acc.name, piece)
                 }
                 "response.completed" -> {
-                    val output = ev["response"]?.jsonObject?.get("output") as? JsonArray
-                    assembled = output?.let { assembleFromOutput(it) }
+                    val resp = ev["response"]?.jsonObject
+                    (resp?.get("usage") as? JsonObject)?.let { onUsage(it) }
+                    assembled = (resp?.get("output") as? JsonArray)?.let { assembleFromOutput(it) }
                     break
                 }
                 "response.failed", "response.incomplete" -> {
