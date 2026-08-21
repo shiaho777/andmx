@@ -62,7 +62,7 @@ ui/workbench/ 旧版三栏 workbench UI（保留）
 ./gradlew assembleLiteDebug      # lite flavor（默认）
 ./gradlew assembleProotDebug     # proot flavor（需 sideload）
 
-# 运行单元测试（66 个测试文件 / 287 个测试）
+# 运行单元测试（76 个测试文件 / 373 个测试）
 ./gradlew :app:testLiteDebugUnitTest
 
 # 安装到已连接设备

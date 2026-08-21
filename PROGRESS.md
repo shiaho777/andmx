@@ -42,7 +42,7 @@ ui2/（共 23,312 行 Kotlin）
 
 ## 待完善
 
-- **ui2 的自动化测试**：`ui2/` 目录下为 0 个测试。真实 LLM 链路与工具调用已在代码中接通（见上），缺的是自动化覆盖；`tools/mock_llm_server.py` 已就位但暂无测试使用它
+- **ChatController 的可测性重构**：ui2 纯逻辑（markdown/时间线/工具卡片状态机/代码高亮等）与 LLM 传输层（MockWebServer e2e）已有测试覆盖；剩余的 `ChatController` 构造期耦合 Context/Room，需注入化后才能 JVM 单测
 - Computer Use 与 ui2 的集成收尾
 - 图片消息支持
 - 会话搜索
