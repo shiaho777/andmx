@@ -9,6 +9,10 @@ sealed class MdBlock {
 }
 
 object MarkdownEngine {
+    private val heading = Regex("^(#{1,6})\\s+(.*)$")
+    private val unordered = Regex("^\\s*[-*+]\\s+(.*)$")
+    private val ordered = Regex("^\\s*\\d+[.)]\\s+(.*)$")
+
     fun parse(markdown: String): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
         val lines = markdown.lines()
@@ -32,10 +36,9 @@ object MarkdownEngine {
                     blocks.add(MdBlock.Code(lang, code.joinToString("\n")))
                 }
 
-                line.startsWith("#") -> {
-                    val level = line.takeWhile { it == '#' }.length
-                    val text = line.substring(level).trim()
-                    blocks.add(MdBlock.Heading(level.coerceIn(1, 6), text))
+                heading.matches(line) -> {
+                    val m = heading.find(line)!!
+                    blocks.add(MdBlock.Heading(m.groupValues[1].length, m.groupValues[2].trim()))
                     i++
                 }
 
@@ -45,19 +48,19 @@ object MarkdownEngine {
                     i++
                 }
 
-                line.matches(Regex("^[*-]\\s+.*")) -> {
+                unordered.matches(line) -> {
                     val items = mutableListOf<String>()
-                    while (i < lines.size && lines[i].matches(Regex("^[*-]\\s+.*"))) {
-                        items.add(lines[i].substring(2).trim())
+                    while (i < lines.size && unordered.matches(lines[i])) {
+                        items.add(unordered.find(lines[i])!!.groupValues[1].trim())
                         i++
                     }
                     blocks.add(MdBlock.List(false, items))
                 }
 
-                line.matches(Regex("^\\d+\\.\\s+.*")) -> {
+                ordered.matches(line) -> {
                     val items = mutableListOf<String>()
-                    while (i < lines.size && lines[i].matches(Regex("^\\d+\\.\\s+.*"))) {
-                        items.add(lines[i].substringAfter('.').trim())
+                    while (i < lines.size && ordered.matches(lines[i])) {
+                        items.add(ordered.find(lines[i])!!.groupValues[1].trim())
                         i++
                     }
                     blocks.add(MdBlock.List(true, items))
@@ -69,11 +72,11 @@ object MarkdownEngine {
                     while (
                         i < lines.size &&
                         lines[i].isNotBlank() &&
-                        !lines[i].startsWith("#") &&
+                        !heading.matches(lines[i]) &&
                         !lines[i].startsWith(">") &&
                         !lines[i].startsWith("```") &&
-                        !lines[i].matches(Regex("^[*-]\\s+.*")) &&
-                        !lines[i].matches(Regex("^\\d+\\.\\s+.*"))
+                        !unordered.matches(lines[i]) &&
+                        !ordered.matches(lines[i])
                     ) {
                         para.add(lines[i])
                         i++

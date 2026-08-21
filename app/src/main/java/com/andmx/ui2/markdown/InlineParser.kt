@@ -61,7 +61,7 @@ object InlineParser {
 
                 text.startsWith("[", i) -> {
                     val mid = text.indexOf("](", i + 1)
-                    val end = if (mid != -1) text.indexOf(")", mid + 2) else -1
+                    val end = if (mid != -1) matchingParen(text, mid + 2) else -1
                     if (mid != -1 && end != -1) {
                         val label = text.substring(i + 1, mid)
                         pushStyle(
@@ -85,5 +85,21 @@ object InlineParser {
                 }
             }
         }
+    }
+
+    private fun matchingParen(text: String, start: Int): Int {
+        var depth = 1
+        var i = start
+        while (i < text.length) {
+            when (text[i]) {
+                '(' -> depth++
+                ')' -> {
+                    depth--
+                    if (depth == 0) return i
+                }
+            }
+            i++
+        }
+        return -1
     }
 }

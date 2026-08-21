@@ -328,6 +328,8 @@ class AgentEngine(
                     }
                 }
                 true
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
             } catch (t: Throwable) {
                 lastError = t.message ?: "请求失败"
                 false
