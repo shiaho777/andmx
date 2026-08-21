@@ -34,9 +34,10 @@
 
 ## 待完善
 
-- ui2 的自动化测试（`app/src/test/` 下目前没有 ui2 覆盖；`tools/mock_llm_server.py` 可用于离线端到端验证）
+- ChatController 的可测性重构（当前构造期耦合 Context/Room/DataStore/proot，需注入化后才能 JVM 单测）
 - Computer Use 与对话流的深度集成
 - 会话搜索
 
 > 对话已通过 `ChatController` 接入真实 `AgentEngine` + `LlmClient`（含 MCP、插件工具集、SubAgent 编排）。
-> 早期文档中「与真实 agent 引擎端到端对接」一项已完成，缺的是自动化回归覆盖。
+> ui2 纯逻辑（markdown 引擎、内联解析、时间线构建/分组、工具卡片状态机、代码高亮、相对时间、用量格式化）已有 JVM 回归测试；
+> LLM 传输层另有进程内 MockWebServer 端到端冒烟（见 `LlmClientEndToEndTest`）。
