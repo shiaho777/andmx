@@ -359,9 +359,8 @@ class AgentEngine(
     }
 
     /**
-     * Repair a history left mid-tool by an interrupted turn: any trailing
-     * assistant tool_calls without matching tool results get synthesized
-     * "interrupted" results so the next model call isn't confused.
+     * Cap a tool output fed back into history, keeping head and tail around an
+     * elision marker when it exceeds [historyToolOutputLimit].
      */
     private fun trimToolOutput(output: String): String {
         if (output.length <= historyToolOutputLimit) return output

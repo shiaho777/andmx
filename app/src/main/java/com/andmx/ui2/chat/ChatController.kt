@@ -1203,70 +1203,11 @@ class ChatController(private val context: Context) {
         body: String,
         scripts: List<String>,
         args: String?,
-    ): String = buildString {
-        appendLine("<command-name>$name</command-name>")
-        appendLine("<command-message>Skill loaded into context. Follow the instructions below.</command-message>")
-        if (!args.isNullOrBlank()) appendLine("<command-args>$args</command-args>")
-        appendLine()
-        appendLine("# Skill: $name")
-        appendLine("Path: $path")
-        if (scripts.isNotEmpty()) appendLine("Bundled files: ${scripts.joinToString()}")
-        appendLine()
-        append(body.ifBlank { "(skill at $path; empty body)" })
-        appendLine()
-        appendLine()
-        appendLine("Treat the skill body as loaded instructions for this turn. Do not re-invoke Skill for the same name.")
-    }.take(14_000)
+    ): String = ChatControllerLogic.formatSkillPayload(name, path, body, scripts, args)
 
 
-    private suspend fun rebuildHistory(conversationId: Long): List<ApiMessage> {
-        val msgs = repo.messages(conversationId)
-        val out = mutableListOf<ApiMessage>()
-        var i = 0
-        while (i < msgs.size) {
-            val m = msgs[i]
-            when (m.role) {
-                "user" -> {
-                    out += ApiMessage(role = "user", content = m.content)
-                    i++
-                }
-                "assistant" -> {
-                    out += ApiMessage(role = "assistant", content = m.content)
-                    i++
-                }
-                "tool" -> {
-                    val batch = mutableListOf<ApiToolCall>()
-                    val results = mutableListOf<ApiMessage>()
-                    while (i < msgs.size && msgs[i].role == "tool") {
-                        val tm = msgs[i]
-                        val callId = "hist-${tm.id}"
-                        batch += ApiToolCall(
-                            id = callId,
-                            function = ApiFunctionCall(
-                                name = tm.toolName ?: "tool",
-                                arguments = tm.toolArgs.ifBlank { "{}" },
-                            ),
-                        )
-                        results += ApiMessage(
-                            role = "tool",
-                            content = tm.content,
-                            toolCallId = callId,
-                            name = tm.toolName,
-                        )
-                        i++
-                    }
-                    out += ApiMessage(
-                        role = "assistant",
-                        content = null,
-                        toolCalls = batch,
-                    )
-                    out += results
-                }
-                else -> i++
-            }
-        }
-        return out
-    }
+    private suspend fun rebuildHistory(conversationId: Long): List<ApiMessage> =
+        ChatControllerLogic.rebuildHistory(repo.messages(conversationId))
 
     private suspend fun approveTool(
         conversationId: Long,
@@ -1311,19 +1252,14 @@ class ChatController(private val context: Context) {
         }
     }
 
-    private fun buildApprovalSummary(tool: Tool, args: JsonObject): String {
-        val preview = runCatching {
-            com.andmx.agent.ToolArgs.preview(tool.name, args.toString())
-        }.getOrDefault("")
-        return buildString {
-            append(tool.name)
-            if (preview.isNotBlank()) append(" · ").append(preview.take(160))
-            else {
-                val raw = args.toString()
-                if (raw.length > 2) append(" · ").append(raw.take(160))
-            }
-        }
-    }
+    private fun buildApprovalSummary(tool: Tool, args: JsonObject): String =
+        ChatControllerLogic.approvalSummary(
+            toolName = tool.name,
+            preview = runCatching {
+                com.andmx.agent.ToolArgs.preview(tool.name, args.toString())
+            }.getOrDefault(""),
+            rawArgs = args.toString(),
+        )
 
 
     private suspend fun buildZCodeSystemPrompt(
