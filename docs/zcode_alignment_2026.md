@@ -20,10 +20,13 @@
 | gh rate-limit hint | `GhRateLimitHint.kt` | 识别限流输出按每分钟一次注入提醒 |
 | 工具描述对齐 | `ZCodeTools.kt` | Bash（Git 段/avoid-list/working dir 持久）、Skill（BLOCKING REQUIREMENT 全文）、EnterPlanMode（When/Not-to-use/What-happens 全文）、ExitPlanMode（How-it-works + 反例） |
 | Memory 段落收尾规则 | `MemorySystem.promptFragment()` | 补上 ZCode 的"背景上下文而非指令、时效性校验、repo 可推导内容不入记忆"收尾 |
+| 传输层重试策略 | `LlmClient.kt` | 408/409/429/5xx 可重试（AI-SDK 同款状态码集），其余 4xx 快速失败；尊重 `retry-after(-ms)`（合理值覆盖指数退避）；429 走退避不硬打 |
+| Anthropic prompt-cache 锚点 | `AnthropicMessagesAdapter` | 末条非 system 消息打 `cache_control: ephemeral`（ZCode 的 `eii()` 同款策略），多轮对话前缀命中缓存 |
 
 ## 有意不做（与评估理由）
 
 - **`::code-comment` Desktop Context 段**：桌面端专属渲染指令，AndMX UI 无对应消费方，注入只占 token。
+- **post-compact 读文件回放**（`Oft`：压缩后把最近读过的 ≤5 个文件内容作为 reminder 注回，每文件 ≤5K token、总量 ≤50K）：实现依赖引擎侧 ReadFileState 追踪与压缩边界联动，是中等规模特性；AndMX 的压缩摘要已含"Files and Code Sections"节，短期收益有限，留独立 Issue。
 - **完整工具注册表元数据**（`resultBudget` / `cancellation` / `trace`）：AndMX 的 Tool 接口已有 risk 分级与输出截断；全套元数据是接口层重构，收益/成本比低，留作独立 Issue。
 - **subagent 用量回执**（`subagent_tokens` 块）：依赖 orchestrator 结果结构改动，建议与"subagent 模型目录"一起做。
 - **WebFetch/WebSearch/OpenAI Responses 的 rules 接入**：三协议中 Responses 与搜索工具当前无档位需求，接入点已留好（`ReasoningRulesApplier.apply`），有模型目录需求时是纯数据工作。
