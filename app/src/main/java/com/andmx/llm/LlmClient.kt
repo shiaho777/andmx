@@ -44,6 +44,11 @@ interface LlmApi {
  * SSE read loop. Mirrors Codex's model_client (x-codex-installation-id,
  * exponential backoff, rate-limit awareness).
  *
+ * Retry policy mirrors ZCode's AI-SDK layer: HTTP 408/409/429 and 5xx are
+ * retryable, everything else fails fast; a server `retry-after` /
+ * `retry-after-ms` header overrides exponential backoff (capped at 60s);
+ * 429 always backs off instead of hammering.
+ *
  * @param def      the bound provider definition (URL/key/headers/retry policy)
  * @param tracker  optional token-usage recorder
  * @param adapter  the wire adapter; defaults to one selected from [def].kind
@@ -64,8 +69,12 @@ class LlmClient(
                 return@withContext Result.success(doChat(request))
             } catch (t: Throwable) {
                 lastError = t
-                if (attempt < maxRetries - 1 && t !is RateLimitException) {
-                    delay((1000L shl attempt).coerceAtMost(10_000))
+                val retryable = t is RetryableHttpException || t is RateLimitException
+                if (attempt < maxRetries - 1 && retryable) {
+                    delay(retryDelayMs(t, attempt))
+                } else if (attempt < maxRetries - 1) {
+                    // Non-retryable (4xx other than 408/409/429): fail fast.
+                    break
                 }
             }
         }
@@ -89,14 +98,37 @@ class LlmClient(
                 doChatStream(request).collect { emit(it) }
                 return@flow
             } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 lastError = t
-                if (attempt < maxRetries - 1 && t !is RateLimitException) {
-                    delay((1000L shl attempt).coerceAtMost(8_000))
+                val retryable = t is RetryableHttpException || t is RateLimitException
+                if (attempt < maxRetries - 1 && retryable) {
+                    delay(retryDelayMs(t, attempt))
+                } else if (attempt < maxRetries - 1) {
+                    break
                 }
             }
         }
         throw lastError ?: RuntimeException("Stream failed")
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * ZCode's backoff rule: honor a server-provided retry-after(-ms) when it is
+     * sane (non-negative and either <60s or shorter than the exponential
+     * backoff would be); otherwise exponential backoff capped at 10s.
+     */
+    private fun retryDelayMs(t: Throwable, attempt: Int): Long {
+        val exponential = (1000L shl attempt).coerceAtMost(10_000)
+        val server = when (t) {
+            is RetryableHttpException -> t.retryAfterMs
+            is RateLimitException -> t.retryAfterMs
+            else -> null
+        } ?: return exponential
+        return when {
+            server < 0 -> exponential
+            server < 60_000 || server < exponential -> server
+            else -> exponential
+        }
+    }
 
     private fun doChatStream(request: ChatRequest): Flow<LlmStreamEvent> = flow {
         val body = adapter.encodeRequest(request.copy(stream = true), def)
@@ -106,9 +138,14 @@ class LlmClient(
 
         if (code !in 200..299) {
             val err = conn.errorStream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+            val retryAfterMs = conn.getHeaderField("retry-after-ms")
+            val retryAfter = conn.getHeaderField("retry-after")
             conn.disconnect()
-            if (code == 429) throw RateLimitException(err.take(500))
-            error("HTTP $code: ${err.take(500)}")
+            throw if (retryAfterMs != null) {
+                httpErrorFor(code, err.take(500), retryAfterMs, headerNameMs = true)
+            } else {
+                httpErrorFor(code, err.take(500), retryAfter)
+            }
         }
 
         conn.inputStream.bufferedReader().use { reader ->
@@ -133,10 +170,15 @@ class LlmClient(
         tracker?.updateRateLimit(TokenUsageTracker.parseRateLimit(conn))
         val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
             ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+        val retryAfterMsHeader = if (code in 200..299) null else conn.getHeaderField("retry-after-ms")
+        val retryAfterHeader = if (code in 200..299) null else conn.getHeaderField("retry-after")
         conn.disconnect()
         if (code !in 200..299) {
-            if (code == 429) throw RateLimitException(text.take(500))
-            error("HTTP $code: ${text.take(500)}")
+            throw if (retryAfterMsHeader != null) {
+                httpErrorFor(code, text.take(500), retryAfterMsHeader, headerNameMs = true)
+            } else {
+                httpErrorFor(code, text.take(500), retryAfterHeader)
+            }
         }
         return text
     }
@@ -163,7 +205,59 @@ class LlmClient(
             outputStream.use { it.write(body.toByteArray()) }
         }
     }
+
+    private fun httpErrorFor(code: Int, body: String, retryAfterHeader: String?, headerNameMs: Boolean = false): Throwable {
+        val retryAfterMs = parseRetryAfterMs(retryAfterHeader, headerNameMs)
+        return when {
+            code == 429 -> {
+                val e = RateLimitException(body)
+                if (retryAfterMs != null) e.retryAfterMs = retryAfterMs
+                e
+            }
+            isRetryableStatus(code) -> RetryableHttpException(code, body, retryAfterMs)
+            else -> RuntimeException("HTTP $code: $body")
+        }
+    }
+
+    companion object {
+        /**
+         * ZCode/AI-SDK retryable statuses: 408 request timeout, 409 conflict,
+         * 429 rate limited, and all 5xx server errors. Other 4xx are
+         * deterministic request errors — retrying them wastes quota.
+         */
+        fun isRetryableStatus(code: Int): Boolean =
+            code == 408 || code == 409 || code == 429 || code in 500..599
+
+        /** Parse a retry hint into milliseconds. [headerNameMs] distinguishes
+         *  `retry-after-ms` (already ms) from `retry-after` (seconds or HTTP-date). */
+        fun parseRetryAfterMs(rawHeader: String?, headerNameMs: Boolean = false): Long? {
+            val raw = rawHeader?.trim().takeUnless { it.isNullOrEmpty() } ?: return null
+            val numeric = raw.toDoubleOrNull()
+            if (numeric != null && numeric.isFinite()) {
+                return when {
+                    headerNameMs -> numeric.toLong()
+                    numeric > 10_000 -> numeric.toLong()
+                    else -> (numeric * 1000).toLong()
+                }
+            }
+            val at = runCatching { java.time.Instant.parse(raw).toEpochMilli() }.getOrNull() ?: return null
+            return (at - System.currentTimeMillis()).coerceAtLeast(0)
+        }
+    }
 }
 
+/**
+ * Transport error whose HTTP class suggests retrying (408/409/429/5xx), carrying
+ * the server's retry-after hint when present.
+ */
+class RetryableHttpException(
+    val statusCode: Int,
+    message: String,
+    val retryAfterMs: Long? = null,
+) : RuntimeException("HTTP $statusCode: $message")
+
 /** Thrown when the API returns 429 Too Many Requests. */
-class RateLimitException(message: String) : RuntimeException(message)
+class RateLimitException(message: String) : RuntimeException(message) {
+    /** Server-provided retry hint parsed from `retry-after(-ms)`, if any. */
+    var retryAfterMs: Long? = null
+}

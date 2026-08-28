@@ -72,9 +72,14 @@ object AnthropicMessagesAdapter : WireAdapter {
         // content blocks. tool messages become tool_result blocks under a user
         // turn; assistant tool_calls become tool_use blocks.
         val userAssistant = req.messages.filter { it.role != "system" }
+        // ZCode prompt-caching anchor: mark the LAST non-system message with
+        // cache_control ephemeral so each turn's prefix (system + history up to
+        // that point) hits Anthropic's prompt cache instead of re-billing.
+        val anchorIndex = userAssistant.indexOfLast { it.role != "system" }
         val anthropicMessages = buildJsonArray {
-            userAssistant.forEach { m ->
-                add(messageToAnthropic(m))
+            userAssistant.forEachIndexed { index, m ->
+                val msg = messageToAnthropic(m)
+                add(if (index == anchorIndex) withCacheControl(msg) else msg)
             }
         }
 
@@ -127,6 +132,22 @@ object AnthropicMessagesAdapter : WireAdapter {
             maxOutputTokens = maxOut,
         )
         return json.encodeToString(JsonObject.serializer(), withRules)
+    }
+
+    /** Attach `cache_control: {type: ephemeral}` to the last content block of a message. */
+    private fun withCacheControl(message: JsonObject): JsonObject {
+        val content = message["content"] as? JsonArray ?: return message
+        if (content.isEmpty()) return message
+        val blocks = content.toMutableList()
+        val last = blocks.removeAt(blocks.lastIndex)
+        val tagged = buildJsonObject {
+            (last as? JsonObject)?.forEach { (k, v) -> put(k, v) }
+            putJsonObject("cache_control") { put("type", "ephemeral") }
+        }
+        blocks.add(tagged)
+        return buildJsonObject {
+            message.forEach { (k, v) -> if (k == "content") put("content", JsonArray(blocks)) else put(k, v) }
+        }
     }
 
     /** Convert one OpenAI-style ApiMessage into an Anthropic message object. */
