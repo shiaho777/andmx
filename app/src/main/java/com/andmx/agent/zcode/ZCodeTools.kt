@@ -4,6 +4,7 @@ import android.content.Context
 import com.andmx.agent.BrowseTool
 import com.andmx.agent.EditFileTool
 import com.andmx.agent.ExecutionAwareTool
+import com.andmx.agent.GhRateLimitHint
 import com.andmx.agent.GlobTool
 import com.andmx.agent.GrepTool
 import com.andmx.agent.ListDirTool
@@ -51,6 +52,32 @@ private fun JsonObject.int(key: String): Int? =
     this[key]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
 
 /** Renames/adapts an existing tool to ZCode's wire name + schema surface. */
+private class GhRateLimitHintTool(
+    private val inner: Tool,
+) : Tool, ExecutionAwareTool {
+    override val name get() = inner.name
+    override val description get() = inner.description
+    override val parameters get() = inner.parameters
+    override val risk get() = inner.risk
+
+    override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
+
+    override suspend fun execute(callId: String, args: JsonObject): ToolResult {
+        val result = if (inner is ExecutionAwareTool && callId.isNotBlank()) {
+            inner.execute(callId, args)
+        } else {
+            inner.execute(args)
+        }
+        val command = args["command"]?.jsonPrimitive?.content.orEmpty()
+        if (!result.isError && result.output.length > 1_000_000) return result
+        return if (GhRateLimitHint.shouldHint(command, result.output)) {
+            ToolResult(result.output + "\n\n" + GhRateLimitHint.HINT, isError = result.isError, imageUrls = result.imageUrls)
+        } else {
+            result
+        }
+    }
+}
+
 private class AliasedTool(
     private val inner: Tool,
     override val name: String,
@@ -228,6 +255,8 @@ class ExitPlanModeTool(
     private val planMode: PlanModeState,
     private val onMode: (ExecMode) -> Unit = {},
     private val requestPlanApproval: suspend (String) -> Boolean = { true },
+    /** Receives the plan's allowedPrompts when approved, for session pre-grants. */
+    private val onAllowedPrompts: (List<com.andmx.agent.AllowedPrompts.Entry>) -> Unit = {},
 ) : Tool {
     override val name = "ExitPlanMode"
     override val description =
@@ -284,6 +313,7 @@ class ExitPlanModeTool(
         }
         planMode.exit()
         onMode(ExecMode.AUTO_EDIT)
+        onAllowedPrompts(com.andmx.agent.AllowedPrompts.parse(args))
         return ToolResult("Plan approved. Exited plan mode; implementation may proceed.\n\nApproved plan:\n$plan")
     }
 }
@@ -529,11 +559,13 @@ fun buildZCodeToolSurface(
     invokeSkill: suspend (String, String?) -> String = { name, _ -> "技能未安装: $name" },
     requestEnterPlanApproval: (suspend (String) -> Boolean)? = null,
     requestExitPlanApproval: suspend (String) -> Boolean = { true },
+    allowedPromptsSink: ((List<com.andmx.agent.AllowedPrompts.Entry>) -> Unit)? = null,
     includeGoals: Boolean = true,
     includeLegacyAliases: Boolean = true,
 ): List<Tool> {
     val access = WorkspaceAccess(context)
     val shell = ShellTool(context, cwdProvider = cwdProvider)
+    val shellWithHint = GhRateLimitHintTool(shell)
     val read = ReadFileTool(context)
     val write = WriteFileTool(context)
     val edit = EditFileTool(context)
@@ -615,7 +647,7 @@ fun buildZCodeToolSurface(
         },
     )
     val bashZ = AliasedTool(
-        inner = shell,
+        inner = shellWithHint,
         name = "Bash",
         description = "Executes a bash command in the workspace shell (proot guest or remote SSH). Prefer dedicated file/search tools over cat/grep/sed.",
         parameters = buildJsonObject {
@@ -769,7 +801,12 @@ fun buildZCodeToolSurface(
         TodoReadTool(todo),
         TodoWriteTool(todo, planTool),
         EnterPlanModeTool(planMode, onPlanModeChange, requestEnterPlanApproval),
-        ExitPlanModeTool(planMode, onPlanModeChange, requestExitPlanApproval),
+        ExitPlanModeTool(
+            planMode,
+            onPlanModeChange,
+            requestExitPlanApproval,
+            onAllowedPrompts = allowedPromptsSink ?: {},
+        ),
         AskUserQuestionTool(askUser),
         ReadSessionContextTool(readSession),
         SkillTool(invokeSkill),

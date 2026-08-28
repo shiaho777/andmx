@@ -17,4 +17,17 @@ object TokenEstimate {
     }
 
     fun estimateAll(texts: List<String>): Int = texts.sumOf { estimate(it) }
+
+    /**
+     * ZCode's compaction estimator: ceil(total chars / 3) per message, counting
+     * tool-call names and JSON arguments. Deliberately aggressive so compaction
+     * fires early.
+     */
+    fun forCompaction(messages: List<com.andmx.llm.ApiMessage>): Int = messages.sumOf { msg ->
+        var chars = msg.content?.length ?: 0
+        msg.toolCalls?.forEach { call ->
+            chars += call.function.name.length + call.function.arguments.length
+        }
+        (chars + 2) / 3
+    }
 }

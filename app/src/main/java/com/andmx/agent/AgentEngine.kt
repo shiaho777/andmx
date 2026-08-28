@@ -79,6 +79,10 @@ class AgentEngine(
     private val toolsByName get() = allTools.associateBy { it.name }
     private var systemSuffix: String = ""
     private var persona: String = ""
+    /** Meta-user context (agentsMd/skills/date); injected into the FIRST user message of a session. */
+    private var metaUserContext: String = ""
+    private var todoItemsProvider: (() -> String?)? = null
+    private var lastAssistantCompletedAtMs: Long? = null
 
     /** Register additional tools at runtime (e.g. from MCP servers). */
     fun addTools(more: List<Tool>) { extraTools = extraTools + more }
@@ -98,8 +102,15 @@ class AgentEngine(
      */
     private fun reasoningFor(settings: ProviderSettings, ctx: TurnContext): String? {
         val e = settings.reasoningEffort
-        if (e.isBlank() || e == "off") return null
+        if (e.isBlank()) return null
         val reasoning = ctx.modelMeta?.reasoning ?: return null
+        if (reasoning.levels.isNotEmpty()) {
+            // Data-driven catalog: pass the user value through (or the model's
+            // default); the adapters' ReasoningRulesApplier resolves it onto
+            // the wire, and "off" strips everything downstream.
+            return if (e == "off") "off" else reasoning.resolveLevelId(e) ?: e
+        }
+        if (e == "off") return null
         return when (reasoning.style) {
             com.andmx.llm.provider.ReasoningStyle.NONE -> null
             com.andmx.llm.provider.ReasoningStyle.EFFORT ->
@@ -120,6 +131,19 @@ class AgentEngine(
         history[0] = ApiMessage(role = "system", content = composedSystem())
     }
 
+    /**
+     * Set ZCode-style meta-user context (agentsMd, skills listing, current
+     * date). Injected wrapped in <system-reminder> ahead of the user's text on
+     * the first user turn only — later turns keep the system prefix stable.
+     */
+    fun setMetaUserContext(text: String) {
+        metaUserContext = text.trim()
+    }
+
+    fun setTodoItemsProvider(provider: (() -> String?)?) {
+        todoItemsProvider = provider
+    }
+
     private fun composedSystem(): String = buildString {
         append(systemPrompt)
         if (persona.isNotBlank()) append("\n\n# 语气\n以「").append(persona).append("」的风格回应。")
@@ -133,6 +157,18 @@ class AgentEngine(
     fun seed(messages: List<ApiMessage>) {
         history.clear()
         history += ApiMessage(role = "system", content = composedSystem())
+        if (metaUserContext.isNotBlank()) {
+            val firstUser = messages.indexOfFirst { it.role == "user" }
+            if (firstUser >= 0 && messages.none { it.content?.contains(META_USER_REMINDER_PREFIX) == true }) {
+                history += messages.take(firstUser)
+                history += ApiMessage(
+                    role = "system",
+                    content = "$META_USER_REMINDER_PREFIX\n$metaUserContext\n</system-reminder>",
+                )
+                history += messages.drop(firstUser)
+                return
+            }
+        }
         history += messages
     }
 
@@ -156,7 +192,13 @@ class AgentEngine(
     }
 
     fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
-        history += ApiMessage(role = "user", content = userInput, imageUrls = images.ifEmpty { null })
+        val isFirstUserTurn = history.none { it.role == "user" }
+        val effectiveInput = if (isFirstUserTurn && metaUserContext.isNotBlank()) {
+            "$META_USER_REMINDER_PREFIX\n$metaUserContext\n</system-reminder>\n\n$userInput"
+        } else {
+            userInput
+        }
+        history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null })
         loop(settings, turn)
     }
 
@@ -176,14 +218,30 @@ class AgentEngine(
         // synthesize "interrupted" results so the model isn't confused.
         cleanupOrphanToolCalls()
 
-        val contextWindow = turn.modelMeta?.contextWindow?.takeIf { it > 0 } ?: 128_000
+        val contextWindow = turn.modelMeta?.contextWindow?.takeIf { it > 0 }
+            ?: ContextCompactor.DEFAULT_CONTEXT_WINDOW
+        val maxOutputTokens = turn.modelMeta?.maxOutputTokens ?: 0
         var convergenceHinted = false
         var step = 0
         val hardLimit = maxSteps + graceSteps
         while (step++ < hardLimit) {
-            // ── Context management: soft compact, then hard-limit fallback ──
-            val overHardLimit = compactor.isContextWindowExceeded(history, contextWindow)
-            if (overHardLimit || compactor.needsCompaction(history, contextWindow)) {
+            // ── Context management: local microcompact → soft compact → hard-limit fallback ──
+            Microcompact.maybeMicrocompact(
+                messages = history,
+                estimatedTokens = compactor.estimateTokens(history),
+                thresholdTokens = compactor.microcompactThresholdTokens(contextWindow),
+                lastAssistantCompletedAtMs = lastAssistantCompletedAtMs,
+                nowMs = System.currentTimeMillis(),
+            )?.let { cleared ->
+                emit(
+                    AgentEvent.AssistantDelta(
+                        "\n_(已清理 ${cleared.clearedCount} 条旧工具结果释放上下文: ${cleared.tokensBefore}→${cleared.tokensAfter} tokens)_\n",
+                    ),
+                )
+            }
+
+            val overHardLimit = compactor.isContextWindowExceeded(history, contextWindow, maxOutputTokens)
+            if (overHardLimit || compactor.needsCompaction(history, contextWindow, maxOutputTokens)) {
                 hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
                 val result = compactor.compact(history, settings, turn)
                 if (result != null) {
@@ -207,6 +265,13 @@ class AgentEngine(
                 history += ApiMessage(
                     role = "system",
                     content = "步数即将用尽。请立即总结当前进度,完成收尾,不要再发起新的工具调用。",
+                )
+            }
+
+            if (TodoReminder.shouldRemind(history)) {
+                history += ApiMessage(
+                    role = "system",
+                    content = "${TodoReminder.MARKER_OPEN}${TodoReminder.reminderText(todoItemsProvider?.invoke())}</system-reminder>",
                 )
             }
 
@@ -255,6 +320,7 @@ class AgentEngine(
                 emit(AgentEvent.Done)
                 return
             }
+            lastAssistantCompletedAtMs = System.currentTimeMillis()
             history += msg
 
             val calls = msg.toolCalls
@@ -439,6 +505,8 @@ class AgentEngine(
     }
 
     companion object {
+        const val META_USER_REMINDER_PREFIX = "<system-reminder>"
+
         val DEFAULT_SYSTEM_PROMPT: String =
             com.andmx.agent.zcode.ZCodePrompts.IDENTITY + "\n\n" +
                 com.andmx.agent.zcode.ZCodePrompts.CORE + "\n\n" +

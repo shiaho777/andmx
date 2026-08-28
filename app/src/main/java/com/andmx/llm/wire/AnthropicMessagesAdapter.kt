@@ -49,7 +49,7 @@ object AnthropicMessagesAdapter : WireAdapter {
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Anthropic spec: thinking budget_tokens must be at least 1024. */
-    private const val MIN_THINKING_BUDGET = 1024
+    internal const val MIN_THINKING_BUDGET = 1024
 
     override fun endpointUrl(base: String): String = base.trimEnd('/') + "/v1/messages"
 
@@ -78,6 +78,8 @@ object AnthropicMessagesAdapter : WireAdapter {
             }
         }
 
+        val reasoning = provider.models[req.model]?.reasoning
+        val maxOut = provider.models[req.model]?.maxOutputTokens?.takeIf { it > 0 } ?: Int.MAX_VALUE
         val root = buildJsonObject {
             put("model", req.model)
             // Anthropic requires max_tokens; default to a generous cap when unset.
@@ -88,16 +90,16 @@ object AnthropicMessagesAdapter : WireAdapter {
             // Extended thinking — only when the model declares the THINKING style.
             // budget_tokens comes from the model's ReasoningConfig (default or a
             // user-supplied numeric value), clamped to ≥1024 and ≤ maxOutputTokens.
-            val reasoning = provider.models[req.model]?.reasoning
-            val wantsThinking = req.reasoningEffort?.let { it.isNotBlank() && it != "off" } == true &&
-                reasoning?.style == com.andmx.llm.provider.ReasoningStyle.THINKING
-            if (wantsThinking && reasoning != null) {
-                val maxOut = provider.models[req.model]?.maxOutputTokens?.takeIf { it > 0 } ?: Int.MAX_VALUE
-                val raw = req.reasoningEffort!!.toIntOrNull() ?: reasoning.defaultBudgetTokens
-                val budget = raw.coerceIn(MIN_THINKING_BUDGET, maxOut)
-                putJsonObject("thinking") {
-                    put("type", "enabled")
-                    put("budget_tokens", budget)
+            if (reasoning?.levels.isNullOrEmpty()) {
+                val wantsThinking = req.reasoningEffort?.let { it.isNotBlank() && it != "off" } == true &&
+                    reasoning?.style == com.andmx.llm.provider.ReasoningStyle.THINKING
+                if (wantsThinking && reasoning != null) {
+                    val raw = req.reasoningEffort!!.toIntOrNull() ?: reasoning.defaultBudgetTokens
+                    val budget = raw.coerceIn(MIN_THINKING_BUDGET, maxOut)
+                    putJsonObject("thinking") {
+                        put("type", "enabled")
+                        put("budget_tokens", budget)
+                    }
                 }
             }
             req.tools?.takeIf { it.isNotEmpty() }?.let { tools ->
@@ -117,7 +119,14 @@ object AnthropicMessagesAdapter : WireAdapter {
                 }
             }
         }
-        return json.encodeToString(JsonObject.serializer(), root)
+        val withRules = ReasoningRulesApplier.apply(
+            body = root,
+            config = reasoning,
+            kind = com.andmx.llm.provider.ProviderKind.ANTHROPIC,
+            userValue = req.reasoningEffort,
+            maxOutputTokens = maxOut,
+        )
+        return json.encodeToString(JsonObject.serializer(), withRules)
     }
 
     /** Convert one OpenAI-style ApiMessage into an Anthropic message object. */
