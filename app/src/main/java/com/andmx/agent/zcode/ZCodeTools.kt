@@ -232,8 +232,33 @@ class EnterPlanModeTool(
     override val name = "EnterPlanMode"
     override val description =
         "Use this tool proactively when you're about to start a non-trivial implementation task. " +
-            "Getting user sign-off on your approach before writing code prevents wasted effort. " +
-            "Transitions into plan mode to explore and design an implementation approach."
+            "Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. " +
+            "This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.\n\n" +
+            "## When to Use This Tool\n\n" +
+            "**Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:\n\n" +
+            "1. **New Feature Implementation**: Adding meaningful new functionality\n" +
+            "2. **Multiple Valid Approaches**: The task can be solved in several different ways\n" +
+            "3. **Code Modifications**: Changes that affect existing behavior or structure\n" +
+            "4. **Architectural Decisions**: The task requires choosing between patterns or technologies\n" +
+            "5. **Multi-File Changes**: The task will likely touch more than 2-3 files\n" +
+            "6. **Unclear Requirements**: You need to explore before understanding the full scope\n\n" +
+            "## When NOT to Use This Tool\n\n" +
+            "Only skip EnterPlanMode for simple tasks:\n" +
+            "- Single-line or few-line fixes (typos, obvious bugs, small tweaks)\n" +
+            "- Adding a single function with clear requirements\n" +
+            "- Tasks where the user has given very specific, detailed instructions\n" +
+            "- Pure research/exploration tasks (use the Agent tool instead)\n\n" +
+            "## What Happens in Plan Mode\n\n" +
+            "In plan mode, you'll:\n" +
+            "1. Thoroughly explore the codebase using Glob, Grep, and Read\n" +
+            "2. Understand existing patterns and architecture\n" +
+            "3. Design an implementation approach\n" +
+            "4. Present your plan to the user for approval\n" +
+            "5. Use AskUserQuestion if you need to clarify approaches\n" +
+            "6. Exit plan mode with ExitPlanMode when ready to implement\n\n" +
+            "## Important Notes\n\n" +
+            "- If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work\n" +
+            "- Users appreciate being consulted before significant changes are made to their codebase"
     override val risk = ToolRisk.READ
     override val parameters = buildJsonObject {
         put("type", "object")
@@ -260,9 +285,15 @@ class ExitPlanModeTool(
 ) : Tool {
     override val name = "ExitPlanMode"
     override val description =
-        "Use when in plan mode and the plan is ready for user approval. " +
-            "Pass the complete plan in the plan field; the user reviews that content before approving implementation. " +
-            "Do NOT use AskUserQuestion to ask if the plan is ready — that is what this tool does."
+        "Use this tool when you are in plan mode and have finished writing your plan and are ready for user approval.\n\n" +
+            "## How This Tool Works\n" +
+            "- You should have already explored the codebase and finalized the plan you want the user to review\n" +
+            "- This tool presents the plan to the user; the user reviews it and approves or rejects implementation\n" +
+            "- Do NOT use AskUserQuestion to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval MUST go through this tool\n\n" +
+            "## Examples\n\n" +
+            "1. Initial task: \"Search for and understand the implementation of vim mode in the codebase\" - Do not use this tool because you are not planning the implementation steps of a task.\n" +
+            "2. Initial task: \"Help me implement yank mode for vim\" - Use this tool after you have finished planning the implementation steps of the task.\n" +
+            "3. Initial task: \"Add a new feature to handle user authentication\" - If unsure about auth method (OAuth, JWT, etc.), use AskUserQuestion first, then use this tool after clarifying the approach."
     override val risk = ToolRisk.READ
     override val parameters = buildJsonObject {
         put("type", "object")
@@ -509,12 +540,20 @@ class SkillTool(
 ) : Tool {
     override val name = "Skill"
     override val description =
-        "Execute a skill within the main conversation. When users ask to perform tasks, " +
-            "check if any available skills match. When users reference a slash command or /<something>, " +
-            "invoke it via this tool. Set skill to the exact available name (no leading slash). " +
-            "Only invoke skills listed as available or explicitly typed by the user. " +
-            "When a skill matches, invoke it BEFORE generating other response text about the task. " +
-            "If <command-name> already appears in the turn, the skill is loaded — follow it without re-invoking."
+        "Execute a skill within the main conversation\n\n" +
+            "When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.\n\n" +
+            "When users reference a \"slash command\" or \"/<something>\", they are referring to a skill. Use this tool to invoke it.\n\n" +
+            "How to invoke:\n" +
+            "- Set `skill` to the exact name of an available skill (no leading slash). For plugin-namespaced skills use the fully qualified `plugin:skill` form.\n" +
+            "- Set `args` to pass optional arguments.\n\n" +
+            "Important:\n" +
+            "- Available skills are listed in system-reminder messages in the conversation\n" +
+            "- Only invoke a skill that appears in that list, or one the user explicitly typed as `/<name>` in their message. Never guess or invent a skill name from training data; otherwise do not call this tool\n" +
+            "- When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task\n" +
+            "- NEVER mention a skill without actually calling this tool\n" +
+            "- Do not invoke a skill that is already running\n" +
+            "- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)\n" +
+            "- If you see a <command-name> tag in the current conversation turn, the skill has ALREADY been loaded - follow the instructions directly instead of calling this tool again"
     override val risk = ToolRisk.EXECUTE
     override val parameters = buildJsonObject {
         put("type", "object")
@@ -649,7 +688,14 @@ fun buildZCodeToolSurface(
     val bashZ = AliasedTool(
         inner = shellWithHint,
         name = "Bash",
-        description = "Executes a bash command in the workspace shell (proot guest or remote SSH). Prefer dedicated file/search tools over cat/grep/sed.",
+        description = "Executes a bash command and returns its output.\n\n" +
+            "- Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile.\n" +
+            "- IMPORTANT: Avoid using this tool to run `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.\n\n" +
+            "# Git\n" +
+            "- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.\n" +
+            "- Use the `gh` CLI for GitHub operations (PRs, issues, API).\n" +
+            "- Commit or push only when the user asks. If on the default branch, branch first.\n" +
+            "- On Android/AndMX the shell runs in a proot Alpine guest (or remote SSH); paths under /root/project map to the workspace.",
         parameters = buildJsonObject {
             put("type", "object")
             putJsonObject("properties") {
