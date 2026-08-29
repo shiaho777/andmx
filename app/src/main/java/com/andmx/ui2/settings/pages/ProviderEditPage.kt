@@ -626,13 +626,24 @@ private fun SelectedModelsEditor(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        id,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    val alias = def.displayName?.takeIf { it.isNotBlank() }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            alias ?: id,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (alias != null) {
+                            Text(
+                                id,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     IconButton(onClick = { onRemove(id) }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             Icons.Outlined.Close,
@@ -642,6 +653,21 @@ private fun SelectedModelsEditor(
                         )
                     }
                 }
+                Text(
+                    "显示名称",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                )
+                OutlinedTextField(
+                    value = def.displayName.orEmpty(),
+                    onValueChange = { raw ->
+                        onPatch(id) { it.copy(displayName = raw.ifBlank { null }) }
+                    },
+                    placeholder = { Text("留空则显示模型 ID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
                 Text(
                     "上下文长度",
                     style = MaterialTheme.typography.labelMedium,
@@ -716,6 +742,25 @@ private fun SelectedModelsEditor(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Done,
                     ),
+                )
+                Text(
+                    "输入类型",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+                )
+                val (hasImage, hasVideo) = splitInputModalities(def.inputModalities)
+                ModalityChips(
+                    options = MODEL_INPUT_MODALITIES,
+                    selected = newModelModalities(hasImage, hasVideo).toSet(),
+                    locked = setOf("text"),
+                    onToggle = { value, on ->
+                        val updated = newModelModalities(
+                            image = if (value == "image") on else hasImage,
+                            video = if (value == "video") on else hasVideo,
+                        )
+                        onPatch(id) { it.copy(inputModalities = updated) }
+                    },
                 )
             }
             if (index < ids.lastIndex) {
@@ -840,6 +885,9 @@ internal fun newModelModalities(image: Boolean, video: Boolean): List<String> = 
     if (image) add("image")
     if (video) add("video")
 }
+
+internal fun splitInputModalities(modalities: List<String>): Pair<Boolean, Boolean> =
+    ("image" in modalities) to ("video" in modalities)
 
 private val MODEL_INPUT_MODALITIES = listOf(
     "text" to "文本",
