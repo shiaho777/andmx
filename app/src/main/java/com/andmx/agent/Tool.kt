@@ -14,6 +14,17 @@ interface Tool {
     /** Risk class, used by the approval policy to decide auto-run vs. prompt. */
     val risk: ToolRisk get() = ToolRisk.EXECUTE
 
+    /**
+     * Cooperative deadline the engine arms around one call, or null for no
+     * limit. Each tool owns its own budget: a network call that can hang
+     * declares one, a build command that legitimately runs for an hour does not.
+     *
+     * The deadline only asks a tool to stop by cancelling its coroutine; a tool
+     * that ignores cancellation keeps the step waiting until it settles.
+     * Cancellation from outside the engine is never reported as a timeout.
+     */
+    val timeoutMs: Long? get() = null
+
     suspend fun execute(args: JsonObject): ToolResult
 
     fun toApiTool(): ApiTool = ApiTool(

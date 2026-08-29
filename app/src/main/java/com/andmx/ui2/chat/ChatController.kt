@@ -7,6 +7,7 @@ import com.andmx.agent.AgentEvent
 import com.andmx.agent.AllowedPrompts
 import com.andmx.agent.ApplyPatchTool
 import com.andmx.agent.ApprovalMode
+import com.andmx.agent.ApprovalOutcome
 import com.andmx.agent.ApprovalPolicy
 import com.andmx.agent.BrowseTool
 import com.andmx.agent.Decision
@@ -1226,17 +1227,17 @@ class ChatController(private val context: Context) {
         mode: ExecMode,
         tool: Tool,
         args: JsonObject,
-    ): Boolean {
+    ): ApprovalOutcome {
         val sessionLive = sessions[conversationId]
         val planActive = sessionLive?.planModeState?.active == true
         if (planActive && !isPlanModeAllowed(tool.name)) {
-            return false
+            return ApprovalOutcome.Rejected("计划模式只允许只读工具")
         }
         val command = args["command"]?.jsonPrimitive?.content
         if (tool.name == "Bash" && command != null) {
             val grants = allowedPromptsByConversation[conversationId]
             if (grants != null && AllowedPrompts.grantsFor(command, grants.promptsFor("Bash"))) {
-                return true
+                return ApprovalOutcome.AllowedOnce
             }
         }
         val decision = when (mode) {
@@ -1252,10 +1253,14 @@ class ChatController(private val context: Context) {
             ExecMode.CONFIRM -> ApprovalPolicy.decide(ApprovalMode.ASK, tool.risk)
         }
         return when (decision) {
-            Decision.AUTO -> true
-            Decision.DENY -> false
+            Decision.AUTO -> ApprovalOutcome.AllowedOnce
+            Decision.DENY -> ApprovalOutcome.Rejected("当前权限模式不允许该操作")
             Decision.PROMPT -> {
-                val session = sessions[conversationId] ?: return false
+                // No live session means no UI can answer the question. That is
+                // not a refusal, and the model can only tell the difference if
+                // the two are reported differently.
+                val session = sessions[conversationId]
+                    ?: return ApprovalOutcome.Unavailable("会话不可用")
                 val deferred = CompletableDeferred<Boolean>()
                 session.pending = deferred
                 val summary = buildApprovalSummary(tool, args)
@@ -1266,7 +1271,8 @@ class ChatController(private val context: Context) {
                     summary = summary,
                     modeLabel = mode.label,
                 )
-                deferred.await()
+                if (deferred.await()) ApprovalOutcome.AllowedOnce
+                else ApprovalOutcome.Rejected()
             }
         }
     }

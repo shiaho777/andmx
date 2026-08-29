@@ -23,6 +23,9 @@ class BrowseTool(
     override val description =
         "打开一个 https 网址,返回页面的可读正文(已去除 HTML 标签),用于联网检索资料。用户会同时在内置浏览器里看到你正在浏览的页面。"
     override val risk = ToolRisk.NETWORK
+    // One hop is capped at 15s connect + 20s read, but a redirect chain walks up
+    // to five of them, so the whole call needs its own ceiling.
+    override val timeoutMs: Long = 90_000
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -68,7 +71,10 @@ class BrowseTool(
                 }
                 append(text)
             }.take(12_000)
-        }.map { ToolResult(it) }.getOrElse { ToolResult("抓取失败: ${it.message}", isError = true) }
+        }.map { ToolResult(it) }.getOrElse {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            ToolResult("抓取失败: ${it.message}", isError = true)
+        }
     }
 
     private fun fetch(url: String): String {

@@ -84,6 +84,7 @@ private class AliasedTool(
     override val description: String,
     override val parameters: JsonObject,
     override val risk: ToolRisk = inner.risk,
+    override val timeoutMs: Long? = inner.timeoutMs,
     private val mapArgs: (JsonObject) -> JsonObject = { it },
 ) : Tool, ExecutionAwareTool {
     override suspend fun execute(args: JsonObject): ToolResult = execute("", args)

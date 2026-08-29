@@ -2909,7 +2909,7 @@ class ConversationController(
     }
 
     /** Gate consulted by the agent before each tool call. */
-    private suspend fun approveGate(tool: Tool, args: kotlinx.serialization.json.JsonObject): Boolean {
+    private suspend fun approveGate(tool: Tool, args: kotlinx.serialization.json.JsonObject): com.andmx.agent.ApprovalOutcome {
         // ── Guardian risk assessment (Codex parity) ──
         val guardianAssessment = when (tool.name) {
             "run_shell" -> {
@@ -2932,7 +2932,7 @@ class ConversationController(
             val msg = "⛔ Guardian 已阻止 ${tool.name}: ${guardianAssessment.rationale}"
             items += ChatItem.Assistant(seq++, msg)
             conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
-            return false
+            return com.andmx.agent.ApprovalOutcome.Rejected(guardianAssessment.rationale)
         }
 
         // ── ExecPolicy check (Codex parity) ──
@@ -2942,11 +2942,11 @@ class ConversationController(
             } ?: ""
             val policyDecision = execPolicy.check(cmd)
             if (policyDecision.isDenied) {
-                val msg = "⛔ ExecPolicy 已阻止命令: ${policyDecision.reason ?: "匹配拒绝规则"}"
-                items += ChatItem.Assistant(seq++, msg)
-                conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
-                return false
-            }
+            val msg = "⛔ ExecPolicy 已阻止命令: ${policyDecision.reason ?: "匹配拒绝规则"}"
+            items += ChatItem.Assistant(seq++, msg)
+            conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
+            return com.andmx.agent.ApprovalOutcome.Rejected(policyDecision.reason)
+        }
         }
 
         // ── Pre-tool-use hook (Codex parity) ──
@@ -2962,17 +2962,17 @@ class ConversationController(
                 val msg = "⛔ Hook 已阻止 ${tool.name}: ${hookResult.message ?: "被钩子拦截"}"
                 items += ChatItem.Assistant(seq++, msg)
                 conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
-                return false
+                return com.andmx.agent.ApprovalOutcome.Rejected(hookResult.message)
             }
         }
 
         return when (ApprovalPolicy.decide(approvalMode, tool.risk)) {
-            Decision.AUTO -> true
+            Decision.AUTO -> com.andmx.agent.ApprovalOutcome.AllowedOnce
             Decision.DENY -> {
                 val msg = "⛔ 只读模式下已阻止 ${tool.name}"
                 items += ChatItem.Assistant(seq++, msg)
                 conversationId?.let { id -> scope.launch { repo.addMessage(id, "assistant", msg) } }
-                false
+                com.andmx.agent.ApprovalOutcome.Rejected("只读模式")
             }
             Decision.PROMPT -> {
                 // Use Guardian assessment for richer approval UI if available
@@ -2997,7 +2997,8 @@ class ConversationController(
                 updateActiveTurn {
                     it.copy(status = TurnStatus.WAITING_APPROVAL)
                 }
-                deferred.await()
+                if (deferred.await()) com.andmx.agent.ApprovalOutcome.AllowedOnce
+                else com.andmx.agent.ApprovalOutcome.Rejected()
             }
         }
     }
