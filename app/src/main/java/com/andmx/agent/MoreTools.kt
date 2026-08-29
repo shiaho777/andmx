@@ -52,6 +52,9 @@ class WebSearchTool(
     override val name = "web_search"
     override val description = "用 DuckDuckGo 联网搜索,返回前若干条结果(标题/链接/摘要)。"
     override val risk = ToolRisk.NETWORK
+    // One request, capped at 15s connect + 20s read; the ceiling covers the
+    // parse and the whole dispatch rather than leaving a hung socket to the OS.
+    override val timeoutMs: Long = 45_000
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -75,7 +78,10 @@ class WebSearchTool(
             val results = WebSearch.parse(html)
             if (results.isEmpty()) ToolResult("(无结果)")
             else ToolResult(results.take(8).joinToString("\n\n") { "${it.title}\n${it.url}\n${it.snippet}" })
-        }.getOrElse { ToolResult("搜索失败: ${it.message}", isError = true) }
+        }.getOrElse {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            ToolResult("搜索失败: ${it.message}", isError = true)
+        }
     }
 
     private fun fetch(url: String): String {

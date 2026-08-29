@@ -70,8 +70,10 @@ class AgentEngine(
     private val graceSteps: Int = 3,
     /** Optional hook system; PRE/POST_TOOL_USE hooks run around each tool call. */
     private val hooks: com.andmx.agent.hooks.HookSystem? = null,
-    /** Gate consulted before running each tool; return false to refuse. */
-    private val approve: suspend (Tool, JsonObject) -> Boolean = { _, _ -> true },
+    /** Gate consulted before running each tool. Only [ApprovalOutcome.AllowedOnce] runs it. */
+    private val approve: ApprovalGate = { _, _ -> ApprovalOutcome.AllowedOnce },
+    /** Advisory guard against a model re-issuing one identical call forever. */
+    private val repeatGuard: RepeatCallGuard = RepeatCallGuard(),
 ) {
     private val history = mutableListOf(ApiMessage(role = "system", content = systemPrompt))
     private var extraTools: List<Tool> = emptyList()
@@ -213,6 +215,9 @@ class AgentEngine(
     }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.loop(settings: ProviderSettings, turn: TurnContext) {
+        // A fresh user turn starts a fresh repeat chain: an instruction that
+        // legitimately re-runs the previous command is not a stuck loop.
+        repeatGuard.reset()
         // Repair history damaged by an interrupted turn: if the tail is an
         // assistant message with tool_calls but no matching tool results,
         // synthesize "interrupted" results so the model isn't confused.
@@ -346,6 +351,7 @@ class AgentEngine(
                     val result = executeToolCall(call)
                     emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
                     history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
+                    noteRepeat(call)
                 }
             } else {
                 // Emit all ToolStarted first (serial, on the flow coroutine).
@@ -362,6 +368,7 @@ class AgentEngine(
                 for ((call, result) in results) {
                     emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
                     history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
+                    noteRepeat(call)
                 }
             }
         }
@@ -428,13 +435,10 @@ class AgentEngine(
      * Cap a tool output fed back into history, keeping head and tail around an
      * elision marker when it exceeds [historyToolOutputLimit].
      */
-    private fun trimToolOutput(output: String): String {
-        if (output.length <= historyToolOutputLimit) return output
-        val head = historyToolOutputLimit / 2
-        val tail = historyToolOutputLimit - head - 32
-        val omitted = output.length - historyToolOutputLimit
-        return output.take(head) + "\n…[截断 " + omitted + " 字符]…\n" + output.takeLast(tail.coerceAtLeast(0))
-    }
+    private fun trimToolOutput(output: String): String =
+        TextTrimming.elide(output, historyToolOutputLimit) { omitted ->
+            "\n…[截断 " + omitted + " 字符]…\n"
+        }
 
     private fun cleanupOrphanToolCalls() {
         if (history.isEmpty()) return
@@ -480,14 +484,11 @@ class AgentEngine(
                 parseArgs(call.function.arguments)
             }
 
-            if (!approve(tool, effectiveArgs)) {
-                ToolResult("已被用户拒绝执行", isError = true)
+            val outcome = approve(tool, effectiveArgs)
+            if (outcome !is ApprovalOutcome.AllowedOnce) {
+                ToolResult(ApprovalOutcome.denialText(outcome), isError = true)
             } else {
-                val raw = runCatching {
-                    if (tool is ExecutionAwareTool) tool.execute(call.id, effectiveArgs)
-                    else tool.execute(effectiveArgs)
-                }
-                    .getOrElse { ToolResult("工具异常: ${it.message}", isError = true) }
+                val raw = invokeTool(tool, call, effectiveArgs)
                 // ── POST_TOOL_USE: hooks may rewrite the output ──
                 val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
                     toolName = call.function.name,
@@ -502,6 +503,42 @@ class AgentEngine(
                 }
             }
         }
+    }
+
+    /**
+     * Run the tool body under the deadline the tool declares for itself.
+     *
+     * A tool that throws becomes an error result, but a cancellation that did
+     * not come from this deadline propagates: reporting a stopped turn as a
+     * tool failure would let the loop keep stepping after the user asked it to
+     * stop, and would look to the model like a command error it should retry.
+     */
+    private suspend fun invokeTool(tool: Tool, call: com.andmx.llm.ApiToolCall, args: JsonObject): ToolResult =
+        ToolTimeout.withDeadline(
+            timeoutMs = tool.timeoutMs,
+            onTimeout = { ToolResult(ToolTimeout.errorText(it), isError = true) },
+        ) {
+            try {
+                if (tool is ExecutionAwareTool) tool.execute(call.id, args)
+                else tool.execute(args)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                ToolResult("工具异常: ${t.message}", isError = true)
+            }
+        }
+
+    /**
+     * Feed one settled call to the repeat guard. Denied and failed calls reach
+     * this too, which is the point: repeating a call that keeps being refused
+     * is the loop most worth breaking.
+     *
+     * The reminder is a system message, so it corrects the model without adding
+     * another card to a phone-sized transcript.
+     */
+    private fun noteRepeat(call: com.andmx.llm.ApiToolCall) {
+        val reminder = repeatGuard.onCall(call.function.name, call.function.arguments) ?: return
+        history += ApiMessage(role = "system", content = reminder)
     }
 
     companion object {

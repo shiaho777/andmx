@@ -22,7 +22,14 @@ class LocalProcessEnvironment : ExecutionEnvironment {
         try {
             val pb = ProcessBuilder(spec.argv)
             spec.workingDir?.let { pb.directory(File(it)) }
-            if (spec.env.isNotEmpty()) pb.environment().putAll(spec.env)
+            val childEnv = pb.environment()
+            // ProcessBuilder seeds the child with a copy of this process's
+            // environment. Drop anything credential-shaped before the model's
+            // command can read `env`, echo it, or spill it to a file.
+            com.andmx.exec.policy.EnvScrubber.sensitiveKeys(childEnv.keys).forEach { childEnv.remove(it) }
+            if (spec.env.isNotEmpty()) {
+                childEnv.putAll(com.andmx.exec.policy.EnvScrubber.scrub(spec.env))
+            }
             pb.redirectErrorStream(spec.redirectErrorStream)
 
             val process = pb.start()
