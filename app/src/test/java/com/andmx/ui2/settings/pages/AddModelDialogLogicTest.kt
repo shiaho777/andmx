@@ -12,6 +12,11 @@ import org.junit.Test
  * ordering of these checks is behaviour, not cosmetics: reporting DUPLICATE_ID
  * before INVALID_CONTEXT means a user fixing a typo'd id is never shown a
  * context-window error for a field they did not touch.
+ *
+ * [newModelModalities] and [splitInputModalities] are inverses: the dialog
+ * holds two booleans while the stored model holds a list, and the inline
+ * editor converts back and forth on every keystroke. If they ever drift, the
+ * modality chips silently flip themselves, so the round-trip is asserted here.
  */
 class AddModelDialogLogicTest {
 
@@ -80,5 +85,40 @@ class AddModelDialogLogicTest {
         assertEquals(null, "".trim().ifBlank { null })
         assertEquals(null, "   ".trim().ifBlank { null })
         assertEquals("GLM", "  GLM  ".trim().ifBlank { null })
+    }
+
+    @Test
+    fun booleansSurviveARoundTripThroughTheStoredList() {
+        for (image in listOf(true, false)) {
+            for (video in listOf(true, false)) {
+                assertEquals(
+                    image to video,
+                    splitInputModalities(newModelModalities(image = image, video = video)),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun splittingIgnoresOrderDuplicatesAndUnknownEntries() {
+        assertEquals(true to true, splitInputModalities(listOf("video", "image", "text")))
+        assertEquals(true to false, splitInputModalities(listOf("text", "image")))
+        assertEquals(false to true, splitInputModalities(listOf("text", "video")))
+        assertEquals(true to true, splitInputModalities(listOf("text", "image", "image", "video")))
+        assertEquals(false to false, splitInputModalities(listOf("text")))
+        assertEquals(false to false, splitInputModalities(emptyList()))
+        assertEquals(false to false, splitInputModalities(listOf("audio")))
+    }
+
+    @Test
+    fun rebuildingFromAnythingAlwaysRestoresText() {
+        val fromEmpty = splitInputModalities(emptyList())
+        assertEquals(listOf("text"), newModelModalities(fromEmpty.first, fromEmpty.second))
+
+        val fromUnknown = splitInputModalities(listOf("audio", "image"))
+        assertEquals(
+            listOf("text", "image"),
+            newModelModalities(fromUnknown.first, fromUnknown.second),
+        )
     }
 }
