@@ -4,6 +4,7 @@ package com.andmx.ui2.chat
 import android.content.Context
 import com.andmx.agent.AgentEngine
 import com.andmx.agent.AgentEvent
+import com.andmx.agent.AllowedPrompts
 import com.andmx.agent.ApplyPatchTool
 import com.andmx.agent.ApprovalMode
 import com.andmx.agent.ApprovalPolicy
@@ -84,6 +85,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -109,6 +114,7 @@ class ChatController(private val context: Context) {
     private val mcpManager = McpManager(context)
     private val rolloutWriters = ConcurrentHashMap<Long, RolloutWriter>()
     private val tokenTrackers = ConcurrentHashMap<Long, TokenUsageTracker>()
+    private val allowedPromptsByConversation = ConcurrentHashMap<Long, AllowedPrompts.Grants>()
     private val orchestrators = ConcurrentHashMap<Long, SubAgentOrchestrator>()
 
 
@@ -943,7 +949,7 @@ class ChatController(private val context: Context) {
         }
         val tools = buildTools(planTool, goalState, todoState, planModeState, conversationId)
         val client = LlmClient(provider, trackerFor(conversationId))
-        val system = buildZCodeSystemPrompt(
+        val (system, metaUser) = buildZCodePromptParts(
             settings = settings,
             provider = provider,
             mode = execMode,
@@ -958,6 +964,8 @@ class ChatController(private val context: Context) {
                 approveTool(conversationId, liveMode, tool, args)
             },
         )
+        engine.setMetaUserContext(metaUser)
+        engine.setTodoItemsProvider { todoItemsJson(todoState) }
         if (sharedExtraTools.isNotEmpty()) {
             engine.addTools(sharedExtraTools)
         }
@@ -1124,6 +1132,10 @@ class ChatController(private val context: Context) {
                 )
                 deferred.await()
             },
+            allowedPromptsSink = { entries ->
+                allowedPromptsByConversation.getOrPut(conversationId) { AllowedPrompts.Grants() }
+                    .addAll(entries)
+            },
         )
     }
 
@@ -1220,6 +1232,13 @@ class ChatController(private val context: Context) {
         if (planActive && !isPlanModeAllowed(tool.name)) {
             return false
         }
+        val command = args["command"]?.jsonPrimitive?.content
+        if (tool.name == "Bash" && command != null) {
+            val grants = allowedPromptsByConversation[conversationId]
+            if (grants != null && AllowedPrompts.grantsFor(command, grants.promptsFor("Bash"))) {
+                return true
+            }
+        }
         val decision = when (mode) {
             ExecMode.FULL -> Decision.AUTO
             ExecMode.PLAN -> {
@@ -1262,11 +1281,11 @@ class ChatController(private val context: Context) {
         )
 
 
-    private suspend fun buildZCodeSystemPrompt(
+    private suspend fun buildZCodePromptParts(
         settings: ProviderSettings,
         provider: ProviderDefinition,
         mode: ExecMode,
-    ): String {
+    ): Pair<String, String> {
         val gitPath = if (projectManager.isRemote) {
             projectManager.currentRemoteSpec()?.remotePath
                 ?: projectManager.hostPath.value
@@ -1298,31 +1317,38 @@ class ChatController(private val context: Context) {
             com.andmx.agent.plugins.SkillInstaller(guestFs).listInstalled()
         }.getOrDefault(emptyList())
         val pluginSkills = runCatching { pluginSystem.listInvocableSkills() }.getOrDefault(emptyList())
-        val skillsHint = buildString {
+        val skillEntries = buildList {
             skills.forEach { skill ->
-                appendLine("- ${skill.name}: invoke via Skill tool with skill=\"${skill.name}\" (slash form /${skill.name})")
+                add(
+                    ZCodePrompts.SkillEntry(
+                        name = skill.name,
+                        description = skill.description.ifBlank { "Invoke via the Skill tool (slash form /${skill.name})" },
+                        path = skill.path,
+                    ),
+                )
             }
             pluginSkills.forEach { (id, _) ->
-                appendLine("- $id: invoke via Skill tool with skill=\"$id\" (plugin skill)")
+                add(
+                    ZCodePrompts.SkillEntry(
+                        name = id,
+                        description = "Plugin skill; invoke via the Skill tool",
+                        path = "plugin:$id",
+                        qualifiedName = "plugin:$id",
+                    ),
+                )
             }
-        }.trim()
-        val agents = runCatching {
+        }
+        val instructionSources = runCatching {
             val cwd = access.guestCwd()
-            val candidates = listOf("AGENTS.md", "CLAUDE.md", "CODEX.md", ".zcode/AGENTS.md")
-            candidates.mapNotNull { name ->
+            listOf("AGENTS.md", "CLAUDE.md", "CODEX.md", ".zcode/AGENTS.md").mapNotNull { name ->
                 val doc = runCatching { access.readText("$cwd/$name") }.getOrNull()
                 if (doc.isNullOrBlank()) {
                     null
                 } else {
-                    buildString {
-                        append("## ")
-                        append(name)
-                        appendLine()
-                        append(doc.take(6000))
-                    }
+                    ZCodePrompts.InstructionSource(path = "$cwd/$name", content = doc.take(6000))
                 }
-            }.joinToString("\n\n")
-        }.getOrDefault("")
+            }
+        }.getOrDefault(emptyList())
         val memory = runCatching { memorySystem.promptFragment() }.getOrDefault("")
         val extra = buildString {
             if (sharedExtraTools.isNotEmpty()) {
@@ -1345,16 +1371,34 @@ class ChatController(private val context: Context) {
             mainBranch = "main",
             gitUser = git?.userName.orEmpty(),
             gitStatus = gitStatus,
-            skillsHint = skillsHint,
         )
-        return ZCodePrompts.assemble(
+        val system = ZCodePrompts.assemble(
             mode = mode,
             env = env,
-            projectDocs = agents,
             customInstructions = settings.customInstructions,
             persona = settings.persona,
             extra = extra,
         )
+        val metaUser = ZCodePrompts.metaUserContext(
+            instructionSources = instructionSources,
+            skills = skillEntries,
+            dateIso = java.time.LocalDate.now().toString(),
+        )
+        return system to metaUser
+    }
+
+    private fun todoItemsJson(state: TodoState): String? {
+        val items = state.items.value
+        if (items.isEmpty()) return null
+        return buildJsonArray {
+            items.forEach { item ->
+                addJsonObject {
+                    put("content", item.content)
+                    put("status", item.status)
+                    put("priority", item.priority)
+                }
+            }
+        }.toString()
     }
 
     private suspend fun buildWorkspaceContext(settings: ProviderSettings): String {

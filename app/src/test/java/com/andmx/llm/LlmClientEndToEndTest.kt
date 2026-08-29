@@ -127,7 +127,9 @@ class LlmClientEndToEndTest {
                 ChatRequest(model = "test-model", messages = listOf(ApiMessage(role = "user", content = "q")), stream = true),
             ).toList()
             error("expected stream failure")
-        } catch (e: IllegalStateException) {
+        } catch (e: RuntimeException) {
+            // ZCode policy: 5xx is a retryable class, surfaced as
+            // RetryableHttpException when the retry budget is exhausted.
             assertTrue(e.message.orEmpty().contains("500"))
         }
         assertEquals(2, server.requestCount)

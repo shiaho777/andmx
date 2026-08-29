@@ -49,7 +49,17 @@ object OpenAiChatAdapter : WireAdapter {
             else -> null
         }
         val toEncode = if (safeEffort == null && req.reasoningEffort != null) req.copy(reasoningEffort = null) else req
-        return json.encodeToString(ChatRequest.serializer(), toEncode)
+        val serialized = json.encodeToString(ChatRequest.serializer(), toEncode)
+        val body = runCatching { json.parseToJsonElement(serialized) }.getOrNull() as? JsonObject
+            ?: return serialized
+        val patched = ReasoningRulesApplier.apply(
+            body = body,
+            config = reasoning,
+            kind = com.andmx.llm.provider.ProviderKind.OPENAI,
+            userValue = req.reasoningEffort,
+            maxOutputTokens = provider.models[req.model]?.maxOutputTokens ?: 0,
+        )
+        return if (patched == body) serialized else json.encodeToString(JsonObject.serializer(), patched)
     }
 
     override fun parseResponse(body: String): ApiMessage {

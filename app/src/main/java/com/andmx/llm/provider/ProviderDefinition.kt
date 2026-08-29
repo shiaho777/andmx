@@ -51,6 +51,11 @@ enum class ReasoningStyle {
  * Per-model reasoning capability declaration. Drives what the UI shows and how
  * adapters translate the user's choice onto the wire — so reasoning behavior is
  * declared by the model, not guessed from a global setting.
+ *
+ * [levels] carries the ZCode-style data-driven mapping (level id → per-kind
+ * wire rules). When present it takes precedence over the [style] branches in
+ * adapters; the legacy style/effortLevels fields stay for backwards-compatible
+ * catalogs.
  */
 @Serializable
 data class ReasoningConfig(
@@ -61,8 +66,27 @@ data class ReasoningConfig(
     val defaultEffort: String = "medium",
     /** THINKING style: default budget_tokens (must be ≥ 1024 per Anthropic spec). */
     val defaultBudgetTokens: Int = 16_000,
+    /** Data-driven level table (ZCode model-catalog style); wins over [style] when non-empty. */
+    val levels: List<ReasoningLevel> = emptyList(),
+    /** Which level id applies when reasoning is on but the user gave no level. */
+    val defaultLevel: String = "",
 ) {
+    fun level(id: String): ReasoningLevel? = levels.firstOrNull { it.id == id }
+
+    /** Resolve the effective level id for a user-selected value (null = send nothing). */
+    fun resolveLevelId(userValue: String?): String? {
+        if (userValue != null && userValue.isNotBlank() && userValue != "off") {
+            return if (levels.any { it.id == userValue }) userValue else defaultLevel.ifBlank { null }
+        }
+        if (userValue == "off") return OFF_SENTINEL
+        if (levels.isNotEmpty()) return defaultLevel.ifBlank { null }
+        return null
+    }
+
     companion object {
+        /** Sentinel meaning "user explicitly turned reasoning off". */
+        const val OFF_SENTINEL = "__off__"
+
         /** Standard OpenAI effort ladder (gpt-5, o3, o4-mini). */
         val OPENAI_EFFORT = ReasoningConfig(
             style = ReasoningStyle.EFFORT,
