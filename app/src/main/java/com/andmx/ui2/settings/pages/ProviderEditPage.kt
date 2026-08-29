@@ -20,10 +20,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -113,6 +116,7 @@ fun ProviderEditPage(
     var modelQuery by remember { mutableStateOf("") }
     var fetchState by remember { mutableStateOf<FetchState>(FetchState.Idle) }
     var testState by remember { mutableStateOf<TestState>(TestState.Idle) }
+    var showAddModelDialog by remember { mutableStateOf(false) }
 
     fun build(): ProviderDefinition {
         val modelMap = selectedModels
@@ -479,6 +483,19 @@ fun ProviderEditPage(
                         )
                     }
                     Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { showAddModelDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Outlined.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("添加模型")
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -495,7 +512,7 @@ fun ProviderEditPage(
                             onClick = { addManualModel() },
                             enabled = manualModel.isNotBlank()
                         ) {
-                            Text("添加")
+                            Text("快速添加")
                         }
                     }
                 }
@@ -556,6 +573,20 @@ fun ProviderEditPage(
                 }
             }
         }
+    }
+
+    if (showAddModelDialog) {
+        AddModelDialog(
+            existingIds = selectedModels.toSet(),
+            onDismiss = { showAddModelDialog = false },
+            onConfirm = { id, def ->
+                if (id !in selectedModels) {
+                    selectedModels = (selectedModels + id).sorted()
+                }
+                modelMeta = modelMeta + (id to def)
+                showAddModelDialog = false
+            },
+        )
     }
 }
 
@@ -787,5 +818,212 @@ private fun TestResultText(text: String, color: Color) {
         style = MaterialTheme.typography.bodySmall,
         color = color,
         modifier = Modifier.padding(top = 8.dp)
+    )
+}
+
+internal enum class AddModelProblem { BLANK_ID, DUPLICATE_ID, INVALID_CONTEXT }
+
+internal fun validateNewModel(
+    id: String,
+    existingIds: Set<String>,
+    contextWindowText: String,
+): AddModelProblem? {
+    val trimmed = id.trim()
+    if (trimmed.isBlank()) return AddModelProblem.BLANK_ID
+    if (trimmed in existingIds) return AddModelProblem.DUPLICATE_ID
+    if ((contextWindowText.toIntOrNull() ?: 0) <= 0) return AddModelProblem.INVALID_CONTEXT
+    return null
+}
+
+internal fun newModelModalities(image: Boolean, video: Boolean): List<String> = buildList {
+    add("text")
+    if (image) add("image")
+    if (video) add("video")
+}
+
+private val MODEL_INPUT_MODALITIES = listOf(
+    "text" to "文本",
+    "image" to "图片",
+    "video" to "视频",
+)
+
+@Composable
+private fun ModalityChips(
+    options: List<Pair<String, String>>,
+    selected: Set<String>,
+    locked: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (value, label) ->
+            val isLocked = value in locked
+            val isOn = value in selected
+            AssistChip(
+                onClick = { onToggle(value, !isOn) },
+                enabled = !isLocked,
+                label = {
+                    Text(
+                        label,
+                        color = if (isOn) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                },
+                leadingIcon = if (isLocked) {
+                    {
+                        Icon(
+                            Icons.Outlined.Lock,
+                            contentDescription = "必选",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else null,
+                colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                    containerColor = if (isOn) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddModelDialog(
+    existingIds: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String, ModelDefinition) -> Unit,
+) {
+    var modelId by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    var contextWindow by remember { mutableStateOf("128000") }
+    var maxOutput by remember { mutableStateOf("") }
+    var supportsImage by remember { mutableStateOf(false) }
+    var supportsVideo by remember { mutableStateOf(false) }
+
+    val trimmedId = modelId.trim()
+    val problem = validateNewModel(modelId, existingIds, contextWindow)
+    val isDuplicate = problem == AddModelProblem.DUPLICATE_ID
+    val contextValue = contextWindow.toIntOrNull() ?: 0
+    val canSave = problem == null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加模型") },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                OutlinedTextField(
+                    value = modelId,
+                    onValueChange = { modelId = it },
+                    label = { Text("模型 ID") },
+                    placeholder = { Text("例如 glm-4.6") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = isDuplicate,
+                    supportingText = if (isDuplicate) {
+                        { Text("该模型已在列表中", color = MaterialTheme.colorScheme.error) }
+                    } else null
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("显示名称") },
+                    placeholder = { Text("可选，留空则显示模型 ID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = contextWindow,
+                    onValueChange = { raw -> contextWindow = raw.filter { it.isDigit() }.take(9) },
+                    label = { Text("上下文窗口") },
+                    suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = problem == AddModelProblem.INVALID_CONTEXT,
+                    supportingText = if (problem == AddModelProblem.INVALID_CONTEXT) {
+                        { Text("请输入大于 0 的整数", color = MaterialTheme.colorScheme.error) }
+                    } else null,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next
+                    )
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = maxOutput,
+                    onValueChange = { raw -> maxOutput = raw.filter { it.isDigit() }.take(8) },
+                    label = { Text("最大输出 Token") },
+                    placeholder = { Text("可选，0 表示不限制") },
+                    suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    )
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "输入类型",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                ModalityChips(
+                    options = MODEL_INPUT_MODALITIES,
+                    selected = newModelModalities(supportsImage, supportsVideo).toSet(),
+                    locked = setOf("text"),
+                    onToggle = { value, on ->
+                        when (value) {
+                            "image" -> supportsImage = on
+                            "video" -> supportsVideo = on
+                        }
+                    }
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "输出类型",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                ModalityChips(
+                    options = listOf("text" to "文本"),
+                    selected = setOf("text"),
+                    locked = setOf("text"),
+                    onToggle = { _, _ -> }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(
+                        trimmedId,
+                        ModelDefinition(
+                            displayName = displayName.trim().ifBlank { null },
+                            contextWindow = contextValue,
+                            maxOutputTokens = maxOutput.toIntOrNull() ?: 0,
+                            inputModalities = newModelModalities(supportsImage, supportsVideo),
+                            outputModalities = listOf("text")
+                        )
+                    )
+                },
+                enabled = canSave
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
     )
 }
