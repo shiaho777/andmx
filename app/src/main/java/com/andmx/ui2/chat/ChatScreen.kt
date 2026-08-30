@@ -510,60 +510,62 @@ LaunchedEffect(Unit) {
                         items = timelineReversed,
                         key = { it.stableId },
                     ) { item ->
-                        when (item) {
-                            is TimelineItem.Message -> {
-                                val isLastAssistant = item.message.role == "assistant" &&
-                                    !item.message.isStreaming &&
-                                    item.stableId == lastAssistantStableId
-                                MessageBubble(
-                                    message = item.message,
-                                    onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
-                                        {
-                                            if (item.message.role == "user") {
-                                                viewModel.copyMessage(item.message.content)
-                                            } else {
-                                                viewModel.copyTurnLog(item.message.id)
-                                            }
-                                        }
-                                    } else null,
-                                    onBranch = if (
-                                        item.message.role == "assistant" &&
+                        Box(Modifier.animateItem()) {
+                            when (item) {
+                                is TimelineItem.Message -> {
+                                    val isLastAssistant = item.message.role == "assistant" &&
                                         !item.message.isStreaming &&
-                                        !item.message.isProcess &&
-                                        !isLoading
-                                    ) {
-                                        { viewModel.branchFromMessage(item.message.id) }
+                                        item.stableId == lastAssistantStableId
+                                    MessageBubble(
+                                        message = item.message,
+                                        onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
+                                            {
+                                                if (item.message.role == "user") {
+                                                    viewModel.copyMessage(item.message.content)
+                                                } else {
+                                                    viewModel.copyTurnLog(item.message.id)
+                                                }
+                                            }
+                                        } else null,
+                                        onBranch = if (
+                                            item.message.role == "assistant" &&
+                                            !item.message.isStreaming &&
+                                            !item.message.isProcess &&
+                                            !isLoading
+                                        ) {
+                                            { viewModel.branchFromMessage(item.message.id) }
+                                        } else null,
+                                        onRegenerate = if (isLastAssistant && !isLoading) {
+                                            { viewModel.regenerate() }
+                                        } else null,
+                                        onEdit = if (
+                                            item.message.role == "user" &&
+                                            !isLoading &&
+                                            item.message.content.isNotBlank()
+                                        ) {
+                                            {
+                                                val text = viewModel.beginEditUserMessage(item.message.id)
+                                                if (text != null) inputText = text
+                                            }
+                                        } else null,
+                                        isEditing = item.message.id == editingMessageId,
+                                    )
+                                }
+                                is TimelineItem.Tool -> ToolCallCard(item.tool)
+                                is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)
+                                is TimelineItem.Reasoning -> ReasoningCard(item.item)
+                                is TimelineItem.Working -> WorkingIndicator()
+                                is TimelineItem.Approval -> ApprovalTimelineCard(
+                                    item = item.item,
+                                    onAllow = if (item.item.status == "pending") {
+                                        { viewModel.resolveApproval(true) }
                                     } else null,
-                                    onRegenerate = if (isLastAssistant && !isLoading) {
-                                        { viewModel.regenerate() }
+                                    onDeny = if (item.item.status == "pending") {
+                                        { viewModel.resolveApproval(false) }
                                     } else null,
-                                    onEdit = if (
-                                        item.message.role == "user" &&
-                                        !isLoading &&
-                                        item.message.content.isNotBlank()
-                                    ) {
-                                        {
-                                            val text = viewModel.beginEditUserMessage(item.message.id)
-                                            if (text != null) inputText = text
-                                        }
-                                    } else null,
-                                    isEditing = item.message.id == editingMessageId,
                                 )
+                                is TimelineItem.SubAgent -> SubAgentTimelineCard(item = item.agent)
                             }
-                            is TimelineItem.Tool -> ToolCallCard(item.tool)
-                            is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)
-                            is TimelineItem.Reasoning -> ReasoningCard(item.item)
-                            is TimelineItem.Working -> WorkingIndicator()
-                            is TimelineItem.Approval -> ApprovalTimelineCard(
-                                item = item.item,
-                                onAllow = if (item.item.status == "pending") {
-                                    { viewModel.resolveApproval(true) }
-                                } else null,
-                                onDeny = if (item.item.status == "pending") {
-                                    { viewModel.resolveApproval(false) }
-                                } else null,
-                            )
-                            is TimelineItem.SubAgent -> SubAgentTimelineCard(item = item.agent)
                         }
                     }
                 }
