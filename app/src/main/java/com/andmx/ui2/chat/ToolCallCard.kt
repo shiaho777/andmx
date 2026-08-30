@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -133,9 +134,10 @@ fun ToolCallCard(toolCall: ToolCall) {
     } else {
         ToolPresentation.secondary(toolCall)
     }
+    val motion = LocalMotion.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(180),
+        animationSpec = motion.defaultEffects,
         label = "toolChevron",
     )
 
@@ -297,8 +299,8 @@ fun ToolCallCard(toolCall: ToolCall) {
 
         AnimatedVisibility(
             visible = expanded && contentMounted,
-            enter = expandVertically(animationSpec = tween(180)) + fadeIn(tween(140)),
-            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(tween(120)),
+            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
+            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
         ) {
             Column(
                 Modifier
@@ -793,9 +795,10 @@ fun ToolGroupCard(tools: List<ToolCall>) {
     var expanded by remember(key) { mutableStateOf(running || failed > 0) }
     var userToggled by remember(key) { mutableStateOf(false) }
     var wasRunning by remember(key) { mutableStateOf(running) }
+    val motion = LocalMotion.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(180),
+        animationSpec = motion.defaultEffects,
         label = "groupChevron",
     )
 
@@ -881,8 +884,8 @@ fun ToolGroupCard(tools: List<ToolCall>) {
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = tween(180)) + fadeIn(tween(140)),
-            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(tween(120)),
+            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
+            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
         ) {
             Column(
                 Modifier

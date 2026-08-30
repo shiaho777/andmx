@@ -2,7 +2,6 @@ package com.andmx.ui2.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -58,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.ui.conversation.ConversationGoal
+import com.andmx.ui2.theme.LocalMotion
 import com.andmx.workspace.GitBaseline
 
 @Composable
@@ -81,9 +81,10 @@ fun StatusCapsule(
     if (!anythingToShow) return
 
     var expanded by remember { mutableStateOf(false) }
+    val motion = LocalMotion.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(180),
+        animationSpec = motion.defaultEffects,
         label = "statusChevron",
     )
 
@@ -171,8 +172,8 @@ fun StatusCapsule(
 
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = tween(180)) + fadeIn(tween(140)),
-            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(tween(120)),
+            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
+            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
         ) {
             Column(
                 Modifier
