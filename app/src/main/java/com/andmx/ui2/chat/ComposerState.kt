@@ -104,7 +104,7 @@ fun thoughtOptionsFor(reasoning: ReasoningConfig?): List<ThoughtOption> {
     }
 }
 
-private fun effortLabel(level: String): String = when (level.lowercase()) {
+internal fun effortLabel(level: String): String = when (level.lowercase()) {
     "off" -> "不思考"
     "minimal", "min" -> "最低"
     "low" -> "低"
