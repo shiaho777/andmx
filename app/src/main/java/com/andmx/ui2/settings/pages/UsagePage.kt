@@ -28,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
@@ -52,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -65,33 +65,23 @@ import com.andmx.ui2.settings.backAppBar
 import com.andmx.ui2.usage.DayBucket
 import com.andmx.ui2.usage.ModelUsage
 import com.andmx.ui2.usage.UsageCalculator
+import com.andmx.ui2.usage.UsageChartLogic
 import com.andmx.ui2.usage.UsageRange
 import com.andmx.ui2.usage.UsageStats
-import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import kotlin.math.max
 
+/**
+ * Palette order mirrors ZCode `--color-usage-chart-1..6`
+ * (sky-600, teal-600, violet-600, rose-500, indigo-500, cyan-600).
+ */
 private val ModelPalette = listOf(
-    Color(0xFF4C8DFF),
-    Color(0xFF34C759),
-    Color(0xFFAF52DE),
-    Color(0xFFFF453A),
-    Color(0xFFFF9F0A),
-    Color(0xFF64D2FF),
-    Color(0xFFFFD60A),
-    Color(0xFFBF5AF2),
-)
-
-private val HeatEmpty = Color(0xFF2B2B2B)
-private val HeatLevels = listOf(
-    Color(0xFF2B2B2B),
-    Color(0xFF2F4A63),
-    Color(0xFF3A6FA0),
-    Color(0xFF4C8DFF),
-    Color(0xFF7AB0FF),
-    Color(0xFFA8CBFF),
+    Color(0xFF0084CC),
+    Color(0xFF0D9488),
+    Color(0xFF7C3AED),
+    Color(0xFFF43F5E),
+    Color(0xFF6366F1),
+    Color(0xFF0891B2),
 )
 
 private val CardBg = Color(0xFF1C1C1C)
@@ -126,7 +116,6 @@ fun UsagePage(onBack: () -> Unit) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val chipBg = if (isDark) ChipBg else MaterialTheme.colorScheme.surfaceVariant
     val chipSelected = if (isDark) ChipSelectedBg else MaterialTheme.colorScheme.secondaryContainer
-    val heatEmpty = if (isDark) HeatEmpty else Color(0xFFE8E8E8)
 
     Scaffold(
         containerColor = pageBg,
@@ -142,25 +131,52 @@ fun UsagePage(onBack: () -> Unit) {
                 .padding(bottom = 28.dp),
         ) {
             Text(
-                "应用用量",
-                style = MaterialTheme.typography.titleSmall,
+                "使用统计",
+                style = MaterialTheme.typography.titleMedium,
                 color = onSurface,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
             )
-            Text(
-                "来自本地应用会话历史。",
-                style = MaterialTheme.typography.bodySmall,
-                color = muted,
-                modifier = Modifier.padding(bottom = 14.dp),
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("应用用量", color = onSurface, style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(chipBg)
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text("应用用量", color = muted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            SummaryRow(
+                stats = stats,
+                muted = muted,
+                onSurface = onSurface,
+                divider = if (isDark) Color(0xFF2E2E2E) else MaterialTheme.colorScheme.outlineVariant,
             )
+
+            Spacer(Modifier.height(16.dp))
+
+            HeatmapCard(
+                stats = stats,
+                cardBg = cardBg,
+                muted = muted,
+                subtle = subtle,
+                onSurface = onSurface,
+            )
+
+            Spacer(Modifier.height(16.dp))
 
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("时间范围", style = MaterialTheme.typography.bodySmall, color = muted)
+                Text("时间范围", color = onSurface, style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     UsageRange.entries.forEach { r ->
                         val selected = range == r
@@ -221,48 +237,25 @@ fun UsagePage(onBack: () -> Unit) {
                         )
                     }
                 }
-                RefreshRow(onRefresh = { refreshKey++ }, muted = muted, onSurface = onSurface)
-                return@Column
+            } else {
+                DailyTrendCard(
+                    daily = stats.daily,
+                    cardBg = cardBg,
+                    muted = muted,
+                    subtle = subtle,
+                    onSurface = onSurface,
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                ModelUsageCard(
+                    stats = stats,
+                    cardBg = cardBg,
+                    cardInner = cardBgAlt,
+                    muted = muted,
+                    onSurface = onSurface,
+                )
             }
-
-            MetricGrid(
-                stats = stats,
-                cardBg = cardBg,
-                muted = muted,
-                onSurface = onSurface,
-            )
-
-            Spacer(Modifier.height(14.dp))
-
-            HeatmapCard(
-                daily = stats.daily,
-                cardBg = cardBg,
-                muted = muted,
-                subtle = subtle,
-                onSurface = onSurface,
-                empty = heatEmpty,
-            )
-
-            Spacer(Modifier.height(14.dp))
-
-            DailyTrendCard(
-                daily = stats.daily,
-                models = stats.models,
-                cardBg = cardBg,
-                muted = muted,
-                subtle = subtle,
-                onSurface = onSurface,
-            )
-
-            Spacer(Modifier.height(14.dp))
-
-            ModelUsageCard(
-                stats = stats,
-                cardBg = cardBg,
-                cardInner = cardBgAlt,
-                muted = muted,
-                onSurface = onSurface,
-            )
 
             RefreshRow(onRefresh = { refreshKey++ }, muted = muted, onSurface = onSurface)
         }
@@ -292,215 +285,257 @@ private fun RefreshRow(onRefresh: () -> Unit, muted: Color, onSurface: Color) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * One rounded card with 5 centered stats separated by hairlines, mirroring
+ * ZCode's summary section (c7): 累计 Token 数 / 峰值 Token 数 / 最长聊天时长 /
+ * 当前连续天数 / 最长连续天数.
+ */
 @Composable
-private fun MetricGrid(
+private fun SummaryRow(
     stats: UsageStats,
-    cardBg: Color,
     muted: Color,
     onSurface: Color,
+    divider: Color,
 ) {
+    val zhDays = "天"
     val items = listOf(
-        MetricItem(Icons.Outlined.Token, "tokens 用量", UsageCalculator.formatCount(stats.totalTokens), null),
-        MetricItem(Icons.Outlined.Forum, "会话数量", stats.sessions.toString(), null),
-        MetricItem(Icons.Outlined.ChatBubbleOutline, "消息数量", stats.messages.toString(), null),
-        MetricItem(Icons.Outlined.CalendarMonth, "活跃天数", stats.activeDays.toString(), null),
-        MetricItem(Icons.Outlined.LocalFireDepartment, "当前连续天数", stats.currentStreak.toString(), null),
-        MetricItem(
-            Icons.AutoMirrored.Outlined.ShowChart,
-            "最常用模型",
-            stats.favoriteModel.ifBlank { "—" },
-            if (stats.favoriteModel.isNotBlank()) "占比 ${UsageCalculator.formatShare(stats.favoriteShare)}" else null,
+        SummaryItem(
+            UsageCalculator.formatCount(stats.lifetimeTotalTokens),
+            "累计 Token 数",
         ),
+        SummaryItem(
+            UsageCalculator.formatCount(stats.peakDayTokens),
+            "峰值 Token 数",
+        ),
+        SummaryItem(
+            UsageChartLogic.formatDuration(stats.longestSessionMs, zhDays, "小时", "分钟"),
+            "最长聊天时长",
+        ),
+        SummaryItem("${stats.currentStreak} $zhDays", "当前连续天数"),
+        SummaryItem("${stats.longestStreak} $zhDays", "最长连续天数"),
     )
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items.chunked(3).forEach { row ->
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (muted == Muted) CardBg else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items.forEachIndexed { i, item ->
+            if (i > 0) {
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(28.dp)
+                        .background(divider),
+                )
+            }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                row.forEach { item ->
-                    MetricCard(
-                        item = item,
-                        modifier = Modifier.weight(1f),
-                        cardBg = cardBg,
-                        muted = muted,
-                        onSurface = onSurface,
-                    )
-                }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                Text(
+                    item.value,
+                    color = onSurface,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    item.label,
+                    color = muted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
 }
 
-private data class MetricItem(
-    val icon: ImageVector,
-    val label: String,
-    val value: String,
-    val sub: String?,
-)
+private data class SummaryItem(val value: String, val label: String)
 
-@Composable
-private fun MetricCard(
-    item: MetricItem,
-    modifier: Modifier,
-    cardBg: Color,
-    muted: Color,
-    onSurface: Color,
-) {
-    Column(
-        modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(cardBg)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(item.icon, contentDescription = null, tint = muted, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(5.dp))
-            Text(
-                item.label,
-                color = muted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            item.value,
-            color = onSurface,
-            fontSize = if (item.value.length > 10) 16.sp else 22.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            lineHeight = 24.sp,
-        )
-        if (item.sub != null) {
-            Text(
-                item.sub,
-                color = muted,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(top = 2.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
+/**
+ * 52-week × 7-day activity heatmap with a month label row underneath,
+ * matching ZCode's grid (`i7=52`, gap-0.5, 4px corner radius, hover scale).
+ */
 @Composable
 private fun HeatmapCard(
-    daily: List<DayBucket>,
+    stats: UsageStats,
     cardBg: Color,
     muted: Color,
     subtle: Color,
     onSurface: Color,
-    empty: Color,
 ) {
-    val maxTok = daily.maxOfOrNull { it.tokens }?.coerceAtLeast(1L) ?: 1L
+    val isDark = (0.299f * onSurface.red + 0.587f * onSurface.green + 0.114f * onSurface.blue) > 0.5f
+    var mode by remember { mutableStateOf(UsageChartLogic.HeatMode.DAILY) }
+    val baseGrid = remember(stats.heatmapDayTokens) {
+        UsageChartLogic.heatGrid(
+            stats.heatmapDayTokens,
+            maxTokens = (stats.heatmapDayTokens.values.maxOrNull() ?: 0L),
+        )
+    }
+    val grid = remember(baseGrid, mode) { UsageChartLogic.applyHeatMode(baseGrid, mode) }
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(cardBg)
-            .padding(14.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("活跃热力图", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("较少", color = subtle, style = MaterialTheme.typography.labelSmall)
-                HeatLevels.forEachIndexed { i, c ->
-                    Box(
-                        Modifier
-                            .size(10.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(if (i == 0) empty else c),
+            Text("Token 活动", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(
+                    if (isDark) Color(0xFF2A2A2A) else MaterialTheme.colorScheme.surfaceVariant,
+                ).padding(horizontal = 4.dp, vertical = 2.dp),
+            ) {
+                val modes = listOf(
+                    "每日" to UsageChartLogic.HeatMode.DAILY,
+                    "每周" to UsageChartLogic.HeatMode.WEEKLY,
+                    "累计" to UsageChartLogic.HeatMode.CUMULATIVE,
+                )
+                modes.forEach { (label, m) ->
+                    val selected = mode == m
+                    Text(
+                        label,
+                        color = if (selected) onSurface else muted,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                when {
+                                    !selected -> Color.Transparent
+                                    isDark -> Color(0xFF141414)
+                                    else -> MaterialTheme.colorScheme.surface
+                                },
+                            )
+                            .clickable { mode = m }
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                     )
                 }
-                Text("较多", color = subtle, style = MaterialTheme.typography.labelSmall)
             }
         }
         Spacer(Modifier.height(12.dp))
 
-        val weeks = remember(daily) { buildHeatWeeks(daily) }
-        Row(
+        val surface = MaterialTheme.colorScheme.surface
+        val heatBase = if ((0.299f * surface.red + 0.587f * surface.green + 0.114f * surface.blue) < 0.5f) {
+            Color(0xFF0D0D0D)
+        } else {
+            Color(0xFFF1F5F9)
+        }
+        val accent = if (isDark) Color(0xFF38BDF8) else Color(0xFF0284C7)
+        Column(
             Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            weeks.forEach { week ->
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    week.forEach { cell ->
-                        val level = if (cell == null || cell.tokens <= 0L) 0
-                        else {
-                            val r = cell.tokens.toFloat() / maxTok.toFloat()
-                            when {
-                                r < 0.15f -> 1
-                                r < 0.35f -> 2
-                                r < 0.55f -> 3
-                                r < 0.8f -> 4
-                                else -> 5
-                            }
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                grid.columns.forEach { col ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        col.levels.forEach { level ->
+                            Box(
+                                Modifier
+                                    .size(9.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        if (level == 0) {
+                                            heatBase.copy(alpha = if (isDark) 0.6f else 1f)
+                                        } else {
+                                            mixHeat(accent, heatBase, UsageChartLogic.heatLevelRatios[level])
+                                        },
+                                    ),
+                            )
                         }
-                        val color = if (level == 0) empty else HeatLevels[level.coerceIn(0, HeatLevels.lastIndex)]
-                        Box(
-                            Modifier
-                                .size(12.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(color),
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                grid.monthLabels.forEach { label ->
+                    Box(Modifier.width((label.span * 11).dp)) {
+                        Text(
+                            label.label,
+                            color = subtle,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
                         )
                     }
                 }
             }
         }
-    }
-}
 
-private fun buildHeatWeeks(daily: List<DayBucket>): List<List<DayBucket?>> {
-    if (daily.isEmpty()) return emptyList()
-    val byDay = daily.associateBy { it.dayStart }
-    val first = daily.first().dayStart
-    val last = daily.last().dayStart
-    val cal = Calendar.getInstance().apply { timeInMillis = first }
-    val dow = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7)
-    cal.add(Calendar.DAY_OF_YEAR, -dow)
-    val start = UsageCalculator.dayStart(cal.timeInMillis)
-    val weeks = mutableListOf<List<DayBucket?>>()
-    var cursor = start
-    while (cursor <= last + 6 * 86_400_000L) {
-        val week = (0 until 7).map { offset ->
-            val d = cursor + offset * 86_400_000L
-            if (d < first || d > last) null else byDay[d]
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("较少", color = subtle, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.width(6.dp))
+            UsageChartLogic.heatLevelRatios.forEachIndexed { i, ratio ->
+                Box(
+                    Modifier
+                        .size(9.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (i == 0) heatBase.copy(alpha = if (isDark) 0.6f else 1f) else mixHeat(accent, heatBase, ratio)),
+                )
+                Spacer(Modifier.width(3.dp))
+            }
+            Spacer(Modifier.width(2.dp))
+            Text("较多", color = subtle, style = MaterialTheme.typography.labelSmall)
         }
-        if (week.any { it != null }) weeks.add(week)
-        cursor += 7 * 86_400_000L
-        if (weeks.size > 12) break
     }
-    return weeks
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Mix accent into base at `ratio` in linear RGB — mirrors color-mix(in oklab, sky, surface). */
+private fun mixHeat(accent: Color, base: Color, ratio: Float): Color {
+    val r = base.red + (accent.red - base.red) * ratio
+    val g = base.green + (accent.green - base.green) * ratio
+    val b = base.blue + (accent.blue - base.blue) * ratio
+    return Color(r, g, b, 1f)
+}
+
+/**
+ * Per-model smooth (monotone) daily token trend, one polyline per top model,
+ * dashed horizontal guides and first/last-style ticks — ZCode
+ * `AppUsageDailyModelTrendChart` semantics on a phone-sized canvas.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun DailyTrendCard(
     daily: List<DayBucket>,
-    models: List<ModelUsage>,
     cardBg: Color,
     muted: Color,
     subtle: Color,
     onSurface: Color,
 ) {
-    val modelOrder = models.map { it.model }
-    val colorOf = remember(modelOrder) {
-        modelOrder.mapIndexed { i, m -> m to ModelPalette[i % ModelPalette.size] }.toMap()
+    val topModels = remember(daily) {
+        val totals = HashMap<String, Long>()
+        daily.forEach { day ->
+            day.byModel.forEach { (m, t) -> totals[m] = (totals[m] ?: 0L) + t }
+        }
+        totals.entries.sortedByDescending { it.value }.take(UsageChartLogic.CHART_SERIES)
+            .map { it.key }
     }
-    val maxTok = daily.maxOfOrNull { it.tokens }?.coerceAtLeast(1L) ?: 1L
-    val dateFmt = remember { SimpleDateFormat("M月d日", Locale.CHINA) }
+    val series = remember(daily, topModels) {
+        topModels.map { model -> model to daily.map { it.byModel[model] ?: 0L } }
+    }
+    val maxTokens = remember(series) {
+        series.flatMap { it.second }.maxOrNull()?.coerceAtLeast(1L) ?: 1L
+    }
+    val legend = series.mapIndexed { i, (model, _) -> model to ModelPalette[i % ModelPalette.size] }
 
     Column(
         Modifier
@@ -509,76 +544,65 @@ private fun DailyTrendCard(
             .background(cardBg)
             .padding(14.dp),
     ) {
-        Text("按天 Token 趋势", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(12.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF181818).copy(alpha = 0.55f))
-                .padding(horizontal = 10.dp, vertical = 12.dp),
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                val h = size.height
-                val w = size.width
-                val guides = listOf(0.25f, 0.5f, 0.75f)
-                guides.forEach { g ->
-                    val y = h * (1f - g)
-                    drawLine(
-                        color = Color.White.copy(alpha = 0.06f),
-                        start = Offset(0f, y),
-                        end = Offset(w, y),
-                        strokeWidth = 1f,
-                    )
+        Text("每日 Token 趋势图", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
+
+        if (legend.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                legend.forEach { (model, color) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(color),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(model, color = muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
                 }
             }
-            Row(
-                Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                daily.forEach { day ->
-                    val frac = (day.tokens.toFloat() / maxTok.toFloat()).coerceIn(0f, 1f)
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.Bottom,
-                    ) {
-                        if (day.tokens <= 0L) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(2.dp)
-                                    .clip(RoundedCornerShape(1.dp))
-                                    .background(subtle.copy(alpha = 0.25f)),
-                            )
-                        } else {
-                            val parts = if (day.byModel.isEmpty()) {
-                                listOf("" to day.tokens)
-                            } else {
-                                day.byModel.entries.sortedByDescending { it.value }.map { it.key to it.value }
-                            }
-                            Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(frac.coerceAtLeast(0.02f)),
-                                verticalArrangement = Arrangement.Bottom,
-                            ) {
-                                parts.asReversed().forEach { (model, tok) ->
-                                    val share = tok.toFloat() / day.tokens.toFloat()
-                                    val c = colorOf[model] ?: ModelPalette.first()
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .weight(share.coerceAtLeast(0.01f), fill = true)
-                                            .background(c),
-                                    )
-                                }
-                            }
-                        }
+            Spacer(Modifier.height(10.dp))
+        }
+
+        val guide = if (subtle == Subtle) Color(0xFF3A3A3A) else MaterialTheme.colorScheme.outlineVariant
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(200.dp),
+        ) {
+            val w = size.width
+            val h = size.height
+            listOf(0.25f, 0.5f, 0.75f).forEach { g ->
+                val y = h * (1f - g)
+                drawLine(
+                    color = guide.copy(alpha = 0.4f),
+                    start = Offset(0f, y),
+                    end = Offset(w, y),
+                    strokeWidth = 1.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 6f)),
+                )
+            }
+            series.forEachIndexed { si, (_, values) ->
+                val pts = UsageChartLogic.seriesPoints(
+                    values = values,
+                    maxTokens = maxTokens.toFloat(),
+                    width = w,
+                    height = h,
+                )
+                if (pts.size >= 2) {
+                    val path = Path().apply {
+                        moveTo(pts.first().x, h - pts.first().y)
+                        pts.drop(1).forEach { lineTo(it.x, (h - it.y).coerceIn(0f, h)) }
                     }
+                    drawPath(
+                        path,
+                        color = ModelPalette[si % ModelPalette.size],
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+                    )
                 }
             }
         }
@@ -590,32 +614,13 @@ private fun DailyTrendCard(
                     .padding(top = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                val first = daily.first().dayStart
-                val mid = daily[daily.size / 2].dayStart
-                val last = daily.last().dayStart
-                listOf(first, mid, last).distinct().forEach { ts ->
-                    Text(dateFmt.format(Date(ts)), color = subtle, style = MaterialTheme.typography.labelSmall)
+                val dates = daily.map { UsageCalculator.formatDayLabel(it.dayStart) }
+                val shown = linkedMapOf<Int, String>()
+                daily.indices.forEach { i ->
+                    if (UsageChartLogic.showTick(i, daily.size)) shown[i] = dates[i]
                 }
-            }
-        }
-
-        if (models.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                models.forEach { m ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(colorOf[m.model] ?: ModelPalette.first()),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(m.model, color = muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                    }
+                shown.entries.forEach { (_, label) ->
+                    Text(label, color = subtle, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
