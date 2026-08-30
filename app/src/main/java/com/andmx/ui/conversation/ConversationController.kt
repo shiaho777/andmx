@@ -2419,7 +2419,10 @@ class ConversationController(
                 when {
                     def.baseUrl.isBlank() -> {
                         connectionOk = false
-                        connectionResult = "请先填写 Base URL"
+                        connectionResult = com.andmx.llm.formatConnectionResult(
+                            success = false,
+                            failure = com.andmx.llm.ConnectionFailure.NO_ENDPOINT,
+                        )
                     }
                     modelId.isBlank() -> {
                         connectionOk = false
@@ -2434,16 +2437,25 @@ class ConversationController(
                         val result = client.chat(request)
                         result.onSuccess {
                             connectionOk = true
-                            connectionResult = "连接成功：模型 $modelId 可正常对话"
+                            connectionResult = com.andmx.llm.formatConnectionResult(
+                                success = true,
+                                failure = null,
+                            )
                         }.onFailure { t ->
                             connectionOk = false
-                            connectionResult = t.message ?: t::class.simpleName ?: "连接失败"
+                            connectionResult = com.andmx.llm.formatConnectionResult(
+                                success = false,
+                                failure = com.andmx.llm.classifyConnectionFailure(t),
+                            )
                         }
                     }
                 }
             } catch (t: Throwable) {
                 connectionOk = false
-                connectionResult = t.message ?: t::class.simpleName ?: "未知错误"
+                connectionResult = com.andmx.llm.formatConnectionResult(
+                    success = false,
+                    failure = com.andmx.llm.classifyConnectionFailure(t),
+                )
             } finally {
                 testingConnection = false
             }

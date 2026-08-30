@@ -61,6 +61,8 @@ import androidx.compose.ui.unit.dp
 import com.andmx.llm.ApiMessage
 import com.andmx.llm.ChatRequest
 import com.andmx.llm.LlmClient
+import com.andmx.llm.classifyConnectionFailure
+import com.andmx.llm.connectionFailureText
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
@@ -542,7 +544,9 @@ fun ProviderEditPage(
                             }.getOrElse { Result.failure(it) }
                             testState = if (result.isSuccess) TestState.Success
                             else TestState.Failed(
-                                result.exceptionOrNull()?.message?.take(80) ?: "连接失败"
+                                connectionFailureText(
+                                    classifyConnectionFailure(result.exceptionOrNull())
+                                )
                             )
                         }
                     },
