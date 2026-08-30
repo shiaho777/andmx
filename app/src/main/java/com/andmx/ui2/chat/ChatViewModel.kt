@@ -1742,6 +1742,7 @@ class ChatViewModel @Inject constructor(
                 _messages.value = current
             }
             is ChatEvent.ToolCallArgsDelta -> {
+                finalizeReasoning()
                 val current = _toolCalls.value.toMutableList()
                 val byId = event.id?.let { id -> current.indexOfFirst { it.id == id } } ?: -1
                 val byNameRunning = if (byId < 0 && !event.name.isNullOrBlank()) {
