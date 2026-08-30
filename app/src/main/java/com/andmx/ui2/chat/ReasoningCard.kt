@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,9 +94,10 @@ fun ReasoningCard(item: ReasoningItem) {
         }
     }
 
+    val motion = LocalMotion.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(180),
+        animationSpec = motion.defaultEffects,
         label = "thinkChevron",
     )
 
@@ -155,8 +157,8 @@ fun ReasoningCard(item: ReasoningItem) {
 
         AnimatedVisibility(
             visible = expanded && contentMounted,
-            enter = expandVertically(animationSpec = tween(180)) + fadeIn(tween(140)),
-            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(tween(120)),
+            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
+            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
         ) {
             val scroll = rememberScrollState()
             LaunchedEffect(item.content, item.isStreaming) {
