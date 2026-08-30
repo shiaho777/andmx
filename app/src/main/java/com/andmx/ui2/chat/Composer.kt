@@ -46,8 +46,10 @@ import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +58,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -803,33 +807,35 @@ private fun SendStopButton(
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
-    val active = isLoading || canSend
-    val bg = if (active) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
-    val tint = if (active) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurfaceVariant
-
+    val haptic = LocalHapticFeedback.current
     AnimatedContent(
         targetState = isLoading,
         transitionSpec = { fadeIn() togetherWith fadeOut() },
         label = "sendStop",
     ) { busy ->
-        Box(
-            Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(bg)
-                .clickable(enabled = busy || canSend) {
-                    if (busy) onStop() else onSend()
+        if (busy) {
+            FilledIconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onStop()
                 },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (busy) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward,
-                contentDescription = if (busy) "停止生成" else "发送",
-                tint = tint,
-                modifier = Modifier.size(18.dp),
-            )
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(Icons.Outlined.Stop, contentDescription = "停止生成", modifier = Modifier.size(20.dp))
+            }
+        } else {
+            FilledIconButton(
+                onClick = {
+                    if (canSend) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSend()
+                    }
+                },
+                enabled = canSend,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(Icons.Outlined.ArrowUpward, contentDescription = "发送", modifier = Modifier.size(20.dp))
+            }
         }
     }
 }
@@ -838,13 +844,7 @@ private fun SendStopButton(
 
 @Composable
 private fun CircleIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
+    IconButton(onClick = onClick) {
         Icon(
             icon,
             contentDescription = desc,
