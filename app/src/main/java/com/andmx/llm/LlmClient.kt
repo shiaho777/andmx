@@ -215,7 +215,7 @@ class LlmClient(
                 e
             }
             isRetryableStatus(code) -> RetryableHttpException(code, body, retryAfterMs)
-            else -> RuntimeException("HTTP $code: $body")
+            else -> HttpStatusException(code, body)
         }
     }
 
@@ -261,3 +261,14 @@ class RateLimitException(message: String) : RuntimeException(message) {
     /** Server-provided retry hint parsed from `retry-after(-ms)`, if any. */
     var retryAfterMs: Long? = null
 }
+
+/**
+ * A non-retryable HTTP status (any 4xx/5xx outside the retryable set).
+ *
+ * Carries the status code as a field rather than only inside the message so
+ * callers can classify the failure — see [classifyConnectionFailure].
+ */
+class HttpStatusException(
+    val statusCode: Int,
+    message: String,
+) : RuntimeException("HTTP $statusCode: $message")
