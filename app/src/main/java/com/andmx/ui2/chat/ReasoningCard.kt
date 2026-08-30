@@ -13,7 +13,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
-import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,31 +46,56 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.LocalMotion
 import kotlinx.coroutines.delay
+
+internal const val REASONING_TAIL_LIMIT = 200
+
+internal fun reasoningTriggerLabel(
+    isStreaming: Boolean,
+    isOpen: Boolean,
+    durationSec: Int?,
+): String = if (isStreaming && !isOpen) {
+    "正在思考"
+} else when (durationSec) {
+    null -> "思考 · 持续了几秒"
+    else -> "思考 · 持续了 ${durationSec} 秒"
+}
+
+internal fun reasoningTailLine(text: String): String? {
+    val lines = text.split('\n')
+    for (i in lines.indices.reversed()) {
+        val line = lines[i].trim()
+        if (line.isEmpty()) continue
+        return if (line.length > REASONING_TAIL_LIMIT) line.takeLast(REASONING_TAIL_LIMIT) else line
+    }
+    return null
+}
 
 @Composable
 fun ReasoningCard(item: ReasoningItem) {
-    var expanded by remember(item.id) { mutableStateOf(item.isStreaming) }
+    if (item.isStreaming && item.content.isBlank()) return
+
+    var expanded by remember(item.id) { mutableStateOf(false) }
     var userToggled by remember(item.id) { mutableStateOf(false) }
     var startedAt by remember(item.id) { mutableLongStateOf(0L) }
+    var elapsedSec by remember(item.id) { mutableIntStateOf(0) }
     var durationSec by remember(item.id) { mutableStateOf<Int?>(null) }
-    var liveSec by remember(item.id) { mutableStateOf<Int?>(null) }
-    var contentMounted by remember(item.id) { mutableStateOf(item.isStreaming) }
+    var contentMounted by remember(item.id) { mutableStateOf(false) }
 
     LaunchedEffect(item.isStreaming) {
         if (item.isStreaming) {
             if (startedAt == 0L) startedAt = System.currentTimeMillis()
             durationSec = null
-            liveSec = 0
-            if (!userToggled) expanded = true
             while (true) {
                 delay(1000L)
-                liveSec = ((System.currentTimeMillis() - startedAt) / 1000L).toInt()
+                elapsedSec = ((System.currentTimeMillis() - startedAt) / 1000L).toInt()
             }
         } else {
-            liveSec = null
             if (startedAt > 0L) {
                 durationSec = ((System.currentTimeMillis() - startedAt) / 1000L)
                     .toInt()
@@ -100,6 +125,8 @@ fun ReasoningCard(item: ReasoningItem) {
         animationSpec = motion.defaultEffects,
         label = "thinkChevron",
     )
+    val shownDuration = durationSec ?: elapsedSec.takeIf { it >= 1 }
+    val tail = if (item.isStreaming && !expanded) reasoningTailLine(item.content) else null
 
     Column(
         Modifier
@@ -126,22 +153,38 @@ fun ReasoningCard(item: ReasoningItem) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
             )
             Spacer(Modifier.width(8.dp))
-            if (item.isStreaming) {
-                ThinkingLabel(liveSec)
+            if (tail != null) {
+                ThinkingLabel()
             } else {
-                val sec = durationSec
                 Text(
-                    text = when {
-                        sec == null -> "已思考"
-                        sec < 2 -> "已思考 · 片刻"
-                        else -> "已思考 · ${sec}s"
-                    },
+                    text = reasoningTriggerLabel(item.isStreaming, expanded, shownDuration),
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
                 )
+            }
+            if (tail != null) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "·",
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = tail,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    textAlign = TextAlign.End,
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
             }
             Icon(
                 Icons.AutoMirrored.Outlined.KeyboardArrowRight,
@@ -184,7 +227,7 @@ fun ReasoningCard(item: ReasoningItem) {
 }
 
 @Composable
-private fun ThinkingLabel(liveSec: Int?) {
+private fun ThinkingLabel() {
     val infinite = rememberInfiniteTransition(label = "think-grad")
     val shift by infinite.animateFloat(
         initialValue = 0f,
@@ -204,7 +247,7 @@ private fun ThinkingLabel(liveSec: Int?) {
         end = Offset(shift * 240f + 180f, 40f),
     )
     Text(
-        text = if (liveSec != null && liveSec >= 1) "思考中 · ${liveSec}s" else "思考中",
+        text = "正在思考",
         style = TextStyle(
             brush = brush,
             fontSize = 13.sp,
