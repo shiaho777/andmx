@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,7 +64,11 @@ import com.andmx.llm.LlmClient
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
+import com.andmx.llm.provider.ReasoningConfig
+import com.andmx.llm.provider.ReasoningStyle
 import com.andmx.llm.wire.AdapterFactory
+import com.andmx.llm.wire.AnthropicMessagesAdapter
+import com.andmx.ui2.chat.effortLabel
 import com.andmx.ui2.settings.SegmentedRow
 import com.andmx.ui2.settings.SettingsGroup
 import com.andmx.ui2.settings.StackedSettingRow
@@ -750,7 +756,7 @@ private fun SelectedModelsEditor(
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
                 )
                 val (hasImage, hasVideo) = splitInputModalities(def.inputModalities)
-                ModalityChips(
+                ChipRow(
                     options = MODEL_INPUT_MODALITIES,
                     selected = newModelModalities(hasImage, hasVideo).toSet(),
                     locked = setOf("text"),
@@ -761,6 +767,10 @@ private fun SelectedModelsEditor(
                         )
                         onPatch(id) { it.copy(inputModalities = updated) }
                     },
+                )
+                ReasoningEditor(
+                    config = def.reasoning,
+                    onChange = { next -> onPatch(id) { it.copy(reasoning = next) } },
                 )
             }
             if (index < ids.lastIndex) {
@@ -889,20 +899,108 @@ internal fun newModelModalities(image: Boolean, video: Boolean): List<String> = 
 internal fun splitInputModalities(modalities: List<String>): Pair<Boolean, Boolean> =
     ("image" in modalities) to ("video" in modalities)
 
+/**
+ * 模型对外暴露推理控制的方式，供 [SelectedModelsEditor] 的推理小节选择。
+ * NONE 对应 [ModelDefinition.reasoning] 为 null；到 [ReasoningStyle] 的映射
+ * 集中写在 [buildReasoningConfig] / [splitReasoningConfig] 的 when 里。
+ */
+internal enum class ReasoningChoice(val label: String) {
+    NONE("不支持"),
+    EFFORT("强度档位"),
+    THINKING("思考预算"),
+}
+
+/** OpenAI 系约定俗成的强度阶梯；目录里出现阶梯外的档位时保留在末尾，不丢数据。 */
+internal val EFFORT_LADDER = listOf("minimal", "low", "medium", "high")
+
+/** 派生自目录默认值，避免两处各写一份 16000 后漂移。 */
+internal val DEFAULT_THINKING_BUDGET_TEXT: String
+    get() = ReasoningConfig.ANTHROPIC_THINKING.defaultBudgetTokens.toString()
+
+/** 推理小节的界面态。[buildReasoningConfig] 与 [splitReasoningConfig] 互为逆运算。 */
+internal data class ReasoningDraft(
+    val choice: ReasoningChoice,
+    /** EFFORT：该模型实际接受的档位，按 [EFFORT_LADDER] 规范排序。 */
+    val levels: List<String>,
+    val defaultLevel: String,
+    /** THINKING：budget_tokens 原文，非法时保留用户输入以便报错。 */
+    val budgetText: String,
+)
+
+/** 已知档位按阶梯序，阶梯外的未知档位去重后排在末尾。 */
+internal fun orderEffortLevels(levels: List<String>): List<String> {
+    val known = EFFORT_LADDER.filter { it in levels }
+    val extra = levels.filter { it !in EFFORT_LADDER }.distinct().sorted()
+    return known + extra
+}
+
+/** Anthropic 规范要求 budget_tokens ≥ 1024。 */
+internal fun validateThinkingBudget(text: String): Boolean =
+    (text.toIntOrNull() ?: -1) >= AnthropicMessagesAdapter.MIN_THINKING_BUDGET
+
+/**
+ * 界面态 → 存储态。选「不支持」时返回 null，让 [ModelDefinition.reasoning] 落回 null，
+ * 而不是存一个空壳对象。
+ */
+internal fun buildReasoningConfig(draft: ReasoningDraft): ReasoningConfig? = when (draft.choice) {
+    ReasoningChoice.NONE -> null
+    ReasoningChoice.EFFORT -> {
+        val levels = orderEffortLevels(draft.levels)
+        ReasoningConfig(
+            style = ReasoningStyle.EFFORT,
+            effortLevels = levels,
+            defaultEffort = draft.defaultLevel.takeIf { it in levels }
+                ?: levels.firstOrNull()
+                ?: "",
+        )
+    }
+    ReasoningChoice.THINKING -> ReasoningConfig(
+        style = ReasoningStyle.THINKING,
+        defaultBudgetTokens = draft.budgetText
+            .toIntOrNull()
+            ?.coerceAtLeast(AnthropicMessagesAdapter.MIN_THINKING_BUDGET)
+            ?: ReasoningConfig.ANTHROPIC_THINKING.defaultBudgetTokens,
+    )
+}
+
+/** 存储态 → 界面态。未知档位原样带回，避免编辑目录模型时把自定义档位抹掉。 */
+internal fun splitReasoningConfig(config: ReasoningConfig?): ReasoningDraft = when (config?.style) {
+    ReasoningStyle.EFFORT -> {
+        val levels = orderEffortLevels(config.effortLevels)
+        ReasoningDraft(
+            choice = ReasoningChoice.EFFORT,
+            levels = levels,
+            defaultLevel = config.defaultEffort.takeIf { it in levels }.orEmpty(),
+            budgetText = DEFAULT_THINKING_BUDGET_TEXT,
+        )
+    }
+    ReasoningStyle.THINKING -> ReasoningDraft(
+        choice = ReasoningChoice.THINKING,
+        levels = emptyList(),
+        defaultLevel = "",
+        budgetText = config.defaultBudgetTokens
+            .takeIf { it > 0 }
+            ?.toString()
+            ?: DEFAULT_THINKING_BUDGET_TEXT,
+    )
+    else -> ReasoningDraft(ReasoningChoice.NONE, emptyList(), "", DEFAULT_THINKING_BUDGET_TEXT)
+}
+
 private val MODEL_INPUT_MODALITIES = listOf(
     "text" to "文本",
     "image" to "图片",
     "video" to "视频",
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModalityChips(
+private fun ChipRow(
     options: List<Pair<String, String>>,
     selected: Set<String>,
-    locked: Set<String>,
     onToggle: (String, Boolean) -> Unit,
+    locked: Set<String> = emptySet(),
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (value, label) ->
             val isLocked = value in locked
             val isOn = value in selected
@@ -935,6 +1033,134 @@ private fun ModalityChips(
                         MaterialTheme.colorScheme.surface
                     }
                 )
+            )
+        }
+    }
+}
+
+/**
+ * 模型级推理声明。自定义模型默认 [ModelDefinition.reasoning] 为 null，
+ * 作曲栏的档位选择器不会亮起；这里让每个模型自己声明推理方式。
+ *
+ * 界面态由 [splitReasoningConfig] 从存储态推导，回写走 [buildReasoningConfig]，
+ * 两者互为逆运算，避免档位在反复编辑中静默翻转。
+ */
+@Composable
+private fun ReasoningEditor(
+    config: ReasoningConfig?,
+    onChange: (ReasoningConfig?) -> Unit,
+) {
+    val draft = remember(config) { splitReasoningConfig(config) }
+    var choice by remember(config) { mutableStateOf(draft.choice) }
+    var levels by remember(config) { mutableStateOf(draft.levels) }
+    var defaultLevel by remember(config) { mutableStateOf(draft.defaultLevel) }
+    var budgetText by remember(config) { mutableStateOf(draft.budgetText) }
+
+    fun push(
+        nextChoice: ReasoningChoice = choice,
+        nextLevels: List<String> = levels,
+        nextDefault: String = defaultLevel,
+        nextBudget: String = budgetText,
+    ) {
+        onChange(
+            buildReasoningConfig(
+                ReasoningDraft(nextChoice, nextLevels, nextDefault, nextBudget)
+            )
+        )
+    }
+
+    Text(
+        "推理",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+    )
+    ChipRow(
+        options = ReasoningChoice.entries.map { it.name to it.label },
+        selected = setOf(choice.name),
+        onToggle = { value, on ->
+            if (on) {
+                val next = ReasoningChoice.valueOf(value)
+                choice = next
+                push(nextChoice = next)
+            }
+        },
+    )
+
+    when (choice) {
+        ReasoningChoice.NONE -> {}
+
+        ReasoningChoice.EFFORT -> {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "可用档位",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            ChipRow(
+                options = (EFFORT_LADDER + levels.filter { it !in EFFORT_LADDER })
+                    .distinct()
+                    .map { it to effortLabel(it) },
+                selected = levels.toSet(),
+                onToggle = { value, on ->
+                    val next = orderEffortLevels(if (on) levels + value else levels - value)
+                    levels = next
+                    val nextDefault = defaultLevel.takeIf { it in next }.orEmpty()
+                    defaultLevel = nextDefault
+                    push(nextLevels = next, nextDefault = nextDefault)
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "默认档位",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            if (levels.isEmpty()) {
+                Text(
+                    "先选择至少一个可用档位",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                ChipRow(
+                    options = levels.map { it to effortLabel(it) },
+                    selected = setOf(defaultLevel),
+                    onToggle = { value, on ->
+                        if (on) {
+                            defaultLevel = value
+                            push(nextDefault = value)
+                        }
+                    },
+                )
+            }
+        }
+
+        ReasoningChoice.THINKING -> {
+            val budgetOk = validateThinkingBudget(budgetText)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = budgetText,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(8)
+                    budgetText = digits
+                    if (validateThinkingBudget(digits)) push(nextBudget = digits)
+                },
+                label = { Text("默认思考预算") },
+                placeholder = { Text(DEFAULT_THINKING_BUDGET_TEXT) },
+                suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                supportingText = {
+                    Text("不少于 ${AnthropicMessagesAdapter.MIN_THINKING_BUDGET}")
+                },
+                isError = !budgetOk,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                ),
             )
         }
     }
@@ -1027,7 +1253,7 @@ private fun AddModelDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(6.dp))
-                ModalityChips(
+                ChipRow(
                     options = MODEL_INPUT_MODALITIES,
                     selected = newModelModalities(supportsImage, supportsVideo).toSet(),
                     locked = setOf("text"),
@@ -1045,7 +1271,7 @@ private fun AddModelDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(6.dp))
-                ModalityChips(
+                ChipRow(
                     options = listOf("text" to "文本"),
                     selected = setOf("text"),
                     locked = setOf("text"),
