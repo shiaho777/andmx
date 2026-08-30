@@ -7,7 +7,6 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
 data class DayBucket(
     val dayStart: Long,
     val tokens: Long,
@@ -36,6 +35,12 @@ data class UsageStats(
     val models: List<ModelUsage> = emptyList(),
     val rangeDays: Int = 30,
     val loaded: Boolean = false,
+    /** Lifetime totals, computed over all history regardless of range. */
+    val lifetimeTotalTokens: Long = 0L,
+    val peakDayTokens: Long = 0L,
+    val longestSessionMs: Long = 0L,
+    /** UTC yyyy-MM-dd → tokens over all history, feeding the 52-week heatmap. */
+    val heatmapDayTokens: Map<String, Long> = emptyMap(),
 )
 
 enum class UsageRange(val label: String, val days: Int) {
@@ -82,19 +87,42 @@ object UsageCalculator {
 
             val allMessages = mutableListOf<Pair<MessageEntity, String>>()
             var sessionCount = 0
+            var longestSessionMs = 0L
+            val lifetimeDayTokens = HashMap<String, Long>()
+            var lifetimeTotalTokens = 0L
             conversations.forEach { conv ->
                 val msgs = runCatching { dao.messagesFor(conv.id) }.getOrDefault(emptyList())
-                    .filter { it.createdAt >= cutoff && isUsageMessage(it) }
+                    .filter { isUsageMessage(it) }
                 if (msgs.isEmpty()) return@forEach
                 val hasUser = msgs.any { it.role == "user" }
                 if (!hasUser) return@forEach
-                sessionCount++
                 val model = conv.model.trim()
-                msgs.forEach { allMessages.add(it to model) }
+                if (msgs.any { it.createdAt >= cutoff && it.content.isNotBlank() }) sessionCount++
+                longestSessionMs = maxOf(
+                    longestSessionMs,
+                    (msgs.maxOf { it.createdAt } - msgs.minOf { it.createdAt }).coerceAtLeast(0L),
+                )
+                val inRange = msgs.filter { it.createdAt >= cutoff }
+                inRange.forEach { allMessages.add(it to model) }
+                msgs.forEach { msg ->
+                    val tok = estimateTokens(msg.content)
+                    if (tok > 0L) {
+                        lifetimeTotalTokens += tok
+                        val key = UsageChartLogic.utcDayKey(msg.createdAt)
+                        lifetimeDayTokens[key] = (lifetimeDayTokens[key] ?: 0L) + tok
+                    }
+                }
             }
 
             if (allMessages.isEmpty()) {
-                return@withContext UsageStats(loaded = true, rangeDays = range.days)
+                return@withContext UsageStats(
+                    loaded = true,
+                    rangeDays = range.days,
+                    lifetimeTotalTokens = lifetimeTotalTokens,
+                    peakDayTokens = lifetimeDayTokens.values.maxOrNull() ?: 0L,
+                    longestSessionMs = longestSessionMs,
+                    heatmapDayTokens = lifetimeDayTokens,
+                )
             }
 
             val dayKeys = (0 until range.days).map { cutoff + it * 86_400_000L }
@@ -178,6 +206,10 @@ object UsageCalculator {
                 models = models,
                 rangeDays = range.days,
                 loaded = true,
+                lifetimeTotalTokens = lifetimeTotalTokens,
+                peakDayTokens = lifetimeDayTokens.values.maxOrNull() ?: 0L,
+                longestSessionMs = longestSessionMs,
+                heatmapDayTokens = lifetimeDayTokens,
             )
         }
 
@@ -223,6 +255,12 @@ object UsageCalculator {
             pct > 0f -> "%.1f%%".format(pct)
             else -> "0%"
         }
+    }
+
+    /** `M月d日` axis label for a local day-start timestamp. */
+    fun formatDayLabel(dayStartMs: Long): String {
+        val c = Calendar.getInstance().apply { timeInMillis = dayStartMs }
+        return "${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日"
     }
 
     private fun trimDecimal(v: Double): String {
