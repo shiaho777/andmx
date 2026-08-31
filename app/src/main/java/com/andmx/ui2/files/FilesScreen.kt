@@ -75,8 +75,9 @@ fun FilesScreen(
 
     val rootPath = hostPath
         ?: android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
+    val rootfsRoot = remember { com.andmx.exec.proot.ProotRuntime(context).rootfsDir.absolutePath }
     val resolved = remember(initialPath, rootPath, hostPath) {
-        resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath)
+        resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath, rootfsRoot)
     }
 
     var currentPath by remember(rootPath, resolved.dir) { mutableStateOf(resolved.dir) }
@@ -86,7 +87,7 @@ fun FilesScreen(
     var changedOnly by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialPath, rootPath, hostPath) {
-        val target = resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath)
+        val target = resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath, rootfsRoot)
         currentPath = target.dir
         openFile = target.file
     }
@@ -150,21 +151,31 @@ private fun RemoteFilesScreen(
         loading = true
         error = null
         scope.launch {
+            var target = path
             val list = withContext(Dispatchers.IO) {
-                runCatching { client.listDir(path) }.getOrElse {
-                    error = it.message
-                    emptyList()
-                }
+                runCatching { client.listDir(path) }.getOrNull()
+            } ?: run {
+                val parent = remoteParentDir(path, rootPath)
+                if (parent != path) {
+                    target = parent
+                    withContext(Dispatchers.IO) {
+                        runCatching { client.listDir(parent) }.getOrNull()
+                    }
+                } else null
             }
-            entries = list
-            currentPath = path
+            if (list == null) {
+                error = "无法访问 $path"
+                entries = emptyList()
+            } else {
+                entries = list
+                currentPath = target
+            }
             loading = false
         }
     }
 
     LaunchedEffect(rootPath, refresh, initialPath) {
         val target = resolveRemoteBrowsePath(initialPath, rootPath)
-        currentPath = target
         reload(target)
         val want = initialPath?.trim().orEmpty()
         if (want.isNotBlank()) {
@@ -337,44 +348,75 @@ internal fun resolveLocalBrowseTarget(
     rootPath: String,
     hostPath: String?,
     guestMount: String,
+    rootfsRoot: String? = null,
 ): LocalBrowseTarget {
     val raw = initialPath?.trim().orEmpty()
     if (raw.isBlank()) return LocalBrowseTarget(rootPath, null)
-    val mapped = when {
-        hostPath != null && raw.startsWith(guestMount) -> {
-            val rel = raw.removePrefix(guestMount).trimStart('/')
-            if (rel.isEmpty()) hostPath else "$hostPath/$rel"
-        }
-        hostPath != null && raw.startsWith("/root/project") -> {
-            val rel = raw.removePrefix("/root/project").trimStart('/')
-            if (rel.isEmpty()) hostPath else "$hostPath/$rel"
-        }
-        raw.startsWith("/") -> raw
-        hostPath != null -> "$hostPath/${raw.trimStart('/')}"
-        else -> "$rootPath/${raw.trimStart('/')}"
+    val expanded = when {
+        raw == "~" -> "/root"
+        raw.startsWith("~/") -> "/root/${raw.removePrefix("~/").trimStart('/')}"
+        else -> raw
     }
-    val file = File(mapped)
-    return when {
-        file.isFile -> LocalBrowseTarget(file.parent ?: rootPath, file.absolutePath)
-        file.isDirectory -> LocalBrowseTarget(file.absolutePath, null)
-        file.parentFile?.isDirectory == true -> LocalBrowseTarget(file.parentFile!!.absolutePath, null)
-        else -> {
-            val parent = file.parent
-            if (!parent.isNullOrBlank()) LocalBrowseTarget(parent, null)
-            else LocalBrowseTarget(rootPath, null)
+    val candidates = mutableListOf<String>()
+    if (hostPath != null) {
+        if (expanded.startsWith(guestMount) || expanded.startsWith("/root/project")) {
+            val rel = expanded.removePrefix(guestMount).removePrefix("/root/project").trimStart('/')
+            candidates += if (rel.isEmpty()) hostPath else "$hostPath/$rel"
+        } else if (expanded == "/root" || expanded.startsWith("/root/")) {
+            val rel = expanded.removePrefix("/root").trimStart('/')
+            if (rootfsRoot != null) {
+                candidates += if (rel.isEmpty()) "$rootfsRoot/root" else "$rootfsRoot/root/$rel"
+            }
+            candidates += if (rel.isEmpty()) hostPath else "$hostPath/$rel"
         }
+        if (!expanded.startsWith("/")) {
+            candidates += "$hostPath/${expanded.trimStart('/')}"
+        }
+    } else {
+        if (rootfsRoot != null && (expanded == "/root" || expanded.startsWith("/root/"))) {
+            val rel = expanded.removePrefix("/root").trimStart('/')
+            candidates += if (rel.isEmpty()) "$rootfsRoot/root" else "$rootfsRoot/root/$rel"
+        }
+        candidates += if (expanded.startsWith("/")) expanded
+        else "$rootPath/${expanded.trimStart('/')}"
     }
+    for (candidate in candidates) {
+        val f = File(candidate)
+        if (f.isFile) return LocalBrowseTarget(f.parent ?: rootPath, f.absolutePath)
+        if (f.isDirectory) return LocalBrowseTarget(f.absolutePath, null)
+    }
+    val fallback = candidates.firstOrNull()
+        ?.let { nearestExistingDir(File(it), rootPath) }
+        ?: rootPath
+    return LocalBrowseTarget(fallback, null)
+}
+
+private fun nearestExistingDir(file: File, rootPath: String): String {
+    var dir: File? = file.parentFile
+    while (dir != null && !dir.isDirectory) dir = dir.parentFile
+    val path = dir?.absolutePath
+    return if (path.isNullOrBlank() || path == "/") rootPath else path
 }
 
 internal fun resolveRemoteBrowsePath(initialPath: String?, rootPath: String): String {
     val raw = initialPath?.trim().orEmpty()
     if (raw.isBlank()) return rootPath
-    if (raw.startsWith("/") || raw.startsWith("~")) {
-        val asFileParent = raw.trimEnd('/').substringBeforeLast('/', missingDelimiterValue = rootPath)
-        return asFileParent.ifBlank { rootPath }
+    val expanded = when {
+        raw == "~" -> rootPath
+        raw.startsWith("~/") -> rootPath.trimEnd('/') + "/" + raw.removePrefix("~/").trimStart('/')
+        else -> raw
     }
-    val joined = rootPath.trimEnd('/') + "/" + raw.trimStart('/')
-    return joined.substringBeforeLast('/', missingDelimiterValue = rootPath).ifBlank { rootPath }
+    val candidate = when {
+        expanded.startsWith("/") -> expanded
+        else -> rootPath.trimEnd('/') + "/" + expanded.trimStart('/')
+    }
+    return candidate.trimEnd('/')
+}
+
+internal fun remoteParentDir(path: String, rootPath: String): String {
+    val p = path.trimEnd('/')
+    if (p.isBlank()) return rootPath
+    return p.substringBeforeLast('/', missingDelimiterValue = "").ifBlank { "/" }
 }
 
 internal fun humanSize(bytes: Long): String = when {

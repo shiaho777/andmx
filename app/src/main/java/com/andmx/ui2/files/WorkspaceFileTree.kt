@@ -87,8 +87,9 @@ fun WorkspaceFileTree(
     val rootPath = hostPath
         ?: android.os.Environment.getExternalStorageDirectory()?.absolutePath
         ?: "/sdcard"
+    val rootfsRoot = remember { com.andmx.exec.proot.ProotRuntime(context).rootfsDir.absolutePath }
     val resolved = remember(initialPath, rootPath, hostPath) {
-        resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath)
+        resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath, rootfsRoot)
     }
     var currentPath by remember(rootPath, resolved.dir) { mutableStateOf(resolved.dir) }
     var query by remember { mutableStateOf("") }
@@ -98,7 +99,7 @@ fun WorkspaceFileTree(
     val changedMap = remember(changes) { changes.associateBy { it.path } }
 
     LaunchedEffect(initialPath, rootPath, hostPath) {
-        val target = resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath)
+        val target = resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath, rootfsRoot)
         currentPath = target.dir
         target.file?.let(onOpenFile)
     }
