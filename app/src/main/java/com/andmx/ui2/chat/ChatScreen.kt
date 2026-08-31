@@ -7,6 +7,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -16,12 +18,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Menu
@@ -48,9 +52,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.andmx.agent.SlashCommands
 import com.andmx.ui2.drawer.CommandCenterSheet
@@ -173,6 +183,38 @@ fun ChatScreen(
     var drawerOpen by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
+
+    // 文件树长按拖拽 → Composer 引用（ZCode 对齐）
+    val fileDragState by com.andmx.ui2.files.FileDragBus.state.collectAsState()
+    var composerBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    LaunchedEffect(fileDragState, composerBounds) {
+        val s = fileDragState
+        if (s.dragging) {
+            val pos = s.position ?: return@LaunchedEffect
+            val inside = composerBounds?.contains(pos) == true
+            if (inside != s.overComposer) {
+                com.andmx.ui2.files.FileDragBus.update(position = pos, overComposer = inside)
+            }
+        }
+    }
+    val dragPayloadNow = fileDragState.payload
+    if (dragPayloadNow != null) {
+        FileDragOverlay(
+            payload = dragPayloadNow,
+            overComposer = fileDragState.overComposer,
+            onRelease = { released ->
+                if (released) {
+                    val s = fileDragState
+                    if (s.overComposer) {
+                        s.payload?.let { p ->
+                            viewModel.addFileContext(p.relativePath.ifBlank { p.path })
+                        }
+                    }
+                    com.andmx.ui2.files.FileDragBus.cancel()
+                }
+            },
+        )
+    }
 
     LaunchedEffect(appSettings.taskAutoArchive, appSettings.taskAutoArchiveDays) {
         TaskAutoArchive.runIfEnabled(context, appSettings)
@@ -360,8 +402,12 @@ LaunchedEffect(Unit) {
             ) {
 
             // Composer 复用：空状态和对话状态共用同一套调用（局部闭包）
+            val composerBoundsModifier = Modifier.onGloballyPositioned { coords ->
+                composerBounds = coords.boundsInRoot()
+            }
             @Composable
-            fun ComposerBlock(flat: Boolean = false) {
+            fun ComposerBlock(flat: Boolean = false, extraModifier: Modifier = Modifier) {
+                val outerModifier = if (flat) composerBoundsModifier else extraModifier
                 Composer(
                     value = inputText,
                     onValueChange = { inputText = it },
@@ -429,7 +475,7 @@ LaunchedEffect(Unit) {
                         viewModel.addSkillByName(skill.name, skill.path)
                     },
                     flat = flat,
-                    modifier = Modifier
+                    modifier = outerModifier
                         .fillMaxWidth()
                         .then(if (flat) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 8.dp)),
                 )
@@ -474,6 +520,7 @@ LaunchedEffect(Unit) {
 
             // ZCode 对齐：无消息时 Composer 居中 + 欢迎语；有消息时 Composer 在底部
             val isEmpty = timeline.isEmpty()
+
 
             if (isEmpty) {
                 EmptyConversationState(
@@ -884,6 +931,93 @@ private fun emptyGreeting(): String {
         in 14..17 -> "下午好呀，继续加油，好不好"
         in 18..22 -> "晚上好呀，今天辛苦啦"
         else -> "夜深啦，困了也要照顾好自己哦"
+    }
+}
+
+/**
+ * 文件拖拽的全屏遮罩 + 胶囊提示（ZCode 对齐）。
+ *
+ * ZCode 桌面端文案：`chat.composer.workspaceFileDragHint` = "松开以引用此文件或目录"。
+ * 遮罩只观察不消费指针事件；手指松开（无按压）时回调 [onRelease]。
+ */
+@Composable
+private fun FileDragOverlay(
+    payload: com.andmx.ui2.files.FileDragBus.Payload,
+    overComposer: Boolean,
+    onRelease: (released: Boolean) -> Unit,
+) {
+    val motion = com.andmx.ui2.theme.LocalMotion.current
+    val position by com.andmx.ui2.files.FileDragBus.state.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(
+        visible = true,
+        enter = fadeIn(motion.fastEffects),
+        exit = fadeOut(motion.fastEffects),
+    ) {
+        val pos = position.position
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            event.changes.forEach { it.consume() }
+                            val pressed = event.changes.any { it.pressed }
+                            if (!pressed) {
+                                onRelease(true)
+                                break
+                            }
+                        }
+                    }
+                }
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(
+                        if (overComposer) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                    .border(
+                        1.dp,
+                        if (overComposer) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(999.dp),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    if (overComposer) Icons.Outlined.Check
+                    else Icons.Outlined.DriveFolderUpload,
+                    null,
+                    Modifier.size(16.dp),
+                    tint = if (overComposer) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (overComposer) "松开以引用此文件或目录"
+                    else payload.relativePath.ifBlank { payload.name },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 260.dp),
+                )
+            }
+        }
+        if (pos != null) {
+            Box(
+                Modifier
+                    .offset { IntOffset((pos.x - 44.dp.toPx()).roundToInt(), (pos.y - 20.dp.toPx()).roundToInt()) }
+                    .size(width = 88.dp, height = 40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+            )
+        }
     }
 }
 
