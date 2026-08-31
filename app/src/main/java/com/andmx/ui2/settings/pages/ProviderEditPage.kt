@@ -207,7 +207,18 @@ fun ProviderEditPage(
         }
     }
 
-    val canSave = name.isNotBlank() && baseUrl.isNotBlank()
+    val metadataProblem = selectedModels.firstNotNullOfOrNull { id ->
+        val def = modelMeta[id] ?: initial?.models?.get(id) ?: ModelDefinition()
+        validateModelMetadata(
+            ModelMetadataDraft(
+                id = id,
+                contextWindowText = metadataTokenText(def.contextWindow),
+                maxOutputTokensText = metadataTokenText(def.maxOutputTokens),
+                inputModalities = def.inputModalities,
+            )
+        )
+    }
+    val canSave = name.isNotBlank() && baseUrl.isNotBlank() && metadataProblem == null
     val catalogue = when (val fs = fetchState) {
         is FetchState.Ready -> fs.models
         else -> emptyList()
@@ -490,6 +501,14 @@ fun ProviderEditPage(
                             onPatch = { id, transform -> patchModel(id, transform) },
                         )
                     }
+                    metadataProblem?.let { problem ->
+                        Text(
+                            modelMetadataProblemText(problem),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
                     OutlinedButton(
                         onClick = { showAddModelDialog = true },
@@ -759,17 +778,14 @@ private fun SelectedModelsEditor(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
                 )
-                val (hasImage, hasVideo) = splitInputModalities(def.inputModalities)
+                val picked = splitInputModalities(def.inputModalities)
                 ChipRow(
                     options = MODEL_INPUT_MODALITIES,
-                    selected = newModelModalities(hasImage, hasVideo).toSet(),
+                    selected = picked,
                     locked = setOf("text"),
                     onToggle = { value, on ->
-                        val updated = newModelModalities(
-                            image = if (value == "image") on else hasImage,
-                            video = if (value == "video") on else hasVideo,
-                        )
-                        onPatch(id) { it.copy(inputModalities = updated) }
+                        val updated = if (on) picked + value else picked - value
+                        onPatch(id) { it.copy(inputModalities = newModelModalities(updated)) }
                     },
                 )
                 ReasoningEditor(
@@ -894,14 +910,71 @@ internal fun validateNewModel(
     return null
 }
 
-internal fun newModelModalities(image: Boolean, video: Boolean): List<String> = buildList {
-    add("text")
-    if (image) add("image")
-    if (video) add("video")
+/** ZCode 的规范模态序（renderer bundle 的 zMt）；归一化与界面选项都以此为准。 */
+internal val MODALITY_ORDER = listOf("text", "image", "video", "audio", "pdf")
+
+/**
+ * ZCode 的 o5：去重、丢弃未知值、按规范序重排。
+ * 刻意不强制补 text —— 缺 text 是校验要报的错，不是归一化要悄悄修的事。
+ */
+internal fun normalizeInputModalities(selected: Iterable<String>): List<String> {
+    val picked = selected.toSet()
+    return MODALITY_ORDER.filter { it in picked }
 }
 
-internal fun splitInputModalities(modalities: List<String>): Pair<Boolean, Boolean> =
-    ("image" in modalities) to ("video" in modalities)
+/** 界面态 → 存储态。text 恒在（界面把它锁为必选，ZCode 的 WMt 亦如此）。 */
+internal fun newModelModalities(selected: Iterable<String>): List<String> =
+    normalizeInputModalities(selected + "text")
+
+/** 存储态 → 界面态。归一化为集合，未知值与重复项在此被吸收。 */
+internal fun splitInputModalities(modalities: Iterable<String>): Set<String> =
+    (normalizeInputModalities(modalities) + "text").toSet()
+
+/**
+ * ZCode HMt 的校验级联：命中的第一个字段即返回，顺序即优先级。
+ * 缺 kinds 一项 —— ZCode 一个模型可配多种 API 格式，AndMX 一个供应商只有一种。
+ */
+internal enum class ModelMetadataProblem { ID, CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, INPUT_MODALITIES }
+
+internal data class ModelMetadataDraft(
+    val id: String,
+    val contextWindowText: String,
+    val maxOutputTokensText: String,
+    val inputModalities: List<String>,
+)
+
+internal fun validateModelMetadata(draft: ModelMetadataDraft): ModelMetadataProblem? {
+    if (draft.id.trim().isEmpty()) return ModelMetadataProblem.ID
+    if (!isValidTokenCount(draft.contextWindowText)) return ModelMetadataProblem.CONTEXT_WINDOW
+    if (!isValidTokenCount(draft.maxOutputTokensText)) return ModelMetadataProblem.MAX_OUTPUT_TOKENS
+    if ("text" !in normalizeInputModalities(draft.inputModalities)) {
+        return ModelMetadataProblem.INPUT_MODALITIES
+    }
+    return null
+}
+
+/**
+ * ZCode 的 VMt 要求正整数（trim → 空则 null → Number → 必须整数且 > 0）。
+ * AndMX 用空白与 0 表示「未指定」，沿用该语义，故这两者算通过。
+ */
+internal fun isValidTokenCount(raw: String): Boolean {
+    val t = raw.trim()
+    if (t.isEmpty() || t == "0") return true
+    val n = t.toDoubleOrNull() ?: return false
+    if (!n.isFinite()) return false
+    val asLong = n.toLong()
+    return n == asLong.toDouble() && asLong > 0 && asLong <= Int.MAX_VALUE
+}
+
+/** 0 表示未指定，落回空串交给 [isValidTokenCount] 放过。 */
+internal fun metadataTokenText(value: Int): String = if (value > 0) value.toString() else ""
+
+internal fun modelMetadataProblemText(problem: ModelMetadataProblem): String = when (problem) {
+    ModelMetadataProblem.ID -> "模型 ID 不能为空"
+    ModelMetadataProblem.CONTEXT_WINDOW -> "上下文窗口必须是正整数"
+    ModelMetadataProblem.MAX_OUTPUT_TOKENS -> "最大输出 Token 必须是正整数"
+    ModelMetadataProblem.INPUT_MODALITIES -> "输入类型必须包含文本"
+}
 
 /**
  * 模型对外暴露推理控制的方式，供 [SelectedModelsEditor] 的推理小节选择。
@@ -994,6 +1067,8 @@ private val MODEL_INPUT_MODALITIES = listOf(
     "text" to "文本",
     "image" to "图片",
     "video" to "视频",
+    "audio" to "音频",
+    "pdf" to "PDF",
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1180,8 +1255,7 @@ private fun AddModelDialog(
     var displayName by remember { mutableStateOf("") }
     var contextWindow by remember { mutableStateOf("128000") }
     var maxOutput by remember { mutableStateOf("") }
-    var supportsImage by remember { mutableStateOf(false) }
-    var supportsVideo by remember { mutableStateOf(false) }
+    var inputModalities by remember { mutableStateOf(setOf("text")) }
 
     val trimmedId = modelId.trim()
     val problem = validateNewModel(modelId, existingIds, contextWindow)
@@ -1259,13 +1333,12 @@ private fun AddModelDialog(
                 Spacer(Modifier.height(6.dp))
                 ChipRow(
                     options = MODEL_INPUT_MODALITIES,
-                    selected = newModelModalities(supportsImage, supportsVideo).toSet(),
+                    selected = inputModalities,
                     locked = setOf("text"),
                     onToggle = { value, on ->
-                        when (value) {
-                            "image" -> supportsImage = on
-                            "video" -> supportsVideo = on
-                        }
+                        inputModalities = splitInputModalities(
+                            if (on) inputModalities + value else inputModalities - value
+                        )
                     }
                 )
                 Spacer(Modifier.height(16.dp))
@@ -1292,7 +1365,7 @@ private fun AddModelDialog(
                             displayName = displayName.trim().ifBlank { null },
                             contextWindow = contextValue,
                             maxOutputTokens = maxOutput.toIntOrNull() ?: 0,
-                            inputModalities = newModelModalities(supportsImage, supportsVideo),
+                            inputModalities = newModelModalities(inputModalities),
                             outputModalities = listOf("text")
                         )
                     )
