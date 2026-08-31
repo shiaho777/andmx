@@ -36,6 +36,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -63,11 +66,16 @@ import com.andmx.llm.ChatRequest
 import com.andmx.llm.LlmClient
 import com.andmx.llm.classifyConnectionFailure
 import com.andmx.llm.connectionFailureText
+import com.andmx.llm.provider.ClaudeModelMapping
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
 import com.andmx.llm.provider.ReasoningConfig
 import com.andmx.llm.provider.ReasoningStyle
+import com.andmx.llm.provider.claudeMappingWithSlot
+import com.andmx.llm.provider.claudeSlotLabel
+import com.andmx.llm.provider.claudeSlotValue
+import com.andmx.llm.provider.normalizeClaudeMapping
 import com.andmx.llm.wire.AdapterFactory
 import com.andmx.llm.wire.AnthropicMessagesAdapter
 import com.andmx.ui2.chat.effortLabel
@@ -124,6 +132,7 @@ fun ProviderEditPage(
     var modelQuery by remember { mutableStateOf("") }
     var fetchState by remember { mutableStateOf<FetchState>(FetchState.Idle) }
     var testState by remember { mutableStateOf<TestState>(TestState.Idle) }
+    var claudeMapping by remember { mutableStateOf(initial?.claudeMapping) }
     var showAddModelDialog by remember { mutableStateOf(false) }
 
     fun build(): ProviderDefinition {
@@ -142,7 +151,8 @@ fun ProviderEditPage(
             apiKey = apiKey.trim(),
             enabled = initial?.enabled ?: true,
             httpHeaders = initial?.httpHeaders ?: emptyMap(),
-            models = modelMap
+            models = modelMap,
+            claudeMapping = normalizeClaudeMapping(claudeMapping),
         )
     }
 
@@ -545,6 +555,22 @@ fun ProviderEditPage(
                 }
             }
 
+            SettingsGroup("Claude 模型映射") {
+                Text(
+                    "为 Claude 的各模型槽位选择对应的模型",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                ClaudeMappingEditor(
+                    mapping = claudeMapping,
+                    candidates = selectedModels,
+                    onPick = { slot, modelId ->
+                        claudeMapping = claudeMappingWithSlot(claudeMapping, slot, modelId)
+                    },
+                )
+            }
+
             SettingsGroup("连接测试") {
                 val firstModel = selectedModels.firstOrNull()
                 Button(
@@ -880,6 +906,67 @@ private fun ModelPickList(
                             .height(1.dp)
                             .background(border.copy(alpha = 0.5f))
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClaudeMappingEditor(
+    mapping: ClaudeModelMapping?,
+    candidates: List<String>,
+    onPick: (String, String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ClaudeModelMapping.SLOT_ORDER.forEach { slot ->
+            var open by remember { mutableStateOf(false) }
+            val value = claudeSlotValue(mapping, slot)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    claudeSlotLabel(slot),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Box {
+                    OutlinedButton(onClick = { open = true }) {
+                        Text(
+                            value.ifBlank { "未设置" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 160.dp),
+                        )
+                    }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        DropdownMenuItem(
+                            text = { Text("未设置") },
+                            onClick = {
+                                onPick(slot, "")
+                                open = false
+                            },
+                        )
+                        candidates.forEach { id ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        id,
+                                        color = if (id == value) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    onPick(slot, id)
+                                    open = false
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
