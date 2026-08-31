@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Difference
+import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.Refresh
@@ -42,8 +44,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -148,6 +157,7 @@ fun WorkspaceFileTree(
                             name = file.name,
                             isDirectory = file.isDirectory,
                             path = file.absolutePath,
+                            rootPath = rootPath,
                             onClick = {
                                 if (file.isDirectory) {
                                     currentPath = file.absolutePath
@@ -262,6 +272,7 @@ private fun RemoteWorkspaceFileTree(
                             name = entry.name,
                             isDirectory = entry.isDirectory,
                             path = entry.path,
+                            rootPath = rootPath,
                             onClick = {
                                 if (entry.isDirectory) {
                                     query = ""
@@ -443,13 +454,45 @@ private fun FileTreeRow(
     name: String,
     isDirectory: Boolean,
     path: String,
+    rootPath: String,
     onClick: () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
+    var rowCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val dragPayload = remember(path, name, isDirectory, rootPath) {
+        val rel = path.removePrefix(rootPath.trimEnd('/')).trimStart('/').ifBlank { name }
+        FileDragBus.Payload(
+            kind = if (isDirectory) FileDragBus.Kind.DIRECTORY else FileDragBus.Kind.FILE,
+            name = name,
+            path = path,
+            relativePath = rel,
+        )
+    }
+    val dragModifier = Modifier
+        .pointerInput(dragPayload) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { offset ->
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val root = rowCoords?.positionInRoot() ?: Offset.Zero
+                    FileDragBus.start(payload = dragPayload, position = root + offset)
+                },
+                onDrag = { change, amount ->
+                    change.consume()
+                    val s = FileDragBus.state.value
+                    val next = s.position?.plus(amount) ?: return@detectDragGesturesAfterLongPress
+                    FileDragBus.update(position = next, overComposer = s.overComposer)
+                },
+                onDragEnd = { FileDragBus.finish() },
+                onDragCancel = { FileDragBus.cancel() },
+            )
+        }
+        .onGloballyPositioned { rowCoords = it }
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .combinedClickable(onClick = onClick)
+            .then(dragModifier)
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -477,5 +520,12 @@ private fun FileTreeRow(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
+        Icon(
+            Icons.Outlined.DragHandle,
+            null,
+            Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
     }
 }
+
