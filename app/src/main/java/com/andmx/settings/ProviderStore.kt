@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.ProviderEntity
+import com.andmx.llm.provider.ClaudeModelMapping
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
@@ -103,6 +104,7 @@ class ProviderStore(
         streamIdleTimeoutMs = streamIdleTimeoutMs,
         httpHeaders = decodeMap(httpHeadersJson),
         models = decodeModels(modelsJson),
+        claudeMapping = decodeClaudeMapping(claudeMappingJson),
     )
 
     private fun ProviderDefinition.toEntity(createdAtMs: Long, isPrimary: Boolean): ProviderEntity = ProviderEntity(
@@ -119,6 +121,7 @@ class ProviderStore(
         streamIdleTimeoutMs = streamIdleTimeoutMs,
         httpHeadersJson = encodeMap(httpHeaders),
         modelsJson = encodeModels(models),
+        claudeMappingJson = encodeClaudeMapping(claudeMapping),
         isPrimary = isPrimary,
         createdAtMs = createdAtMs,
         updatedAtMs = createdAtMs,
@@ -135,6 +138,13 @@ class ProviderStore(
 
     private fun decodeModels(s: String): Map<String, ModelDefinition> =
         runCatching { json.decodeFromString(MapSerializer(String.serializer(), ModelDefinition.serializer()), s) }.getOrDefault(emptyMap())
+
+    private fun encodeClaudeMapping(m: ClaudeModelMapping?): String =
+        m?.let { runCatching { json.encodeToString(ClaudeModelMapping.serializer(), it) }.getOrNull() }.orEmpty()
+
+    private fun decodeClaudeMapping(s: String): ClaudeModelMapping? =
+        if (s.isBlank()) null
+        else runCatching { json.decodeFromString(ClaudeModelMapping.serializer(), s) }.getOrNull()
 
     companion object {
         private const val SEED_PREFS = "andmx_provider_seed"

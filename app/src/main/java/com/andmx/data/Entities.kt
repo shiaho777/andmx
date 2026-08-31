@@ -211,6 +211,8 @@ data class ProviderEntity(
     val httpHeadersJson: String,
     /** JSON-serialized Map<String, ModelDefinition>. */
     val modelsJson: String,
+    /** JSON-serialized ClaudeModelMapping, or "" when never configured. */
+    val claudeMappingJson: String = "",
     /** Whether this is the currently-selected provider. */
     val isPrimary: Boolean,
     val createdAtMs: Long = System.currentTimeMillis(),

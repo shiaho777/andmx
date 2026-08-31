@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProviderEntity::class,
         TaskGroupEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -40,6 +40,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_9_10,
                     MIGRATION_10_11,
                     MIGRATION_11_12,
+                    MIGRATION_12_13,
                 )
                 .build()
                 .also { instance = it }
@@ -211,6 +212,19 @@ abstract class AndmxDatabase : RoomDatabase() {
         private val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * v12 → v13: Adds the `claudeMappingJson` column to providers for
+         * ZCode's `providerMappings.claude` model-slot mapping.
+         *
+         * Empty string means "never configured", which deserializes to null —
+         * matching ZCode's optional `claude` block.
+         */
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE providers ADD COLUMN claudeMappingJson TEXT NOT NULL DEFAULT ''")
             }
         }
 

@@ -126,6 +126,33 @@ data class ModelDefinition(
 }
 
 /**
+ * ZCode's `providerMappings.claude`: which of this provider's models should be
+ * used for each Claude model slot.
+ *
+ * Reverse-engineered from the engine schema in `zcode.cjs`
+ * (`Xxn = f.object({haiku, sonnet, opus, reasoning})` — every slot a required
+ * string, while the enclosing `claude` object is optional). The renderer in
+ * this build carries only the matching zod schema, no UI yet, so the editing
+ * surface here is designed from the i18n labels:
+ * `slot.haiku` = Haiku（轻量任务）, `slot.sonnet` = Sonnet（常规任务）,
+ * `slot.opus` = Opus（复杂任务）, `slot.reasoning` = Reasoning（推理任务）.
+ *
+ * A blank slot means "not set" (`mappingNotSet` = 未设置).
+ */
+@Serializable
+data class ClaudeModelMapping(
+    val haiku: String = "",
+    val sonnet: String = "",
+    val opus: String = "",
+    val reasoning: String = "",
+) {
+    /** ZCode's canonical slot order. */
+    companion object {
+        val SLOT_ORDER = listOf("haiku", "sonnet", "opus", "reasoning")
+    }
+}
+
+/**
  * A model provider configuration — the unified representation that replaces the
  * former split across `ModelProvider`, `ModelProviderConfig`, and the provider
  * fields of `ProviderSettings`.
@@ -161,6 +188,8 @@ data class ProviderDefinition(
     val httpHeaders: Map<String, String> = emptyMap(),
     /** Per-provider model catalogue. */
     val models: Map<String, ModelDefinition> = emptyMap(),
+    /** ZCode's `providerMappings.claude`; null = the user never configured it. */
+    val claudeMapping: ClaudeModelMapping? = null,
 ) {
     /** A provider is usable when enabled and, if it requires a key, the key is present. */
     val isUsable: Boolean get() = enabled && (!apiKeyRequired || apiKey.isNotBlank())
