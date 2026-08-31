@@ -6,20 +6,29 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -31,6 +40,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,12 +48,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.settings.ProviderStore
 import com.andmx.ui2.settings.EmptyState
 import com.andmx.ui2.settings.backAppBar
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private sealed class ModelView {
     data object List : ModelView()
@@ -84,7 +98,10 @@ fun ModelPage(onBack: () -> Unit) {
                 onToggleEnabled = { p, enabled ->
                     scope.launch { store.upsert(p.copy(enabled = enabled)) }
                 },
-                onSetPrimary = { scope.launch { store.setPrimary(it.id) } }
+                onSetPrimary = { scope.launch { store.setPrimary(it.id) } },
+                onReorder = { activeId, overId ->
+                    scope.launch { store.reorderProviders(activeId, overId) }
+                }
             )
             is ModelView.Edit -> ProviderEditPage(
                 initial = target.provider,
@@ -113,8 +130,14 @@ private fun ModelListView(
     onAdd: () -> Unit,
     onEdit: (ProviderDefinition) -> Unit,
     onToggleEnabled: (ProviderDefinition, Boolean) -> Unit,
-    onSetPrimary: (ProviderDefinition) -> Unit
+    onSetPrimary: (ProviderDefinition) -> Unit,
+    onReorder: (String, String) -> Unit
 ) {
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    // One card is roughly this tall; crossing it counts as a slot change.
+    val stepPx = with(density) { PROVIDER_CARD_STEP_DP.dp.toPx() }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -139,13 +162,39 @@ private fun ModelListView(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(providers, key = { it.id }) { provider ->
-                    ProviderCard(
-                        provider = provider,
-                        isPrimary = provider.id == primaryId,
-                        onEdit = { onEdit(provider) },
-                        onToggleEnabled = { onToggleEnabled(provider, it) },
-                        onSetPrimary = { onSetPrimary(provider) }
-                    )
+                    val isDragging = draggingId == provider.id
+                    Box(
+                        Modifier
+                            .zIndex(if (isDragging) 1f else 0f)
+                            .offset { IntOffset(0, if (isDragging) dragOffset.roundToInt() else 0) }
+                    ) {
+                        ProviderCard(
+                            provider = provider,
+                            isPrimary = provider.id == primaryId,
+                            dragging = isDragging,
+                            onEdit = { onEdit(provider) },
+                            onToggleEnabled = { onToggleEnabled(provider, it) },
+                            onSetPrimary = { onSetPrimary(provider) },
+                            onDragStart = { draggingId = provider.id; dragOffset = 0f },
+                            onDrag = { delta ->
+                                dragOffset += delta
+                                val index = providers.indexOfFirst { it.id == draggingId }
+                                if (index >= 0) {
+                                    when {
+                                        dragOffset >= stepPx && index < providers.lastIndex -> {
+                                            onReorder(provider.id, providers[index + 1].id)
+                                            dragOffset -= stepPx
+                                        }
+                                        dragOffset <= -stepPx && index > 0 -> {
+                                            onReorder(provider.id, providers[index - 1].id)
+                                            dragOffset += stepPx
+                                        }
+                                    }
+                                }
+                            },
+                            onDragStop = { draggingId = null; dragOffset = 0f }
+                        )
+                    }
                 }
             }
         }
@@ -156,17 +205,42 @@ private fun ModelListView(
 private fun ProviderCard(
     provider: ProviderDefinition,
     isPrimary: Boolean,
+    dragging: Boolean,
     onEdit: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
-    onSetPrimary: () -> Unit
+    onSetPrimary: () -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragStop: () -> Unit
 ) {
+    val elevation by animateDpAsState(
+        targetValue = if (dragging) 8.dp else 1.dp,
+        label = "providerCardElevation",
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onEdit)
+            .clickable(onClick = onEdit),
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.DragHandle,
+                    "拖拽调整供应商顺序",
+                    Modifier
+                        .size(20.dp)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { onDragStart() },
+                                onDragEnd = { onDragStop() },
+                                onDragCancel = { onDragStop() },
+                                onDrag = { _, dragAmount -> onDrag(dragAmount.y) },
+                            )
+                        },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -212,6 +286,9 @@ private fun ProviderCard(
         }
     }
 }
+
+/** Vertical travel that counts as moving one slot while dragging. */
+private const val PROVIDER_CARD_STEP_DP = 132f
 
 private fun kindShort(p: ProviderDefinition): String = when (p.kind.name) {
     "OPENAI" -> "Chat"

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -32,9 +33,19 @@ class ProviderStore(
     private val dao = AndmxDatabase.get(context).dao()
     private val prefs = context.getSharedPreferences(SEED_PREFS, Context.MODE_PRIVATE)
 
-    /** All configured providers, ordered with primary first. */
+    /**
+     * All configured providers, in the user's display order.
+     *
+     * The order lives in [prefs] as a standalone id list (see [ProviderOrder]),
+     * so the table itself stays unordered and a provider that has never been
+     * dragged simply falls to the end.
+     */
     val providers: Flow<List<ProviderDefinition>> =
-        dao.observeProviders().map { rows -> rows.map { it.toDefinition() } }
+        dao.observeProviders().map { rows ->
+            val defs = rows.map { it.toDefinition() }
+            applyProviderOrder(defs.map { it.id }, readProviderOrder())
+                .mapNotNull { id -> defs.firstOrNull { it.id == id } }
+        }
 
     /** The currently-selected provider, or null if none is usable yet. */
     val primary: Flow<ProviderDefinition?> =
@@ -78,6 +89,30 @@ class ProviderStore(
         if (dao.allProviders().isNotEmpty() && primary.first() == null) {
             dao.allProviders().firstOrNull()?.let { dao.setPrimary(it.id) }
         }
+    }
+
+    /**
+     * Move the provider [activeId] onto [overId]'s slot, then persist the
+     * resulting order. Unknown or identical ids leave the order untouched.
+     */
+    suspend fun reorderProviders(activeId: String, overId: String) {
+        val current = dao.observeProviders().first().map { it.id }
+        val next = reorderProviderIds(current, activeId, overId)
+        if (next != current) writeProviderOrder(next)
+    }
+
+    private fun readProviderOrder(): List<String> {
+        val raw = prefs.getString(KEY_PROVIDER_ORDER, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(String.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun writeProviderOrder(ids: List<String>) {
+        val raw = runCatching {
+            json.encodeToString(ListSerializer(String.serializer()), ids)
+        }.getOrNull() ?: return
+        prefs.edit().putString(KEY_PROVIDER_ORDER, raw).apply()
     }
 
     /** Mark a provider as the active one (clears the previous primary). */
@@ -149,6 +184,7 @@ class ProviderStore(
     companion object {
         private const val SEED_PREFS = "andmx_provider_seed"
         private const val KEY_SEEDED = "seeded_v1"
+        private const val KEY_PROVIDER_ORDER = "provider_order_v1"
     }
 }
 
