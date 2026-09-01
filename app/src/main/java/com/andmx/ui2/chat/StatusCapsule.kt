@@ -56,7 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.agent.UpdatePlanTool
-import com.andmx.ui.conversation.ConversationGoal
+import com.andmx.agent.ConversationGoal
 import com.andmx.ui2.theme.LocalMotion
 import com.andmx.workspace.GitBaseline
 
@@ -70,6 +70,7 @@ fun StatusCapsule(
     contextWindow: Int,
     breakdown: List<ChatController.ContextBreakdownItem> = emptyList(),
     onCompress: () -> Unit,
+    displayMode: String = "auto",
     modifier: Modifier = Modifier,
 ) {
     val hasSteps = planSteps.isNotEmpty()
@@ -81,7 +82,9 @@ fun StatusCapsule(
         (gitInfo?.branch?.isNotBlank() == true) || contextPct > 0.001f
     if (!anythingToShow) return
 
-    var expanded by remember { mutableStateOf(false) }
+    // ZCode summaryPanel.displayMode 对齐：auto 默认收起（用户可手动展开），
+    // expanded 强制展开，collapsed 强制收起。
+    var expanded by remember(displayMode) { mutableStateOf(displayMode == "expanded") }
     val motion = LocalMotion.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,

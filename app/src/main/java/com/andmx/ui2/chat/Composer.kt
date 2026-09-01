@@ -33,9 +33,11 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.ListAlt
 import androidx.compose.material.icons.outlined.PanTool
@@ -974,6 +976,10 @@ private fun MentionChipView(
             val c = MaterialTheme.colorScheme.onSurfaceVariant
             c to MaterialTheme.colorScheme.surfaceContainerHighest
         }
+        ContextChipKind.MESSAGE -> {
+            val c = if (isDark) Color(0xFFC4B5FD) else Color(0xFF6D28D9)
+            c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
+        }
     }
     val display = when (kind) {
         ContextChipKind.SKILL -> label.removePrefix("$")
@@ -1075,6 +1081,7 @@ private fun ContextChipKind.icon(): ImageVector = when (this) {
     ContextChipKind.COMMAND -> Icons.Outlined.Terminal
     ContextChipKind.SKILL -> Icons.Outlined.AutoAwesome
     ContextChipKind.ATTACHMENT -> Icons.Outlined.AttachFile
+    ContextChipKind.MESSAGE -> Icons.Outlined.FormatQuote
 }
 
 /**

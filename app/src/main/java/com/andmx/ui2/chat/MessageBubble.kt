@@ -18,6 +18,8 @@ import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FormatQuote
+import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +46,7 @@ fun MessageBubble(
     onCopy: (() -> Unit)? = null,
     onBranch: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    onQuote: (() -> Unit)? = null,
     isEditing: Boolean = false,
 ) {
     val isUser = message.role == "user"
@@ -53,6 +56,7 @@ fun MessageBubble(
             modifier = modifier,
             onCopy = onCopy,
             onEdit = onEdit,
+            onQuote = onQuote,
             isEditing = isEditing,
         )
     } else {
@@ -62,6 +66,7 @@ fun MessageBubble(
             onRegenerate = onRegenerate,
             onCopy = onCopy,
             onBranch = onBranch,
+            onQuote = onQuote,
         )
     }
 }
@@ -72,6 +77,7 @@ private fun UserProcessBubble(
     modifier: Modifier = Modifier,
     onCopy: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    onQuote: (() -> Unit)? = null,
     isEditing: Boolean = false,
 ) {
     val maxBubble = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
@@ -104,11 +110,12 @@ private fun UserProcessBubble(
                 },
             )
         }
-        if (message.content.isNotBlank() && (onCopy != null || onEdit != null || message.createdAt > 0L || message.sortKey > 0L)) {
+        if (message.content.isNotBlank() && (onCopy != null || onEdit != null || onQuote != null || message.createdAt > 0L || message.sortKey > 0L)) {
             UserActionBar(
                 createdAt = message.createdAt.takeIf { it > 0L } ?: message.sortKey,
                 onCopy = onCopy,
                 onEdit = onEdit,
+                onQuote = onQuote,
                 isEditing = isEditing,
             )
         }
@@ -120,6 +127,7 @@ private fun UserActionBar(
     createdAt: Long,
     onCopy: (() -> Unit)?,
     onEdit: (() -> Unit)?,
+    onQuote: (() -> Unit)?,
     isEditing: Boolean,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -143,6 +151,13 @@ private fun UserActionBar(
                 onClick = onEdit,
             )
         }
+        if (onQuote != null) {
+            ActionChip(
+                icon = Icons.Outlined.FormatQuote,
+                label = "引用",
+                onClick = onQuote,
+            )
+        }
         val timeLabel = formatHm(createdAt)
         if (timeLabel.isNotBlank()) {
             Text(
@@ -162,6 +177,7 @@ private fun AssistantProcessBlock(
     onRegenerate: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
     onBranch: (() -> Unit)? = null,
+    onQuote: (() -> Unit)? = null,
 ) {
     val process = message.isProcess
     // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
@@ -213,13 +229,14 @@ private fun AssistantProcessBlock(
             }
         }
         val showActions = !process && !message.isStreaming && message.content.isNotBlank()
-        if (showActions && (onCopy != null || onBranch != null || onRegenerate != null || message.completedAt > 0L || message.createdAt > 0L)) {
+        if (showActions && (onCopy != null || onBranch != null || onRegenerate != null || onQuote != null || message.completedAt > 0L || message.createdAt > 0L)) {
             AssistantActionBar(
                 createdAt = message.createdAt.takeIf { it > 0L } ?: message.sortKey,
                 completedAt = message.completedAt,
                 onCopy = onCopy,
                 onBranch = onBranch,
                 onRegenerate = onRegenerate,
+                onQuote = onQuote,
             )
         }
     }
@@ -232,6 +249,7 @@ private fun AssistantActionBar(
     onCopy: (() -> Unit)?,
     onBranch: (() -> Unit)?,
     onRegenerate: (() -> Unit)?,
+    onQuote: (() -> Unit)? = null,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
@@ -264,6 +282,13 @@ private fun AssistantActionBar(
                     icon = Icons.Outlined.Refresh,
                     label = "重新生成",
                     onClick = onRegenerate,
+                )
+            }
+            if (onQuote != null) {
+                ActionChip(
+                    icon = Icons.Outlined.FormatQuote,
+                    label = "引用",
+                    onClick = onQuote,
                 )
             }
         }
