@@ -76,6 +76,9 @@ class ChatViewModel @Inject constructor(
     private val _contextWindow = MutableStateFlow(128_000)
     val contextWindow: StateFlow<Int> = _contextWindow.asStateFlow()
 
+    /** 上下文来源分解（ZCode chat.contextUsage.breakdown 对齐）。 */
+    val contextBreakdown: StateFlow<List<ChatController.ContextBreakdownItem>> = controller.contextBreakdown
+
     private val _subAgentItems = MutableStateFlow<List<SubAgentItem>>(emptyList())
     val subAgentItems: StateFlow<List<SubAgentItem>> = _subAgentItems.asStateFlow()
 
@@ -1993,6 +1996,13 @@ class ChatViewModel @Inject constructor(
             }
         }
         controller.resolveApproval(allow)
+    }
+
+    /** ZCode 对齐：审批作用域（允许本会话 / 始终拒绝）。 */
+    fun resolveApprovalScoped(allow: Boolean, scope: ChatController.ApprovalScope) {
+        val denied = scope == ChatController.ApprovalScope.SESSION_DENY
+        resolveApproval(allow && !denied)
+        controller.resolveApprovalScoped(allow, scope)
     }
 
     fun resolveUserQuestion(answersJson: String) {

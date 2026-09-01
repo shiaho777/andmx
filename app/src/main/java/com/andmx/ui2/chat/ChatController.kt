@@ -10,6 +10,8 @@ import com.andmx.agent.ApprovalMode
 import com.andmx.agent.ApprovalOutcome
 import com.andmx.agent.ApprovalPolicy
 import com.andmx.agent.BrowseTool
+import com.andmx.agent.ContextBreakdown
+import com.andmx.agent.ToolArgs
 import com.andmx.agent.Decision
 import com.andmx.agent.EditFileTool
 import com.andmx.agent.GitTool
@@ -240,7 +242,30 @@ class ChatController(private val context: Context) {
         val total: Int = 0,
         val lastTotal: Int = 0,
     )
+
+    /** 上下文来源分解 UI 模型（ZCode chat.contextUsage.breakdown 对齐）。 */
+    data class ContextBreakdownItem(val label: String, val chars: Int, val percent: Double)
+
+    private val _contextBreakdown = MutableStateFlow<List<ContextBreakdownItem>>(emptyList())
+    val contextBreakdown: StateFlow<List<ContextBreakdownItem>> = _contextBreakdown.asStateFlow()
+
+    private fun refreshContextBreakdown(conversationId: Long) {
+        val session = sessions[conversationId] ?: return
+        val tools = session.engine.listTools()
+        val mcp = tools.count { ToolArgs.isMcpName(it.first) }
+        val builtin = (tools.size - mcp).coerceAtLeast(0)
+        val result = ContextBreakdown.compute(
+            history = session.engine.snapshotHistory(),
+            systemToolCount = builtin,
+            mcpToolCount = mcp,
+        )
+        _contextBreakdown.value = result.withPercent().map { (item, percent) ->
+            ContextBreakdownItem(item.source.label, item.chars, percent)
+        }
+    }
+
     private val subAgentWatchJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
+    private val approvalRulesByConversation = ConcurrentHashMap<Long, ConcurrentHashMap<String, ApprovalScope>>()
     private val liveChatEvents = ConcurrentHashMap<Long, kotlinx.coroutines.flow.MutableSharedFlow<ChatEvent>>()
 
     private fun liveBus(conversationId: Long): kotlinx.coroutines.flow.MutableSharedFlow<ChatEvent> =
@@ -283,24 +308,71 @@ class ChatController(private val context: Context) {
         val planModeState: PlanModeState = PlanModeState(),
         var approvalMode: ExecMode,
         var pending: CompletableDeferred<Boolean>? = null,
+        var pendingArgs: String? = null,
         var pendingAnswer: CompletableDeferred<String>? = null,
         val turnToolOutputs: MutableList<Pair<String, String>> = mutableListOf(),
         var lastUserText: String = "",
         var lastAssistantText: String = "",
     )
 
+    /** 审批作用域（ZCode chat.permission 对齐）。 */
+    enum class ApprovalScope { ONCE, SESSION_ALLOW, SESSION_DENY }
+
     fun resolveApproval(allow: Boolean) {
+        resolveApprovalScoped(allow, ApprovalScope.ONCE)
+    }
+
+    /**
+     * 带作用域的审批：本会话允许/拒绝会为该会话登记一条 grant/deny 规则，
+     * 后续相同 (tool, key) 的请求不再弹窗（ZCode 对齐）。
+     */
+    fun resolveApprovalScoped(allow: Boolean, scope: ApprovalScope) {
         val req = _pendingApproval.value
         _pendingApproval.value = null
         val session = req?.let { sessions[it.conversationId] }
-        session?.pending?.complete(allow)
+        val allowed = allow && scope != ApprovalScope.SESSION_DENY
+        if (session != null && req != null && scope != ApprovalScope.ONCE) {
+            val rule = approvalRuleKey(req.toolName, session.pendingArgs.orEmpty())
+            if (rule != null) {
+                approvalRulesByConversation
+                    .computeIfAbsent(req.conversationId) { ConcurrentHashMap() }[rule] = scope
+            }
+        }
+        session?.pending?.complete(allowed)
         session?.pending = null
+        session?.pendingArgs = null
         if (session?.pendingAnswer != null) {
             session.pendingAnswer?.complete(
-                if (allow) """{"answers":{"__default__":"approved"}}""" else """{"answers":{"__default__":"rejected"}}"""
+                if (allowed) """{"answers":{"__default__":"approved"}}""" else """{"answers":{"__default__":"rejected"}}"""
             )
             session.pendingAnswer = null
         }
+    }
+
+    /** 规则键：命令类按前缀（首个 token），文件/其它按工具名 + 摘要 key。 */
+    private fun approvalRuleKey(toolName: String, args: String): String? {
+        val canonical = ToolArgs.canonical(toolName)
+        return when (canonical) {
+            "shell", "git" -> {
+                val command = ToolArgs.shellCommand(toolName, args)
+                if (command.isBlank()) null
+                else "$canonical:prefix:${command.trim().split(Regex("\\s+")).first().lowercase()}"
+            }
+            "read", "write", "edit", "multiedit", "patch", "list", "grep", "glob" -> {
+                val path = ToolArgs.filePath(toolName, args)
+                if (path.isBlank()) null
+                else "$canonical:file:${path.trimEnd('*')}"
+            }
+            else -> "$canonical:any"
+        }
+    }
+
+    private fun sessionRuleFor(conversationId: Long, toolName: String, args: String): ApprovalScope? {
+        val rule = approvalRuleKey(toolName, args) ?: return null
+        val scoped = approvalRulesByConversation[conversationId]?.get(rule)
+        if (scoped != null && scoped != ApprovalScope.ONCE) return scoped
+        // 文件规则同时命中同路径其它编辑操作；命令前缀规则在 approvalRuleKey 已归一
+        return null
     }
 
     fun resolveUserQuestion(answersJson: String) {
@@ -1249,6 +1321,12 @@ class ChatController(private val context: Context) {
                 return ApprovalOutcome.AllowedOnce
             }
         }
+        // 会话级审批规则（ZCode 对齐）：本会话允许/始终拒绝命中即不再弹窗。
+        when (sessionRuleFor(conversationId, tool.name, args.toString())) {
+            ApprovalScope.SESSION_ALLOW -> return ApprovalOutcome.AllowedOnce
+            ApprovalScope.SESSION_DENY -> return ApprovalOutcome.Rejected("此操作已被你设置为始终拒绝")
+            else -> Unit
+        }
         val decision = when (mode) {
             ExecMode.FULL -> Decision.AUTO
             ExecMode.PLAN -> {
@@ -1272,6 +1350,7 @@ class ChatController(private val context: Context) {
                     ?: return ApprovalOutcome.Unavailable("会话不可用")
                 val deferred = CompletableDeferred<Boolean>()
                 session.pending = deferred
+                session.pendingArgs = args.toString()
                 val summary = buildApprovalSummary(tool, args)
                 _pendingApproval.value = ApprovalRequest(
                     conversationId = conversationId,
@@ -1466,6 +1545,7 @@ class ChatController(private val context: Context) {
             total = session.totalTokens.takeIf { it > 0 } ?: (session.inputTokens + session.outputTokens),
             lastTotal = last.totalTokens.takeIf { it > 0 } ?: (last.inputTokens + last.outputTokens),
         )
+        refreshContextBreakdown(conversationId)
     }
 
     private suspend fun ensureRolloutSession(
