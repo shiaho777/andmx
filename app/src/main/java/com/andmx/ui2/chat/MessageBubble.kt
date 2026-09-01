@@ -17,11 +17,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -159,6 +164,16 @@ private fun AssistantProcessBlock(
     onBranch: (() -> Unit)? = null,
 ) {
     val process = message.isProcess
+    // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
+    val previewPlan = remember(message.content, message.isStreaming) {
+        if (message.isStreaming) {
+            MessagePreview.Plan(message.content, message.content.length, false)
+        } else {
+            MessagePreview.plan(message.content)
+        }
+    }
+    var showFull by remember(message.id) { mutableStateOf(false) }
+    val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else message.content
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -170,10 +185,33 @@ private fun AssistantProcessBlock(
             ),
     ) {
         StreamingText(
-            text = message.content,
+            text = visibleText,
             isStreaming = message.isStreaming,
             muted = process,
         )
+        if (previewPlan.truncated && !showFull) {
+            Row(
+                Modifier
+                    .padding(top = 2.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showFull = true }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.ExpandMore,
+                    null,
+                    Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "查看完整消息（${previewPlan.fullBytes / 1000}k 字符）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
         val showActions = !process && !message.isStreaming && message.content.isNotBlank()
         if (showActions && (onCopy != null || onBranch != null || onRegenerate != null || message.completedAt > 0L || message.createdAt > 0L)) {
             AssistantActionBar(
