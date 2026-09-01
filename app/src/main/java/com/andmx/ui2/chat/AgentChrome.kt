@@ -480,7 +480,7 @@ fun ContextUsageBar(
 
 @Composable
 fun GoalStrip(
-    goal: com.andmx.ui.conversation.ConversationGoal,
+    goal: com.andmx.agent.ConversationGoal,
     modifier: Modifier = Modifier,
 ) {
     if (!goal.hasGoal) return

@@ -62,7 +62,7 @@ class MarkdownEngineTest {
     @Test
     fun unclosedCodeFenceStillYieldsCode() {
         val blocks = MarkdownEngine.parse("```\nline1\nline2")
-        assertEquals(listOf(MdBlock.Code(lang = "", code = "line1\nline2")), blocks)
+        assertEquals(listOf(MdBlock.Code(lang = "", code = "line1\nline2", unclosed = true, openingLine = "```", contentStartOffset = 4)), blocks)
     }
 
     @Test

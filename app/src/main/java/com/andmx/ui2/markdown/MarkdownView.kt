@@ -45,7 +45,17 @@ fun MarkdownView(
     contentColor: Color = Color.Unspecified,
     bodySizeSp: Float = 0f,
 ) {
-    val blocks = remember(markdown) { MarkdownEngine.parse(markdown) }
+    // 流式期间走增量解析（dsh incremental 对齐）：冻结块跨 chunk 复用，
+    // 只有尾部重解析；块以源偏移为 key，跨冻结边界不重挂载。
+    val parser = remember { IncrementalMarkdown.Parser() }
+    var incremental by remember { mutableStateOf<IncrementalMarkdown.Result?>(null) }
+    if (streaming) incremental = parser.update(markdown)
+    val positioned: List<IncrementalMarkdown.PositionedBlock> = if (streaming && incremental != null) {
+        incremental!!.frozen + incremental!!.tail
+    } else {
+        remember(markdown) { MarkdownEngine.parseWithOffsets(markdown) }
+            .map { IncrementalMarkdown.PositionedBlock(it.block, it.startOffset) }
+    }
     val isDark = isSystemInDarkTheme()
     val textColor = if (contentColor == Color.Unspecified) {
         MaterialTheme.colorScheme.onSurface
@@ -64,10 +74,11 @@ fun MarkdownView(
     val gap = if (streaming) 5.dp else 8.dp
 
     Column(modifier = modifier.fillMaxWidth()) {
-        blocks.forEachIndexed { index, block ->
+        positioned.forEachIndexed { index, positionedBlock ->
+            val block = positionedBlock.node
             if (index > 0) Spacer(modifier.height(gap))
-
-            when (block) {
+            androidx.compose.runtime.key(positionedBlock.key) {
+                when (block) {
                 is MdBlock.Heading -> {
                     val style = when (block.level) {
                         1 -> MaterialTheme.typography.headlineLarge
@@ -136,6 +147,7 @@ fun MarkdownView(
                 }
 
                 is MdBlock.Table -> MarkdownTable(block, bodyStyle, textColor, mutedColor)
+            }
             }
         }
     }

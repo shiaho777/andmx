@@ -37,14 +37,14 @@ import com.andmx.agent.GoalToolState
 import com.andmx.agent.threadHandoffText
 import com.andmx.agent.ThreadHandoffContext
 import com.andmx.agent.HandoffRunLogItem
-import com.andmx.ui.conversation.ConversationGoal
+import com.andmx.agent.ConversationGoal
 import com.andmx.agent.WebSearchTool
 import com.andmx.agent.WriteFileTool
 import com.andmx.agent.hooks.HookSystem
 import com.andmx.agent.suggestions.AmbientSuggestions
 import com.andmx.agent.memory.MemorySystem
-import com.andmx.ui.conversation.GoalPhase
-import com.andmx.ui.conversation.GoalStatus
+import com.andmx.agent.GoalPhase
+import com.andmx.agent.GoalStatus
 import com.andmx.agent.multi.SubAgentOrchestrator
 import com.andmx.agent.multi.SubagentCatalog
 import com.andmx.agent.multi.ZCodeAgentTool
@@ -652,6 +652,8 @@ class ChatController(private val context: Context) {
     ) {
         when (event) {
             is AgentEvent.AssistantDelta -> emit(ChatEvent.AssistantChunk(event.text))
+            is AgentEvent.StepStarted -> emit(ChatEvent.StepStarted(event.turn, event.step, event.startedAtMs))
+            is AgentEvent.FirstToken -> emit(ChatEvent.FirstToken(event.turn, event.step, event.atMs))
             is AgentEvent.ReasoningDelta -> emit(ChatEvent.ReasoningChunk(event.text))
             is AgentEvent.ReasoningDone -> emit(ChatEvent.ReasoningDone)
             is AgentEvent.ToolCallArgsDelta -> emit(ChatEvent.ToolCallArgsDelta(event.index, event.id, event.name, event.argumentsSoFar))

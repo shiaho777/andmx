@@ -23,8 +23,6 @@ import com.andmx.agent.GetGoalTool
 import com.andmx.agent.ApplyPatchTool
 import com.andmx.agent.GitTool
 import com.andmx.exec.policy.NetworkPolicy
-import com.andmx.ui.conversation.ConversationGoal
-import com.andmx.ui.conversation.GoalStatus
 import com.andmx.ui2.chat.ExecMode
 import com.andmx.workspace.WorkspaceAccess
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -28,6 +28,10 @@ sealed class ChatEvent {
     data class SubAgentFailed(val agentId: String, val error: String) : ChatEvent()
     data class Error(val message: String) : ChatEvent()
     data object Done : ChatEvent()
+
+    /** step 首包/首 token 时间戳（dsh StatsLine 的 TTFT/吞吐指标来源）。 */
+    data class StepStarted(val turn: Int, val step: Int, val startedAtMs: Long) : ChatEvent()
+    data class FirstToken(val turn: Int, val step: Int, val atMs: Long) : ChatEvent()
 }
 
 data class PlanStepUi(

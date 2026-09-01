@@ -1,7 +1,7 @@
 package com.andmx.agent
 
-import com.andmx.ui.conversation.ConversationGoal
-import com.andmx.ui.conversation.GoalStatus
+import com.andmx.agent.ConversationGoal
+import com.andmx.agent.GoalStatus
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add

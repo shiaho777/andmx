@@ -19,6 +19,12 @@ import kotlinx.serialization.json.jsonObject
 sealed interface AgentEvent {
     /** Incremental assistant text chunk (streaming). */
     data class AssistantDelta(val text: String) : AgentEvent
+    /**
+     * 本 step 请求发出（TTFT 起点）。turn 由引擎递增计数。
+     */
+    data class StepStarted(val turn: Int, val step: Int, val startedAtMs: Long) : AgentEvent
+    /** 本 step 首个可见内容到达（TTFT 终点 / 解码起点）。 */
+    data class FirstToken(val turn: Int, val step: Int, val atMs: Long) : AgentEvent
     /** Incremental model thinking / reasoning chunk. */
     data class ReasoningDelta(val text: String) : AgentEvent
     /** Thinking block finished for the current model step. */
@@ -85,6 +91,7 @@ class AgentEngine(
     private var metaUserContext: String = ""
     private var todoItemsProvider: (() -> String?)? = null
     private var lastAssistantCompletedAtMs: Long? = null
+    private var turnCount: Int = 0
 
     /** Register additional tools at runtime (e.g. from MCP servers). */
     fun addTools(more: List<Tool>) { extraTools = extraTools + more }
@@ -212,6 +219,7 @@ class AgentEngine(
             userInput
         }
         history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null })
+        turnCount += 1
         loop(settings, turn)
     }
 
@@ -301,13 +309,25 @@ class AgentEngine(
             // Stream with retry: a transient stream break / empty reply shouldn't
             // kill the whole turn. Retry up to 2 times with backoff.
             var sawReasoning = false
+            var firstTokenSent = false
+            emit(AgentEvent.StepStarted(turnCount, step, System.currentTimeMillis()))
             val toolArgBuf = sortedMapOf<Int, StringBuilder>()
             val toolMeta = sortedMapOf<Int, Pair<String?, String?>>()
             val msg = streamWithRetry(
                 request,
-                onContent = { emit(AgentEvent.AssistantDelta(it)) },
+                onContent = {
+                    if (!firstTokenSent) {
+                        firstTokenSent = true
+                        emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
+                    }
+                    emit(AgentEvent.AssistantDelta(it))
+                },
                 onReasoning = {
                     sawReasoning = true
+                    if (!firstTokenSent) {
+                        firstTokenSent = true
+                        emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
+                    }
                     emit(AgentEvent.ReasoningDelta(it))
                 },
                 onToolCall = { index, id, name, argDelta ->
