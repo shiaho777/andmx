@@ -361,6 +361,15 @@ class ChatController(private val context: Context) {
         return com.andmx.agent.TokenEstimate.estimateAll(texts)
     }
 
+    /**
+     * turnSteer（ZCode 对齐）：把用户消息注入运行中会话的引擎历史，
+     * 下一个模型步即会看到；仅在有活跃会话时生效。
+     */
+    fun injectUserMessage(conversationId: Long, text: String) {
+        val session = sessions[conversationId] ?: return
+        session.engine.injectUserMessage(text)
+    }
+
     fun clearSession(conversationId: Long) {
         sessions.remove(conversationId)
         orchestrators.remove(conversationId)?.shutdown()

@@ -107,6 +107,16 @@ class ChatViewModel @Inject constructor(
     private val _queue = MutableStateFlow<List<String>>(emptyList())
     val queue: StateFlow<List<String>> = _queue.asStateFlow()
 
+    /** 队列暂停原因（ZCode 对齐：停止/出错后队列不丢，等用户手动继续）。 */
+    enum class QueuePause { NONE, STOPPED, ERROR }
+
+    private val _queuePaused = MutableStateFlow(QueuePause.NONE)
+    val queuePaused: StateFlow<QueuePause> = _queuePaused.asStateFlow()
+
+    /** turnSteer：运行中注入当前轮的引导消息（null = 无待引导）。 */
+    private val _steeringMessage = MutableStateFlow<String?>(null)
+    val steeringMessage: StateFlow<String?> = _steeringMessage.asStateFlow()
+
     /** 输入区上下文 chips（@ / # 等）。 */
     private val _contextChips = MutableStateFlow<List<ContextChip>>(emptyList())
     val contextChips: StateFlow<List<ContextChip>> = _contextChips.asStateFlow()
@@ -720,7 +730,40 @@ class ChatViewModel @Inject constructor(
         val editId = pendingEditMessageId
         pendingEditMessageId = null
         _editingMessageId.value = null
+        if (_steeringMessage.value != null && _queue.value.isNotEmpty()) {
+            _steeringMessage.value = null
+        }
         runTurn(withContext, images, editMessageId = editId)
+    }
+
+    /** turnSteer（ZCode 对齐）：任务运行中把消息直接注入当前轮。 */
+    fun steerCurrentTurn(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        if (!_isLoading.value) {
+            sendMessage(trimmed)
+            return
+        }
+        val withContext = buildMessageWithContext(trimmed)
+        _contextChips.value = emptyList()
+        _steeringMessage.value = withContext
+        viewModelScope.launch {
+            val id = _currentConversationId.value
+            if (id > 0L) {
+                runCatching {
+                    repo.addMessage(
+                        conversationId = id,
+                        role = "user",
+                        content = withContext,
+                    )
+                }
+                controller.injectUserMessage(id, withContext)
+            }
+        }
+    }
+
+    fun cancelSteer() {
+        _steeringMessage.value = null
     }
 
     private fun resolveImageDataUrl(attachment: Attachment): String? {
@@ -1084,18 +1127,26 @@ class ChatViewModel @Inject constructor(
 
     fun branchFromMessage(messageId: Long) {
         if (_isLoading.value) {
-            _error.value = "请等待当前回复完成后再分支"
+            _error.value = "任务结束后可分叉"
             return
         }
         viewModelScope.launch {
             val parentId = _currentConversationId.value
             if (parentId <= 0L) {
-                _error.value = "当前没有可分支的会话"
+                _error.value = "当前没有可分叉的对话"
                 return@launch
             }
             val live = _messages.value
             val liveIdx = live.indexOfFirst { it.id == messageId }
+            if (liveIdx < 0) {
+                _error.value = "原对话已不包含分叉那条消息"
+                return@launch
+            }
             val history = runCatching { repo.messages(parentId) }.getOrDefault(emptyList())
+            if (history.isEmpty() && liveIdx < 0) {
+                _error.value = "派生自旧对话（已丢失追溯信息）"
+                return@launch
+            }
             val slice: List<com.andmx.data.MessageEntity> = when {
                 history.isNotEmpty() -> {
                     val byId = history.indexOfFirst { it.id == messageId }
@@ -1108,21 +1159,10 @@ class ChatViewModel @Inject constructor(
                     }
                     if (idx < 0) emptyList() else history.take(idx + 1)
                 }
-                liveIdx >= 0 -> {
-                    live.take(liveIdx + 1).map { m ->
-                        com.andmx.data.MessageEntity(
-                            id = 0,
-                            conversationId = parentId,
-                            role = m.role,
-                            content = m.content,
-                            createdAt = m.createdAt.takeIf { it > 0L } ?: m.sortKey,
-                        )
-                    }
-                }
                 else -> emptyList()
             }
             if (slice.isEmpty()) {
-                _error.value = "无法定位分支点"
+                _error.value = "找不到分叉点 checkpoint"
                 return@launch
             }
             val parent = runCatching { repo.conversation(parentId) }.getOrNull()
@@ -1147,7 +1187,7 @@ class ChatViewModel @Inject constructor(
             }
             runCatching { repo.recordSpawnEdge(parentId, childId, status = "branched") }
             switchToConversation(childId)
-            android.widget.Toast.makeText(context, "已创建分支会话", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, "已分叉会话", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1315,6 +1355,7 @@ class ChatViewModel @Inject constructor(
         if (id > 0L) controller.stopTurn(id)
         else controller.resolveApproval(false)
         _isLoading.value = false
+        pauseQueue(QueuePause.STOPPED)
         val running = _toolCalls.value.map {
             if (it.isRunning) it.copy(isRunning = false, isError = true, output = it.output ?: "已停止") else it
         }
@@ -1436,9 +1477,21 @@ class ChatViewModel @Inject constructor(
     fun cancelSwitchModel() { _modelSwitchGuard.value = null }
 
     private fun drainQueue() {
+        _steeringMessage.value = null
         val next = _queue.value.firstOrNull() ?: return
         _queue.value = _queue.value.drop(1)
         runTurn(next)
+    }
+
+    /** ZCode 对齐：stop 后队列不丢，进入暂停态等用户手动继续。 */
+    fun resumeQueue() {
+        if (_isLoading.value) return
+        _queuePaused.value = QueuePause.NONE
+        drainQueue()
+    }
+
+    private fun pauseQueue(reason: QueuePause) {
+        if (_queue.value.isNotEmpty()) _queuePaused.value = reason
     }
 
     fun removeFromQueue(index: Int) {
@@ -1843,7 +1896,10 @@ class ChatViewModel @Inject constructor(
             is ChatEvent.SubAgentDelta,
             is ChatEvent.SubAgentCompleted,
             is ChatEvent.SubAgentFailed -> handleSideEvent(event)
-            is ChatEvent.Error -> _error.value = event.message
+            is ChatEvent.Error -> {
+                _error.value = event.message
+                pauseQueue(QueuePause.ERROR)
+            }
             is ChatEvent.Done -> {
                 finalizeReasoning()
                 // Last assistant item without trailing tools becomes final answer (non-process).

@@ -98,6 +98,9 @@ fun Composer(
     onSend: () -> Unit,
     isLoading: Boolean,
     onStop: () -> Unit,
+    onSteer: ((String) -> Unit)? = null,
+    steeringPending: Boolean = false,
+    onCancelSteer: () -> Unit = {},
     modelLabel: String,
     selectedModel: String,
     activeProviderId: String,
@@ -309,6 +312,15 @@ fun Composer(
 
                 Spacer(Modifier.size(8.dp))
 
+                if (isLoading && onSteer != null) {
+                    SteerBar(
+                        pending = steeringPending,
+                        onCancel = onCancelSteer,
+                        onGuide = { onSteer(value) },
+                    )
+                    Spacer(Modifier.size(6.dp))
+                }
+
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -345,6 +357,45 @@ fun Composer(
                         onStop = onStop,
                     )
                 }
+            }
+        }
+    }
+}
+
+// ── turnSteer 引导条（ZCode 对齐：运行中把草稿注入当前轮）────────────────
+@Composable
+private fun SteerBar(
+    pending: Boolean,
+    onCancel: () -> Unit,
+    onGuide: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.AutoMirrored.Outlined.Chat,
+            null,
+            Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (pending) "等待引导当前任务…" else "引导当前任务",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        if (pending) {
+            androidx.compose.material3.TextButton(onClick = onCancel) {
+                Text("取消", style = MaterialTheme.typography.labelMedium)
+            }
+        } else {
+            androidx.compose.material3.TextButton(onClick = onGuide) {
+                Text("引导", style = MaterialTheme.typography.labelMedium)
             }
         }
     }
