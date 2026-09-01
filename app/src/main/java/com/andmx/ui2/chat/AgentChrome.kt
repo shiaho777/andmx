@@ -93,9 +93,12 @@ fun ApprovalBanner(
                     .padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // ZCode 对齐：允许本会话 / 始终拒绝 直接落作用域；普通允许/拒绝走 ONCE。
+                // ZCode 对齐：允许本会话/本项目、始终拒绝；普通允许/拒绝走 ONCE。
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_DENY) }) {
                     Text("始终拒绝")
+                }
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ALLOW) }) {
+                    Text("始终允许本项目")
                 }
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_ALLOW) }) {
                     Text("允许本会话")
