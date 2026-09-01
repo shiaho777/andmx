@@ -68,6 +68,7 @@ fun StatusCapsule(
     gitInfo: GitBaseline.GitInfo?,
     contextTokens: Int,
     contextWindow: Int,
+    breakdown: List<ChatController.ContextBreakdownItem> = emptyList(),
     onCompress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -190,7 +191,7 @@ fun StatusCapsule(
                 if (hasSteps) ProgressSection(planSteps)
                 if (subAgents.isNotEmpty()) AgentsSection(runningAgents, doneAgents, subAgents)
                 if (gitInfo?.branch?.isNotBlank() == true) GitSection(gitInfo)
-                ContextSection(contextTokens, contextWindow, contextPct, onCompress)
+                ContextSection(contextTokens, contextWindow, contextPct, breakdown, onCompress)
             }
         }
     }
@@ -356,7 +357,13 @@ private fun GitSection(info: GitBaseline.GitInfo) {
 }
 
 @Composable
-private fun ContextSection(tokens: Int, window: Int, pct: Float, onCompress: () -> Unit) {
+private fun ContextSection(
+    tokens: Int,
+    window: Int,
+    pct: Float,
+    breakdown: List<ChatController.ContextBreakdownItem>,
+    onCompress: () -> Unit,
+) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("上下文")
@@ -378,6 +385,43 @@ private fun ContextSection(tokens: Int, window: Int, pct: Float, onCompress: () 
             },
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
         )
+        if (breakdown.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "上下文来源",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(4.dp))
+            breakdown.forEach { item ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        item.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(88.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    LinearProgressIndicator(
+                        progress = { item.percent.toFloat().coerceIn(0f, 1f) },
+                        modifier = Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp)),
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    Text(
+                        "${(item.percent * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        modifier = Modifier.width(38.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(6.dp))
         AssistChip(
             onClick = onCompress,

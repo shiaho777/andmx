@@ -52,6 +52,7 @@ fun ApprovalBanner(
     request: ChatController.ApprovalRequest,
     onAllow: () -> Unit,
     onDeny: () -> Unit,
+    onScope: (ChatController.ApprovalScope) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -90,8 +91,16 @@ fun ApprovalBanner(
                 Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // ZCode 对齐：允许本会话 / 始终拒绝 直接落作用域；普通允许/拒绝走 ONCE。
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_DENY) }) {
+                    Text("始终拒绝")
+                }
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_ALLOW) }) {
+                    Text("允许本会话")
+                }
+                Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = onDeny) { Text("拒绝") }
                 Button(onClick = onAllow) { Text("允许") }
             }

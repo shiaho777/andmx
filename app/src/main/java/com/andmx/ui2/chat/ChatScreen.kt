@@ -91,6 +91,7 @@ fun ChatScreen(
     val mcpStatus by viewModel.mcpStatus.collectAsState()
     val contextTokens by viewModel.contextTokens.collectAsState()
     val contextWindow by viewModel.contextWindow.collectAsState()
+    val contextBreakdown by viewModel.contextBreakdown.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val goal by viewModel.goal.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -654,6 +655,7 @@ LaunchedEffect(Unit) {
                     gitInfo = gitInfo,
                     contextTokens = contextTokens,
                     contextWindow = contextWindow,
+                    breakdown = contextBreakdown,
                     onCompress = { viewModel.compressContext() },
                 )
                 RewindBar(
@@ -689,6 +691,7 @@ LaunchedEffect(Unit) {
                             request = req,
                             onAllow = { viewModel.resolveApproval(true) },
                             onDeny = { viewModel.resolveApproval(false) },
+                            onScope = { viewModel.resolveApprovalScoped(true, it) },
                         )
                     }
                 }
