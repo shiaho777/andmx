@@ -316,7 +316,9 @@ class ChatController(private val context: Context) {
     )
 
     /** 审批作用域（ZCode chat.permission 对齐）。 */
-    enum class ApprovalScope { ONCE, SESSION_ALLOW, SESSION_DENY }
+    enum class ApprovalScope { ONCE, SESSION_ALLOW, SESSION_DENY, PROJECT_ALLOW }
+
+    val approvalRuleStore = com.andmx.agent.ApprovalRuleStore(context)
 
     fun resolveApproval(allow: Boolean) {
         resolveApprovalScoped(allow, ApprovalScope.ONCE)
@@ -324,7 +326,8 @@ class ChatController(private val context: Context) {
 
     /**
      * 带作用域的审批：本会话允许/拒绝会为该会话登记一条 grant/deny 规则，
-     * 后续相同 (tool, key) 的请求不再弹窗（ZCode 对齐）。
+     * 后续相同 (tool, key) 的请求不再弹窗；PROJECT_ALLOW 额外写入持久存储
+     * （ZCode allowForProject 对齐），跨会话生效。
      */
     fun resolveApprovalScoped(allow: Boolean, scope: ApprovalScope) {
         val req = _pendingApproval.value
@@ -336,6 +339,14 @@ class ChatController(private val context: Context) {
             if (rule != null) {
                 approvalRulesByConversation
                     .computeIfAbsent(req.conversationId) { ConcurrentHashMap() }[rule] = scope
+                if (scope == ApprovalScope.PROJECT_ALLOW) {
+                    val key = rule.split(':', limit = 2)
+                    approvalRuleStore.add(
+                        projectKey(),
+                        key.first(),
+                        rule,
+                    )
+                }
             }
         }
         session?.pending?.complete(allowed)
@@ -374,6 +385,10 @@ class ChatController(private val context: Context) {
         // 文件规则同时命中同路径其它编辑操作；命令前缀规则在 approvalRuleKey 已归一
         return null
     }
+
+    /** 当前项目键（本地 hostPath / 远程 workspaceUri），持久规则按此隔离。 */
+    fun projectKey(): String =
+        com.andmx.agent.ApprovalRuleStore.projectKeyOf(projectManager.hostPath.value)
 
     fun resolveUserQuestion(answersJson: String) {
         val req = _pendingApproval.value
@@ -1325,7 +1340,17 @@ class ChatController(private val context: Context) {
         when (sessionRuleFor(conversationId, tool.name, args.toString())) {
             ApprovalScope.SESSION_ALLOW -> return ApprovalOutcome.AllowedOnce
             ApprovalScope.SESSION_DENY -> return ApprovalOutcome.Rejected("此操作已被你设置为始终拒绝")
+            ApprovalScope.PROJECT_ALLOW -> return ApprovalOutcome.AllowedOnce
             else -> Unit
+        }
+        // 项目级持久规则（ZCode allowForProject）：跨会话生效，仅 ALLOW。
+        val canonical = ToolArgs.canonical(tool.name)
+        val persistedRule = approvalRuleKey(tool.name, args.toString())
+        if (persistedRule != null && canonical != null) {
+            val split = persistedRule.split(':', limit = 2)
+            if (approvalRuleStore.allows(projectKey(), split.first(), persistedRule)) {
+                return ApprovalOutcome.AllowedOnce
+            }
         }
         val decision = when (mode) {
             ExecMode.FULL -> Decision.AUTO

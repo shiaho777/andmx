@@ -196,6 +196,54 @@ fun GeneralPage(onBack: () -> Unit) {
                     minLines = 3,
                 )
             }
+
+            ApprovalRulesSection()
+        }
+    }
+}
+
+/**
+ * 「始终允许本项目」持久规则管理（ZCode allowForProject 对齐）：
+ * 展示当前项目的已授权规则，可单独移除或全部清空。
+ */
+@Composable
+private fun ApprovalRulesSection() {
+    val context = LocalContext.current
+    val store = remember { com.andmx.agent.ApprovalRuleStore(context) }
+    val rules by store.rules.collectAsState()
+    val scope = rememberCoroutineScope()
+    val projectKey = remember {
+        com.andmx.agent.ApprovalRuleStore.projectKeyOf(
+            com.andmx.workspace.ProjectManager(context).hostPath.value,
+        )
+    }
+    val current = rules[projectKey].orEmpty()
+    if (current.isEmpty()) return
+
+    SettingsGroup("已授权权限规则") {
+        Text(
+            "本项目内被「始终允许」的操作。移除后对应操作会重新请求确认。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        current.sortedBy { it.display }.forEach { rule ->
+            StackedSettingRow(
+                title = rule.display,
+                description = rule.toolCanonical,
+            ) {
+                androidx.compose.material3.TextButton(
+                    onClick = { scope.launch { store.remove(projectKey, rule) } },
+                ) {
+                    Text("移除")
+                }
+            }
+            HorizontalDivider()
+        }
+        androidx.compose.material3.TextButton(
+            onClick = { scope.launch { store.clear(projectKey) } },
+        ) {
+            Text("清除本项目全部规则", color = MaterialTheme.colorScheme.error)
         }
     }
 }

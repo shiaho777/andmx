@@ -81,10 +81,11 @@ class ApprovalScopeKeyTest {
     @Test
     fun scopeEnumCoversZCodeActions() {
         val scopes = ChatController.ApprovalScope.entries
-        assertEquals(3, scopes.size)
+        assertEquals(4, scopes.size)
         assertTrue(scopes.contains(ChatController.ApprovalScope.ONCE))
         assertTrue(scopes.contains(ChatController.ApprovalScope.SESSION_ALLOW))
         assertTrue(scopes.contains(ChatController.ApprovalScope.SESSION_DENY))
+        assertTrue(scopes.contains(ChatController.ApprovalScope.PROJECT_ALLOW))
         assertFalse(ChatController.ApprovalScope.SESSION_DENY == ChatController.ApprovalScope.SESSION_ALLOW)
     }
 }
