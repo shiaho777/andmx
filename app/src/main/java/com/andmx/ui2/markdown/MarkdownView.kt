@@ -10,16 +10,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.WrapText
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -122,6 +134,62 @@ fun MarkdownView(
                         )
                     }
                 }
+
+                is MdBlock.Table -> MarkdownTable(block, bodyStyle, textColor, mutedColor)
+            }
+        }
+    }
+}
+
+/** GFM 表格渲染（ZCode markdownTable 对齐）：行列对齐、横向滚动容错。 */
+@Composable
+private fun MarkdownTable(
+    block: MdBlock.Table,
+    bodyStyle: androidx.compose.ui.text.TextStyle,
+    textColor: Color,
+    mutedColor: Color,
+) {
+    val columns = block.header.size
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
+    ) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(2.dp)) {
+            repeat(columns) { col ->
+                Column(
+                    Modifier
+                        .widthIn(min = 88.dp, max = 260.dp)
+                        .padding(horizontal = 8.dp),
+                ) {                    Text(
+                        text = InlineParser.parse(block.header.getOrElse(col) { "" }, textColor),
+                        style = bodyStyle.copy(fontWeight = FontWeight.SemiBold, fontSize = (bodyStyle.fontSize.value * 0.92f).sp),
+                        color = textColor,
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
+                    )
+                    block.rows.forEach { row ->
+                        Text(
+                            text = InlineParser.parse(row.getOrElse(col) { "" }, textColor),
+                            style = bodyStyle.copy(fontSize = (bodyStyle.fontSize.value * 0.92f).sp),
+                            color = textColor,
+                            modifier = Modifier.padding(vertical = 5.dp),
+                        )
+                    }
+                }
+                if (col < columns - 1) {
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                    )
+                }
             }
         }
     }
@@ -155,9 +223,13 @@ fun CodeBlockThemed(
     fontSize: Int,
     lightweight: Boolean = false,
 ) {
+    // ZCode codeBlock.copyCode / wrapLines 对齐：非流式代码块带复制与换行开关。
+    var wrapOverride by remember(code) { mutableStateOf<Boolean?>(null) }
+    val wrap = wrapOverride ?: wrapLongLines
+    val clipboard = LocalClipboardManager.current
     val highlighted = remember(code, theme, lightweight) {
         if (lightweight) {
-            androidx.compose.ui.text.AnnotatedString(code)
+            AnnotatedString(code)
         } else {
             CodeHighlight.highlight(code, theme)
         }
@@ -165,42 +237,81 @@ fun CodeBlockThemed(
     val lineCount = remember(code) { code.count { it == '\n' } + 1 }
     val gutterWidth = (lineCount.toString().length * fontSize * 0.62f).dp + 12.dp
 
-    Box(
-        modifier = Modifier
+    Column(
+        Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(theme.background)
-            .padding(vertical = 10.dp),
+            .background(theme.background),
     ) {
-        val inner = @Composable {
-            Row(Modifier.padding(horizontal = 12.dp)) {
-                if (showLineNumbers) {
+        if (!lightweight) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(theme.comment.copy(alpha = 0.10f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (code.isNotBlank()) "代码" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.comment,
+                )
+                Spacer(Modifier.weight(1f))
+                androidx.compose.material3.IconButton(
+                    onClick = { wrapOverride = !wrap },
+                    modifier = Modifier.size(26.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.WrapText,
+                        "自动换行",
+                        Modifier.size(14.dp),
+                        tint = if (wrap) theme.foreground else theme.comment,
+                    )
+                }
+                androidx.compose.material3.IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(code)) },
+                    modifier = Modifier.size(26.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        "复制代码",
+                        Modifier.size(14.dp),
+                        tint = theme.comment,
+                    )
+                }
+            }
+        }
+        Box(Modifier.padding(vertical = 10.dp)) {
+            val inner = @Composable {
+                Row(Modifier.padding(horizontal = 12.dp)) {
+                    if (showLineNumbers) {
+                        Text(
+                            text = (1..lineCount).joinToString("\n"),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = fontSize.sp,
+                                lineHeight = (fontSize * 1.5f).sp,
+                                color = theme.comment,
+                            ),
+                            modifier = Modifier.width(gutterWidth),
+                        )
+                    }
                     Text(
-                        text = (1..lineCount).joinToString("\n"),
+                        text = highlighted,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = FontFamily.Monospace,
                             fontSize = fontSize.sp,
                             lineHeight = (fontSize * 1.5f).sp,
-                            color = theme.comment,
+                            color = theme.foreground,
                         ),
-                        modifier = Modifier.width(gutterWidth),
                     )
                 }
-                Text(
-                    text = highlighted,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = fontSize.sp,
-                        lineHeight = (fontSize * 1.5f).sp,
-                        color = theme.foreground,
-                    ),
-                )
             }
-        }
-        if (wrapLongLines) {
-            inner()
-        } else {
-            Box(Modifier.horizontalScroll(rememberScrollState())) { inner() }
+            if (wrap) {
+                inner()
+            } else {
+                Box(Modifier.horizontalScroll(rememberScrollState())) { inner() }
+            }
         }
     }
 }
