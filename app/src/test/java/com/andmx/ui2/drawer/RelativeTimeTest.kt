@@ -72,8 +72,14 @@ class RelativeTimeTest {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
+        // 周一当天 weekStart == 今天(今天 bucket)；周二起 weekStart 是"昨天"(yesterday bucket)
+        // 或更早——两种都合法，bucket 永不应早于本周的上一档。
         assertTrue(
-            timelineBucket(weekStart) == TimelineBucket.TODAY || timelineBucket(weekStart) == TimelineBucket.THIS_WEEK,
+            timelineBucket(weekStart) in setOf(
+                TimelineBucket.TODAY,
+                TimelineBucket.YESTERDAY,
+                TimelineBucket.THIS_WEEK,
+            ),
         )
     }
 

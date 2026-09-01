@@ -177,6 +177,17 @@ class AgentEngine(
     /** Snapshot of the current history (used to preserve state across engine rebuilds). */
     fun snapshotHistory(): List<ApiMessage> = history.toList()
 
+    /**
+     * turnSteer: append a user message to the in-flight turn's history. The next
+     * model step sees it alongside tool results, steering the current work
+     * without waiting for the turn to end (ZCode 对齐).
+     */
+    fun injectUserMessage(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        history += ApiMessage(role = "user", content = trimmed)
+    }
+
     suspend fun compactNow(settings: ProviderSettings, turn: TurnContext): String? {
         hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
         val result = compactor.compact(history, settings, turn) ?: return null

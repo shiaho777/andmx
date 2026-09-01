@@ -133,6 +133,8 @@ fun ChatScreen(
     val pendingApproval by viewModel.pendingApproval.collectAsState()
     val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
+    val queuePaused by viewModel.queuePaused.collectAsState()
+    val steeringMessage by viewModel.steeringMessage.collectAsState()
     val config by viewModel.composerConfig.collectAsState()
     val planOverlay by viewModel.planOverlayActive.collectAsState()
     val fileChanges by viewModel.fileChanges.collectAsState()
@@ -418,6 +420,14 @@ LaunchedEffect(Unit) {
                             attachments = emptyList()
                         }
                     },
+                    onSteer = if (isLoading) {
+                        { text ->
+                            viewModel.steerCurrentTurn(text)
+                            inputText = ""
+                        }
+                    } else null,
+                    steeringPending = steeringMessage != null,
+                    onCancelSteer = { viewModel.cancelSteer() },
                     isLoading = isLoading,
                     onStop = { viewModel.stop() },
                     modelLabel = config.modelLabel,
@@ -686,6 +696,8 @@ LaunchedEffect(Unit) {
                 if (queue.isNotEmpty()) {
                     QueueStrip(
                         queue = queue,
+                        paused = queuePaused,
+                        onResume = { viewModel.resumeQueue() },
                         onRemove = { viewModel.removeFromQueue(it) },
                         onSendNow = { viewModel.sendQueuedNow(it) },
                         canSendNow = !isLoading,

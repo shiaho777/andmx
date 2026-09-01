@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -27,12 +28,44 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun QueueStrip(
     queue: List<String>,
+    paused: ChatViewModel.QueuePause,
+    onResume: () -> Unit,
     onRemove: (Int) -> Unit,
     onSendNow: (Int) -> Unit,
     canSendNow: Boolean,
     modifier: Modifier = Modifier
 ) {
     Column(modifier.padding(bottom = 4.dp)) {
+        if (paused != ChatViewModel.QueuePause.NONE) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.PauseCircle, null,
+                    Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    when (paused) {
+                        ChatViewModel.QueuePause.STOPPED -> "由于你中断了当前响应，队列已暂停"
+                        ChatViewModel.QueuePause.ERROR -> "由于当前响应出错，队列已暂停（内容未丢失）"
+                        ChatViewModel.QueuePause.NONE -> ""
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+                androidx.compose.material3.TextButton(onClick = onResume, enabled = canSendNow) {
+                    Text("继续", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
         Row(
             Modifier.padding(start = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
