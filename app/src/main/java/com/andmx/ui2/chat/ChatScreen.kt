@@ -94,7 +94,6 @@ fun ChatScreen(
     val contextBreakdown by viewModel.contextBreakdown.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val goal by viewModel.goal.collectAsState()
-    val lastTurnMetrics by viewModel.lastTurnMetrics.collectAsState()
     val error by viewModel.error.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val editingMessageId by viewModel.editingMessageId.collectAsState()
@@ -123,36 +122,7 @@ fun ChatScreen(
             showWorking = isLoading && !hasLiveStream && !hasRunningTool && visibleReasonings.none { it.isStreaming },
         )
     }
-    // Turn 过程折叠（dsh web turn-process 对齐）：已关闭 Turn 的过程行默认
-    // 收起为摘要行，手动展开的 Turn 记录在本会话状态里。
-    val turnFolds = remember(timeline) { TurnProcessFolding.folds(timeline) }
-    var manuallyExpandedFolds by remember { mutableStateOf(setOf<Long>()) }
-    val activeFolds = remember(turnFolds, manuallyExpandedFolds) {
-        turnFolds.filterNot { it.sortKey in manuallyExpandedFolds }
-    }
-    val hiddenTimelineIds = remember(timeline, activeFolds) {
-        TurnProcessFolding.hiddenIds(timeline, activeFolds)
-    }
-    val visibleTimeline = remember(timeline, hiddenTimelineIds, activeFolds) {
-        if (hiddenTimelineIds.isEmpty() && activeFolds.isEmpty()) {
-            timeline
-        } else {
-            val out = ArrayList<TimelineItem>(timeline.size)
-            var pendingFoldIdx = 0
-            for (item in timeline) {
-                while (pendingFoldIdx < activeFolds.size && activeFolds[pendingFoldIdx].sortKey <= item.sortKey) {
-                    out += TimelineItem.TurnProcess(activeFolds[pendingFoldIdx])
-                    pendingFoldIdx += 1
-                }
-                if (item.stableId !in hiddenTimelineIds) out += item
-            }
-            if (pendingFoldIdx < activeFolds.size) {
-                out += TimelineItem.TurnProcess(activeFolds[pendingFoldIdx])
-            }
-            out
-        }
-    }
-    val timelineReversed = remember(visibleTimeline) { visibleTimeline.asReversed() }
+    val timelineReversed = remember(timeline) { timeline.asReversed() }
     val lastAssistantStableId = remember(timeline) {
         timeline.lastOrNull {
             it is TimelineItem.Message &&
@@ -657,17 +627,6 @@ LaunchedEffect(Unit) {
                                 is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)
                                 is TimelineItem.Reasoning -> ReasoningCard(item.item)
                                 is TimelineItem.Working -> WorkingIndicator()
-                                is TimelineItem.TurnProcess -> TurnProcessRow(
-                                    fold = item.fold,
-                                    expanded = item.fold.sortKey in manuallyExpandedFolds,
-                                    onToggle = {
-                                        manuallyExpandedFolds = if (item.fold.sortKey in manuallyExpandedFolds) {
-                                            manuallyExpandedFolds - item.fold.sortKey
-                                        } else {
-                                            manuallyExpandedFolds + item.fold.sortKey
-                                        }
-                                    },
-                                )
                                 is TimelineItem.Approval -> ApprovalTimelineCard(
                                     item = item.item,
                                     onAllow = if (item.item.status == "pending") {
@@ -734,7 +693,6 @@ LaunchedEffect(Unit) {
                     displayMode = appSettings.summaryPanelDisplayMode,
                     onCompress = { viewModel.compressContext() },
                 )
-                TurnMetricsLine(metrics = lastTurnMetrics)
                 RewindBar(
                     changes = fileChanges,
                     rewindResult = rewindResult,

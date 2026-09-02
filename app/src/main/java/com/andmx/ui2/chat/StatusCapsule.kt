@@ -56,7 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.agent.UpdatePlanTool
-import com.andmx.agent.ConversationGoal
+import com.andmx.ui.conversation.ConversationGoal
 import com.andmx.ui2.theme.LocalMotion
 import com.andmx.workspace.GitBaseline
 

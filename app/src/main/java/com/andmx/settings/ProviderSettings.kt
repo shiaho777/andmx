@@ -58,6 +58,8 @@ data class ProviderSettings(
     val taskAutoArchive: Boolean = false,
     /** 归档保留时长（天）: 3 | 7 | 14 | 30 */
     val taskAutoArchiveDays: Int = 7,
+    /** 状态面板展开策略: "auto" | "expanded" | "collapsed"（ZCode summaryPanel.displayMode 对齐） */
+    val summaryPanelDisplayMode: String = "auto",
 
     // ── 代码预览（对标 ZCode Code Preview）──
     /** 浅色模式下代码块主题 id。 */
@@ -105,6 +107,7 @@ class SettingsStore(private val context: Context) {
     private val showTodosKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_todos")
     private val autoArchiveKey = androidx.datastore.preferences.core.booleanPreferencesKey("task_auto_archive")
     private val autoArchiveDaysKey = androidx.datastore.preferences.core.intPreferencesKey("task_auto_archive_days")
+    private val summaryPanelModeKey = stringPreferencesKey("summary_panel_display_mode")
     private val lightCodeThemeKey = stringPreferencesKey("light_code_theme")
     private val darkCodeThemeKey = stringPreferencesKey("dark_code_theme")
     private val showLineNumbersKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_line_numbers")
@@ -142,6 +145,7 @@ class SettingsStore(private val context: Context) {
             showTodos = p[showTodosKey] ?: def.showTodos,
             taskAutoArchive = p[autoArchiveKey] ?: def.taskAutoArchive,
             taskAutoArchiveDays = p[autoArchiveDaysKey] ?: def.taskAutoArchiveDays,
+            summaryPanelDisplayMode = p[summaryPanelModeKey] ?: def.summaryPanelDisplayMode,
             lightCodeTheme = p[lightCodeThemeKey] ?: def.lightCodeTheme,
             darkCodeTheme = p[darkCodeThemeKey] ?: def.darkCodeTheme,
             showLineNumbers = p[showLineNumbersKey] ?: def.showLineNumbers,
@@ -174,6 +178,7 @@ class SettingsStore(private val context: Context) {
             p[showTodosKey] = settings.showTodos
             p[autoArchiveKey] = settings.taskAutoArchive
             p[autoArchiveDaysKey] = settings.taskAutoArchiveDays
+            p[summaryPanelModeKey] = settings.summaryPanelDisplayMode
             p[lightCodeThemeKey] = settings.lightCodeTheme
             p[darkCodeThemeKey] = settings.darkCodeTheme
             p[showLineNumbersKey] = settings.showLineNumbers
