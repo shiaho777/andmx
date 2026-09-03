@@ -68,6 +68,33 @@ enum class ContextChipKind {
     COMMAND,    // /cmd
     SKILL,      // $skill
     ATTACHMENT, // 附件
+    MESSAGE,    // 对话引用（ZCode chat.selections 对齐）
+}
+
+/**
+ * 对话引用上限（ZCode chat.selections.limit 对齐）：
+ * 单条 ≤ 8,000 字符、最多 8 条、总计 ≤ 16,000 字符。
+ */
+object MessageSelections {
+    const val MAX_SINGLE_CHARS = 8_000
+    const val MAX_COUNT = 8
+    const val MAX_TOTAL_CHARS = 16_000
+
+    sealed class AddResult {
+        data object Ok : AddResult()
+        data class Rejected(val reason: String) : AddResult()
+    }
+
+    /** 校验能否把一条消息引用加入 [current]；重复 id 视为已存在直接放行。 */
+    fun validate(current: List<ContextChip>, content: String, id: String): AddResult = when {
+        current.any { it.id == id } -> AddResult.Ok
+        current.count { it.kind == ContextChipKind.MESSAGE } >= MAX_COUNT ->
+            AddResult.Rejected("最多可添加 $MAX_COUNT 条对话引用。")
+        content.length > MAX_SINGLE_CHARS -> AddResult.Rejected("单条引用最多 8,000 个字符。")
+        current.filter { it.kind == ContextChipKind.MESSAGE }.sumOf { it.payload.length } + content.length >
+            MAX_TOTAL_CHARS -> AddResult.Rejected("对话引用总计最多 16,000 个字符。")
+        else -> AddResult.Ok
+    }
 }
 
 /**

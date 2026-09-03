@@ -1257,17 +1257,20 @@ class ChatViewModel @Inject constructor(
                     ContextChipKind.FILE -> append("@${chip.payload} ")
                     ContextChipKind.CONVERSATION -> append("${chip.label} ")
                     ContextChipKind.ATTACHMENT -> append("${chip.label} ")
+                    ContextChipKind.MESSAGE -> append("<quote id=\"${chip.id}\">${chip.payload}</quote> ")
                 }
             }
         }.trim()
         val extra = buildString {
             val files = chips.filter { it.kind == ContextChipKind.FILE }
             val convs = chips.filter { it.kind == ContextChipKind.CONVERSATION }
-            if (files.isNotEmpty() || convs.isNotEmpty() || attachments.isNotEmpty()) {
+            val selMsgs = chips.filter { it.kind == ContextChipKind.MESSAGE }
+            if (files.isNotEmpty() || convs.isNotEmpty() || selMsgs.isNotEmpty() || attachments.isNotEmpty()) {
                 appendLine()
                 appendLine("[上下文]")
                 files.forEach { appendLine("- 文件: ${it.payload}") }
                 convs.forEach { appendLine("- 关联会话: ${it.label} (id=${it.payload})") }
+                selMsgs.forEach { appendLine("- 对话引用: ${it.label}") }
                 attachments.forEach { appendLine("- 附件: ${it.name}") }
             }
         }
@@ -1575,6 +1578,26 @@ class ChatViewModel @Inject constructor(
                 payload = path,
             ),
         )
+    }
+
+    /**
+     * 对话引用（ZCode chat.selections 对齐）：把一条消息引用到输入框。
+     * 超限返回拒绝原因（单条 8k / 最多 8 条 / 总计 16k），由 UI 提示。
+     */
+    fun addMessageSelection(messageId: Long, role: String, content: String): String? {
+        val id = "msg:$messageId"
+        val result = MessageSelections.validate(_contextChips.value, content, id)
+        if (result is MessageSelections.AddResult.Rejected) return result.reason
+        val typeLabel = if (role == "user") "用户消息" else "助手消息"
+        addContextChip(
+            ContextChip(
+                id = id,
+                kind = ContextChipKind.MESSAGE,
+                label = "$typeLabel #${messageId}",
+                payload = content,
+            ),
+        )
+        return null
     }
 
     fun addConversationContext(pick: ConversationPick) {

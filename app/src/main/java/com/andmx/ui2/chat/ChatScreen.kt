@@ -158,6 +158,7 @@ fun ChatScreen(
     }
 
     var showTerminal by remember { mutableStateOf(false) }
+    var selectionError by remember { mutableStateOf<String?>(null) }
     var showFiles by remember { mutableStateOf(false) }
     var filesInitialPath by remember { mutableStateOf<String?>(null) }
     var fileTreeRequestKey by remember { mutableStateOf(0) }
@@ -607,6 +608,19 @@ LaunchedEffect(Unit) {
                                             }
                                         } else null,
                                         isEditing = item.message.id == editingMessageId,
+                                        onQuote = if (
+                                            !item.message.isStreaming &&
+                                            !item.message.isProcess &&
+                                            item.message.content.isNotBlank()
+                                        ) {
+                                            {
+                                                selectionError = viewModel.addMessageSelection(
+                                                    item.message.id,
+                                                    item.message.role,
+                                                    item.message.content,
+                                                )
+                                            }
+                                        } else null,
                                     )
                                 }
                                 is TimelineItem.Tool -> ToolCallCard(item.tool)
@@ -648,6 +662,26 @@ LaunchedEffect(Unit) {
                     }
                 }
 
+                AnimatedVisibility(
+                    visible = selectionError != null,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    selectionError?.let {
+                        Snackbar(
+                            modifier = Modifier.padding(8.dp),
+                            action = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { selectionError = null },
+                                ) {
+                                    Text("知道了")
+                                }
+                            },
+                        ) {
+                            Text(it)
+                        }
+                    }
+                }
+
                 StatusCapsule(
                     goal = goal,
                     planSteps = planSteps,
@@ -656,6 +690,7 @@ LaunchedEffect(Unit) {
                     contextTokens = contextTokens,
                     contextWindow = contextWindow,
                     breakdown = contextBreakdown,
+                    displayMode = appSettings.summaryPanelDisplayMode,
                     onCompress = { viewModel.compressContext() },
                 )
                 RewindBar(

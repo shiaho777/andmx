@@ -114,6 +114,22 @@ fun GeneralPage(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                HorizontalDivider()
+                StackedSettingRow(
+                    title = "状态面板",
+                    description = "对话底部状态胶囊与面板的展开方式。",
+                ) {
+                    SegmentedRow(
+                        options = listOf(
+                            "auto" to "自动",
+                            "expanded" to "始终展开",
+                            "collapsed" to "始终收起",
+                        ),
+                        selected = s.summaryPanelDisplayMode,
+                        onSelect = { save(s.copy(summaryPanelDisplayMode = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
             SettingsGroup("通知") {
