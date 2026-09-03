@@ -49,7 +49,9 @@ import com.andmx.ui2.settings.pages.CommandPage
 import com.andmx.ui2.settings.pages.GeneralPage
 import com.andmx.ui2.settings.pages.IndexPage
 import com.andmx.ui2.settings.pages.McpPage
+import com.andmx.ui2.settings.pages.MemoryViewerPage
 import com.andmx.ui2.settings.pages.ModelPage
+import com.andmx.ui2.settings.pages.ModelTrajectoryPage
 import com.andmx.ui2.settings.pages.PluginPage
 import com.andmx.ui2.settings.pages.SkillsPage
 import com.andmx.ui2.settings.pages.SubAgentPage
@@ -66,7 +68,9 @@ enum class SettingsPage(val title: String, val icon: ImageVector) {
     PLUGIN("插件管理", Icons.Outlined.Extension),
     COMMAND("命令", Icons.Outlined.Terminal),
     INDEX("索引库", Icons.AutoMirrored.Outlined.ManageSearch),
-    USAGE("使用统计", Icons.Outlined.QueryStats)
+    USAGE("使用统计", Icons.Outlined.QueryStats),
+    MODEL_TRAJECTORY("模型调用轨迹", Icons.Outlined.QueryStats),
+    MEMORY("工作区记忆", Icons.Outlined.Storage)
 }
 
 @Composable
@@ -110,6 +114,8 @@ fun SettingsScreen(
             SettingsPage.COMMAND -> CommandPage(backToHome)
             SettingsPage.INDEX -> IndexPage(backToHome)
             SettingsPage.USAGE -> UsagePage(backToHome)
+            SettingsPage.MODEL_TRAJECTORY -> ModelTrajectoryPage(backToHome)
+            SettingsPage.MEMORY -> MemoryViewerPage(backToHome)
         }
     }
 }
@@ -145,7 +151,7 @@ private fun SettingsHome(
                 SettingsPage.GENERAL, SettingsPage.CODE_PREVIEW, SettingsPage.MODEL,
                 SettingsPage.SKILLS, SettingsPage.SUBAGENT, SettingsPage.MCP,
                 SettingsPage.PLUGIN, SettingsPage.COMMAND, SettingsPage.INDEX,
-                SettingsPage.USAGE,
+                SettingsPage.USAGE, SettingsPage.MODEL_TRAJECTORY, SettingsPage.MEMORY,
             )
             val descriptions = mapOf(
                 SettingsPage.GENERAL to "主题、语言与当前窗口体验",
@@ -158,6 +164,8 @@ private fun SettingsHome(
                 SettingsPage.COMMAND to "斜杠命令",
                 SettingsPage.INDEX to "工作区索引与搜索",
                 SettingsPage.USAGE to "会话与模型用量统计",
+                SettingsPage.MODEL_TRAJECTORY to "逐次模型调用的来源、Token 与输入输出",
+                SettingsPage.MEMORY to "查看工作区长期记忆文件",
             )
             items.forEach { item ->
                 SettingsItem(

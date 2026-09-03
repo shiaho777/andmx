@@ -12,6 +12,8 @@ import com.andmx.agent.ApprovalPolicy
 import com.andmx.agent.BrowseTool
 import com.andmx.agent.ContextBreakdown
 import com.andmx.agent.ToolArgs
+import com.andmx.agent.TracedLlm
+import com.andmx.agent.ModelCallTrace
 import com.andmx.agent.Decision
 import com.andmx.agent.EditFileTool
 import com.andmx.agent.GitTool
@@ -130,7 +132,7 @@ class ChatController(private val context: Context) {
         val settings = settingsStore.settings.firstOrNull()
         val baseModel = settings?.model.orEmpty().ifBlank { fallbackProvider.models.keys.firstOrNull().orEmpty() }
         if (com.andmx.agent.multi.SubagentModelCatalog.isInherit(modelSpec)) {
-            return LlmClient(fallbackProvider, trackerFor(conversationId)) to TurnContext(fallbackProvider, baseModel)
+            return TracedLlm(LlmClient(fallbackProvider, trackerFor(conversationId)), ModelCallTrace.Source.SUBAGENT) to TurnContext(fallbackProvider, baseModel)
         }
         val parsed = com.andmx.agent.multi.SubagentModelCatalog.parse(modelSpec)
         val providers = providerStore.providers.firstOrNull().orEmpty().filter { it.enabled }
@@ -142,7 +144,7 @@ class ChatController(private val context: Context) {
             else -> null
         } ?: fallbackProvider
         val model = modelId.ifBlank { baseModel }.ifBlank { provider.models.keys.firstOrNull().orEmpty() }
-        return LlmClient(provider, trackerFor(conversationId)) to TurnContext(provider, model)
+        return TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.SUBAGENT) to TurnContext(provider, model)
     }
 
     private suspend fun loadSubagentExtras(): List<com.andmx.settings.CustomSubAgent> {
@@ -999,7 +1001,7 @@ class ChatController(private val context: Context) {
                         buildTools(existing.planTool, existing.goalState, existing.todoState, existing.planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" && it.name != "Task" && it.name != "TaskOutput" && it.name != "TaskStop" } + sharedExtraTools
                     },
                     settings = settings,
-                    client = LlmClient(provider, trackerFor(conversationId)),
+                    client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.SUBAGENT),
                     turnProvider = { TurnContext(provider, settings.model) },
                     parentHistoryProvider = { existing.engine.snapshotHistory() },
                     resolveRun = { modelSpec ->
@@ -1045,7 +1047,7 @@ class ChatController(private val context: Context) {
             }
         }
         val tools = buildTools(planTool, goalState, todoState, planModeState, conversationId)
-        val client = LlmClient(provider, trackerFor(conversationId))
+        val client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.MAIN)
         val (system, metaUser) = buildZCodePromptParts(
             settings = settings,
             provider = provider,
