@@ -59,15 +59,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode"
-            android:screenOrientation="fullSensor"
-            android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.AndMX" />
-    
-
         <!-- ── Computer Use: AccessibilityService for gesture dispatch (tap/swipe/type) ── -->
         <service
             android:name=".computeruse.AndmxAccessibilityService"

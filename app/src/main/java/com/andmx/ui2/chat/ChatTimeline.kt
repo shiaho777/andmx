@@ -55,6 +55,14 @@ sealed class TimelineItem {
     ) : TimelineItem() {
         override val stableId: String = "working"
     }
+
+    /** Turn 过程折叠摘要行（dsh web turn-process 对齐）。 */
+    data class TurnProcess(
+        val fold: TurnProcessFolding.Fold,
+    ) : TimelineItem() {
+        override val sortKey: Long = fold.sortKey
+        override val stableId: String = "turn-process-${fold.sortKey}"
+    }
 }
 
 data class SubAgentItem(

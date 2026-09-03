@@ -67,7 +67,7 @@ class ChatViewModel @Inject constructor(
     val subAgents: StateFlow<List<ChatController.SubAgentUi>> = controller.subAgents
     val mcpStatus: StateFlow<List<com.andmx.mcp.McpManager.Connected>> = controller.mcpStatus
     val tokenUsage: StateFlow<ChatController.TokenUsageUi> = controller.tokenUsage
-    val goal: StateFlow<com.andmx.ui.conversation.ConversationGoal> = controller.goal
+    val goal: StateFlow<com.andmx.agent.ConversationGoal> = controller.goal
     val ambient = controller.ambient
 
 
@@ -198,6 +198,14 @@ class ChatViewModel @Inject constructor(
     private val _editingMessageId = MutableStateFlow<Long?>(null)
     val editingMessageId: StateFlow<Long?> = _editingMessageId.asStateFlow()
     private var turnJob: Job? = null
+
+    // Turn 指标采集（dsh StatsLine 对齐）：每个 turn 的起点/首 token/终点。
+    private val _lastTurnMetrics = MutableStateFlow<TurnMetrics.Reading?>(null)
+    val lastTurnMetrics: StateFlow<TurnMetrics.Reading?> = _lastTurnMetrics.asStateFlow()
+    private var turnStartedAtMs = 0L
+    private var turnFirstTokenAtMs = 0L
+    private var turnEndedAtMs = 0L
+    private var turnStepCount = 0
 
     /** 切换到指定会话：更新当前 id + 加载历史消息到 messages。 */
     fun switchToConversation(id: Long) {
@@ -930,7 +938,7 @@ class ChatViewModel @Inject constructor(
                             if (!g.hasGoal) {
                                 appendLocalAssistant("当前没有目标可暂停。")
                             } else {
-                                controller.setGoalStatus(id, com.andmx.ui.conversation.GoalStatus.PAUSED, "由 /goal 暂停")
+                                controller.setGoalStatus(id, com.andmx.agent.GoalStatus.PAUSED, "由 /goal 暂停")
                                 appendLocalAssistant("已暂停目标：${g.text}")
                             }
                         }
@@ -939,7 +947,7 @@ class ChatViewModel @Inject constructor(
                             if (!g.hasGoal) {
                                 appendLocalAssistant("当前没有目标可恢复。")
                             } else {
-                                controller.setGoalStatus(id, com.andmx.ui.conversation.GoalStatus.ACTIVE, "由 /goal 恢复")
+                                controller.setGoalStatus(id, com.andmx.agent.GoalStatus.ACTIVE, "由 /goal 恢复")
                                 appendLocalAssistant("已恢复目标：${g.text}")
                             }
                         }
@@ -1700,6 +1708,13 @@ class ChatViewModel @Inject constructor(
 
     private fun handleEvent(event: ChatEvent) {
         when (event) {
+            is ChatEvent.StepStarted -> {
+                if (turnStartedAtMs == 0L) turnStartedAtMs = event.startedAtMs
+                turnStepCount += 1
+            }
+            is ChatEvent.FirstToken -> {
+                if (turnFirstTokenAtMs == 0L) turnFirstTokenAtMs = event.atMs
+            }
             is ChatEvent.UserMessage -> {
                 val key = nextProcessSortKey()
                 _messages.value += ChatMessage(
@@ -1928,6 +1943,18 @@ class ChatViewModel @Inject constructor(
             }
             is ChatEvent.Done -> {
                 finalizeReasoning()
+                // Turn 指标收口（诚实规则：时间戳不完整则不产出）。
+                turnEndedAtMs = System.currentTimeMillis()
+                val reading = TurnMetrics.reading(
+                    turnStartMs = turnStartedAtMs,
+                    firstTokenMs = turnFirstTokenAtMs,
+                    turnEndMs = turnEndedAtMs,
+                    outputTokens = controller.tokenUsage.value.lastTotal.takeIf { it > 0 },
+                )
+                _lastTurnMetrics.value = reading.takeIf { it.ttftMs != null }
+                turnStartedAtMs = 0L
+                turnFirstTokenAtMs = 0L
+                turnEndedAtMs = 0L
                 // Last assistant item without trailing tools becomes final answer (non-process).
                 val msgs = _messages.value.toMutableList()
                 val tools = _toolCalls.value
