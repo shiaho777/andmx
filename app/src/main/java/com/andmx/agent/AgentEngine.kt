@@ -61,7 +61,9 @@ data class TurnContext(
 class AgentEngine(
     private val tools: List<Tool>,
     private val client: LlmApi,
-    private val compactor: ContextCompactor = ContextCompactor(client = client),
+    private val compactor: ContextCompactor = ContextCompactor(
+        client = TracedLlm(client, ModelCallTrace.Source.COMPACT),
+    ),
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     private val historyToolOutputLimit: Int = 8_000,

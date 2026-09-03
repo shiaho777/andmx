@@ -156,7 +156,11 @@ class LlmClient(
                 onToolCall = { index, id, name, argDelta ->
                     emit(LlmStreamEvent.ToolCallDelta(index, id, name, argDelta))
                 },
-                onUsage = { usage -> tracker?.recordTurn(TokenUsageTracker.parseUsage(usage)) },
+                onUsage = { usage ->
+                    val parsed = TokenUsageTracker.parseUsage(usage)
+                    tracker?.recordTurn(parsed)
+                    emit(LlmStreamEvent.UsageUpdate(parsed))
+                },
             )
             conn.disconnect()
             emit(LlmStreamEvent.Completed(message))
