@@ -17,8 +17,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -434,7 +438,7 @@ LaunchedEffect(Unit) {
             Column(
                 Modifier
                     .fillMaxSize()
-                    .imePadding()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                     .background(MaterialTheme.colorScheme.background)
             ) {
 
@@ -568,6 +572,23 @@ LaunchedEffect(Unit) {
 
 
             if (isEmpty) {
+                val starters = remember(
+                    hostPath,
+                    projectName,
+                    gitInfo?.isRepo,
+                    gitInfo?.hasChanges,
+                    gitInfo?.dirtyFileCount,
+                    gitInfo?.ahead,
+                ) {
+                    starterSuggestions(
+                        hasWorkspace = hostPath != null,
+                        projectName = projectName,
+                        isGitRepo = gitInfo?.isRepo == true,
+                        hasChanges = gitInfo?.hasChanges == true,
+                        dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
+                        ahead = gitInfo?.ahead ?: 0,
+                    )
+                }
                 EmptyConversationState(
                     hasWorkspace = hostPath != null,
                     projectName = projectName,
@@ -587,6 +608,8 @@ LaunchedEffect(Unit) {
                         viewModel.refreshGitInfo()
                         showGitActions = true
                     },
+                    suggestions = starters,
+                    onPickSuggestion = { inputText = it },
                     modifier = Modifier.weight(1f),
                 ) {
                     ComposerBlock(flat = true)
@@ -944,11 +967,13 @@ private fun EmptyConversationState(
     onOpenRemote: () -> Unit = {},
     onPickBranch: () -> Unit,
     onGitActions: () -> Unit = {},
+    suggestions: List<StarterSuggestion> = emptyList(),
+    onPickSuggestion: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     composer: @Composable () -> Unit,
 ) {
     // 问候语 + 输入卡片作为同一主体居中。
-    // 键盘只依赖父级连续 imePadding，不做可见性分支/布局切换，避免收起时回弹闪一下。
+    // 键盘只依赖父级连续 safeDrawing，不做可见性分支/布局切换，避免收起时回弹闪一下。
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -1012,6 +1037,13 @@ private fun EmptyConversationState(
                     onGitActions = onGitActions,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (suggestions.isNotEmpty()) {
+                    StarterSuggestions(
+                        suggestions = suggestions,
+                        onPick = onPickSuggestion,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                    )
+                }
                 composer()
             }
         }
