@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.markdown.MarkdownView
@@ -53,17 +54,19 @@ fun StreamingText(
                 ),
                 label = "cursorAlpha",
             )
-            Text(
-                text = "▍",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = if (muted) 13.sp else 15.sp,
-                    lineHeight = if (muted) 20.sp else 22.sp,
-                ),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 1.dp, bottom = 1.dp)
-                    .alpha(alpha),
-            )
+            DisableSelection {
+                Text(
+                    text = "▍",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = if (muted) 13.sp else 15.sp,
+                        lineHeight = if (muted) 20.sp else 22.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(start = 1.dp, bottom = 1.dp)
+                        .alpha(alpha),
+                )
+            }
         }
     }
 }

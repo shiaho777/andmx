@@ -3,6 +3,7 @@ package com.andmx.ui2.markdown
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import com.andmx.ui2.markdown.InlineParser.UrlAnnotationTag
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -47,6 +48,7 @@ class InlineParserTest {
         val out = InlineParser.parse("[label](https://example.com)", Color.Black)
         assertEquals("label", out.text)
         assertEquals(TextDecoration.Underline, out.spanStyles.single().item.textDecoration)
+        assertEquals("https://example.com", out.getStringAnnotations(UrlAnnotationTag, 0, out.length).single().item)
     }
 
     @Test
@@ -78,5 +80,56 @@ class InlineParserTest {
     fun emptyInput() {
         assertEquals("", InlineParser.parse("", Color.Black).text)
         assertNull(InlineParser.parse("", Color.Black).spanStyles.firstOrNull())
+    }
+
+    @Test
+    fun underscoreBoldSpan() {
+        val out = InlineParser.parse("a __b__ c", Color.Black)
+        assertEquals("a b c", out.text)
+        assertEquals(FontWeight.Bold, out.spanStyles.single().item.fontWeight)
+    }
+
+    @Test
+    fun strikethroughSpan() {
+        val out = InlineParser.parse("a ~~b~~ c", Color.Black)
+        assertEquals("a b c", out.text)
+        assertEquals(TextDecoration.LineThrough, out.spanStyles.single().item.textDecoration)
+    }
+
+    @Test
+    fun imageRendersAltWithUrlAnnotation() {
+        val out = InlineParser.parse("![logo](https://example.com/a.png)", Color.Black)
+        assertEquals("logo", out.text)
+        assertEquals("https://example.com/a.png", out.getStringAnnotations(UrlAnnotationTag, 0, out.length).single().item)
+    }
+
+    @Test
+    fun autolinkInAngleBrackets() {
+        val out = InlineParser.parse("<https://example.com/x>", Color.Black)
+        assertEquals("https://example.com/x", out.text)
+        assertEquals("https://example.com/x", out.getStringAnnotations(UrlAnnotationTag, 0, out.length).single().item)
+    }
+
+    @Test
+    fun bareUrlBecomesLink() {
+        val out = InlineParser.parse("see https://example.com/x.", Color.Black)
+        assertEquals("see https://example.com/x.", out.text)
+        assertEquals("https://example.com/x", out.getStringAnnotations(UrlAnnotationTag, 0, out.length).single().item)
+    }
+
+    @Test
+    fun escapedMarkerStaysLiteral() {
+        assertEquals("*x*", InlineParser.parse("\\*x\\*", Color.Black).text)
+    }
+
+    @Test
+    fun doubleBacktickCodeSpan() {
+        val out = InlineParser.parse("x ``y ` z`` w", Color.Black)
+        assertEquals("x y ` z w", out.text)
+    }
+
+    @Test
+    fun snakeCaseKeepsUnderscores() {
+        assertEquals("some_variable_name", InlineParser.parse("some_variable_name", Color.Black).text)
     }
 }
