@@ -731,6 +731,28 @@ class ChatController(private val context: Context) {
                     maybeAutoTitle(conversationId, event.name, userTextForTitle)
                 }
             }
+            is AgentEvent.GoalVerifying -> {
+                emit(ChatEvent.GoalVerifying(event.iteration))
+            }
+            is AgentEvent.GoalVerified -> {
+                emit(
+                    ChatEvent.GoalVerified(
+                        iteration = event.iteration,
+                        passed = event.passed,
+                        reason = event.reason,
+                        nextAction = event.nextAction,
+                    ),
+                )
+                runCatching {
+                    writer.writeEventMsg(
+                        EventMsg(
+                            type = "goal_verification",
+                            turnId = turnId,
+                            errorMessage = if (event.passed) null else event.reason,
+                        ),
+                    )
+                }
+            }
             is AgentEvent.Failed -> {
                 runCatching {
                     writer.writeEventMsg(
@@ -1060,6 +1082,7 @@ class ChatController(private val context: Context) {
             client = client,
             systemPrompt = system,
             hooks = hookSystem,
+            goalState = goalState,
             approve = { tool, args ->
                 val liveMode = sessions[conversationId]?.approvalMode ?: execMode
                 approveTool(conversationId, liveMode, tool, args)
@@ -1670,6 +1693,7 @@ class ChatController(private val context: Context) {
     }
 
     private fun applyGoalTokenUsage(session: Session) {
+        if (session.engine.managesGoalTokens) return
         val usage = tokenTrackers[session.conversationId]?.lastTurnUsage?.value ?: return
         val add = usage.totalTokens.takeIf { it > 0 } ?: (usage.inputTokens + usage.outputTokens)
         if (add <= 0) return

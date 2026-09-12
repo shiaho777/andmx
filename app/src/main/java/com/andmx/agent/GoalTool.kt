@@ -93,7 +93,7 @@ class UpdateGoalTool(
     private val state: GoalToolState,
 ) : Tool {
     override val name = "update_goal"
-    override val description = "Update the current goal's objective, status, or token budget. Use status 'complete' when the goal is achieved."
+    override val description = "Update the current goal's objective, status, or token budget. Completion is decided by the runtime's completion verifier after each turn — do not mark a goal complete yourself."
     override val risk = ToolRisk.READ
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
@@ -104,10 +104,10 @@ class UpdateGoalTool(
             }
             putJsonObject("status") {
                 put("type", "string")
-                put("description", "New status: active, paused, blocked, complete")
+                put("description", "New status: active, paused, blocked. Completion is set by the runtime verifier, not by this tool.")
                 putJsonArray("enum") {
                     add(JsonPrimitive("active")); add(JsonPrimitive("paused"))
-                    add(JsonPrimitive("blocked")); add(JsonPrimitive("complete"))
+                    add(JsonPrimitive("blocked"))
                 }
             }
             putJsonObject("token_budget") {
@@ -123,11 +123,16 @@ class UpdateGoalTool(
         val objective = args["objective"]?.toString()?.trim()?.trim('"')?.takeIf { it.isNotBlank() }
         val statusStr = args["status"]?.toString()?.trim()?.trim('"')
         val budget = args["token_budget"]?.toString()?.trim()?.trim('"')?.toIntOrNull()
+        if (statusStr?.lowercase() == "complete") {
+            return ToolResult(
+                "Completion is decided by the runtime's completion verifier after this turn; finish the work and answer normally.",
+                isError = true,
+            )
+        }
         val newStatus = when (statusStr?.lowercase()) {
             "active" -> GoalStatus.ACTIVE
             "paused" -> GoalStatus.PAUSED
             "blocked" -> GoalStatus.BLOCKED
-            "complete" -> GoalStatus.COMPLETE
             else -> cur.status
         }
         state.setGoal(
@@ -165,12 +170,20 @@ class GetGoalTool(
         val g = state.goal
         if (!g.hasGoal) return ToolResult("No goal is currently set.")
         val parts = mutableListOf(
-            "Objective: ${g.text}",
-            "Status: ${g.status.label}",
+            "Current session goal state (authoritative):",
+            "Status: ${g.status.name.lowercase()}",
+            "Tokens used: ${g.tokensUsed}",
+            "Token budget: ${if (g.tokenBudget > 0) g.tokenBudget else "none"}",
+            "Time used: ${g.timeUsedSeconds} seconds",
+            "Objective:",
+            g.text,
         )
-        if (g.tokenBudget > 0) {
-            parts += "Token budget: ${g.tokensUsed}/${g.tokenBudget} used (${g.remainingBudget} remaining)"
+        if (g.goalIteration > 0) {
+            parts += "Completion verifications run: ${g.goalIteration}"
+            if (g.lastVerifyReason.isNotBlank()) parts += "Last verifier reason: ${g.lastVerifyReason}"
+            if (g.nextAction.isNotBlank()) parts += "Verifier next action: ${g.nextAction}"
         }
+        parts += "Use it as the authoritative long-running objective unless a later get_goal result or goal event updates it."
         return ToolResult(parts.joinToString("\n"))
     }
 }

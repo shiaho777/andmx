@@ -63,6 +63,14 @@ sealed class TimelineItem {
         override val sortKey: Long = fold.sortKey
         override val stableId: String = "turn-process-${fold.sortKey}"
     }
+
+    /** Goal 完成度验证行（ZCode goalVerifier 时间线对齐）。 */
+    data class GoalVerify(
+        val item: GoalVerifyItem,
+    ) : TimelineItem() {
+        override val sortKey: Long = item.sortKey
+        override val stableId: String = "gv-${item.sortKey}-${item.iteration}"
+    }
 }
 
 data class SubAgentItem(
@@ -79,11 +87,13 @@ fun buildTimeline(
     approvals: List<ApprovalItem> = emptyList(),
     subAgents: List<SubAgentItem> = emptyList(),
     reasonings: List<ReasoningItem> = emptyList(),
+    goalVerifications: List<GoalVerifyItem> = emptyList(),
     showWorking: Boolean = false,
 ): List<TimelineItem> {
-    val raw = ArrayList<TimelineItem>(messages.size + tools.size + approvals.size + subAgents.size + reasonings.size + 1)
+    val raw = ArrayList<TimelineItem>(messages.size + tools.size + approvals.size + subAgents.size + reasonings.size + goalVerifications.size + 1)
     messages.forEach { raw += TimelineItem.Message(it) }
     reasonings.forEach { r -> raw += TimelineItem.Reasoning(r) }
+    goalVerifications.forEach { raw += TimelineItem.GoalVerify(it) }
     tools.forEach { t ->
         val key = t.sortKey.takeIf { it > 0L } ?: t.id.hashCode().toLong().and(0x7fffffffL)
         raw += TimelineItem.Tool(t, key)

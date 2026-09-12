@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.ConversationGoal
+import com.andmx.agent.GoalStatus
 import com.andmx.ui2.theme.LocalMotion
 import com.andmx.workspace.GitBaseline
 
@@ -232,6 +233,23 @@ private fun GoalSection(goal: ConversationGoal) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
         )
+        if (goal.goalIteration > 0) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "已验证 ${goal.goalIteration} 轮 · ${goal.status.label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            if (goal.nextAction.isNotBlank() && goal.status == GoalStatus.ACTIVE) {
+                Text(
+                    "下一步：${goal.nextAction}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (goal.tokenBudget > 0) {
             Spacer(Modifier.height(4.dp))
             val used = goal.tokensUsed.toFloat() / goal.tokenBudget.toFloat()

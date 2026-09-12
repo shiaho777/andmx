@@ -44,6 +44,15 @@ sealed interface AgentEvent {
         val imageUrls: List<String>? = null,
     ) : AgentEvent
     data class Failed(val message: String) : AgentEvent
+    /** 目标完成度验证开始（ZCode goalVerifier 对齐）。 */
+    data class GoalVerifying(val iteration: Int) : AgentEvent
+    /** 目标完成度验证结果：passed=false 时引擎会注入 continuation 续跑。 */
+    data class GoalVerified(
+        val iteration: Int,
+        val passed: Boolean,
+        val reason: String,
+        val nextAction: String,
+    ) : AgentEvent
     data object Done : AgentEvent
 }
 
@@ -82,6 +91,17 @@ class AgentEngine(
     private val approve: ApprovalGate = { _, _ -> ApprovalOutcome.AllowedOnce },
     /** Advisory guard against a model re-issuing one identical call forever. */
     private val repeatGuard: RepeatCallGuard = RepeatCallGuard(),
+    /**
+     * When set, an ACTIVE goal turns the engine into ZCode's autonomous
+     * delivery loop: each final answer triggers a goal-completion verifier
+     * call; a failing verdict injects a continuation message and the loop
+     * keeps working until the verifier passes, the token budget runs out, or
+     * [maxGoalIterations] is hit. The engine also owns goal token accounting
+     * in that mode ([managesGoalTokens]).
+     */
+    private val goalState: GoalToolState? = null,
+    /** Safety cap on verifier-driven continuations for a single runTurn call. */
+    private val maxGoalIterations: Int = 20,
 ) {
     private val history = mutableListOf(ApiMessage(role = "system", content = systemPrompt))
     private var extraTools: List<Tool> = emptyList()
@@ -94,6 +114,19 @@ class AgentEngine(
     private var todoItemsProvider: (() -> String?)? = null
     private var lastAssistantCompletedAtMs: Long? = null
     private var turnCount: Int = 0
+    private val goalVerifier by lazy {
+        GoalVerifier(TracedLlm(client, ModelCallTrace.Source.GOAL_VERIFY), json)
+    }
+    /** Stream-observed tokens not yet committed to [GoalToolState]. */
+    private var pendingGoalTokens: Int = 0
+
+    /**
+     * True when the engine owns goal token accounting (a [goalState] was
+     * injected): every stream's usage — including continuation and verifier
+     * calls — is folded into the goal directly. Callers must not add turn
+     * usage again on top.
+     */
+    val managesGoalTokens: Boolean get() = goalState != null
 
     /** Register additional tools at runtime (e.g. from MCP servers). */
     fun addTools(more: List<Tool>) { extraTools = extraTools + more }
@@ -236,9 +269,6 @@ class AgentEngine(
     }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.loop(settings: ProviderSettings, turn: TurnContext) {
-        // A fresh user turn starts a fresh repeat chain: an instruction that
-        // legitimately re-runs the previous command is not a stuck loop.
-        repeatGuard.reset()
         // Repair history damaged by an interrupted turn: if the tail is an
         // assistant message with tool_calls but no matching tool results,
         // synthesize "interrupted" results so the model isn't confused.
@@ -247,9 +277,19 @@ class AgentEngine(
         val contextWindow = turn.modelMeta?.contextWindow?.takeIf { it > 0 }
             ?: ContextCompactor.DEFAULT_CONTEXT_WINDOW
         val maxOutputTokens = turn.modelMeta?.maxOutputTokens ?: 0
+        val hardLimit = maxSteps + graceSteps
+
+        // ZCode goal loop: while an ACTIVE goal exists, every final answer is
+        // audited by the completion verifier; a failing verdict injects a
+        // continuation message and a fresh step budget instead of ending.
+        var continuations = 0
+        goalLoop@ while (true) {
+        // A fresh user turn (or goal continuation) starts a fresh repeat
+        // chain: an instruction that legitimately re-runs the previous
+        // command is not a stuck loop.
+        repeatGuard.reset()
         var convergenceHinted = false
         var step = 0
-        val hardLimit = maxSteps + graceSteps
         while (step++ < hardLimit) {
             // ── Context management: local microcompact → soft compact → hard-limit fallback ──
             Microcompact.maybeMicrocompact(
@@ -363,8 +403,14 @@ class AgentEngine(
 
             val calls = msg.toolCalls
             if (calls.isNullOrEmpty()) {
-                // Final answer — commit the text and finish.
+                // Final answer — commit the text, then let an active goal's
+                // completion verifier decide whether the turn may end.
                 msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
+                if (verifyGoalAndMaybeContinue(settings, turn, continuations)) {
+                    continuations += 1
+                    continue@goalLoop
+                }
+                flushGoalTokens()
                 emit(AgentEvent.Done)
                 return
             }
@@ -405,8 +451,100 @@ class AgentEngine(
                 }
             }
         }
+        flushGoalTokens()
         emit(AgentEvent.Failed("已达最大步数 ($maxSteps) + 收敛宽限 ($graceSteps),任务未能完成"))
         emit(AgentEvent.Done)
+        return
+        }
+    }
+
+    /**
+     * ZCode `target_completion_verification` + `goal-continuation` 对齐：
+     * 对刚结束的回合跑一次独立 verifier 调用。
+     * 返回 true 表示已注入续跑消息、外层 goalLoop 应继续；false 表示回合
+     * 可结束（无活动目标 / 验证通过 / 预算耗尽 / 迭代上限 / 验证调用失败）。
+     */
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.verifyGoalAndMaybeContinue(
+        settings: ProviderSettings,
+        turn: TurnContext,
+        continuations: Int,
+    ): Boolean {
+        val gs = goalState ?: return false
+        val goal = gs.goal
+        if (!goal.isActivelyPursued) return false
+        val iteration = goal.goalIteration + 1
+        emit(AgentEvent.GoalVerifying(iteration))
+        val result = try {
+            goalVerifier.verify(history.toList(), goal, turn, settings)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            emit(AgentEvent.Failed("目标验证调用失败: ${t.message ?: "未知错误"}"))
+            return false
+        }
+        pendingGoalTokens += result.tokensUsed
+        val now = System.currentTimeMillis()
+        val verified = goal.copy(
+            goalIteration = iteration,
+            tokensUsed = goal.tokensUsed + pendingGoalTokens,
+            timeUsedSeconds = if (goal.startedAt > 0) {
+                ((now - goal.startedAt) / 1000L).coerceAtLeast(goal.timeUsedSeconds)
+            } else {
+                goal.timeUsedSeconds
+            },
+            lastVerifyReason = result.verdict.reason,
+            nextAction = result.verdict.nextAction,
+            updatedAt = now,
+        )
+        pendingGoalTokens = 0
+        emit(
+            AgentEvent.GoalVerified(
+                iteration,
+                result.verdict.passed,
+                result.verdict.reason,
+                result.verdict.nextAction,
+            ),
+        )
+        if (result.verdict.passed) {
+            gs.setGoal(
+                verified.copy(
+                    status = GoalStatus.COMPLETE,
+                    phase = GoalStatus.COMPLETE.toPhase(),
+                    nextAction = "",
+                ),
+            )
+            return false
+        }
+        if (verified.isBudgetExhausted) {
+            gs.setGoal(
+                verified.copy(
+                    status = GoalStatus.BUDGET_LIMITED,
+                    phase = GoalStatus.BUDGET_LIMITED.toPhase(),
+                ),
+            )
+            return false
+        }
+        if (continuations + 1 >= maxGoalIterations) {
+            gs.setGoal(verified)
+            return false
+        }
+        gs.setGoal(verified)
+        history += ApiMessage(
+            role = "user",
+            content = goalVerifier.continuationPrompt(verified, result.verdict),
+        )
+        return true
+    }
+
+    /** Commit stream-observed tokens into the goal (engine-managed accounting). */
+    private fun flushGoalTokens() {
+        val gs = goalState ?: return
+        val pending = pendingGoalTokens
+        pendingGoalTokens = 0
+        if (pending <= 0) return
+        val g = gs.goal
+        if (!g.hasGoal) return
+        gs.setGoal(g.copy(tokensUsed = g.tokensUsed + pending, updatedAt = System.currentTimeMillis()))
     }
 
     /**
@@ -430,7 +568,10 @@ class AgentEngine(
                         is LlmStreamEvent.Reasoning -> onReasoning(ev.delta)
                         is LlmStreamEvent.ToolCallDelta -> onToolCall(ev.index, ev.id, ev.name, ev.argumentsDelta)
                         is LlmStreamEvent.Completed -> message = ev.message
-                        is LlmStreamEvent.UsageUpdate -> { /* tracked by LlmClient */ }
+                        is LlmStreamEvent.UsageUpdate -> {
+                            pendingGoalTokens += ev.usage.totalTokens.takeIf { it > 0 }
+                                ?: (ev.usage.inputTokens + ev.usage.outputTokens)
+                        }
                     }
                 }
                 true
