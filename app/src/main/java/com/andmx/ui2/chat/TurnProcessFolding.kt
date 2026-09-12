@@ -95,6 +95,9 @@ object TurnProcessFolding {
                 is TimelineItem.Reasoning -> {
                     if (turnOpen && firstProcessKey < 0) firstProcessKey = item.sortKey
                 }
+                is TimelineItem.GoalVerify -> {
+                    if (turnOpen && firstProcessKey < 0) firstProcessKey = item.sortKey
+                }
                 is TimelineItem.SubAgent -> {
                     if (turnOpen && item.agent.state != "RUNNING") {
                         subagents += 1
@@ -139,6 +142,7 @@ object TurnProcessFolding {
                 is TimelineItem.Tool -> if (key >= covering.sortKey) hidden += item.stableId
                 is TimelineItem.ToolGroup -> if (key >= covering.sortKey) hidden += item.stableId
                 is TimelineItem.Reasoning -> if (key >= covering.sortKey) hidden += item.stableId
+                is TimelineItem.GoalVerify -> if (key >= covering.sortKey) hidden += item.stableId
                 is TimelineItem.SubAgent -> if (key >= covering.sortKey) hidden += item.stableId
                 is TimelineItem.Approval -> Unit
                 is TimelineItem.Working -> Unit

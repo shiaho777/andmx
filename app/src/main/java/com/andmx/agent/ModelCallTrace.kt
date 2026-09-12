@@ -18,6 +18,7 @@ object ModelCallTrace {
         SESSION_TITLE("标题生成"),
         COMPACT("上下文压缩"),
         SUBAGENT("子智能体"),
+        GOAL_VERIFY("目标验证"),
         UNKNOWN("未知来源"),
     }
 

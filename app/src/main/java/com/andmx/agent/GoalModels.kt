@@ -39,10 +39,20 @@ data class ConversationGoal(
     val startedAt: Long = 0L,
     val updatedAt: Long = 0L,
     val note: String = "",
+    /** ZCode goalIteration：已跑完的验证轮数（每次 verifier 判定 +1）。 */
+    val goalIteration: Int = 0,
+    /** 最近一次 goalVerifier 判定给出的原因。 */
+    val lastVerifyReason: String = "",
+    /** 最近一次判定给出的下一步动作（未通过时驱动续跑）。 */
+    val nextAction: String = "",
+    /** 目标累计耗时（秒）。 */
+    val timeUsedSeconds: Long = 0L,
 ) {
     val hasGoal: Boolean get() = text.isNotBlank()
     /** Remaining token budget, or 0 if no budget set. */
     val remainingBudget: Int get() = if (tokenBudget > 0) (tokenBudget - tokensUsed).coerceAtLeast(0) else 0
     /** True when a budget is set and has been exhausted. */
     val isBudgetExhausted: Boolean get() = tokenBudget > 0 && tokensUsed >= tokenBudget
+    /** 是否处于 verifier 续跑管辖内（运行中的目标）。 */
+    val isActivelyPursued: Boolean get() = hasGoal && status == GoalStatus.ACTIVE
 }

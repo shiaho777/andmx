@@ -88,6 +88,7 @@ fun ChatScreen(
     val approvals by viewModel.approvals.collectAsState()
     val subAgents by viewModel.subAgents.collectAsState()
     val subAgentItems by viewModel.subAgentItems.collectAsState()
+    val goalVerifications by viewModel.goalVerifications.collectAsState()
     val mcpStatus by viewModel.mcpStatus.collectAsState()
     val contextTokens by viewModel.contextTokens.collectAsState()
     val contextWindow by viewModel.contextWindow.collectAsState()
@@ -111,16 +112,18 @@ fun ChatScreen(
             n.contains("todo") || n == "update_plan"
         }
     }
-    val timeline = remember(messages, visibleTools, approvals, subAgentItems, visibleReasonings, isLoading) {
+    val timeline = remember(messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications, isLoading) {
         val hasLiveStream = messages.any { it.isStreaming } || visibleReasonings.any { it.isStreaming }
         val hasRunningTool = visibleTools.any { it.isRunning }
+        val hasVerifying = goalVerifications.any { it.passed == null }
         buildTimeline(
             messages = messages,
             tools = visibleTools,
             approvals = approvals,
             subAgents = subAgentItems,
             reasonings = visibleReasonings,
-            showWorking = isLoading && !hasLiveStream && !hasRunningTool && visibleReasonings.none { it.isStreaming },
+            goalVerifications = goalVerifications,
+            showWorking = isLoading && !hasLiveStream && !hasRunningTool && !hasVerifying && visibleReasonings.none { it.isStreaming },
         )
     }
     // Turn 过程折叠（dsh web turn-process 对齐）：已关闭 Turn 的过程行默认
@@ -678,6 +681,7 @@ LaunchedEffect(Unit) {
                                     } else null,
                                 )
                                 is TimelineItem.SubAgent -> SubAgentTimelineCard(item = item.agent)
+                                is TimelineItem.GoalVerify -> GoalVerifyRow(item = item.item)
                             }
                         }
                     }

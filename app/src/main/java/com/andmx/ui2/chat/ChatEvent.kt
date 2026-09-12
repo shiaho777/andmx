@@ -27,6 +27,17 @@ sealed class ChatEvent {
     data class SubAgentCompleted(val agentId: String, val result: String) : ChatEvent()
     data class SubAgentFailed(val agentId: String, val error: String) : ChatEvent()
     data class Error(val message: String) : ChatEvent()
+
+    /** Goal 完成度验证开始（第 [iteration] 轮）。 */
+    data class GoalVerifying(val iteration: Int) : ChatEvent()
+
+    /** Goal 完成度验证结果：未通过时引擎注入续跑消息继续工作。 */
+    data class GoalVerified(
+        val iteration: Int,
+        val passed: Boolean,
+        val reason: String,
+        val nextAction: String,
+    ) : ChatEvent()
     data object Done : ChatEvent()
 
     /** step 首包/首 token 时间戳（dsh StatsLine 的 TTFT/吞吐指标来源）。 */
@@ -74,5 +85,14 @@ data class ReasoningItem(
     val id: String,
     val content: String,
     val isStreaming: Boolean = true,
+    val sortKey: Long = System.currentTimeMillis(),
+)
+
+/** 一次 goal 完成度验证的时间线条目。 */
+data class GoalVerifyItem(
+    val iteration: Int,
+    val passed: Boolean? = null,
+    val reason: String = "",
+    val nextAction: String = "",
     val sortKey: Long = System.currentTimeMillis(),
 )

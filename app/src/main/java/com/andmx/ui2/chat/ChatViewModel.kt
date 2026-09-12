@@ -82,6 +82,10 @@ class ChatViewModel @Inject constructor(
     private val _subAgentItems = MutableStateFlow<List<SubAgentItem>>(emptyList())
     val subAgentItems: StateFlow<List<SubAgentItem>> = _subAgentItems.asStateFlow()
 
+    /** Goal 完成度验证时间线（ZCode goalVerifications 对齐）。 */
+    private val _goalVerifications = MutableStateFlow<List<GoalVerifyItem>>(emptyList())
+    val goalVerifications: StateFlow<List<GoalVerifyItem>> = _goalVerifications.asStateFlow()
+
 
     val pendingApproval: StateFlow<ChatController.ApprovalRequest?> = controller.pendingApproval
     val planSteps: StateFlow<List<com.andmx.agent.UpdatePlanTool.PlanStep>> = controller.planSteps
@@ -224,6 +228,7 @@ class ChatViewModel @Inject constructor(
         currentReasoningText = ""
         _approvals.value = emptyList()
         _subAgentItems.value = emptyList()
+        _goalVerifications.value = emptyList()
         _error.value = null
         viewModelScope.launch {
             val history = runCatching { repo.messages(id) }.getOrDefault(emptyList())
@@ -1219,6 +1224,7 @@ class ChatViewModel @Inject constructor(
         _toolCalls.value = _toolCalls.value.filter { it.sortKey <= keepAfter }
         _approvals.value = _approvals.value.filter { it.sortKey <= keepAfter }
         _subAgentItems.value = _subAgentItems.value.filter { it.sortKey <= keepAfter }
+        _goalVerifications.value = _goalVerifications.value.filter { it.sortKey <= keepAfter }
         currentReasoningId = null
         currentReasoningText = ""
         lastReasoningUiAt = 0L
@@ -1304,6 +1310,7 @@ class ChatViewModel @Inject constructor(
         _reasonings.value = _reasonings.value.filter { it.sortKey < cutKey }
         _approvals.value = _approvals.value.filter { it.sortKey < cutKey }
         _subAgentItems.value = _subAgentItems.value.filter { it.sortKey < cutKey }
+        _goalVerifications.value = _goalVerifications.value.filter { it.sortKey < cutKey }
         currentReasoningId = null
         currentReasoningText = ""
         lastReasoningUiAt = 0L
@@ -1937,6 +1944,29 @@ class ChatViewModel @Inject constructor(
             is ChatEvent.SubAgentDelta,
             is ChatEvent.SubAgentCompleted,
             is ChatEvent.SubAgentFailed -> handleSideEvent(event)
+            is ChatEvent.GoalVerifying -> {
+                val key = nextProcessSortKey()
+                _goalVerifications.value = _goalVerifications.value + GoalVerifyItem(
+                    iteration = event.iteration,
+                    sortKey = key,
+                )
+            }
+            is ChatEvent.GoalVerified -> {
+                val list = _goalVerifications.value
+                val idx = list.indexOfLast { it.iteration == event.iteration && it.passed == null }
+                val item = GoalVerifyItem(
+                    iteration = event.iteration,
+                    passed = event.passed,
+                    reason = event.reason,
+                    nextAction = event.nextAction,
+                    sortKey = if (idx >= 0) list[idx].sortKey else nextProcessSortKey(),
+                )
+                _goalVerifications.value = if (idx >= 0) {
+                    list.toMutableList().also { it[idx] = item }
+                } else {
+                    list + item
+                }
+            }
             is ChatEvent.Error -> {
                 _error.value = event.message
                 pauseQueue(QueuePause.ERROR)
