@@ -31,6 +31,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action default includes the removed `tools` package, which
+          # fails sdkmanager; platform-tools is all we need preinstalled here.
+          packages: platform-tools
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses >/dev/null || true
