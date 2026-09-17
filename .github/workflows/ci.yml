@@ -31,6 +31,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action default includes the removed `tools` package, which
+          # fails sdkmanager; platform-tools is all we need preinstalled here.
+          packages: platform-tools
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses >/dev/null || true
@@ -56,6 +60,26 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testLiteDebugUnitTest --no-daemon --stacktrace
 
+      - name: Compile instrumented smoke tests
+        run: ./gradlew :app:assembleLiteDebug :app:assembleLiteDebugAndroidTest -PtestAbi=x86_64 --no-daemon --stacktrace
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Offline Android UI smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew :app:connectedLiteDebugAndroidTest -PtestAbi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=com.andmx.SmokeTest --no-daemon --stacktrace
+
       - name: Upload test report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -64,6 +88,8 @@ jobs:
           path: |
             app/build/reports/tests/testLiteDebugUnitTest
             app/build/test-results/testLiteDebugUnitTest
+            app/build/reports/androidTests/connected
+            app/build/outputs/androidTest-results
           retention-days: 7
           if-no-files-found: ignore
 
@@ -73,7 +99,7 @@ jobs:
           {
             echo "## Delivery gate"
             echo "- Job: \`build\` (workflow **CI**)"
-            echo "- Verifies: lite Kotlin · proot Kotlin · native (CMake/NDK) · unit tests"
+            echo "- Verifies: lite Kotlin · proot Kotlin · native (CMake/NDK) · unit/Robolectric tests · x86_64 Android smoke tests"
             echo "- Merge only when this job is green on PRs into \`main\`."
             echo "- Issues close via PR body \`Fixes #N\` / \`Closes #N\` on **merge**, not from CI."
             echo "- Do not close the linked Issue while CI is red or only because the PR opened."

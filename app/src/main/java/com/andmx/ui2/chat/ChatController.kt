@@ -1764,40 +1764,7 @@ class ChatController(private val context: Context) {
     suspend fun exportConversationMarkdown(conversationId: Long): String {
         val conv = repo.conversation(conversationId)
         val msgs = repo.messages(conversationId)
-        val md = buildString {
-            appendLine("# ${conv?.title ?: "AndMX 对话"}")
-            appendLine()
-            appendLine("- 项目: `${conv?.project.orEmpty()}`")
-            appendLine("- 模型: `${conv?.model.orEmpty()}`")
-            appendLine("- 导出时间: ${java.time.Instant.now()}")
-            appendLine()
-            msgs.forEach { m ->
-                when (m.role) {
-                    "user" -> {
-                        appendLine("## User")
-                        appendLine(m.content)
-                        appendLine()
-                    }
-                    "assistant" -> {
-                        appendLine("## Assistant")
-                        appendLine(m.content)
-                        appendLine()
-                    }
-                    "tool" -> {
-                        appendLine("### Tool · ${m.toolName.orEmpty()}")
-                        if (m.toolArgs.isNotBlank()) {
-                            appendLine("```json")
-                            appendLine(m.toolArgs.take(2000))
-                            appendLine("```")
-                        }
-                        appendLine("```")
-                        appendLine(m.content.take(4000))
-                        appendLine("```")
-                        appendLine()
-                    }
-                }
-            }
-        }
+        val md = conversationMarkdown(conv, msgs, java.time.Instant.now())
         val path = "/root/andmx-export-${System.currentTimeMillis()}.md"
         val ok = runCatching { guestFs.writeText(path, md) }.isSuccess
         return if (ok) {

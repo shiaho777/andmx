@@ -60,8 +60,10 @@ class ComputerUseTool(context: Context) : Tool {
             }
             putJsonObject("coordinate") {
                 put("type", "array")
-                put("description", "[x, y] 坐标,基于你上次看到的截图。用于 click/scroll/swipe 起点等")
-                putJsonArray("items") { addJsonObject { put("type", "integer") } }
+                put("description", "基于上次截图的坐标：click/scroll 为 [x,y]，swipe 为 [x1,y1,x2,y2]")
+                putJsonObject("items") { put("type", "integer") }
+                put("minItems", 2)
+                put("maxItems", 4)
             }
             putJsonObject("text") {
                 put("type", "string")

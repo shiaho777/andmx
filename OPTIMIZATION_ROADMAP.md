@@ -38,23 +38,23 @@
 
 ---
 
-## 实际完成情况（核对于代码）
+## 当前状态
 
 - Markdown 引擎、文件图标、对话流、工具卡片、终端、会话抽屉均已落地，对应代码在 `ui2/` 各子目录。
-- ui2 总计约 23,300 行 Kotlin。历次文档给出的 7,460 及更低估算均已过时，以 `find app/src/main/java/com/andmx/ui2 -name '*.kt' | xargs wc -l` 为准。
-- ui2 与旧版 `ui/`（含 `ui/workbench/`，约 22,400 行）并存，通过 `AndroidManifest.xml` 的 launcher activity 配置切换。早期「~10,000 行」的估算偏低约一半。
-- 对话（`ui2/chat/`，约 10,600 行）与设置页（`ui2/settings/`，约 7,400 行）是两个最大的子模块，均远超早期预估。
+- `MainActivity2` 是唯一界面入口，旧版 workbench 已删除；上文双 UI 并存仅描述早期目标。
+- 图片附件和会话搜索已有实现；搜索匹配标题、项目和首条用户消息，不等同于全部消息全文检索。
+- `app/src/test/java/com/andmx/ui2/` 已有逻辑测试；不能把它与真机 Compose 交互测试混为一谈。
+- 上文行数均为历史记录，不作为当前规模或性能依据。
 
 ## 早期文档中的不可验证声明
 
 早期版本曾列出「启动提升 50%+」「内存减少 60%+」「APK 20MB」等性能数字。这些数字没有测量来源，已移除。如需性能基线，应使用 Android Studio Profiler 实测。
 
-## 待完善
+## 后续验证重点
 
-- ui2 的自动化测试（`app/src/test/` 下目前没有 ui2 覆盖）
-- Computer Use 与对话流的深度集成
-- 图片消息支持
-- 会话搜索
+- 持续扩展设备级回归测试，覆盖生命周期、权限拒绝和长会话。
+- Computer Use 已注册默认工具表，仍需用户授权屏幕录制及无障碍，计划模式不允许屏幕操作。
+- 性能优化先建立启动、内存和长列表滚动基线，不使用未经测量的提升比例。
+- Goal 会话内续跑不是后台定时调度，当前没有独立的定时任务系统。
 
-> 「与真实 agent 引擎端到端对接」一项已完成：`ui2/chat/ChatController.kt` 构造真实
-> `AgentEngine` + `LlmClient` 并调用 `runTurn`。缺的是自动化回归覆盖，不是接线。
+`ChatController` 已构造真实 `AgentEngine` + `LlmClient` 并调用 `runTurn`，不是待接线的原型。

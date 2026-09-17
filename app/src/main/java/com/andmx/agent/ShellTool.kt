@@ -19,7 +19,16 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.io.File
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * The agent's primary hand: run a shell command inside the proot Linux guest
@@ -62,6 +71,20 @@ class ShellTool(
                 put("type", "string")
                 put("description", "要执行的 shell 命令,例如 'ls -la /root' 或 'python3 -c \"print(1+1)\"'")
             }
+            putJsonObject("timeout_ms") {
+                put("type", "integer")
+                put("minimum", 1)
+                put("maximum", 600_000)
+            }
+            putJsonObject("max_output_chars") {
+                put("type", "integer")
+                put("minimum", 1)
+                put("maximum", 16_000)
+            }
+            putJsonObject("strict_cwd") {
+                put("type", "boolean")
+                put("description", "Fail if the workspace directory is unavailable; do not fall back to home.")
+            }
         }
         putJsonArray("required") { add("command") }
     }
@@ -71,12 +94,36 @@ class ShellTool(
     override suspend fun execute(callId: String, args: JsonObject): ToolResult {
         val command = args["command"]?.jsonPrimitive?.content
             ?: return ToolResult("缺少参数 command", isError = true)
-        val prepared = ensureNetworkTools(command)
+        val bounded = listOf("timeout_ms", "max_output_chars", "strict_cwd").any { it in args }
+        val timeoutMs = if ("timeout_ms" in args) {
+            (args["timeout_ms"] as? JsonPrimitive)?.longOrNull?.takeIf { it in 1..600_000 }
+                ?: return ToolResult("timeout_ms must be between 1 and 600000", isError = true)
+        } else 600_000L
+        val maxOutputChars = if ("max_output_chars" in args) {
+            (args["max_output_chars"] as? JsonPrimitive)?.intOrNull?.takeIf { it in 1..16_000 }
+                ?: return ToolResult("max_output_chars must be between 1 and 16000", isError = true)
+        } else 16_000
+        val strictCwd = if ("strict_cwd" in args) {
+            (args["strict_cwd"] as? JsonPrimitive)?.booleanOrNull
+                ?: return ToolResult("strict_cwd must be a boolean", isError = true)
+        } else false
+        val prepared = if (bounded) command else ensureNetworkTools(command)
 
         val cwd = cwdProvider().ifBlank { access.guestCwd() }
-        val cdCommand = if (cwd.isNotBlank()) "cd '$cwd' 2>/dev/null || cd ~; $prepared" else prepared
+        if (strictCwd && cwd.isBlank()) {
+            return ToolResult("执行失败: 工作区未就绪,无法定位命令工作目录", isError = true)
+        }
+        val quotedCwd = "'${cwd.replace("'", "'\"'\"'")}'"
+        val cdCommand = when {
+            strictCwd -> "cd $quotedCwd || exit 125; $prepared"
+            cwd.isNotBlank() -> "cd $quotedCwd 2>/dev/null || cd ~; $prepared"
+            else -> prepared
+        }
 
         if (access.isRemote) {
+            if (bounded) {
+                return ToolResult("执行失败: 远程工作区不支持带超时的验证命令执行", isError = true)
+            }
             if (callId.isNotBlank()) {
                 _events.tryEmit(ShellEvent.Started(callId, command, cwd))
             }
@@ -97,6 +144,10 @@ class ShellTool(
                 )
             }
             return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+        }
+
+        if (bounded) {
+            return executeBounded(cdCommand, timeoutMs, maxOutputChars)
         }
 
         if (callId.isNotBlank()) {
@@ -125,6 +176,82 @@ class ShellTool(
             append("\n[exit=${res.exitCode}]")
         }
         return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+    }
+
+    private suspend fun executeBounded(
+        cdCommand: String,
+        timeoutMs: Long,
+        maxOutputChars: Int,
+    ): ToolResult {
+        val install = runtime.install()
+        if (!install.ok) {
+            return ToolResult("执行失败: ${install.message}", isError = true)
+        }
+        val rootfs = runtime.rootfsDir.takeIf { it.exists() }
+        val sh = if (rootfs != null) "/bin/sh" else "/system/bin/sh"
+        val argv = runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = rootfs)
+
+        return withContext(Dispatchers.IO) {
+            val process = runCatching {
+                ProcessBuilder(argv)
+                    .directory(File(context.filesDir.path))
+                    .apply {
+                        environment().clear()
+                        environment().putAll(com.andmx.exec.policy.EnvScrubber.scrub(runtime.env()))
+                        redirectErrorStream(true)
+                    }
+                    .start()
+            }.getOrElse {
+                return@withContext ToolResult("执行失败: ${it.message}", isError = true)
+            }
+            val output = StringBuilder()
+            val buffer = ByteArray(8_192)
+            var timedOut = false
+            var truncated = false
+            val started = System.nanoTime()
+            val reader = process.inputStream
+            try {
+                process.outputStream.close()
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    if ((System.nanoTime() - started) / 1_000_000 >= timeoutMs) {
+                        timedOut = true
+                        break
+                    }
+                    val available = reader.available()
+                    if (available > 0) {
+                        val n = reader.read(buffer, 0, minOf(available, buffer.size))
+                        if (n <= 0) break
+                        val chunk = String(buffer, 0, n, StandardCharsets.UTF_8)
+                        val remaining = maxOutputChars - output.length
+                        output.append(chunk.take(remaining))
+                        if (chunk.length > remaining) truncated = true
+                    } else if (!process.isAlive) {
+                        break
+                    } else {
+                        delay(25)
+                    }
+                }
+                val exitCode = if (timedOut) 124 else process.exitValue()
+                val suffix = if (timedOut) "\n(超时,已终止)\n[exit=124]" else "\n[exit=$exitCode]"
+                val text = output.toString().replace("\r", "").trimEnd().ifBlank { "(无输出)" }
+                val marker = "\n…[截断]"
+                val rendered = if (truncated || text.length + suffix.length > maxOutputChars) {
+                    text.take((maxOutputChars - marker.length - suffix.length).coerceAtLeast(0)) + marker + suffix
+                } else text + suffix
+                ToolResult(rendered.takeLast(maxOutputChars), isError = timedOut || exitCode != 0)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                ToolResult("执行失败: ${e.message}".take(maxOutputChars), isError = true)
+            } finally {
+                runCatching { process.destroy() }
+                runCatching { if (process.isAlive) process.destroyForcibly() }
+                runCatching { reader.close() }
+                runCatching { process.errorStream.close() }
+                runCatching { process.outputStream.close() }
+            }
+        }
     }
 
     private suspend fun executeBound(

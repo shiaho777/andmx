@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Sort
@@ -36,6 +35,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -49,9 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -369,61 +369,39 @@ fun SearchField(
     onClose: (() -> Unit)? = null,
 ) {
     val placeholder = if (archived) "搜索归档任务..." else "搜索任务..."
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-            .height(40.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.Search,
-            null,
-            Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(8.dp))
-        BasicTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            singleLine = true,
-            textStyle = TextStyle(
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
-            ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-            modifier = Modifier.weight(1f),
-            decorationBox = { inner ->
-                if (query.isEmpty()) {
-                    Text(
-                        placeholder,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+        placeholder = { Text(placeholder, fontSize = 14.sp) },
+        leadingIcon = {
+            Icon(Icons.Outlined.Search, null, Modifier.size(18.dp))
+        },
+        trailingIcon = if (query.isNotEmpty() || onClose != null) {
+            {
+                IconButton(onClick = {
+                    if (query.isNotEmpty()) onQueryChange("") else onClose?.invoke()
+                }) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        if (query.isNotEmpty()) "清除搜索" else "关闭搜索",
+                        Modifier.size(18.dp),
                     )
                 }
-                inner()
-            },
-        )
-        if (onClose != null) {
-            Box(
-                Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onClose),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Outlined.Close,
-                    "关闭",
-                    Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
-        }
-    }
+        } else null,
+        shape = RoundedCornerShape(10.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+            unfocusedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
 }
 
 @Composable

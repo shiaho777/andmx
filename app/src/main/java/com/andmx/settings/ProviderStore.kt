@@ -1,100 +1,101 @@
 package com.andmx.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.room.withTransaction
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.ProviderEntity
 import com.andmx.llm.provider.ClaudeModelMapping
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
-/**
- * Persists the catalogue of configured [ProviderDefinition]s in the Room
- * `providers` table, and exposes the currently-selected ("primary") provider.
- *
- * On first access, if the table is empty the store seeds it: built-in presets
- * are inserted, and a legacy single-provider config (pre-v8 DataStore values)
- * is migrated into one custom row marked primary — so existing users keep
- * their endpoint/key.
- */
 class ProviderStore(
     context: Context,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
+    cipher: CredentialCipher = AesGcmCredentialCipher(AndroidKeystoreCredentialKeys()),
 ) {
-    private val dao = AndmxDatabase.get(context).dao()
+    private val database = AndmxDatabase.get(context)
+    private val dao = database.dao()
     private val prefs = context.getSharedPreferences(SEED_PREFS, Context.MODE_PRIVATE)
+    private val credentials = CredentialPersistence(cipher)
+    private val settingsStore = SettingsStore(context, cipher)
+    private val errors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val credentialErrors: StateFlow<Map<String, String>> = errors.asStateFlow()
 
-    /**
-     * All configured providers, in the user's display order.
-     *
-     * The order lives in [prefs] as a standalone id list (see [ProviderOrder]),
-     * so the table itself stays unordered and a provider that has never been
-     * dragged simply falls to the end.
-     */
-    val providers: Flow<List<ProviderDefinition>> =
-        dao.observeProviders().map { rows ->
-            val defs = rows.map { it.toDefinition() }
-            applyProviderOrder(defs.map { it.id }, readProviderOrder())
-                .mapNotNull { id -> defs.firstOrNull { it.id == id } }
+    private val decoded: Flow<List<Pair<ProviderEntity, ProviderDefinition>>> =
+        dao.observeProviders().map {
+            database.withTransaction {
+                dao.allProviders().map { row -> row to row.toDefinition() }
+            }
         }
 
-    /** The currently-selected provider, or null if none is usable yet. */
-    val primary: Flow<ProviderDefinition?> =
-        dao.observePrimaryProvider().map { row -> row?.toDefinition() }
+    val state: Flow<Pair<List<ProviderDefinition>, ProviderDefinition?>> = decoded.map { rows ->
+        val definitions = rows.map { it.second }
+        val ordered = applyProviderOrder(definitions.map { it.id }, readProviderOrder())
+            .mapNotNull { id -> definitions.firstOrNull { it.id == id } }
+        ordered to rows.firstOrNull { it.first.isPrimary }?.second
+    }
+    val providers: Flow<List<ProviderDefinition>> = state.map { it.first }
+    val primary: Flow<ProviderDefinition?> = state.map { it.second }
 
-    /** Providers + the primary in one emission (UI convenience). */
-    val state: Flow<Pair<List<ProviderDefinition>, ProviderDefinition?>> =
-        combine(providers, primary) { list, p -> list to p }
-
-    /**
-     * Migrate a legacy DataStore single-provider config into the providers table
-     * on first run, if present. Idempotent.
-     *
-     * No built-in presets are seeded — the table starts empty and the user adds
-     * each provider by hand (name, protocol, URL, key), then fetches the model
-     * list from the endpoint.
-     */
     suspend fun ensureSeeded(legacy: LegacyProvider? = null) {
-        if (prefs.getBoolean(KEY_SEEDED, false)) return
-        val existing = dao.allProviders()
-        if (existing.isEmpty() && legacy != null) {
-            val now = System.currentTimeMillis()
-            dao.upsertProvider(legacy.toProviderDefinition().copy(enabled = true).toEntity(createdAtMs = now, isPrimary = true))
+        database.withTransaction {
+            val existing = dao.allProviders()
+            existing.forEach { row ->
+                credentials.readAndMigrate(row.apiKey, CredentialPersistence.providerScope(row.id)) {
+                    dao.upsertProvider(row.copy(apiKey = it))
+                }
+            }
+            if (!prefs.getBoolean(KEY_SEEDED, false) && existing.isEmpty() && legacy != null) {
+                val now = System.currentTimeMillis()
+                val definition = legacy.toProviderDefinition()
+                val encrypted = credentials.forSave(definition.apiKey, null, CredentialPersistence.providerScope(definition.id))
+                dao.upsertProvider(definition.toEntity(now, true, encrypted))
+            }
+        }
+        if (legacy != null) {
+            val migrated = dao.allProviders().firstOrNull { it.id == "migrated" }
+            if (migrated != null && migrated.baseUrl == legacy.baseUrl &&
+                credentials.decryptStored(migrated.apiKey, CredentialPersistence.providerScope(migrated.id)) == legacy.apiKey
+            ) {
+                settingsStore.clearLegacyProvider(legacy)
+            }
         }
         prefs.edit().putBoolean(KEY_SEEDED, true).apply()
     }
 
-    /** Insert or update a provider by id, preserving its existing primary flag. */
     suspend fun upsert(def: ProviderDefinition) {
-        val now = System.currentTimeMillis()
-        // Preserve the existing isPrimary state so editing a provider (e.g.
-        // adding a model) doesn't accidentally demote the active provider.
-        val existingPrimary = dao.allProviders().firstOrNull { it.id == def.id }?.isPrimary ?: false
-        dao.upsertProvider(def.toEntity(createdAtMs = now, isPrimary = existingPrimary))
-    }
-
-    /** Delete a provider. Falls back to the first remaining provider as primary. */
-    suspend fun delete(id: String) {
-        dao.deleteProvider(id)
-        // If we just removed the primary, promote the next available provider.
-        if (dao.allProviders().isNotEmpty() && primary.first() == null) {
-            dao.allProviders().firstOrNull()?.let { dao.setPrimary(it.id) }
+        database.withTransaction {
+            val now = System.currentTimeMillis()
+            val existing = dao.allProviders().firstOrNull { it.id == def.id }
+            val encrypted = credentials.forSave(def.apiKey, existing?.apiKey, CredentialPersistence.providerScope(def.id))
+            dao.upsertProvider(def.toEntity(now, existing?.isPrimary ?: false, encrypted)
+                .copy(createdAtMs = existing?.createdAtMs ?: now))
         }
+        errors.update { it - def.id }
     }
 
-    /**
-     * Move the provider [activeId] onto [overId]'s slot, then persist the
-     * resulting order. Unknown or identical ids leave the order untouched.
-     */
+    suspend fun delete(id: String) {
+        database.withTransaction {
+            dao.deleteProvider(id)
+            val remaining = dao.allProviders()
+            if (remaining.none { it.isPrimary }) remaining.firstOrNull()?.let { dao.setPrimary(it.id) }
+        }
+        errors.update { it - id }
+    }
+
     suspend fun reorderProviders(activeId: String, overId: String) {
         val current = dao.observeProviders().first().map { it.id }
         val next = reorderProviderIds(current, activeId, overId)
@@ -109,45 +110,57 @@ class ProviderStore(
     }
 
     private fun writeProviderOrder(ids: List<String>) {
-        val raw = runCatching {
-            json.encodeToString(ListSerializer(String.serializer()), ids)
-        }.getOrNull() ?: return
+        val raw = json.encodeToString(ListSerializer(String.serializer()), ids)
         prefs.edit().putString(KEY_PROVIDER_ORDER, raw).apply()
     }
 
-    /** Mark a provider as the active one (clears the previous primary). */
     suspend fun setPrimary(id: String) {
-        val rows = dao.allProviders()
-        if (rows.none { it.id == id }) return
-        dao.clearPrimary()
-        dao.setPrimary(id)
+        database.withTransaction {
+            if (dao.allProviders().any { it.id == id }) {
+                dao.clearPrimary()
+                dao.setPrimary(id)
+            }
+        }
     }
 
-    // ── Entity ↔ Definition ───────────────────────────────────────────────────
+    private suspend fun ProviderEntity.toDefinition(): ProviderDefinition {
+        var unreadable = false
+        val runtimeKey = try {
+            credentials.readAndMigrate(apiKey, CredentialPersistence.providerScope(id)) {
+                dao.upsertProvider(copy(apiKey = it))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            unreadable = true
+            errors.update { it + (id to ERROR_UNREADABLE) }
+            ""
+        }
+        if (!unreadable) errors.update { it - id }
+        return ProviderDefinition(
+            id = id,
+            name = name,
+            kind = runCatching { ProviderKind.valueOf(kind) }.getOrDefault(ProviderKind.OPENAI),
+            baseUrl = baseUrl,
+            apiKey = runtimeKey,
+            apiKeyRequired = apiKeyRequired,
+            enabled = enabled && !unreadable,
+            source = source,
+            requestMaxRetries = requestMaxRetries,
+            streamMaxRetries = streamMaxRetries,
+            streamIdleTimeoutMs = streamIdleTimeoutMs,
+            httpHeaders = decodeMap(httpHeadersJson),
+            models = decodeModels(modelsJson),
+            claudeMapping = decodeClaudeMapping(claudeMappingJson),
+        )
+    }
 
-    private fun ProviderEntity.toDefinition(): ProviderDefinition = ProviderDefinition(
-        id = id,
-        name = name,
-        kind = runCatching { ProviderKind.valueOf(kind) }.getOrDefault(ProviderKind.OPENAI),
-        baseUrl = baseUrl,
-        apiKey = apiKey,
-        apiKeyRequired = apiKeyRequired,
-        enabled = enabled,
-        source = source,
-        requestMaxRetries = requestMaxRetries,
-        streamMaxRetries = streamMaxRetries,
-        streamIdleTimeoutMs = streamIdleTimeoutMs,
-        httpHeaders = decodeMap(httpHeadersJson),
-        models = decodeModels(modelsJson),
-        claudeMapping = decodeClaudeMapping(claudeMappingJson),
-    )
-
-    private fun ProviderDefinition.toEntity(createdAtMs: Long, isPrimary: Boolean): ProviderEntity = ProviderEntity(
+    private fun ProviderDefinition.toEntity(now: Long, isPrimary: Boolean, encryptedKey: String): ProviderEntity = ProviderEntity(
         id = id,
         name = name,
         kind = kind.name,
         baseUrl = baseUrl,
-        apiKey = apiKey,
+        apiKey = encryptedKey,
         apiKeyRequired = apiKeyRequired,
         enabled = enabled,
         source = source,
@@ -158,8 +171,8 @@ class ProviderStore(
         modelsJson = encodeModels(models),
         claudeMappingJson = encodeClaudeMapping(claudeMapping),
         isPrimary = isPrimary,
-        createdAtMs = createdAtMs,
-        updatedAtMs = createdAtMs,
+        createdAtMs = now,
+        updatedAtMs = now,
     )
 
     private fun encodeMap(m: Map<String, String>): String =
@@ -175,23 +188,20 @@ class ProviderStore(
         runCatching { json.decodeFromString(MapSerializer(String.serializer(), ModelDefinition.serializer()), s) }.getOrDefault(emptyMap())
 
     private fun encodeClaudeMapping(m: ClaudeModelMapping?): String =
-        m?.let { runCatching { json.encodeToString(ClaudeModelMapping.serializer(), it) }.getOrNull() }.orEmpty()
+        m?.let { json.encodeToString(ClaudeModelMapping.serializer(), it) }.orEmpty()
 
     private fun decodeClaudeMapping(s: String): ClaudeModelMapping? =
-        if (s.isBlank()) null
-        else runCatching { json.decodeFromString(ClaudeModelMapping.serializer(), s) }.getOrNull()
+        if (s.isBlank()) null else runCatching { json.decodeFromString(ClaudeModelMapping.serializer(), s) }.getOrNull()
 
     companion object {
         private const val SEED_PREFS = "andmx_provider_seed"
         private const val KEY_SEEDED = "seeded_v1"
         private const val KEY_PROVIDER_ORDER = "provider_order_v1"
+        private const val ERROR_UNREADABLE =
+            "API Key 无法安全读取或迁移，原始数据已保留。请稍后重试；凭据永久丢失时请删除并重新添加此供应商。"
     }
 }
 
-/**
- * Snapshot of the legacy pre-v8 single-provider config (from DataStore), used
- * only to seed the new multi-provider table on first run.
- */
 data class LegacyProvider(
     val baseUrl: String,
     val apiKey: String,
@@ -199,16 +209,11 @@ data class LegacyProvider(
     val wireApi: String,
 )
 
-/** Heuristically turn a legacy config into a [ProviderDefinition]. */
-private fun LegacyProvider.toProviderDefinition(): ProviderDefinition {
-    val kind = ProviderKind.from(wireApi)
-    val id = "migrated"
-    return ProviderDefinition(
-        id = id,
-        name = "",
-        kind = kind,
-        baseUrl = baseUrl,
-        apiKey = apiKey,
-        models = if (model.isBlank()) emptyMap() else mapOf(model to ModelDefinition()),
-    )
-}
+private fun LegacyProvider.toProviderDefinition(): ProviderDefinition = ProviderDefinition(
+    id = "migrated",
+    name = "",
+    kind = ProviderKind.from(wireApi),
+    baseUrl = baseUrl,
+    apiKey = apiKey,
+    models = if (model.isBlank()) emptyMap() else mapOf(model to ModelDefinition()),
+)

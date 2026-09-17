@@ -6,6 +6,7 @@ import com.andmx.llm.LlmApi
 import com.andmx.llm.LlmStreamEvent
 import com.andmx.settings.ProviderSettings
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -19,8 +20,6 @@ import kotlinx.serialization.json.jsonPrimitive
  * {"passed": boolean, "reason": string, "nextAction": string}。
  * 未通过时引擎注入 [continuationPrompt] 续跑下一轮（goalIteration+1）。
  *
- * 解析失败对齐 ZCode 的 fail-open：视为通过并带兜底 reason，避免验证器
- * 故障把会话锁死在无限续跑里。
  */
 class GoalVerifier(
     private val client: LlmApi,
@@ -70,9 +69,9 @@ class GoalVerifier(
         if (!completed && text.isBlank()) {
             return Result(
                 Verdict(
-                    passed = true,
+                    passed = false,
                     reason = "The completion verifier produced no output.",
-                    nextAction = "",
+                    nextAction = "Retry completion verification with concrete evidence.",
                 ),
                 tokensUsed = tokens,
             )
@@ -84,17 +83,17 @@ class GoalVerifier(
     fun parseVerdict(raw: String): Verdict {
         for (candidate in candidates(raw)) {
             val obj = parseJsonObject(candidate) ?: continue
-            val reason = obj["reason"]?.jsonPrimitive?.contentOrNull?.trim()
-            return Verdict(
-                passed = obj["passed"]?.jsonPrimitive?.booleanOrNull == true,
-                reason = reason?.takeIf { it.isNotEmpty() } ?: DEFAULT_FAIL_REASON,
-                nextAction = obj["nextAction"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty(),
-            )
+            val passed = obj["passed"] as? JsonPrimitive ?: continue
+            val reason = obj["reason"] as? JsonPrimitive ?: continue
+            val nextAction = obj["nextAction"] as? JsonPrimitive ?: continue
+            if (passed.isString || passed.booleanOrNull == null || !reason.isString ||
+                reason.content.isBlank() || !nextAction.isString) continue
+            return Verdict(passed.booleanOrNull == true, reason.content.trim(), nextAction.content.trim())
         }
         return Verdict(
-            passed = true,
+            passed = false,
             reason = "The completion verifier did not return valid JSON.",
-            nextAction = "",
+            nextAction = "Retry completion verification with a complete JSON verdict and concrete evidence.",
         )
     }
 

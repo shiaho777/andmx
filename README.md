@@ -34,7 +34,7 @@ Android 原生的 AI 编程 agent。把「能真正改代码、跑命令、操�
 ```
 agent/        agent 循环 + 工具系统（ShellTool/FileTools/PatchTool/GitTool/
               ComputerUseTool/BrowseTool/GoalTool/McpTool…）+ 批准策略、
-              上下文压缩、hooks、automations、plugins、memory、多 agent
+              上下文压缩、hooks、plugins、memory、多 agent
 llm/          LLM 客户端、流式模型、token 跟踪
 llm/provider/ ProviderDefinition / ModelDefinition / ReasoningConfig
 llm/wire/     WireAdapter 三协议实现（OpenAiChat/OpenAiResponses/Anthropic）
@@ -49,11 +49,10 @@ diff/         Diff / Patch 引擎
 term/         终端模拟器
 workspace/    项目管理、change tracker、guest 路径
 settings/     ProviderStore / ProviderSettings
-ui2/          新版极简 UI（Material You，对话为唯一主屏），默认 launcher
-ui/workbench/ 旧版三栏 workbench UI（保留）
+ui2/          唯一 UI（Material You，对话为唯一主屏），launcher
 ```
 
-两套 UI 并存：`ui2/`（`MainActivity2`，当前 launcher）是移动优先的极简实现；`ui/workbench/`（`MainActivity`，已降级为非导出）是桌面风格的三栏布局。在 `AndroidManifest.xml` 切换 launcher activity 即可在两者间切换。
+`ui2/`（`MainActivity2`，launcher）是移动优先的极简实现；早期桌面风格的三栏 workbench UI 已删除，不再保留双 UI 切换。
 
 ## 构建与运行
 
@@ -62,11 +61,14 @@ ui/workbench/ 旧版三栏 workbench UI（保留）
 ./gradlew assembleLiteDebug      # lite flavor（默认）
 ./gradlew assembleProotDebug     # proot flavor（需 sideload）
 
-# 运行单元测试（76 个测试文件 / 373 个测试）
+# 运行单元测试（含 Robolectric；首次运行需联网下载测试依赖）
 ./gradlew :app:testLiteDebugUnitTest
 
 # 安装到已连接设备
 ./gradlew installLiteDebug
+
+# 设备/模拟器上的冒烟与回归测试（CI 可加 -PtestAbi=x86_64）
+./gradlew connectedLiteDebugAndroidTest
 ```
 
 `local.properties` 需配置 Android SDK 路径。

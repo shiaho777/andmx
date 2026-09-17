@@ -223,7 +223,12 @@ fun ConversationDrawer(
                             Spacer(Modifier.height(2.dp))
                             DrawerQuickAction(
                                 icon = Icons.Outlined.Search,
-                                label = "搜索",
+                                label = "搜索任务",
+                                onClick = { searchOpen = true },
+                            )
+                            DrawerQuickAction(
+                                icon = Icons.Outlined.Search,
+                                label = "搜索命令",
                                 onClick = { closeAnd(onOpenSearch) },
                             )
                             DrawerQuickAction(
@@ -240,9 +245,6 @@ fun ConversationDrawer(
                         onViewChange = { mode ->
                             viewMode = mode
                             drawerPrefs.edit().putString(KEY_VIEW_MODE, mode.name).apply()
-                            if (mode == ViewMode.TIMELINE) {
-                                searchOpen = false
-                            }
                         },
                         onSortChange = {
                             sortMode = it
@@ -291,15 +293,10 @@ fun ConversationDrawer(
 
                     val source = if (showArchived) archived else conversations
                     val filtered = remember(source, query) {
-                        if (query.isBlank()) {
-                            source
-                        } else {
-                            source.filter {
-                                it.title.contains(query, true) ||
-                                    it.project.contains(query, true) ||
-                                    it.firstUserMessage.contains(query, true)
-                            }
-                        }
+                        filterConversations(source, query)
+                    }
+                    val effectiveCollapsedGroups = remember(query, collapsedGroups) {
+                        searchCollapsedGroups(query, collapsedGroups)
                     }
 
                     if (filtered.isEmpty()) {
@@ -359,7 +356,7 @@ fun ConversationDrawer(
                             taskGroups = taskGroups,
                             viewMode = viewMode,
                             sortMode = sortMode,
-                            collapsedGroups = collapsedGroups,
+                            collapsedGroups = effectiveCollapsedGroups,
                             currentConversationId = currentConversationId,
                             streamingConversationIds = streamingConversationIds,
                             showAllPinned = showAllPinned,

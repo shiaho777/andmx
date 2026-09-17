@@ -1,6 +1,7 @@
 package com.andmx.agent.zcode
 
 import android.content.Context
+import com.andmx.agent.ComputerUseTool
 import com.andmx.agent.BrowseTool
 import com.andmx.agent.EditFileTool
 import com.andmx.agent.ExecutionAwareTool
@@ -858,6 +859,7 @@ fun buildZCodeToolSurface(
         listDir,
         ApplyPatchTool(context),
         GitTool(context, cwdProvider = cwdProvider),
+        ComputerUseTool(context),
     )
     if (includeGoals) {
         zcode += CreateGoalTool(goalState)
