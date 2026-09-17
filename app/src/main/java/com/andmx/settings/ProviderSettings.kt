@@ -86,9 +86,13 @@ data class ProviderSettings(
     val hasSelection: Boolean get() = activeProviderId.isNotBlank() && model.isNotBlank()
 }
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "andmx_settings")
+internal val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "andmx_settings")
 
-class SettingsStore(private val context: Context) {
+class SettingsStore(
+    private val context: Context,
+    cipher: CredentialCipher = AesGcmCredentialCipher(AndroidKeystoreCredentialKeys()),
+) {
+    private val credentials = CredentialPersistence(cipher)
     private val activeProviderKey = stringPreferencesKey("active_provider_id")
     private val modelKey = stringPreferencesKey("model")
     private val approvalKey = stringPreferencesKey("approval_mode")
@@ -191,20 +195,34 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    /** Snapshot legacy provider fields, for one-time seeding of the providers table. */
     suspend fun legacyProvider(): LegacyProvider? {
-        val p = context.dataStore.data.first()
-        val baseUrl = p[legacyBaseUrlKey]
-        val apiKey = p[legacyApiKeyKey]
-        // Only treat as migratable if there's a real base URL or key.
-        return if (!baseUrl.isNullOrBlank() || !apiKey.isNullOrBlank()) {
-            LegacyProvider(
-                baseUrl = baseUrl.orEmpty(),
-                apiKey = apiKey.orEmpty(),
-                model = p[modelKey].orEmpty(),
-                wireApi = p[legacyWireApiKey].orEmpty(),
-            )
-        } else null
+        var legacy: LegacyProvider? = null
+        context.dataStore.edit { p ->
+            val baseUrl = p[legacyBaseUrlKey].orEmpty()
+            val stored = p[legacyApiKeyKey].orEmpty()
+            if (baseUrl.isBlank() && stored.isBlank()) return@edit
+            val plaintext = credentials.readAndMigrate(stored, CredentialPersistence.LEGACY_SCOPE) {
+                p[legacyApiKeyKey] = it
+            }
+            legacy = LegacyProvider(baseUrl, plaintext, p[modelKey].orEmpty(), p[legacyWireApiKey].orEmpty())
+        }
+        return legacy
+    }
+
+    suspend fun clearLegacyProvider(legacy: LegacyProvider) {
+        context.dataStore.edit { p ->
+            if (p[legacyBaseUrlKey].orEmpty() != legacy.baseUrl ||
+                p[legacyWireApiKey].orEmpty() != legacy.wireApi
+            ) return@edit
+            val stored = p[legacyApiKeyKey]
+            val plaintext = if (stored == null) "" else
+                credentials.decryptStored(stored, CredentialPersistence.LEGACY_SCOPE)
+            if (plaintext != legacy.apiKey) return@edit
+            p.remove(legacyBaseUrlKey)
+            p.remove(legacyApiKeyKey)
+            p.remove(legacyModelProviderKey)
+            p.remove(legacyWireApiKey)
+        }
     }
 
     private val settingsJson = Json { ignoreUnknownKeys = true }

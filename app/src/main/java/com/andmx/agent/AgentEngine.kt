@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** Events streamed out of an agent turn for the UI to render. */
 sealed interface AgentEvent {
@@ -474,7 +476,8 @@ class AgentEngine(
         if (!goal.isActivelyPursued) return false
         val iteration = goal.goalIteration + 1
         emit(AgentEvent.GoalVerifying(iteration))
-        val result = try {
+        val commandFailure = runGoalValidationCommands(goal, iteration)
+        val result = if (commandFailure != null) GoalVerifier.Result(commandFailure, 0) else try {
             goalVerifier.verify(history.toList(), goal, turn, settings)
         } catch (c: kotlinx.coroutines.CancellationException) {
             throw c
@@ -483,6 +486,10 @@ class AgentEngine(
             return false
         }
         pendingGoalTokens += result.tokensUsed
+        if (gs.goal != goal) {
+            flushGoalTokens()
+            return false
+        }
         val now = System.currentTimeMillis()
         val verified = goal.copy(
             goalIteration = iteration,
@@ -534,6 +541,47 @@ class AgentEngine(
             content = goalVerifier.continuationPrompt(verified, result.verdict),
         )
         return true
+    }
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.runGoalValidationCommands(
+        goal: ConversationGoal,
+        iteration: Int,
+    ): GoalVerifier.Verdict? {
+        if (goal.validationCommands.isEmpty()) return null
+        if (goal.validationCommands.size > ValidationCommandsArg.MAX_COMMANDS ||
+            goal.validationCommands.any { it.isBlank() || it.length > ValidationCommandsArg.MAX_COMMAND_LENGTH }) {
+            return GoalVerifier.Verdict(false, "Invalid goal validation command configuration.", "Ask the user to correct the validation commands.")
+        }
+        if (goal.tokenBudget > 0 && goal.tokensUsed.toLong() + pendingGoalTokens >= goal.tokenBudget) {
+            return GoalVerifier.Verdict(false, "Goal budget exhausted before command validation.", "Increase the goal budget to run validation.")
+        }
+        for ((index, command) in goal.validationCommands.withIndex()) {
+            val call = com.andmx.llm.ApiToolCall(
+                id = "goal-validation-${java.util.UUID.randomUUID()}",
+                function = com.andmx.llm.ApiFunctionCall("run_shell", buildJsonObject {
+                    put("command", command)
+                    put("timeout_ms", 120_000)
+                    put("max_output_chars", 8_000)
+                    put("strict_cwd", true)
+                }.toString()),
+            )
+            history += ApiMessage(role = "assistant", toolCalls = listOf(call))
+            emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
+            val result = executeToolCall(call, validation = true).let {
+                it.copy(output = it.output.take(8_000), imageUrls = null)
+            }
+            emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError))
+            history += ApiMessage(role = "tool", content = result.output, toolCallId = call.id, name = call.function.name)
+            if (result.isError) {
+                return GoalVerifier.Verdict(
+                    false,
+                    "Validation command ${index + 1} failed in verification $iteration: ${result.output}",
+                    "Resolve the validation command failure before completing the goal.",
+                )
+            }
+            if (goalState?.goal != goal) return GoalVerifier.Verdict(false, "Goal changed during validation.", "Verify the updated goal.")
+        }
+        return null
     }
 
     /** Commit stream-observed tokens into the goal (engine-managed accounting). */
@@ -637,7 +685,7 @@ class AgentEngine(
     }.getOrElse { JsonObject(emptyMap()) }
 
     /** Execute a single tool call: PRE_TOOL_USE hook → approval → run → POST_TOOL_USE hook. */
-    private suspend fun executeToolCall(call: com.andmx.llm.ApiToolCall): ToolResult {
+    private suspend fun executeToolCall(call: com.andmx.llm.ApiToolCall, validation: Boolean = false): ToolResult {
         val tool = toolsByName[call.function.name]
         return if (tool == null) {
             ToolResult("未知工具: ${call.function.name}", isError = true)
@@ -658,11 +706,17 @@ class AgentEngine(
                 parseArgs(call.function.arguments)
             }
 
+            if (validation && effectiveArgs != parseArgs(call.function.arguments)) {
+                return ToolResult("Validation command arguments were changed by a hook; verification refused.", isError = true)
+            }
             val outcome = approve(tool, effectiveArgs)
             if (outcome !is ApprovalOutcome.AllowedOnce) {
                 ToolResult(ApprovalOutcome.denialText(outcome), isError = true)
             } else {
-                val raw = invokeTool(tool, call, effectiveArgs)
+                val raw = if (validation) {
+                    kotlinx.coroutines.withTimeoutOrNull(120_000L) { invokeTool(tool, call, effectiveArgs) }
+                        ?: ToolResult("Validation command timed out after 120000ms", isError = true)
+                } else invokeTool(tool, call, effectiveArgs)
                 // ── POST_TOOL_USE: hooks may rewrite the output ──
                 val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
                     toolName = call.function.name,

@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.andmx.llm.provider.ProviderDefinition
+import com.andmx.settings.CredentialStorageException
 import com.andmx.settings.ProviderStore
 import com.andmx.ui2.settings.EmptyState
 import com.andmx.ui2.settings.backAppBar
@@ -71,9 +72,11 @@ fun ModelPage(onBack: () -> Unit) {
     val store = remember { ProviderStore(context) }
     val providers by store.providers.collectAsState(initial = emptyList())
     val primary by store.primary.collectAsState(initial = null)
+    val credentialErrors by store.credentialErrors.collectAsState()
     val scope = rememberCoroutineScope()
 
     var view by remember { mutableStateOf<ModelView>(ModelView.List) }
+    var saveError by remember { mutableStateOf<String?>(null) }
 
     AnimatedContent(
         targetState = view,
@@ -92,11 +95,20 @@ fun ModelPage(onBack: () -> Unit) {
             is ModelView.List -> ModelListView(
                 providers = providers,
                 primaryId = primary?.id,
+                credentialErrors = credentialErrors,
+                saveError = saveError,
+                onDismissSaveError = { saveError = null },
                 onBack = onBack,
                 onAdd = { view = ModelView.Edit(null) },
                 onEdit = { view = ModelView.Edit(it) },
                 onToggleEnabled = { p, enabled ->
-                    scope.launch { store.upsert(p.copy(enabled = enabled)) }
+                    scope.launch {
+                        try {
+                            store.upsert(p.copy(enabled = enabled))
+                        } catch (e: CredentialStorageException) {
+                            saveError = e.message
+                        }
+                    }
                 },
                 onSetPrimary = { scope.launch { store.setPrimary(it.id) } },
                 onReorder = { activeId, overId ->
@@ -107,8 +119,15 @@ fun ModelPage(onBack: () -> Unit) {
                 initial = target.provider,
                 onBack = { view = ModelView.List },
                 onSave = {
-                    scope.launch { store.upsert(it) }
-                    view = ModelView.List
+                    scope.launch {
+                        try {
+                            store.upsert(it)
+                            view = ModelView.List
+                        } catch (e: CredentialStorageException) {
+                            saveError = e.message
+                            view = ModelView.List
+                        }
+                    }
                 },
                 onDelete = target.provider?.let { p ->
                     {
@@ -126,6 +145,9 @@ fun ModelPage(onBack: () -> Unit) {
 private fun ModelListView(
     providers: List<ProviderDefinition>,
     primaryId: String?,
+    credentialErrors: Map<String, String>,
+    saveError: String?,
+    onDismissSaveError: () -> Unit,
     onBack: () -> Unit,
     onAdd: () -> Unit,
     onEdit: (ProviderDefinition) -> Unit,
@@ -138,6 +160,16 @@ private fun ModelListView(
     val density = LocalDensity.current
     // One card is roughly this tall; crossing it counts as a slot change.
     val stepPx = with(density) { PROVIDER_CARD_STEP_DP.dp.toPx() }
+    saveError?.let { error ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = onDismissSaveError,
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = onDismissSaveError) { Text("知道了") }
+            },
+            title = { Text("凭据保存失败") },
+            text = { Text(error) },
+        )
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -171,6 +203,7 @@ private fun ModelListView(
                         ProviderCard(
                             provider = provider,
                             isPrimary = provider.id == primaryId,
+                            credentialError = credentialErrors[provider.id],
                             dragging = isDragging,
                             onEdit = { onEdit(provider) },
                             onToggleEnabled = { onToggleEnabled(provider, it) },
@@ -205,6 +238,7 @@ private fun ModelListView(
 private fun ProviderCard(
     provider: ProviderDefinition,
     isPrimary: Boolean,
+    credentialError: String?,
     dragging: Boolean,
     onEdit: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
@@ -282,6 +316,14 @@ private fun ProviderCard(
                         Text("设为主要")
                     }
                 }
+            }
+            credentialError?.let { error ->
+                Text(
+                    error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
             }
         }
     }

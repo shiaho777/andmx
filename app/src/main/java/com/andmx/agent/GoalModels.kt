@@ -47,6 +47,7 @@ data class ConversationGoal(
     val nextAction: String = "",
     /** 目标累计耗时（秒）。 */
     val timeUsedSeconds: Long = 0L,
+    val validationCommands: List<String> = emptyList(),
 ) {
     val hasGoal: Boolean get() = text.isNotBlank()
     /** Remaining token budget, or 0 if no budget set. */

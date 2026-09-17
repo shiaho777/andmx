@@ -181,14 +181,82 @@ class AgentEngineGoalLoopTest {
         val fenced = verifier.parseVerdict("```json\n{\"passed\": true, \"reason\": \"ok\", \"nextAction\": \"\"}\n```")
         assertTrue(fenced.passed)
 
-        val padded = verifier.parseVerdict("结论如下: {\"passed\": false, \"reason\": \"r\"} 以上")
+        val padded = verifier.parseVerdict("结论如下: {\"passed\": false, \"reason\": \"r\", \"nextAction\": \"a\"} 以上")
         assertFalse(padded.passed)
         assertEquals("r", padded.reason)
 
-        // 解析失败 fail-open：防止验证器故障把会话锁死在续跑循环。
+        val missingNextAction = verifier.parseVerdict("结论如下: {\"passed\": false, \"reason\": \"r\"} 以上")
+        assertFalse(missingNextAction.passed)
+        assertTrue(missingNextAction.reason.contains("did not return valid JSON"))
+
         val garbage = verifier.parseVerdict("not json at all")
-        assertTrue(garbage.passed)
+        assertFalse(garbage.passed)
         assertTrue(garbage.reason.contains("did not return valid JSON"))
+        assertFalse(garbage.nextAction.isBlank())
+
+        val empty = verifier.parseVerdict("")
+        assertFalse(empty.passed)
+        assertTrue(empty.reason.contains("did not return valid JSON"))
+
+        val missingFields = verifier.parseVerdict("""{"reason": "no passed flag"}""")
+        assertFalse(missingFields.passed)
+        assertTrue(missingFields.reason.contains("did not return valid JSON"))
+    }
+
+    private class ValidationTool(private val result: ToolResult) : Tool {
+        override val name = "run_shell"
+        override val description = "Test validation"
+        override val parameters = kotlinx.serialization.json.JsonObject(emptyMap())
+        override val risk = ToolRisk.EXECUTE
+        var calls = 0
+        override suspend fun execute(args: kotlinx.serialization.json.JsonObject): ToolResult {
+            calls++
+            assertEquals("true", args["strict_cwd"].toString())
+            assertEquals("120000", args["timeout_ms"].toString())
+            assertEquals("8000", args["max_output_chars"].toString())
+            return result
+        }
+    }
+
+    @Test
+    fun successfulCommandsStillRequireModelVerification() = runTest {
+        val tool = ValidationTool(ToolResult("[exit=0]"))
+        val llm = ScriptedLlm(listOf("done"), emptyList())
+        val state = GoalToolState().apply { setGoal(activeGoal().copy(validationCommands = listOf("test -f result"))) }
+        var approvals = 0
+        val engine = AgentEngine(tools = listOf(tool), client = llm, goalState = state,
+            approve = { _, _ -> approvals++; ApprovalOutcome.AllowedOnce })
+        engine.runTurn(settings, turn, "work").toList()
+        assertEquals(1, tool.calls)
+        assertEquals(1, approvals)
+        assertEquals(2, llm.calls)
+        assertEquals(GoalStatus.COMPLETE, state.goal.status)
+    }
+
+    @Test
+    fun failedCommandsCannotCompleteGoal() = runTest {
+        val tool = ValidationTool(ToolResult("[exit=1]", isError = true))
+        val llm = ScriptedLlm(listOf("done"), emptyList())
+        val state = GoalToolState().apply { setGoal(activeGoal().copy(validationCommands = listOf("false"))) }
+        val engine = AgentEngine(tools = listOf(tool), client = llm, goalState = state, maxGoalIterations = 1)
+        val events = engine.runTurn(settings, turn, "work").toList()
+        assertEquals(1, tool.calls)
+        assertEquals(1, llm.calls)
+        assertEquals(GoalStatus.ACTIVE, state.goal.status)
+        assertFalse(events.filterIsInstance<AgentEvent.GoalVerified>().single().passed)
+    }
+
+    @Test
+    fun rejectedValidationNeverRunsCommand() = runTest {
+        val tool = ValidationTool(ToolResult("[exit=0]"))
+        val llm = ScriptedLlm(listOf("done"), emptyList())
+        val state = GoalToolState().apply { setGoal(activeGoal().copy(validationCommands = listOf("test -f result"))) }
+        val engine = AgentEngine(tools = listOf(tool), client = llm, goalState = state, maxGoalIterations = 1,
+            approve = { _, _ -> ApprovalOutcome.Rejected("test refusal") })
+        engine.runTurn(settings, turn, "work").toList()
+        assertEquals(0, tool.calls)
+        assertEquals(1, llm.calls)
+        assertEquals(GoalStatus.ACTIVE, state.goal.status)
     }
 
     @Test
