@@ -51,11 +51,50 @@ class AnthropicMessagesAdapterTest {
             ),
         )
         val body = json.parseToJsonElement(adapter.encodeRequest(req, provider)).jsonObject
-        // system must be a top-level field, NOT a message in the array.
-        assertEquals("你是助手", body["system"]?.jsonPrimitive?.content)
+        // system must be a top-level block array, NOT a message in the array.
+        val system = body["system"]?.jsonArray ?: error("system missing")
+        assertEquals(1, system.size)
+        val block = system[0].jsonObject
+        assertEquals("text", block["type"]?.jsonPrimitive?.content)
+        assertEquals("你是助手", block["text"]?.jsonPrimitive?.content)
+        // Leading system block gets its own ephemeral cache breakpoint.
+        assertEquals(
+            "ephemeral",
+            block["cache_control"]?.jsonObject?.get("type")?.jsonPrimitive?.content,
+        )
         val messages = body["messages"]?.jsonArray ?: error("missing messages")
         assertEquals(1, messages.size)
         assertEquals("user", messages[0].jsonObject["role"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun leadingSystemBlocksGetCacheControlButNotReminders() {
+        val req = ChatRequest(
+            model = "GLM-5.2",
+            messages = listOf(
+                ApiMessage(role = "system", content = "cli"),
+                ApiMessage(role = "system", content = "stable"),
+                ApiMessage(role = "system", content = "dynamic"),
+                ApiMessage(role = "system", content = "reminder-block"),
+                ApiMessage(role = "user", content = "u1"),
+                ApiMessage(role = "system", content = "mid reminder"),
+                ApiMessage(role = "assistant", content = "a1"),
+            ),
+        )
+        val body = json.parseToJsonElement(adapter.encodeRequest(req, provider)).jsonObject
+        val system = body["system"]?.jsonArray ?: error("system missing")
+        assertEquals(5, system.size)
+        // First 3 contiguous blocks carry breakpoints; the 4th would exceed
+        // Anthropic's per-request cap once the message anchor is added.
+        repeat(3) { i ->
+            assertEquals(
+                "ephemeral",
+                system[i].jsonObject["cache_control"]?.jsonObject?.get("type")?.jsonPrimitive?.content,
+            )
+        }
+        assertNull(system[3].jsonObject["cache_control"])
+        assertNull(system[4].jsonObject["cache_control"])
+        assertEquals("mid reminder", system[4].jsonObject["text"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -149,5 +188,26 @@ class AnthropicMessagesAdapterTest {
         assertEquals("t1", calls.first().id)
         assertEquals("run_shell", calls.first().function.name)
         assertEquals("""{"command":"ls"}""", calls.first().function.arguments)
+    }
+
+    @Test
+    fun maxTokensStopReasonNormalizesToLength() = runTest {
+        val lines = sequenceOf(
+            """data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+            """data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"cut off"}}""",
+            """data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":8192}}""",
+            """data: {"type":"message_stop"}""",
+        )
+        val msg = adapter.parseStream(lines, onContent = {})
+        assertEquals("cut off", msg.content)
+        assertEquals("length", msg.finishReason)
+    }
+
+    @Test
+    fun endTurnDoesNotNormalize() {
+        val body = """{"content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}"""
+        val msg = adapter.parseResponse(body)
+        assertEquals("done", msg.content)
+        assertEquals("end_turn", msg.finishReason)
     }
 }

@@ -37,12 +37,36 @@ class ToolPresentationTest {
 
     @Test
     fun groupingRules() {
-        for (name in listOf("Read", "ListDir", "Grep", "Glob", "Git", "get_goal", "TodoRead")) {
-            assertTrue(name, ToolPresentation.shouldGroup(name))
+        // ZCode changes/execute/read 三分组：只读扇出、写改、命令各自成组。
+        for (name in listOf("Read", "ListDir", "Grep", "Glob", "get_goal", "TodoRead")) {
+            assertEquals(name, ToolPresentation.GroupKind.READ, ToolPresentation.groupKind(name))
         }
-        for (name in listOf("Bash", "Write", "Edit", "WebFetch")) {
-            assertFalse(name, ToolPresentation.shouldGroup(name))
+        for (name in listOf("Write", "Edit", "MultiEdit", "apply_patch")) {
+            assertEquals(name, ToolPresentation.GroupKind.CHANGE, ToolPresentation.groupKind(name))
         }
+        for (name in listOf("Bash", "Git")) {
+            assertEquals(name, ToolPresentation.GroupKind.EXECUTE, ToolPresentation.groupKind(name))
+        }
+        for (name in listOf("WebFetch", "Agent", "TodoWrite", "AskUserQuestion")) {
+            assertNull(name, ToolPresentation.groupKind(name))
+        }
+    }
+
+    @Test
+    fun todoItemsParseFromWriteArgs() {
+        val args = """{"todos":[{"content":"修 bug","status":"in_progress","priority":"high"},{"content":"写测试","status":"completed"},{"content":"提交","status":"pending"}]}"""
+        val items = ToolPresentation.todoItems(tc(name = "TodoWrite", args = args))!!
+        assertEquals(3, items.size)
+        assertEquals("修 bug", items[0].content)
+        assertEquals("in_progress", items[0].status)
+        assertEquals("pending", items[2].status)
+    }
+
+    @Test
+    fun todoItemsRejectsNonTodoOrMalformed() {
+        assertNull(ToolPresentation.todoItems(tc(name = "Read", args = """{"todos":[]}""")))
+        assertNull(ToolPresentation.todoItems(tc(name = "TodoWrite", args = "not-json")))
+        assertNull(ToolPresentation.todoItems(tc(name = "TodoWrite", args = """{"todos":[]}""")))
     }
 
     @Test

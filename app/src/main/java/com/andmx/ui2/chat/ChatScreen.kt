@@ -177,11 +177,19 @@ fun ChatScreen(
     val planOverlay by viewModel.planOverlayActive.collectAsState()
     val fileChanges by viewModel.fileChanges.collectAsState()
     val rewindResult by viewModel.rewindResult.collectAsState()
+    val rewindPickerOpen by viewModel.rewindPickerOpen.collectAsState()
+    val rewindCheckpoints by viewModel.rewindCheckpoints.collectAsState()
+    val workflowsOpen by viewModel.workflowsOpen.collectAsState()
+    val workflowDefs by viewModel.workflowDefs.collectAsState()
+    val workflowRuns by viewModel.workflowRuns.collectAsState()
+    val workflowDetail by viewModel.workflowDetail.collectAsState()
+    val workflowDetailEvents by viewModel.workflowDetailEvents.collectAsState()
     val modelSwitchGuard by viewModel.modelSwitchGuard.collectAsState()
     val contextChips by viewModel.contextChips.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
     val skills by viewModel.skills.collectAsState()
     val pluginSlashSpecs by viewModel.pluginSlashSpecs.collectAsState()
+    val subAgentCatalog by viewModel.subAgentCatalog.collectAsState()
 
     // ZCode 对齐：对话为唯一主屏，终端/文件/设置均为浮层
     val projectName by viewModel.projectName.collectAsState()
@@ -289,6 +297,7 @@ LaunchedEffect(Unit) {
                     showSettings = true
                 }
                 ChatActionBus.Action.OpenSearch -> showCommandCenter = true
+                ChatActionBus.Action.OpenDrawer -> drawerOpen = true
             }
         }
     }
@@ -344,8 +353,14 @@ LaunchedEffect(Unit) {
     val slashSuggestions by remember(inputText, pluginSlashSpecs) {
         derivedStateOf {
             val t = inputText
-            if (t.startsWith("/") && !t.contains(' ')) {
-                SlashCommands.suggestions(t, 8, extras = pluginSlashSpecs)
+            // ZCode 对齐：中文 IME 的 、/／ 归一为 / 触发斜杠命令联想。
+            val normalized = when {
+                t.startsWith("/") -> t
+                t.startsWith("、") || t.startsWith("／") -> "/" + t.drop(1)
+                else -> null
+            }
+            if (normalized != null && !normalized.contains(' ')) {
+                SlashCommands.suggestions(normalized, 8, extras = pluginSlashSpecs)
             } else emptyList()
         }
     }
@@ -374,6 +389,72 @@ LaunchedEffect(Unit) {
                 .filter { q.isBlank() || it.name.contains(q, ignoreCase = true) }
                 .take(8)
                 .map { SkillSuggestion(name = it.name, path = it.path) }
+        }
+    }
+    // ZCode 对齐：行尾 @query → 子代理 / 会话 / 插件命令 / 文件浏览 混合面板。
+    val mentionSuggestions by remember {
+        derivedStateOf {
+            val t = inputText
+            val match = Regex("""(?:^|\s)@([^\s@]*)$""").find(t) ?: return@derivedStateOf emptyList()
+            val q = match.groupValues[1].lowercase()
+            buildList {
+                subAgentCatalog
+                    .filter {
+                        it.enabled &&
+                            (q.isBlank() || it.name.lowercase().contains(q) ||
+                                it.description.lowercase().contains(q))
+                    }
+                    .take(4)
+                    .forEach {
+                        add(
+                            MentionSuggestion(
+                                kind = MentionKind.AGENT,
+                                label = it.name,
+                                subtitle = it.description.take(40),
+                                payload = it.name,
+                            ),
+                        )
+                    }
+                recentConversations
+                    .filter {
+                        q.isBlank() || it.title.lowercase().contains(q) ||
+                            it.subtitle.lowercase().contains(q)
+                    }
+                    .take(3)
+                    .forEach {
+                        add(
+                            MentionSuggestion(
+                                kind = MentionKind.SESSION,
+                                label = it.title,
+                                subtitle = it.subtitle,
+                                conversationId = it.id,
+                            ),
+                        )
+                    }
+                pluginSlashSpecs
+                    .filter {
+                        q.isBlank() || it.name.lowercase().contains(q) ||
+                            it.desc.lowercase().contains(q)
+                    }
+                    .take(3)
+                    .forEach {
+                        add(
+                            MentionSuggestion(
+                                kind = MentionKind.PLUGIN,
+                                label = it.name,
+                                subtitle = it.desc.take(40),
+                                payload = it.name,
+                            ),
+                        )
+                    }
+                add(
+                    MentionSuggestion(
+                        kind = MentionKind.FILE_BROWSER,
+                        label = "浏览文件…",
+                        subtitle = "打开项目文件树",
+                    ),
+                )
+            }.take(9)
         }
     }
 
@@ -451,7 +532,16 @@ LaunchedEffect(Unit) {
                 val outerModifier = if (flat) composerBoundsModifier else extraModifier
                 Composer(
                     value = inputText,
-                    onValueChange = { inputText = it },
+                    onValueChange = { newValue ->
+                        // ZCode 对齐：粘贴长文本转附件 chip，不进输入框。
+                        val pasted = extractPastedSegment(inputText, newValue)
+                        if (pasted != null) {
+                            viewModel.addPastedText(pasted.text)
+                            inputText = newValue.removeRange(pasted.start, pasted.endExclusive)
+                        } else {
+                            inputText = newValue
+                        }
+                    },
                     onSend = {
                         if (inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()) {
                             viewModel.sendMessage(inputText, attachments = attachments)
@@ -501,7 +591,7 @@ LaunchedEffect(Unit) {
                     onPickSlash = { spec ->
                         val raw = spec.name.trim()
                         val bare = raw.removePrefix("/")
-                        inputText = Regex("""^/\S*$""").replace(inputText, "").trimEnd()
+                        inputText = Regex("""^[/、／]\S*$""").replace(inputText, "").trimEnd()
                         val skill = skills.firstOrNull { it.name.equals(bare, ignoreCase = true) }
                         if (skill != null) {
                             viewModel.addSkillByName(skill.name, skill.path)
@@ -522,6 +612,24 @@ LaunchedEffect(Unit) {
                             mr.value.takeWhile { it.isWhitespace() }
                         }.trimEnd()
                         viewModel.addSkillByName(skill.name, skill.path)
+                    },
+                    mentionSuggestions = mentionSuggestions,
+                    onPickMention = { m ->
+                        inputText = Regex("""(?:^|\s)@[^\s@]*$""").replace(inputText) { mr ->
+                            mr.value.takeWhile { it.isWhitespace() }
+                        }.trimEnd()
+                        when (m.kind) {
+                            MentionKind.AGENT -> viewModel.addAgentContext(m.payload)
+                            MentionKind.SESSION -> viewModel.addConversationContext(
+                                ConversationPick(id = m.conversationId, title = m.label),
+                            )
+                            MentionKind.PLUGIN -> viewModel.addCommandByName(m.payload)
+                            MentionKind.FILE_BROWSER -> {
+                                fileTreeRequestPath = null
+                                fileTreeRequestKey += 1
+                                drawerOpen = true
+                            }
+                        }
                     },
                     flat = flat,
                     modifier = outerModifier
@@ -768,6 +876,29 @@ LaunchedEffect(Unit) {
                     onRewind = { viewModel.rewindFiles() },
                     onDismissResult = { viewModel.clearRewindResult() },
                 )
+                if (rewindPickerOpen) {
+                    RewindPickerDialog(
+                        checkpoints = rewindCheckpoints,
+                        onPick = { viewModel.rewindToCheckpoint(it) },
+                        onDismiss = { viewModel.dismissRewindPicker() },
+                    )
+                }
+                if (workflowsOpen) {
+                    WorkflowsDialog(
+                        defs = workflowDefs,
+                        runs = workflowRuns,
+                        onPickRun = { viewModel.openWorkflowDetail(it) },
+                        onDismiss = { viewModel.dismissWorkflows() },
+                    )
+                }
+                workflowDetail?.let { snap ->
+                    WorkflowRunDetailDialog(
+                        snapshot = snap,
+                        events = workflowDetailEvents,
+                        onCancel = { viewModel.cancelWorkflowRun(it) },
+                        onDismiss = { viewModel.dismissWorkflowDetail() },
+                    )
+                }
                 modelSwitchGuard?.let { g ->
                     ModelSwitchGuardDialog(
                         guard = g,
@@ -785,6 +916,7 @@ LaunchedEffect(Unit) {
                             request = req,
                             onSubmit = { viewModel.resolveUserQuestion(it) },
                             onCancel = { viewModel.resolveApproval(false) },
+                            onSnooze = { viewModel.snoozeUserQuestion() },
                         )
                         "exit_plan" -> ExitPlanApprovalPanel(
                             request = req,

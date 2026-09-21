@@ -1,5 +1,6 @@
 package com.andmx.ui2.chat
 
+import com.andmx.agent.ToolArgs
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -105,12 +106,19 @@ fun buildTimeline(
     var i = 0
     while (i < ordered.size) {
         val item = ordered[i]
+        if (item is TimelineItem.Tool && shouldDropTool(item.tool)) {
+            i++
+            continue
+        }
         if (item is TimelineItem.Tool && shouldGroupTool(item.tool)) {
+            val kind = ToolPresentation.groupKind(item.tool.name)
             val batch = mutableListOf(item.tool)
             var j = i + 1
             while (j < ordered.size) {
                 val next = ordered[j]
-                if (next is TimelineItem.Tool && shouldGroupTool(next.tool)) {
+                if (next is TimelineItem.Tool && shouldGroupTool(next.tool) &&
+                    ToolPresentation.groupKind(next.tool.name) == kind
+                ) {
                     batch += next.tool
                     j++
                 } else break
@@ -137,6 +145,13 @@ private fun shouldGroupTool(tool: ToolCall): Boolean {
     return ToolPresentation.shouldGroup(tool.name)
 }
 
+/**
+ * 已成功的 agent 调用不渲染通用工具卡——SubAgentTimelineCard（task/state/result）
+ * 已覆盖其信息；被拒/失败的调用保留卡片以留下拒绝痕迹。
+ */
+private fun shouldDropTool(tool: ToolCall): Boolean =
+    !tool.isRunning && !tool.isError && ToolArgs.canonical(tool.name) == "agent"
+
 object ChatActionBus {
     sealed class Action {
         data class OpenFile(val path: String) : Action()
@@ -145,6 +160,7 @@ object ChatActionBus {
         data object OpenSettings : Action()
         data object OpenSkillsSettings : Action()
         data object OpenSearch : Action()
+        data object OpenDrawer : Action()
     }
 
     private val _actions = MutableSharedFlow<Action>(extraBufferCapacity = 8)
@@ -153,6 +169,8 @@ object ChatActionBus {
     fun openFile(path: String) {
         if (path.isNotBlank()) _actions.tryEmit(Action.OpenFile(path))
     }
+
+    fun openDrawer() = _actions.tryEmit(Action.OpenDrawer)
 
     fun openTerminal() {
         _actions.tryEmit(Action.OpenTerminal)

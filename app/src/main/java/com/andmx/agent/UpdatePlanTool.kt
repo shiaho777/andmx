@@ -28,6 +28,7 @@ class UpdatePlanTool : Tool {
             "应始终保持恰好一个 in_progress 步骤，直到全部完成。" +
             "不要为简单或单步任务使用计划。不要在调用后重复计划全文。"
     override val risk = ToolRisk.READ
+    override val concurrentSafe = false
 
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")

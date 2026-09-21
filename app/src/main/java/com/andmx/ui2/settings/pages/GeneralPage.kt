@@ -100,6 +100,13 @@ fun GeneralPage(onBack: () -> Unit) {
                     onCheckedChange = { save(s.copy(showTodos = it)) },
                 )
                 HorizontalDivider()
+                SwitchRow(
+                    title = "提问自动继续",
+                    description = "AskUserQuestion 提问 5 分钟未作答时，以空答案自动继续；关闭后无限等待。",
+                    checked = s.askAutoResolve,
+                    onCheckedChange = { save(s.copy(askAutoResolve = it)) },
+                )
+                HorizontalDivider()
                 StackedSettingRow(
                     title = "交互行为",
                     description = "在运行时将后续操作加入队列，或引导至下一轮工具调用后运行。",
@@ -236,25 +243,32 @@ private fun ApprovalRulesSection() {
     val current = rules[projectKey].orEmpty()
     if (current.isEmpty()) return
 
-    SettingsGroup("已授权权限规则") {
+    SettingsGroup("项目权限规则") {
         Text(
-            "本项目内被「始终允许」的操作。移除后对应操作会重新请求确认。",
+            "本项目内的持久规则：始终允许 / 每次询问 / 始终拒绝。移除后对应操作回到按模式判定。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        current.sortedBy { it.display }.forEach { rule ->
-            StackedSettingRow(
-                title = rule.display,
-                description = rule.toolCanonical,
-            ) {
-                androidx.compose.material3.TextButton(
-                    onClick = { scope.launch { store.remove(projectKey, rule) } },
+        val grouped = current.groupBy { it.behavior }
+        listOf(
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW to "始终允许",
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ASK to "每次询问",
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.DENY to "始终拒绝",
+        ).forEach { (behavior, label) ->
+            grouped[behavior].orEmpty().sortedBy { it.display }.forEach { rule ->
+                StackedSettingRow(
+                    title = rule.display,
+                    description = "${rule.toolCanonical} · $label",
                 ) {
-                    Text("移除")
+                    androidx.compose.material3.TextButton(
+                        onClick = { scope.launch { store.remove(projectKey, rule) } },
+                    ) {
+                        Text("移除")
+                    }
                 }
+                HorizontalDivider()
             }
-            HorizontalDivider()
         }
         androidx.compose.material3.TextButton(
             onClick = { scope.launch { store.clear(projectKey) } },

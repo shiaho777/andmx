@@ -42,6 +42,7 @@ import kotlinx.serialization.json.longOrNull
 class ShellTool(
     private val context: Context,
     private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
+    private val backgroundTasks: BackgroundTasks? = null,
 ) : Tool, ExecutionAwareTool {
     private val access = WorkspaceAccess(context)
     private val runtime = ProotRuntime(context)
@@ -85,6 +86,10 @@ class ShellTool(
                 put("type", "boolean")
                 put("description", "Fail if the workspace directory is unavailable; do not fall back to home.")
             }
+            putJsonObject("run_in_background") {
+                put("type", "boolean")
+                put("description", "Run without blocking; returns a task_id and output file path. Use TaskOutput/TaskStop to manage.")
+            }
         }
         putJsonArray("required") { add("command") }
     }
@@ -118,6 +123,19 @@ class ShellTool(
             strictCwd -> "cd $quotedCwd || exit 125; $prepared"
             cwd.isNotBlank() -> "cd $quotedCwd 2>/dev/null || cd ~; $prepared"
             else -> prepared
+        }
+
+        val runBackground = (args["run_in_background"] as? JsonPrimitive)?.booleanOrNull == true
+        if (runBackground) {
+            val tasks = backgroundTasks
+                ?: return ToolResult("执行失败: 后台任务不可用", isError = true)
+            if (access.isRemote) {
+                return ToolResult("执行失败: 远程工作区暂不支持后台执行", isError = true)
+            }
+            val task = tasks.startShell(cdCommand, cwd)
+            return ToolResult(
+                "Command started in background task_id=${task.id} output=${task.outputPath}",
+            )
         }
 
         if (access.isRemote) {

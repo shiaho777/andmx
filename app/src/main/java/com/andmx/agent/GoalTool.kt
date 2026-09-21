@@ -74,6 +74,7 @@ class CreateGoalTool(
     override val name = "create_goal"
     override val description = "Set a concrete objective to pursue. Starts a new active goal or replaces the current goal when it is complete. Optionally set a token budget."
     override val risk = ToolRisk.READ
+    override val concurrentSafe = false
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -135,6 +136,7 @@ class UpdateGoalTool(
     override val name = "update_goal"
     override val description = "Update the current goal's objective, status, or token budget. Completion is decided by the runtime's completion verifier after each turn — do not mark a goal complete yourself."
     override val risk = ToolRisk.READ
+    override val concurrentSafe = false
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {

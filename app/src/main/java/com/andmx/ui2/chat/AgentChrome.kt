@@ -87,22 +87,36 @@ fun ApprovalBanner(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 6.dp),
             )
+            // ZCode 对齐：会话/项目级 allow·deny 作用域；普通允许/拒绝走 ONCE。
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp),
+                    .padding(top = 10.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // ZCode 对齐：允许本会话/本项目、始终拒绝；普通允许/拒绝走 ONCE。
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_DENY) }) {
-                    Text("始终拒绝")
-                }
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ALLOW) }) {
-                    Text("始终允许本项目")
-                }
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_ALLOW) }) {
                     Text("允许本会话")
                 }
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ALLOW) }) {
+                    Text("允许本项目")
+                }
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ASK) }) {
+                    Text("每次询问")
+                }
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_DENY) }) {
+                    Text("始终拒绝")
+                }
+                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_DENY) }) {
+                    Text("拒绝本项目")
+                }
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = onDeny) { Text("拒绝") }
                 Button(onClick = onAllow) { Text("允许") }

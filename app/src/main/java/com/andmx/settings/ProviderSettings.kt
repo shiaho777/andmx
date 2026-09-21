@@ -60,6 +60,8 @@ data class ProviderSettings(
     val taskAutoArchiveDays: Int = 7,
     /** 状态面板展开策略: "auto" | "expanded" | "collapsed"（ZCode summaryPanel.displayMode 对齐） */
     val summaryPanelDisplayMode: String = "auto",
+    /** AskUserQuestion 无作答时 5 分钟自动以空答案继续（上游 autoResolution 对齐）。 */
+    val askAutoResolve: Boolean = true,
 
     // ── 代码预览（对标 ZCode Code Preview）──
     /** 浅色模式下代码块主题 id。 */
@@ -112,6 +114,7 @@ class SettingsStore(
     private val autoArchiveKey = androidx.datastore.preferences.core.booleanPreferencesKey("task_auto_archive")
     private val autoArchiveDaysKey = androidx.datastore.preferences.core.intPreferencesKey("task_auto_archive_days")
     private val summaryPanelModeKey = stringPreferencesKey("summary_panel_display_mode")
+    private val askAutoResolveKey = androidx.datastore.preferences.core.booleanPreferencesKey("ask_auto_resolve")
     private val lightCodeThemeKey = stringPreferencesKey("light_code_theme")
     private val darkCodeThemeKey = stringPreferencesKey("dark_code_theme")
     private val showLineNumbersKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_line_numbers")
@@ -150,6 +153,7 @@ class SettingsStore(
             taskAutoArchive = p[autoArchiveKey] ?: def.taskAutoArchive,
             taskAutoArchiveDays = p[autoArchiveDaysKey] ?: def.taskAutoArchiveDays,
             summaryPanelDisplayMode = p[summaryPanelModeKey] ?: def.summaryPanelDisplayMode,
+            askAutoResolve = p[askAutoResolveKey] ?: def.askAutoResolve,
             lightCodeTheme = p[lightCodeThemeKey] ?: def.lightCodeTheme,
             darkCodeTheme = p[darkCodeThemeKey] ?: def.darkCodeTheme,
             showLineNumbers = p[showLineNumbersKey] ?: def.showLineNumbers,
@@ -183,6 +187,7 @@ class SettingsStore(
             p[autoArchiveKey] = settings.taskAutoArchive
             p[autoArchiveDaysKey] = settings.taskAutoArchiveDays
             p[summaryPanelModeKey] = settings.summaryPanelDisplayMode
+            p[askAutoResolveKey] = settings.askAutoResolve
             p[lightCodeThemeKey] = settings.lightCodeTheme
             p[darkCodeThemeKey] = settings.darkCodeTheme
             p[showLineNumbersKey] = settings.showLineNumbers

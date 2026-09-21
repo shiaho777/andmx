@@ -152,6 +152,16 @@ object OpenAiResponsesAdapter : WireAdapter {
     override fun parseResponse(body: String): ApiMessage {
         val root = json.parseToJsonElement(body).jsonObject
         return assembleFromOutput(root["output"] as? JsonArray)
+            .copy(finishReason = incompleteFinishReason(root))
+    }
+
+    /** "incomplete" + reason=max_output_tokens ⇒ output-limit truncation ("length"). */
+    private fun incompleteFinishReason(resp: JsonObject): String? {
+        val reason = resp["incomplete_details"]?.jsonObject
+            ?.get("reason")?.jsonPrimitive?.contentOrNull
+        return if (resp["status"]?.jsonPrimitive?.contentOrNull == "incomplete" &&
+            reason == "max_output_tokens"
+        ) "length" else null
     }
 
     override fun extractUsage(body: String): JsonObject? =
@@ -248,9 +258,26 @@ object OpenAiResponsesAdapter : WireAdapter {
                     val resp = ev["response"]?.jsonObject
                     (resp?.get("usage") as? JsonObject)?.let { onUsage(it) }
                     assembled = (resp?.get("output") as? JsonArray)?.let { assembleFromOutput(it) }
+                        ?.copy(finishReason = resp?.let { incompleteFinishReason(it) })
                     break
                 }
-                "response.failed", "response.incomplete" -> {
+                "response.incomplete" -> {
+                    val resp = ev["response"]?.jsonObject
+                    if (resp != null && incompleteFinishReason(resp) == "length") {
+                        // Output-token cap: partial output is a valid truncated
+                        // reply, the engine decides whether to continue.
+                        (resp["usage"] as? JsonObject)?.let { onUsage(it) }
+                        assembled = (resp["output"] as? JsonArray)?.let { assembleFromOutput(it) }
+                            ?.copy(finishReason = "length")
+                            ?: assembleFromBuffers(text, calls).copy(finishReason = "length")
+                        break
+                    }
+                    val msg = resp?.get("error")?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
+                        ?: resp?.get("incomplete_details")?.jsonObject?.get("reason")?.jsonPrimitive?.contentOrNull
+                        ?: "Responses stream incomplete"
+                    error(msg)
+                }
+                "response.failed" -> {
                     val msg = ev["response"]?.jsonObject?.get("error")?.jsonObject
                         ?.get("message")?.jsonPrimitive?.contentOrNull
                         ?: "Responses stream failed"

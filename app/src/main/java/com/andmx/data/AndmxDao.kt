@@ -208,4 +208,56 @@ interface AndmxDao {
 
     @Query("UPDATE conversations SET groupId = :groupId WHERE id = :conversationId")
     suspend fun setConversationGroup(conversationId: Long, groupId: String)
+
+    // ── v14: Cron automations ──
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAutomation(a: CronAutomationEntity)
+
+    @Query("SELECT * FROM cron_automations ORDER BY nextRunAt ASC")
+    suspend fun allAutomations(): List<CronAutomationEntity>
+
+    @Query("SELECT * FROM cron_automations WHERE id = :id")
+    suspend fun automation(id: String): CronAutomationEntity?
+
+    @Query("SELECT * FROM cron_automations WHERE enabled = 1 AND lifecycleStatus = 'active' AND nextRunAt <= :now ORDER BY nextRunAt ASC")
+    suspend fun dueAutomations(now: Long): List<CronAutomationEntity>
+
+    @Query("DELETE FROM cron_automations WHERE id = :id")
+    suspend fun deleteAutomation(id: String): Int
+
+    // ── dwf 工作流（ZCode dynamic-workflow port 对齐）───────────
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWorkflowDefinition(d: WorkflowDefinitionEntity)
+
+    @Query("SELECT * FROM workflow_definitions ORDER BY title ASC")
+    suspend fun allWorkflowDefinitions(): List<WorkflowDefinitionEntity>
+
+    @Query("SELECT * FROM workflow_definitions WHERE id = :id")
+    suspend fun workflowDefinition(id: String): WorkflowDefinitionEntity?
+
+    @Query("DELETE FROM workflow_definitions WHERE id = :id")
+    suspend fun deleteWorkflowDefinition(id: String): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWorkflowRun(r: WorkflowRunEntity)
+
+    @Query("SELECT * FROM workflow_runs WHERE runId = :runId")
+    suspend fun workflowRun(runId: String): WorkflowRunEntity?
+
+    @Query("SELECT * FROM workflow_runs ORDER BY updatedAtMs DESC LIMIT :limit")
+    suspend fun workflowRuns(limit: Int = 50): List<WorkflowRunEntity>
+
+    @Query("SELECT * FROM workflow_runs WHERE status IN (:statuses) ORDER BY updatedAtMs DESC")
+    suspend fun workflowRunsByStatus(statuses: List<String>): List<WorkflowRunEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertWorkflowEvent(e: WorkflowEventEntity)
+
+    @Query("SELECT COALESCE(MAX(seq), 0) FROM workflow_events WHERE runId = :runId")
+    suspend fun workflowEventMaxSeq(runId: String): Long
+
+    @Query("SELECT * FROM workflow_events WHERE runId = :runId ORDER BY seq ASC")
+    suspend fun workflowEvents(runId: String): List<WorkflowEventEntity>
 }

@@ -1,6 +1,8 @@
 package com.andmx.agent
 
+import com.andmx.agent.zcode.ZCodePrompts
 import com.andmx.llm.ApiMessage
+import com.andmx.llm.ApiToolCall
 import com.andmx.llm.ChatRequest
 import com.andmx.llm.LlmApi
 import com.andmx.llm.LlmStreamEvent
@@ -67,6 +69,8 @@ sealed interface AgentEvent {
 data class TurnContext(
     val provider: ProviderDefinition,
     val model: String,
+    /** Sub-agent `$level` override from the spawn model spec; wins over settings.reasoningEffort. */
+    val reasoningOverride: String? = null,
 ) {
     val modelMeta: ModelDefinition? get() = provider.models[model]
 }
@@ -83,6 +87,13 @@ class AgentEngine(
     ),
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+    /**
+     * ZCode-style split system prompt: [cliPrefix, stable, dynamic] blocks kept
+     * as separate leading system messages so provider-side prompt caches keyed
+     * on the stable prefix survive dynamic-section churn. Empty = legacy
+     * single-block [systemPrompt].
+     */
+    private var systemPromptBlocks: List<String> = emptyList(),
     private val historyToolOutputLimit: Int = 8_000,
     private val maxSteps: Int = 50,
     /** Steps granted after maxSteps to let the model wrap up; if it still hasn't converged, we fail. */
@@ -104,8 +115,12 @@ class AgentEngine(
     private val goalState: GoalToolState? = null,
     /** Safety cap on verifier-driven continuations for a single runTurn call. */
     private val maxGoalIterations: Int = 20,
+    /** Local date source for the date_change reminder edge (test hook). */
+    private val dateProvider: () -> String = { java.time.LocalDate.now().toString() },
 ) {
-    private val history = mutableListOf(ApiMessage(role = "system", content = systemPrompt))
+    private val history = mutableListOf<ApiMessage>().also { h ->
+        baseSystemBlocks().forEach { h += ApiMessage(role = "system", content = it) }
+    }
     private var extraTools: List<Tool> = emptyList()
     private val allTools get() = tools + extraTools
     private val toolsByName get() = allTools.associateBy { it.name }
@@ -116,6 +131,13 @@ class AgentEngine(
     private var todoItemsProvider: (() -> String?)? = null
     private var lastAssistantCompletedAtMs: Long? = null
     private var turnCount: Int = 0
+    /** Live read of plan-mode state; reminder injection keys off this. */
+    private var planModeProvider: (() -> Boolean)? = null
+    private var planReminderCount = 0
+    private var humanTurnsSincePlanReminder = 0
+    private var planWasEnabled = false
+    /** 最近一次已知的本地日期（date_change reminder 的边沿检测）。 */
+    private var lastLocalDate: String? = null
     private val goalVerifier by lazy {
         GoalVerifier(TracedLlm(client, ModelCallTrace.Source.GOAL_VERIFY), json)
     }
@@ -147,7 +169,7 @@ class AgentEngine(
      *   adapter clamps it to the spec range
      */
     private fun reasoningFor(settings: ProviderSettings, ctx: TurnContext): String? {
-        val e = settings.reasoningEffort
+        val e = ctx.reasoningOverride ?: settings.reasoningEffort
         if (e.isBlank()) return null
         val reasoning = ctx.modelMeta?.reasoning ?: return null
         if (reasoning.levels.isNotEmpty()) {
@@ -165,16 +187,47 @@ class AgentEngine(
         }
     }
 
+    private fun baseSystemBlocks(): List<String> =
+        systemPromptBlocks.ifEmpty { listOf(systemPrompt) }
+
+    private fun systemMessages(): List<ApiMessage> {
+        val blocks = baseSystemBlocks().toMutableList()
+        val extras = buildString {
+            if (persona.isNotBlank()) append("\n\n# 语气\n以「$persona」的风格回应。")
+            if (systemSuffix.isNotBlank()) append("\n\n# 用户自定义指令\n$systemSuffix")
+        }
+        if (extras.isNotBlank()) blocks[blocks.lastIndex] = blocks.last() + extras
+        return blocks.map { ApiMessage(role = "system", content = it) }
+    }
+
+    private fun rewriteSystemPrefix() {
+        var prefix = 0
+        while (prefix < history.size && history[prefix].role == "system") prefix++
+        repeat(prefix) { history.removeAt(0) }
+        history.addAll(0, systemMessages())
+    }
+
+    /** Replace the split system-prompt blocks (settings/env refresh). */
+    fun setSystemBlocks(blocks: List<String>) {
+        systemPromptBlocks = blocks
+        rewriteSystemPrefix()
+    }
+
+    /** Source of truth for plan-mode reminders (PlanModeState.active). */
+    fun setPlanModeProvider(provider: (() -> Boolean)?) {
+        planModeProvider = provider
+    }
+
     /** Append project/custom instructions to the system prompt. */
     fun setCustomInstructions(text: String) {
         systemSuffix = text.trim()
-        history[0] = ApiMessage(role = "system", content = composedSystem())
+        rewriteSystemPrefix()
     }
 
     /** Set the assistant persona/tone. */
     fun setPersona(p: String) {
         persona = p.trim()
-        history[0] = ApiMessage(role = "system", content = composedSystem())
+        rewriteSystemPrefix()
     }
 
     /**
@@ -190,32 +243,47 @@ class AgentEngine(
         todoItemsProvider = provider
     }
 
-    private fun composedSystem(): String = buildString {
-        append(systemPrompt)
-        if (persona.isNotBlank()) append("\n\n# 语气\n以「").append(persona).append("」的风格回应。")
-        if (systemSuffix.isNotBlank()) append("\n\n# 用户自定义指令\n").append(systemSuffix)
-    }
+    private fun composedSystem(): String =
+        systemMessages().joinToString("\n\n") { it.content.orEmpty() }
 
     /** Public access to the composed system prompt (for rollout recording). */
     fun composedSystemPrompt(): String = composedSystem()
 
+    /** Rebuild plan-reminder cadence counters after restoring a history. */
+    private fun rescanPlanReminderState() {
+        var count = 0
+        var lastReminderIdx = -1
+        history.forEachIndexed { i, m ->
+            if (m.role == "system" && ZCodePrompts.isPlanModeReminder(m.content)) {
+                count += 1
+                lastReminderIdx = i
+            }
+        }
+        planReminderCount = count
+        humanTurnsSincePlanReminder = history.drop(lastReminderIdx + 1).count { it.role == "user" }
+    }
+
     /** Reset the conversation history (used when loading a saved conversation). */
     fun seed(messages: List<ApiMessage>) {
         history.clear()
-        history += ApiMessage(role = "system", content = composedSystem())
-        if (metaUserContext.isNotBlank()) {
-            val firstUser = messages.indexOfFirst { it.role == "user" }
-            if (firstUser >= 0 && messages.none { it.content?.contains(META_USER_REMINDER_PREFIX) == true }) {
-                history += messages.take(firstUser)
-                history += ApiMessage(
-                    role = "system",
-                    content = "$META_USER_REMINDER_PREFIX\n$metaUserContext\n</system-reminder>",
-                )
-                history += messages.drop(firstUser)
-                return
-            }
+        history += systemMessages()
+        val firstUser = messages.indexOfFirst { it.role == "user" }
+        val injectMeta = metaUserContext.isNotBlank() && firstUser >= 0 &&
+            messages.none { it.content?.contains(META_USER_REMINDER_PREFIX) == true }
+        if (injectMeta) {
+            history += messages.take(firstUser)
+            history += ApiMessage(
+                role = "system",
+                content = SystemReminder.wrap(
+                    SystemReminder.Source.CONTEXT_PREFIX,
+                    metaUserContext,
+                ).trimEnd(),
+            )
+            history += messages.drop(firstUser)
+        } else {
+            history += messages
         }
-        history += messages
+        rescanPlanReminderState()
     }
 
     /** Snapshot of the current history (used to preserve state across engine rebuilds). */
@@ -251,13 +319,80 @@ class AgentEngine(
     fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
         val isFirstUserTurn = history.none { it.role == "user" }
         val effectiveInput = if (isFirstUserTurn && metaUserContext.isNotBlank()) {
-            "$META_USER_REMINDER_PREFIX\n$metaUserContext\n</system-reminder>\n\n$userInput"
+            SystemReminder.wrap(SystemReminder.Source.CONTEXT_PREFIX, metaUserContext)
+                .trimEnd() + "\n\n$userInput"
         } else {
             userInput
         }
         history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null })
         turnCount += 1
+        humanTurnsSincePlanReminder += 1
+        injectDateChangeReminder()
+        injectPlanModeReminder()
         loop(settings, turn)
+    }
+
+    /**
+     * ZCode runtime_mode reminder: while plan mode is active, re-attach the
+     * plan contract every ≥5 real user turns (full text on the 1st and every
+     * 5th attachment, sparse otherwise); on the plan→build edge emit the exit
+     * reminder once. Delivered as a <system-reminder> after the user message.
+     */
+    private fun injectPlanModeReminder() {
+        val planEnabled = planModeProvider?.invoke() == true
+        if (planEnabled) {
+            val due = planReminderCount == 0 ||
+                humanTurnsSincePlanReminder >= ZCodePrompts.PLAN_MODE_REMINDER_TURNS_BETWEEN
+            if (due) {
+                planReminderCount += 1
+                humanTurnsSincePlanReminder = 0
+                val body = if (planReminderCount % ZCodePrompts.PLAN_MODE_FULL_REMINDER_EVERY_N == 1) {
+                    ZCodePrompts.PLAN_MODE_FULL_REMINDER
+                } else {
+                    ZCodePrompts.PLAN_MODE_SPARSE_REMINDER
+                }
+                history += ApiMessage(
+                    role = "system",
+                    content = SystemReminder.wrap(SystemReminder.Source.RUNTIME_MODE, body),
+                )
+            }
+        } else if (planWasEnabled) {
+            history += ApiMessage(
+                role = "system",
+                content = SystemReminder.wrap(
+                    SystemReminder.Source.PLAN_MODE_EXIT,
+                    ZCodePrompts.PLAN_MODE_EXIT_REMINDER,
+                ),
+            )
+        }
+        planWasEnabled = planEnabled
+    }
+
+    /**
+     * ZCode date_change reminder: 跨天的会话在每个新回合提示一次新日期
+     * （runtime_local 生命周期——上游不落盘，AndMX 随 history 持久化）。
+     */
+    private fun injectDateChangeReminder() {
+        val today = dateProvider()
+        val prev = lastLocalDate
+        lastLocalDate = today
+        if (prev == null || prev == today) return
+        history += ApiMessage(
+            role = "system",
+            content = SystemReminder.wrap(
+                SystemReminder.Source.DATE_CHANGE,
+                SystemReminder.buildDateChangeBody(today),
+            ),
+        )
+    }
+
+    /**
+     * 任意来源的系统提示注入入口（子代理完成通知、环境变更等 mid_turn_event
+     * 类）。写入 history，下一个模型步的 ChatRequest 自然携带。
+     */
+    fun injectSystemReminder(source: SystemReminder.Source, body: String) {
+        if (body.isBlank()) return
+        history += ApiMessage(role = "system", content = SystemReminder.wrap(source, body))
     }
 
     /**
@@ -285,6 +420,7 @@ class AgentEngine(
         // audited by the completion verifier; a failing verdict injects a
         // continuation message and a fresh step budget instead of ending.
         var continuations = 0
+        var outputTokenContinuations = 0
         goalLoop@ while (true) {
         // A fresh user turn (or goal continuation) starts a fresh repeat
         // chain: an instruction that legitimately re-runs the previous
@@ -297,7 +433,7 @@ class AgentEngine(
             Microcompact.maybeMicrocompact(
                 messages = history,
                 estimatedTokens = compactor.estimateTokens(history),
-                thresholdTokens = compactor.microcompactThresholdTokens(contextWindow),
+                thresholdTokens = compactor.microcompactThresholdTokens(contextWindow, maxOutputTokens),
                 lastAssistantCompletedAtMs = lastAssistantCompletedAtMs,
                 nowMs = System.currentTimeMillis(),
             )?.let { cleared ->
@@ -332,14 +468,20 @@ class AgentEngine(
                 convergenceHinted = true
                 history += ApiMessage(
                     role = "system",
-                    content = "步数即将用尽。请立即总结当前进度,完成收尾,不要再发起新的工具调用。",
+                    content = SystemReminder.wrap(
+                        SystemReminder.Source.MODEL_ANOMALY,
+                        "步数即将用尽。请立即总结当前进度,完成收尾,不要再发起新的工具调用。",
+                    ),
                 )
             }
 
             if (TodoReminder.shouldRemind(history)) {
                 history += ApiMessage(
                     role = "system",
-                    content = "${TodoReminder.MARKER_OPEN}${TodoReminder.reminderText(todoItemsProvider?.invoke())}</system-reminder>",
+                    content = SystemReminder.wrap(
+                        SystemReminder.Source.TODO_REMINDER,
+                        TodoReminder.reminderText(todoItemsProvider?.invoke()),
+                    ),
                 )
             }
 
@@ -405,6 +547,23 @@ class AgentEngine(
 
             val calls = msg.toolCalls
             if (calls.isNullOrEmpty()) {
+                // Output-token truncation (ZCode turn-output-token-continuation):
+                // a reply cut at max tokens resumes in-place with a fixed
+                // nudge, up to 3 times per turn; replies carrying tool calls
+                // proceed normally since the calls are the continuation.
+                if (msg.finishReason == "length") {
+                    if (outputTokenContinuations < MAX_OUTPUT_TOKEN_CONTINUATIONS) {
+                        outputTokenContinuations += 1
+                        msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
+                        history += ApiMessage(role = "user", content = OUTPUT_TOKEN_CONTINUE_PROMPT)
+                        continue
+                    }
+                    msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
+                    emit(AgentEvent.Failed("模型回复超出输出 token 上限"))
+                    emit(AgentEvent.Done)
+                    return
+                }
+                outputTokenContinuations = 0
                 // Final answer — commit the text, then let an active goal's
                 // completion verifier decide whether the turn may end.
                 msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
@@ -439,11 +598,37 @@ class AgentEngine(
                 calls.forEach { call ->
                     emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
                 }
-                // Execute tools in parallel — NO emit inside async.
-                val results = coroutineScope {
-                    calls.map { call ->
-                        async { call to executeToolCall(call) }
-                    }.map { it.await() }
+                // ZCode tool scheduler: only concurrency-safe calls share a
+                // wave; state-mutating/destructive calls form serial barriers
+                // that preserve the model's requested order.
+                val groups = mutableListOf<List<ApiToolCall>>()
+                var pending = mutableListOf<ApiToolCall>()
+                for (call in calls) {
+                    if (toolsByName[call.function.name]?.concurrentSafe == true) {
+                        pending += call
+                    } else {
+                        if (pending.isNotEmpty()) {
+                            groups += pending
+                            pending = mutableListOf()
+                        }
+                        groups += listOf(call)
+                    }
+                }
+                if (pending.isNotEmpty()) groups += pending
+                // Execute — NO emit inside async.
+                val results = mutableListOf<Pair<ApiToolCall, ToolResult>>()
+                for (group in groups) {
+                    if (group.size == 1) {
+                        results += group[0] to executeToolCall(group[0])
+                    } else {
+                        for (wave in group.chunked(MAX_PARALLEL_TOOL_CALLS)) {
+                            coroutineScope {
+                                results += wave.map { call ->
+                                    async { call to executeToolCall(call) }
+                                }.map { it.await() }
+                            }
+                        }
+                    }
                 }
                 // Emit ToolFinished in order (serial, on the flow coroutine).
                 for ((call, result) in results) {
@@ -771,6 +956,16 @@ class AgentEngine(
 
     companion object {
         const val META_USER_REMINDER_PREFIX = "<system-reminder>"
+
+        /** Upstream tool scheduler cap on concurrent calls per wave. */
+        const val MAX_PARALLEL_TOOL_CALLS = 10
+
+        /** Upstream turn-output-token-continuation: max in-place resumes per turn. */
+        const val MAX_OUTPUT_TOKEN_CONTINUATIONS = 3
+        const val OUTPUT_TOKEN_CONTINUE_PROMPT =
+            "Output token limit hit. Resume directly — no apology, no recap of " +
+                "what you were doing. Pick up mid-thought if that is where the " +
+                "cut happened. Break remaining work into smaller pieces."
 
         val DEFAULT_SYSTEM_PROMPT: String =
             com.andmx.agent.zcode.ZCodePrompts.IDENTITY + "\n\n" +

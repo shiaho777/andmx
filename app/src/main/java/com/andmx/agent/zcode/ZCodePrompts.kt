@@ -1,15 +1,13 @@
 package com.andmx.agent.zcode
 
-import com.andmx.ui2.chat.ExecMode
-
 /**
- * System-prompt sections reverse-engineered from the ZCode desktop bundle
- * (glm/zcode.cjs). Sections mirror the upstream assembly order:
- * identity → core/harness → environment/git → dynamic behavior → context
- * management → session guidance → mode overlay. Project docs, skills and the
- * current date go to the meta-user channel ([metaUserContext]) injected into
- * the first user message instead of system, so edits never bust the system
- * prefix cache.
+ * System-prompt sections aligned with ZCode 3.14 source (context/builder.ts).
+ * Emits three system blocks — cli_prefix, stable body, dynamic body — matching
+ * upstream cacheable/stable/dynamic boundaries. Mode/plan state is delivered
+ * through runtime reminders ([PLAN_MODE_FULL_REMINDER] etc.), not the prompt.
+ * Project docs, skills and the current date go to the meta-user channel
+ * ([metaUserContext]) injected into the first user message instead of system,
+ * so edits never bust the system prefix cache.
  */
 object ZCodePrompts {
 
@@ -66,13 +64,19 @@ Before ending your turn, check your last paragraph. If it is a plan, an analysis
 
 Before running a command that changes system state — restarts, deletes, config edits — check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.""".trimIndent()
 
-    val SESSION_GUIDANCE = """
+    /**
+     * Upstream emits this section only when the Skill tool is registered AND at
+     * least one skill exists; the Agent/AskUserQuestion guidance lines were
+     * removed upstream in favor of full tool descriptions (3.14 source:
+     * context/dynamic-sections.ts buildSessionGuidanceSection).
+     */
+    fun sessionGuidance(hasSkills: Boolean): String? {
+        if (!hasSkills) return null
+        return """
 # Session-specific guidance
 - When the user types `/<skill-name>`, invoke it via Skill. Only use skills listed in the user-invocable skills section — don't guess.
-- Prefer TodoWrite for multi-step work; keep exactly one item in_progress.
-- For non-trivial implementation, call EnterPlanMode first when approaches/architecture/multi-file scope are unclear.
-- Use Agent or Task for specialized multi-step subwork; Explore for broad read-only fan-out. Background launches return an id — use TaskOutput to read progress and TaskStop to cancel.
 """.trimIndent()
+    }
 
     val PLAN_WORKFLOW = """
 ## Plan Workflow
@@ -82,10 +86,10 @@ Goal: Gain a comprehensive understanding of the user's request by reading throug
 
 1. Focus on understanding the user's request and the code associated with their request. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
 
-2. **Launch up to 4 Explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.
+2. **Launch up to 3 Explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.
    - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.
    - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.
-   - Quality over quantity - 4 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
+   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
    - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigating testing patterns
 
 ### Phase 2: Design
@@ -114,30 +118,35 @@ This is critical - your turn should only end with either using the AskUserQuesti
 
 NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications using the AskUserQuestion tool. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.""".trimIndent()
 
-    fun modeOverlay(mode: ExecMode): String = when (mode) {
-        ExecMode.PLAN -> """
-# Mode: plan
-You are in plan mode. Explore with read-only tools, design an approach, and use TodoWrite for the plan steps.
-Do NOT write/edit/patch files or run destructive shell commands until ExitPlanMode is approved.
-AskUserQuestion only for decisions the user must make.
+    // ── runtime_mode reminders (upstream runtime-reminders.ts) ────────────────
+    // Plan state is delivered as <system-reminder> turns, NOT baked into the
+    // system prompt: every ≥5 real user turns, first and every 5th attachment
+    // is the full text, the rest the sparse one-liner.
+
+    const val PLAN_MODE_REMINDER_TURNS_BETWEEN = 5
+    const val PLAN_MODE_FULL_REMINDER_EVERY_N = 5
+
+    val PLAN_MODE_FULL_REMINDER = """
+Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received.
 
 $PLAN_WORKFLOW
 """.trimIndent()
-        ExecMode.AUTO_EDIT -> """
-# Mode: build (accept edits)
-File reads/writes/edits apply automatically. Shell/network still may require confirmation depending on risk.
-Implement end-to-end; don't stop at analysis unless the user asked for a plan only.
+
+    val PLAN_MODE_SPARSE_REMINDER =
+        "Plan mode still active (see full instructions earlier in conversation). Read-only. Follow 4-phase workflow. " +
+            "End turns with AskUserQuestion (for clarifications) or ExitPlanMode (for plan approval). " +
+            "Never ask about plan approval via text or AskUserQuestion."
+
+    val PLAN_MODE_EXIT_REMINDER = """
+## Exited Plan Mode
+
+You have exited plan mode. You can now make edits, run tools, and take actions.
 """.trimIndent()
-        ExecMode.FULL -> """
-# Mode: yolo / full access
-Operate with maximum autonomy. Prefer completing the task without pausing for routine approvals.
-Still refuse unauthorized destructive security requests. Report outcomes faithfully.
-""".trimIndent()
-        ExecMode.CONFIRM -> """
-# Mode: confirm before changes
-Reads auto-run. Writes, patches, shell, and network may require user approval.
-When blocked, adjust the approach rather than retrying the same denied call.
-""".trimIndent()
+
+    /** Matches both full and sparse plan-mode reminders already in history. */
+    fun isPlanModeReminder(content: String?): Boolean {
+        val body = content?.removePrefix("<system-reminder>")?.trimStart() ?: return false
+        return body.startsWith("Plan mode is active.") || body.startsWith("Plan mode still active")
     }
 
     data class SessionEnv(
@@ -154,6 +163,7 @@ When blocked, adjust the approach rather than retrying the same denied call.
         val recentCommits: String = "",
     )
 
+    /** env_info section (upstream order: after memory, before context_management). */
     fun sessionBlock(env: SessionEnv): String = buildString {
         appendLine("# Environment")
         appendLine("You have been invoked in the following environment:")
@@ -163,23 +173,34 @@ When blocked, adjust the approach rather than retrying the same denied call.
         appendLine("- Shell: ${env.shell}")
         appendLine("- OS Version: ${env.osVersion}")
         appendLine("- You are powered by the model named ${env.modelLabel}.")
-        if (env.isGitRepo || env.branch.isNotBlank() || env.gitStatus.isNotBlank()) {
-            appendLine()
+    }
+
+    /**
+     * system_context (git) section — upstream emits it as the LAST system
+     * section, only when the workspace is a git repo.
+     */
+    fun gitContextBlock(env: SessionEnv): String? {
+        if (!env.isGitRepo && env.branch.isBlank() && env.gitStatus.isBlank()) return null
+        return buildString {
             appendLine("gitStatus: This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.")
+            if (env.branch.isNotBlank()) {
+                appendLine()
+                appendLine("Current branch: ${env.branch}")
+            }
+            if (env.mainBranch.isNotBlank()) {
+                appendLine()
+                appendLine("Main branch (you will usually use this for PRs): ${env.mainBranch}")
+            }
+            if (env.gitUser.isNotBlank()) {
+                appendLine()
+                appendLine("Git user: ${env.gitUser}")
+            }
             appendLine()
-            if (env.branch.isNotBlank()) appendLine("Current branch: ${env.branch}")
-            if (env.mainBranch.isNotBlank()) appendLine("Main branch (you will usually use this for PRs): ${env.mainBranch}")
-            if (env.gitUser.isNotBlank()) appendLine("Git user: ${env.gitUser}")
-            if (env.gitStatus.isNotBlank()) {
-                appendLine()
-                appendLine("Status:")
-                appendLine(env.gitStatus.trimEnd())
-            }
-            if (env.recentCommits.isNotBlank()) {
-                appendLine()
-                appendLine("Recent commits:")
-                appendLine(env.recentCommits.trimEnd())
-            }
+            appendLine("Status:")
+            appendLine(if (env.gitStatus.isNotBlank()) env.gitStatus.trimEnd() else "(unknown)")
+            appendLine()
+            appendLine("Recent commits:")
+            appendLine(env.recentCommits.trimEnd())
         }
     }
 
@@ -249,45 +270,82 @@ When blocked, adjust the approach rather than retrying the same denied call.
         return parts.joinToString("\n\n")
     }
 
-    fun assemble(
-        mode: ExecMode,
+    /**
+     * Upstream emits three system messages: cli_prefix (cacheable), stable body
+     * (cacheable), dynamic body. Mode state is NOT part of the prompt — it
+     * arrives via runtime_mode reminders (see PLAN_MODE_* consts).
+     * Block order mirrors upstream ContextBuilder (3.14): identity →
+     * dynamic behavior → session guidance → memory → env → context management →
+     * git system context; project docs/custom/persona/extra are AndMX extensions.
+     */
+    fun assembleBlocks(
         env: SessionEnv,
         projectDocs: String = "",
         customInstructions: String = "",
         persona: String = "",
         extra: String = "",
-    ): String = buildString {
-        appendLine(IDENTITY)
-        appendLine()
-        appendLine(CORE)
-        appendLine()
-        appendLine(sessionBlock(env))
-        appendLine()
-        appendLine(CRAFT)
-        appendLine()
-        appendLine(CONTEXT_MGMT)
-        appendLine()
-        appendLine(SESSION_GUIDANCE)
-        appendLine()
-        appendLine(modeOverlay(mode))
-        if (projectDocs.isNotBlank()) {
+        hasSkills: Boolean = false,
+        memory: String = "",
+    ): List<String> {
+        val dynamic = buildString {
+            append(CRAFT)
+            sessionGuidance(hasSkills)?.let {
+                appendLine()
+                appendLine()
+                append(it)
+            }
+            if (memory.isNotBlank()) {
+                appendLine()
+                appendLine()
+                append(memory.trim())
+            }
             appendLine()
-            appendLine("# Project instructions")
-            appendLine(projectDocs.trimEnd())
-        }
-        if (customInstructions.isNotBlank()) {
             appendLine()
-            appendLine("# User custom instructions")
-            appendLine(customInstructions.trimEnd())
-        }
-        if (persona.isNotBlank()) {
+            append(sessionBlock(env).trimEnd())
             appendLine()
-            appendLine("# Tone")
-            appendLine("Respond in the style of 「$persona」.")
-        }
-        if (extra.isNotBlank()) {
             appendLine()
-            append(extra.trimEnd())
+            append(CONTEXT_MGMT)
+            gitContextBlock(env)?.let {
+                appendLine()
+                appendLine()
+                append(it.trimEnd())
+            }
+            if (projectDocs.isNotBlank()) {
+                appendLine()
+                appendLine()
+                append("# Project instructions\n")
+                append(projectDocs.trimEnd())
+            }
+            if (customInstructions.isNotBlank()) {
+                appendLine()
+                appendLine()
+                append("# User custom instructions\n")
+                append(customInstructions.trimEnd())
+            }
+            if (persona.isNotBlank()) {
+                appendLine()
+                appendLine()
+                append("# Tone\nRespond in the style of 「$persona」.")
+            }
+            if (extra.isNotBlank()) {
+                appendLine()
+                appendLine()
+                append(extra.trimEnd())
+            }
         }
+        return listOf(IDENTITY, CORE, dynamic.trimEnd())
     }
+
+    /** Single-string projection of [assembleBlocks] for legacy callers/tests. */
+    fun assemble(
+        env: SessionEnv,
+        projectDocs: String = "",
+        customInstructions: String = "",
+        persona: String = "",
+        extra: String = "",
+        hasSkills: Boolean = false,
+        memory: String = "",
+    ): String = assembleBlocks(
+        env, projectDocs, customInstructions, persona, extra, hasSkills, memory,
+    ).joinToString("\n\n")
 }

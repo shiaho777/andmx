@@ -4,10 +4,16 @@ import com.andmx.agent.multi.SubagentCatalog
 import com.andmx.agent.zcode.AskUserQuestionParser
 import com.andmx.agent.zcode.ZCodePrompts
 import com.andmx.agent.zcode.isPlanModeAllowed
+import com.andmx.llm.ApiFunctionCall
 import com.andmx.llm.ApiMessage
-import com.andmx.ui2.chat.ExecMode
+import com.andmx.llm.ApiToolCall
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -20,9 +26,8 @@ import org.junit.Test
 
 class ZCodeAlignmentTest {
     @Test
-    fun systemPromptContainsZCodeIdentityAndHarness() {
-        val prompt = ZCodePrompts.assemble(
-            mode = ExecMode.AUTO_EDIT,
+    fun systemPromptEmitsThreeBlocksWithoutMode() {
+        val blocks = ZCodePrompts.assembleBlocks(
             env = ZCodePrompts.SessionEnv(
                 cwd = "/root/project",
                 isGitRepo = true,
@@ -31,11 +36,13 @@ class ZCodeAlignmentTest {
                 gitStatus = "clean",
             ),
         )
-        assertTrue(prompt.contains("You are ZCode"))
-        assertTrue(prompt.contains("# Harness"))
-        assertTrue(prompt.contains("Primary working directory: /root/project"))
-        assertTrue(prompt.contains("Mode: build"))
-        assertTrue(prompt.contains("Current branch: main"))
+        assertEquals(3, blocks.size)
+        assertTrue(blocks[0].contains("You are ZCode"))
+        assertTrue(blocks[1].contains("# Harness"))
+        assertTrue(blocks[2].contains("Primary working directory: /root/project"))
+        assertTrue(blocks[2].contains("Current branch: main"))
+        // Mode state must not live in the system prompt (upstream: runtime reminders).
+        assertFalse(blocks.joinToString("\n").contains("Mode:"))
     }
 
     @Test
@@ -55,10 +62,11 @@ class ZCodeAlignmentTest {
     }
 
     @Test
-    fun planOverlayMentionsNoWrites() {
-        val plan = ZCodePrompts.modeOverlay(ExecMode.PLAN)
-        assertTrue(plan.contains("plan mode"))
-        assertTrue(plan.lowercase().contains("do not write") || plan.contains("Do NOT write"))
+    fun planReminderMentionsNoWrites() {
+        assertTrue(ZCodePrompts.PLAN_MODE_FULL_REMINDER.contains("Plan mode is active"))
+        assertTrue(ZCodePrompts.PLAN_MODE_FULL_REMINDER.contains("MUST NOT make any edits"))
+        assertTrue(ZCodePrompts.PLAN_MODE_SPARSE_REMINDER.contains("Plan mode still active"))
+        assertTrue(ZCodePrompts.PLAN_MODE_EXIT_REMINDER.contains("## Exited Plan Mode"))
     }
 
     @Test
@@ -98,6 +106,74 @@ class ZCodeAlignmentTest {
     }
 
     @Test
+    fun askUserQuestionModelContentHasThreeStates() {
+        val q = com.andmx.agent.zcode.AskQuestion(
+            question = "Which auth?",
+            header = "Auth",
+            options = listOf(
+                com.andmx.agent.zcode.AskOption("JWT", "tokens"),
+                com.andmx.agent.zcode.AskOption("Session", "server"),
+            ),
+        )
+        // Empty → continue with best judgment, not a rejection.
+        val empty = AskUserQuestionParser.formatModelContent(listOf(q), JsonObject(emptyMap()))
+        assertTrue(empty.contains("did not provide answers"))
+        assertTrue(empty.contains("best judgment"))
+        assertTrue(empty.contains("do not treat this as a rejection"))
+        // Partial → skipped count surfaced.
+        val partial = AskUserQuestionParser.formatModelContent(
+            listOf(q, q.copy(question = "Which DB?")),
+            JsonObject(mapOf("Which auth?" to JsonPrimitive("JWT"))),
+        )
+        assertTrue(partial.contains("skipped 1"))
+        assertTrue(partial.contains("\"Which auth?\"=\"JWT\""))
+        // Full → answers + annotations.
+        val full = AskUserQuestionParser.formatModelContent(
+            listOf(q),
+            JsonObject(mapOf("Which auth?" to JsonPrimitive("JWT"))),
+            JsonObject(mapOf("Which auth?" to buildJsonObject { put("notes", "use refresh tokens") })),
+        )
+        assertTrue(full.contains("User has answered your questions"))
+        assertTrue(full.contains("user notes: use refresh tokens"))
+        // Cancelled sentinel is stripped in execute → empty state.
+        runTest {
+            val tool = com.andmx.agent.zcode.AskUserQuestionTool(ask = { _, _ -> "" })
+            val args = buildJsonObject {
+                putJsonArray("questions") {
+                    add(buildJsonObject {
+                        put("question", "Which auth?")
+                        put("header", "Auth")
+                        putJsonArray("options") {
+                            add(buildJsonObject { put("label", "JWT"); put("description", "tokens") })
+                            add(buildJsonObject { put("label", "Session"); put("description", "server") })
+                        }
+                    })
+                }
+                putJsonObject("answers") { put("__default__", "cancelled") }
+            }
+            val result = tool.execute(args)
+            assertFalse(result.isError)
+            assertTrue(result.output.contains("did not provide answers"))
+            val cancelledTool = com.andmx.agent.zcode.AskUserQuestionTool(
+                ask = { _, _ -> """{"answers":{"__default__":"cancelled"}}""" },
+            )
+            val viaAsk = cancelledTool.execute(buildJsonObject {
+                putJsonArray("questions") {
+                    add(buildJsonObject {
+                        put("question", "Which auth?")
+                        put("header", "Auth")
+                        putJsonArray("options") {
+                            add(buildJsonObject { put("label", "JWT"); put("description", "tokens") })
+                            add(buildJsonObject { put("label", "Session"); put("description", "server") })
+                        }
+                    })
+                }
+            })
+            assertTrue(viaAsk.output.contains("did not provide answers"))
+        }
+    }
+
+    @Test
     fun exitPlanModeSchemaRequiresPlanInPromptDocs() {
         val empty = AskUserQuestionParser.parse(buildJsonObject { })
         assertTrue(empty.isEmpty())
@@ -106,7 +182,6 @@ class ZCodeAlignmentTest {
     @Test
     fun harnessMatchesZcodeWording() {
         val prompt = ZCodePrompts.assemble(
-            mode = ExecMode.AUTO_EDIT,
             env = ZCodePrompts.SessionEnv(cwd = "/root/project", isGitRepo = false, modelLabel = "m"),
         )
         assertTrue(prompt.contains("displayed to the user as Github-flavored markdown in a terminal"))
@@ -129,8 +204,8 @@ class ZCodeAlignmentTest {
     }
 
     @Test
-    fun planOverlayContainsWorkflowAndExitContract() {
-        val plan = ZCodePrompts.modeOverlay(ExecMode.PLAN)
+    fun planReminderContainsWorkflowAndExitContract() {
+        val plan = ZCodePrompts.PLAN_MODE_FULL_REMINDER
         assertTrue(plan.contains("## Plan Workflow"))
         assertTrue(plan.contains("### Phase 4: Call ExitPlanMode"))
         assertTrue(plan.contains("MUST use ExitPlanMode"))
@@ -235,5 +310,233 @@ class ZCodeAlignmentTest {
             it.role == "user" && it.content?.contains("<system-reminder>") == true
         }
         assertTrue(reInjected.isEmpty())
+    }
+
+    private fun noopLlm() = object : com.andmx.llm.LlmApi {
+        override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> =
+            Result.success(ApiMessage(role = "assistant", content = "ok"))
+    }
+
+    private fun fakeTurn() = TurnContext(
+        provider = com.andmx.llm.provider.ProviderDefinition(id = "t", name = "t", baseUrl = "http://x"),
+        model = "m",
+    )
+
+    @Test
+    fun engineSeedsSplitSystemBlocks() = runTest {
+        val engine = AgentEngine(
+            tools = emptyList(),
+            client = noopLlm(),
+            systemPromptBlocks = listOf("B1", "B2", "B3"),
+        )
+        engine.runTurn(com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "hi").toList()
+        val h = engine.snapshotHistory()
+        assertEquals(listOf("B1", "B2", "B3"), h.take(3).map { it.content })
+        assertTrue(h.take(3).all { it.role == "system" })
+        assertEquals("user", h[3].role)
+    }
+
+    @Test
+    fun setCustomInstructionsAppendsToLastSystemBlock() = runTest {
+        val engine = AgentEngine(
+            tools = emptyList(),
+            client = noopLlm(),
+            systemPromptBlocks = listOf("B1", "B2", "B3"),
+        )
+        engine.setCustomInstructions("keep diffs small")
+        val h = engine.snapshotHistory()
+        assertEquals(3, h.count { it.role == "system" })
+        assertTrue(h[2].content!!.endsWith("keep diffs small"))
+    }
+
+    @Test
+    fun planModeRemindersFollowUpstreamCadence() = runTest {
+        var planOn = false
+        val engine = AgentEngine(tools = emptyList(), client = noopLlm())
+        engine.setPlanModeProvider { planOn }
+        val settings = com.andmx.settings.ProviderSettings(model = "m")
+        val turn = fakeTurn()
+
+        planOn = true
+        engine.runTurn(settings, turn, "t1").toList()
+        var reminders = engine.snapshotHistory().filter {
+            ZCodePrompts.isPlanModeReminder(it.content)
+        }
+        assertEquals(1, reminders.size)
+        assertTrue(reminders[0].content!!.contains("Plan mode is active."))
+        assertTrue(reminders[0].content!!.contains("## Plan Workflow"))
+
+        // Turns 2..5 stay under TURNS_BETWEEN_ATTACHMENTS — no new reminder.
+        repeat(4) { engine.runTurn(settings, turn, "t${it + 2}").toList() }
+        assertEquals(
+            1,
+            engine.snapshotHistory().count { ZCodePrompts.isPlanModeReminder(it.content) },
+        )
+
+        // Turn 6 is due; attachment #2 is sparse (full only on 1st + every 5th).
+        engine.runTurn(settings, turn, "t6").toList()
+        reminders = engine.snapshotHistory().filter { ZCodePrompts.isPlanModeReminder(it.content) }
+        assertEquals(2, reminders.size)
+        assertTrue(reminders.last().content!!.contains("Plan mode still active"))
+
+        // Exit edge emits the exit reminder exactly once.
+        planOn = false
+        engine.runTurn(settings, turn, "t7").toList()
+        engine.runTurn(settings, turn, "t8").toList()
+        assertEquals(
+            1,
+            engine.snapshotHistory().count { it.content?.contains("## Exited Plan Mode") == true },
+        )
+    }
+
+    @Test
+    fun unsafeCallsSerializeBetweenSafeWaves() = runTest {
+        val running = AtomicInteger(0)
+        val maxConcurrent = AtomicInteger(0)
+        val unsafeRanExclusive = AtomicBoolean(true)
+        fun safeTool(toolName: String) = object : Tool {
+            override val name = toolName
+            override val description = ""
+            override val parameters = buildJsonObject { }
+            override val concurrentSafe = true
+            override suspend fun execute(args: JsonObject): ToolResult {
+                val c = running.incrementAndGet()
+                maxConcurrent.accumulateAndGet(c) { a, b -> maxOf(a, b) }
+                yield()
+                yield()
+                running.decrementAndGet()
+                return ToolResult("ok-$toolName")
+            }
+        }
+        val unsafeTool = object : Tool {
+            override val name = "unsafeB"
+            override val description = ""
+            override val parameters = buildJsonObject { }
+            override val concurrentSafe = false
+            override suspend fun execute(args: JsonObject): ToolResult {
+                if (running.get() != 0) unsafeRanExclusive.set(false)
+                running.incrementAndGet()
+                yield()
+                yield()
+                running.decrementAndGet()
+                return ToolResult("ok-unsafeB")
+            }
+        }
+        val calls = listOf("safeA", "unsafeB", "safeC", "safeD")
+        var first = true
+        val llm = object : com.andmx.llm.LlmApi {
+            override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> {
+                if (!first) return Result.success(ApiMessage(role = "assistant", content = "done"))
+                first = false
+                return Result.success(
+                    ApiMessage(
+                        role = "assistant",
+                        toolCalls = calls.mapIndexed { i, n ->
+                            ApiToolCall(id = "c$i", function = ApiFunctionCall(n, "{}"))
+                        },
+                    ),
+                )
+            }
+        }
+        val tools = listOf(safeTool("safeA"), unsafeTool, safeTool("safeC"), safeTool("safeD"))
+        val engine = AgentEngine(tools = tools, client = llm)
+        engine.runTurn(com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "go").toList()
+
+        // safeC+safeD overlap; unsafeB never shared a wave.
+        assertEquals(2, maxConcurrent.get())
+        assertTrue(unsafeRanExclusive.get())
+        // Results land in request order.
+        val toolMsgs = engine.snapshotHistory().filter { it.role == "tool" }
+        assertEquals(listOf("c0", "c1", "c2", "c3"), toolMsgs.map { it.toolCallId })
+    }
+
+    @Test
+    fun truncatedOutputAutoContinuesUpToThreeThenFails() = runTest {
+        var calls = 0
+        val llm = object : com.andmx.llm.LlmApi {
+            override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> {
+                calls += 1
+                return Result.success(
+                    ApiMessage(role = "assistant", content = "part$calls", finishReason = "length"),
+                )
+            }
+        }
+        val engine = AgentEngine(tools = emptyList(), client = llm)
+        val events = engine.runTurn(
+            com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "go",
+        ).toList()
+        // 1 initial + 3 continuations, then the turn fails.
+        assertEquals(1 + AgentEngine.MAX_OUTPUT_TOKEN_CONTINUATIONS, calls)
+        assertTrue(events.any { it is AgentEvent.Failed })
+        assertEquals(
+            AgentEngine.MAX_OUTPUT_TOKEN_CONTINUATIONS,
+            engine.snapshotHistory().count {
+                it.role == "user" && it.content == AgentEngine.OUTPUT_TOKEN_CONTINUE_PROMPT
+            },
+        )
+    }
+
+    @Test
+    fun truncatedOutputRecoversOnCleanFinish() = runTest {
+        var calls = 0
+        val llm = object : com.andmx.llm.LlmApi {
+            override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> {
+                calls += 1
+                return Result.success(
+                    ApiMessage(
+                        role = "assistant",
+                        content = "part$calls",
+                        finishReason = if (calls == 1) "length" else null,
+                    ),
+                )
+            }
+        }
+        val engine = AgentEngine(tools = emptyList(), client = llm)
+        val events = engine.runTurn(
+            com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "go",
+        ).toList()
+        assertEquals(2, calls)
+        assertTrue(events.none { it is AgentEvent.Failed })
+        assertTrue(events.last() is AgentEvent.Done)
+    }
+
+    @Test
+    fun toolCallsOnTruncatedReplyProceedWithoutContinuation() = runTest {
+        var calls = 0
+        val llm = object : com.andmx.llm.LlmApi {
+            override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> {
+                calls += 1
+                return if (calls == 1) {
+                    Result.success(
+                        ApiMessage(
+                            role = "assistant",
+                            toolCalls = listOf(
+                                ApiToolCall(id = "c0", function = ApiFunctionCall("safeA", "{}")),
+                            ),
+                            finishReason = "length",
+                        ),
+                    )
+                } else {
+                    Result.success(ApiMessage(role = "assistant", content = "done"))
+                }
+            }
+        }
+        val safe = object : Tool {
+            override val name = "safeA"
+            override val description = ""
+            override val parameters = buildJsonObject { }
+            override val concurrentSafe = true
+            override suspend fun execute(args: JsonObject) = ToolResult("ok")
+        }
+        val engine = AgentEngine(tools = listOf(safe), client = llm)
+        val events = engine.runTurn(
+            com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "go",
+        ).toList()
+        assertEquals(2, calls)
+        assertTrue(events.any { it is AgentEvent.ToolFinished })
+        assertEquals(
+            0,
+            engine.snapshotHistory().count { it.content == AgentEngine.OUTPUT_TOKEN_CONTINUE_PROMPT },
+        )
     }
 }

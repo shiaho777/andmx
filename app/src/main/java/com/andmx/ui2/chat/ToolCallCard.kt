@@ -35,9 +35,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -72,6 +75,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.text.style.TextAlign
+import com.andmx.agent.ToolArgs
 import com.andmx.diff.DiffLine
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
@@ -118,6 +122,7 @@ fun ToolCallCard(toolCall: ToolCall) {
     val editPreview = remember(toolCall.id, toolCall.name, toolCall.args) {
         if (isEditTool) ToolEditDiff.preview(toolCall.name, toolCall.args) else null
     }
+    val todoItems = remember(toolCall.id, toolCall.args) { ToolPresentation.todoItems(toolCall) }
     val family = ToolPresentation.family(toolCall.name)
     val kindLabel = if (editPreview != null) {
         editKindLabel(editPreview.operation, toolCall.isRunning, toolCall.isError)
@@ -324,6 +329,50 @@ fun ToolCallCard(toolCall: ToolCall) {
                             mono = true,
                             emphasize = true,
                         )
+                    }
+                } else if (todoItems != null) {
+                    // todo 专属卡：args.todos 直接渲染为清单，不暴露原始 JSON。
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.38f),
+                            )
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        todoItems.forEach { item ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    when (item.status.lowercase()) {
+                                        "completed" -> Icons.Outlined.CheckCircle
+                                        "in_progress" -> Icons.Outlined.Schedule
+                                        else -> Icons.Outlined.RadioButtonUnchecked
+                                    },
+                                    null,
+                                    Modifier.size(13.dp),
+                                    tint = when (item.status.lowercase()) {
+                                        "completed" -> MaterialTheme.colorScheme.primary
+                                        "in_progress" -> MaterialTheme.colorScheme.tertiary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    },
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    item.content,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    color = if (item.status.lowercase() == "completed") {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                        }
+                        if (!toolCall.output.isNullOrBlank() && toolCall.isError) {
+                            MetaBlock(title = "错误", body = toolCall.output.take(4000), mono = true, emphasize = true)
+                        }
                     }
                 } else {
                     Column(
@@ -816,13 +865,26 @@ fun ToolGroupCard(tools: List<ToolCall>) {
         wasRunning = running
     }
 
-    val labels = tools.map { ToolPresentation.family(it.name).label }.distinct().take(3)
+    val kind = ToolPresentation.groupKind(tools.first().name)
     val title = buildString {
-        append(tools.size)
-        append(" 步")
-        if (labels.isNotEmpty()) {
-            append(" · ")
-            append(labels.joinToString(" / "))
+        // ZCode 分组语义：改动按去重文件数、执行按命令数、只读按步数。
+        when (kind) {
+            ToolPresentation.GroupKind.CHANGE -> {
+                val files = tools.mapNotNull {
+                    ToolArgs.filePath(it.name, it.args).takeIf(String::isNotBlank)
+                }.distinct()
+                append(if (files.isNotEmpty()) "改动 ${files.size} 个文件" else "${tools.size} 处改动")
+            }
+            ToolPresentation.GroupKind.EXECUTE -> append("执行 ${tools.size} 条命令")
+            else -> {
+                append(tools.size)
+                append(" 步")
+                val labels = tools.map { ToolPresentation.family(it.name).label }.distinct().take(3)
+                if (labels.isNotEmpty()) {
+                    append(" · ")
+                    append(labels.joinToString(" / "))
+                }
+            }
         }
         if (failed > 0) {
             append(" · ")

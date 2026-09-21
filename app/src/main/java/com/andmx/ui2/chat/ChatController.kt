@@ -9,6 +9,7 @@ import com.andmx.agent.ApplyPatchTool
 import com.andmx.agent.ApprovalMode
 import com.andmx.agent.ApprovalOutcome
 import com.andmx.agent.ApprovalPolicy
+import com.andmx.agent.ApprovalRuleStore
 import com.andmx.agent.BrowseTool
 import com.andmx.agent.ContextBreakdown
 import com.andmx.agent.ToolArgs
@@ -28,9 +29,11 @@ import com.andmx.agent.TurnContext
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.zcode.isPlanModeAllowed
 import com.andmx.agent.zcode.buildZCodeToolSurface
+import com.andmx.agent.zcode.CronTools
 import com.andmx.agent.zcode.PlanModeState
 import com.andmx.agent.zcode.TodoState
 import com.andmx.agent.zcode.AskQuestion
+import com.andmx.agent.zcode.AskUserQuestionParser
 import com.andmx.agent.zcode.ZCodePrompts
 import com.andmx.agent.CreateGoalTool
 import com.andmx.agent.UpdateGoalTool
@@ -57,6 +60,7 @@ import com.andmx.agent.plugins.deviceutils.StorageCleanupToolset
 import com.andmx.agent.plugins.htmlvideo.HtmlVideoToolset
 import com.andmx.agent.plugins.devforge.DevForgeToolset
 import com.andmx.data.ConversationRepository
+import com.andmx.data.CronStore
 import com.andmx.data.rollout.EventMsg
 import com.andmx.data.rollout.ResponseItem
 import com.andmx.data.rollout.RolloutWriter
@@ -81,7 +85,9 @@ import com.andmx.workspace.WorkspaceKind
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -89,9 +95,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
@@ -103,6 +112,8 @@ class ChatController(private val context: Context) {
         private const val TOOL_OUTPUT_ROLLOUT_LIMIT = 4_096
         private const val TOOL_OUTPUT_MEMORY_LIMIT = 4_000
         private const val MAX_CACHED_SESSIONS = 4
+        private const val ASK_HIDDEN_GRACE_MS = 60_000L
+        private const val ASK_AUTO_RESOLVE_MS = 300_000L
     }
     private val settingsStore = SettingsStore(context)
     private val providerStore = ProviderStore(context)
@@ -112,6 +123,16 @@ class ChatController(private val context: Context) {
     private val networkPolicy = NetworkPolicy.PERMISSIVE
     private val guestFs = GuestFs(ProotRuntime(context))
     private val memorySystem = MemorySystem(guestFs)
+    private val memoryAgent = com.andmx.agent.memory.MemoryAgentRunner(
+        guestFs,
+        workspaceReadTools = {
+            listOf(
+                com.andmx.agent.ReadFileTool(context),
+                com.andmx.agent.GrepTool(context),
+                com.andmx.agent.GlobTool(context),
+            )
+        },
+    )
     private val pluginSystem = PluginSystem(context, guestFs)
     private val hookSystem = HookSystem(context)
     private val ambientSuggestions = AmbientSuggestions(context)
@@ -121,6 +142,23 @@ class ChatController(private val context: Context) {
     private val tokenTrackers = ConcurrentHashMap<Long, TokenUsageTracker>()
     private val allowedPromptsByConversation = ConcurrentHashMap<Long, AllowedPrompts.Grants>()
     private val orchestrators = ConcurrentHashMap<Long, SubAgentOrchestrator>()
+    private val backgroundTasksByConversation = ConcurrentHashMap<Long, com.andmx.agent.BackgroundTasks>()
+
+    private fun backgroundTasksFor(conversationId: Long): com.andmx.agent.BackgroundTasks =
+        backgroundTasksByConversation.getOrPut(conversationId) {
+            com.andmx.agent.BackgroundTasks(context).also { tasks ->
+                controllerScope.launch {
+                    tasks.events.collect { ev ->
+                        if (ev is com.andmx.agent.BackgroundTasks.Event.Terminated) {
+                            sessions[conversationId]?.engine?.injectSystemReminder(
+                                com.andmx.agent.SystemReminder.Source.QUEUED_SYSTEM_NOTIFICATION,
+                                tasks.notificationBody(ev.task),
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
 
 
@@ -134,7 +172,8 @@ class ChatController(private val context: Context) {
         if (com.andmx.agent.multi.SubagentModelCatalog.isInherit(modelSpec)) {
             return TracedLlm(LlmClient(fallbackProvider, trackerFor(conversationId)), ModelCallTrace.Source.SUBAGENT) to TurnContext(fallbackProvider, baseModel)
         }
-        val parsed = com.andmx.agent.multi.SubagentModelCatalog.parse(modelSpec)
+        val (baseSpec, level) = com.andmx.agent.multi.SubagentModelCatalog.splitLevel(modelSpec)
+        val parsed = com.andmx.agent.multi.SubagentModelCatalog.parse(baseSpec)
         val providers = providerStore.providers.firstOrNull().orEmpty().filter { it.enabled }
         val providerId = parsed?.first.orEmpty()
         val modelId = parsed?.second.orEmpty()
@@ -144,7 +183,7 @@ class ChatController(private val context: Context) {
             else -> null
         } ?: fallbackProvider
         val model = modelId.ifBlank { baseModel }.ifBlank { provider.models.keys.firstOrNull().orEmpty() }
-        return TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.SUBAGENT) to TurnContext(provider, model)
+        return TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.SUBAGENT) to TurnContext(provider, model, reasoningOverride = level)
     }
 
     private suspend fun loadSubagentExtras(): List<com.andmx.settings.CustomSubAgent> {
@@ -152,7 +191,7 @@ class ChatController(private val context: Context) {
         return com.andmx.agent.multi.SubagentStorage.loadDiscoveredAgents(context, workspace)
     }
 
-    private fun createZCodeAgentTools(orch: SubAgentOrchestrator): List<Tool> {
+    private fun createZCodeAgentTools(orch: SubAgentOrchestrator, conversationId: Long): List<Tool> {
         val resolveAgent: suspend (String?) -> com.andmx.settings.CustomSubAgent? = { type ->
             val users = settingsStore.customSubAgents.firstOrNull().orEmpty()
             val state = settingsStore.subagentState.firstOrNull() ?: com.andmx.settings.SubagentStateFile()
@@ -165,7 +204,7 @@ class ChatController(private val context: Context) {
             val extras = loadSubagentExtras()
             SubagentCatalog.listAll(users, state, extras).filter { it.enabled }.map { it.name }
         }
-        return orch.createTaskTools(resolveAgent, listTypes)
+        return orch.createTaskTools(resolveAgent, listTypes, backgroundTasks = backgroundTasksFor(conversationId))
     }
 
 
@@ -269,6 +308,15 @@ class ChatController(private val context: Context) {
     private val subAgentWatchJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
     private val approvalRulesByConversation = ConcurrentHashMap<Long, ConcurrentHashMap<String, ApprovalScope>>()
     private val liveChatEvents = ConcurrentHashMap<Long, kotlinx.coroutines.flow.MutableSharedFlow<ChatEvent>>()
+    private val cronStore = CronStore(context)
+    private val runningConversations = ConcurrentHashMap.newKeySet<Long>()
+    private val automationTurnIds = ConcurrentHashMap.newKeySet<Long>()
+    private val workflowStore = com.andmx.data.WorkflowStore(context, guestFs)
+    val workflowService = com.andmx.agent.workflow.WorkflowService(
+        scope = controllerScope,
+        store = workflowStore,
+        actorRunner = { input -> runWorkflowActor(input) },
+    )
 
     private fun liveBus(conversationId: Long): kotlinx.coroutines.flow.MutableSharedFlow<ChatEvent> =
         liveChatEvents.getOrPut(conversationId) {
@@ -297,6 +345,8 @@ class ChatController(private val context: Context) {
         val kind: String = "tool",
         val questions: List<AskQuestion> = emptyList(),
         val planText: String = "",
+        val autoDeadlineAt: Long? = null,
+        val countdownVisibleAt: Long? = null,
     )
 
     private class Session(
@@ -312,15 +362,204 @@ class ChatController(private val context: Context) {
         var pending: CompletableDeferred<Boolean>? = null,
         var pendingArgs: String? = null,
         var pendingAnswer: CompletableDeferred<String>? = null,
+        var answerTimer: Job? = null,
+        var answerSnoozed: Boolean = false,
         val turnToolOutputs: MutableList<Pair<String, String>> = mutableListOf(),
         var lastUserText: String = "",
         var lastAssistantText: String = "",
     )
 
     /** 审批作用域（ZCode chat.permission 对齐）。 */
-    enum class ApprovalScope { ONCE, SESSION_ALLOW, SESSION_DENY, PROJECT_ALLOW }
+    enum class ApprovalScope { ONCE, SESSION_ALLOW, SESSION_DENY, PROJECT_ALLOW, PROJECT_DENY, PROJECT_ASK }
 
     val approvalRuleStore = com.andmx.agent.ApprovalRuleStore(context)
+
+    /**
+     * AskUserQuestion 自动决议全局开关（上游 interaction-registry autoResolution 对齐）：
+     * 开启时提问先经 60s 隐藏宽限，之后显示倒计时，300s 未作答自动以空答案继续；
+     * 关闭时所有活动倒计时立即转为 snoozed（无限等待用户）。
+     */
+    private val _questionAutoResolve = MutableStateFlow(true)
+    val questionAutoResolve: StateFlow<Boolean> = _questionAutoResolve.asStateFlow()
+
+    fun setQuestionAutoResolve(enabled: Boolean) {
+        controllerScope.launch {
+            val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+            settingsStore.update(cur.copy(askAutoResolve = enabled))
+        }
+    }
+
+    /** 用户点「稍后」：停掉倒计时，问题无限期挂起直到作答或取消。 */
+    fun snoozeUserQuestion() {
+        val req = _pendingApproval.value ?: return
+        if (req.kind != "ask_user") return
+        val session = sessions[req.conversationId] ?: return
+        snoozeAnswerTimer(session)
+        _pendingApproval.value = req.copy(autoDeadlineAt = null, countdownVisibleAt = null)
+    }
+
+    private fun snoozeAnswerTimer(session: Session) {
+        session.answerSnoozed = true
+        session.answerTimer?.cancel()
+        session.answerTimer = null
+    }
+
+    private fun clearAnswerTimer(session: Session?) {
+        session?.answerTimer?.cancel()
+        session?.answerTimer = null
+        session?.answerSnoozed = false
+    }
+
+    init {
+        controllerScope.launch {
+            settingsStore.settings.collect { s ->
+                val was = _questionAutoResolve.value
+                _questionAutoResolve.value = s.askAutoResolve
+                if (was && !s.askAutoResolve) {
+                    sessions.values.forEach { snoozeAnswerTimer(it) }
+                    val cur = _pendingApproval.value
+                    if (cur?.kind == "ask_user" && cur.autoDeadlineAt != null) {
+                        _pendingApproval.value = cur.copy(autoDeadlineAt = null, countdownVisibleAt = null)
+                    }
+                }
+            }
+        }
+        controllerScope.launch {
+            while (true) {
+                delay(15_000L)
+                runCatching { cronTick() }
+            }
+        }
+    }
+
+    /**
+     * ZCode automation scheduler 对齐：到期任务经 sendMessage 复用主循环跑一轮；
+     * 会话正在跑普通回合时顺延 60s，避免两条流并发写同一 history。
+     */
+    private suspend fun cronTick() {
+        cronStore.due(System.currentTimeMillis()).forEach { auto ->
+            if (runningConversations.contains(auto.conversationId)) {
+                cronStore.defer(auto.id, 60_000L)
+            } else {
+                controllerScope.launch { runAutomation(auto) }
+            }
+        }
+    }
+
+    private suspend fun runAutomation(auto: com.andmx.data.CronAutomationEntity) {
+        automationTurnIds += auto.conversationId
+        try {
+            sendMessage(auto.conversationId, auto.prompt).collect { ev ->
+                liveBus(auto.conversationId).tryEmit(ev)
+            }
+        } finally {
+            automationTurnIds -= auto.conversationId
+            runCatching { cronStore.markRan(auto.id) }
+        }
+    }
+
+    /**
+     * dwf actor 回合（ZCode workflow_child 对齐）：隔离 AgentEngine 跑子会话，
+     * 工具面 = 会话全量 - workflow 变更工具 + submit_result/escalate。
+     * escalate 经 ask_user 审批路径回到 run 所属会话的用户。
+     */
+    private suspend fun runWorkflowActor(
+        input: com.andmx.agent.workflow.WorkflowAgentInput,
+    ): com.andmx.agent.workflow.WorkflowAgentResult {
+        val convId = workflowStore.runConversationId(input.runId)
+        val settings = settingsStore.settings.firstOrNull()
+            ?: return com.andmx.agent.workflow.WorkflowAgentResult("settings unavailable")
+        val providers = providerStore.providers.firstOrNull().orEmpty()
+        val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
+            ?: providerStore.primary.firstOrNull()
+            ?: return com.andmx.agent.workflow.WorkflowAgentResult("no provider")
+        val client = TracedLlm(LlmClient(provider, trackerFor(convId)), ModelCallTrace.Source.WORKFLOW)
+        input.onChildSessionStarted?.invoke("wf_actor_${input.activityId}", settings.model)
+        val submitSlot = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val blocked = setOf(
+            "CreateWorkflow", "AmendWorkflow", "SaveWorkflow",
+            "ResumeWorkflowRun", "CancelWorkflowRun",
+        )
+        val tools = buildTools(
+            UpdatePlanTool(), GoalToolState(), TodoState(), PlanModeState(), convId,
+        ).filter { it.name !in blocked } + listOf(
+            com.andmx.agent.workflow.SubmitResultTool(submitSlot),
+            com.andmx.agent.workflow.EscalateTool { question, ctx ->
+                askWorkflowEscalation(convId, input, question, ctx)
+            },
+        )
+        val systemPrompt = buildString {
+            append("You are a workflow actor running inside a ZCode-style durable workflow.\n")
+            append("Run: ${input.runId} | phase: ${input.phase}")
+            input.node?.let { append(" | node: ${it.id}") }
+            input.collection?.let { append(" | collection: ${it.collectionId}") }
+            append("\nDo not create, amend, or resume workflows — you are inside one.")
+            append("\nReturn your result as the final assistant message, or call submit_result for structured output.")
+        }
+        val engine = AgentEngine(
+            tools = tools,
+            client = client,
+            systemPrompt = systemPrompt,
+            maxSteps = 60,
+        )
+        var finalText = ""
+        var failure: String? = null
+        try {
+            engine.runTurn(settings, TurnContext(provider, settings.model), input.prompt)
+                .collect { ev ->
+                    when (ev) {
+                        is AgentEvent.Assistant -> finalText = ev.text
+                        is AgentEvent.Failed -> failure = ev.message
+                        else -> {}
+                    }
+                }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failure = e.message
+        }
+        failure?.let { throw IllegalStateException(it) }
+        return com.andmx.agent.workflow.WorkflowAgentResult(
+            response = submitSlot.get() ?: finalText,
+            sessionId = "wf_actor_${input.activityId}",
+            model = settings.model,
+        )
+    }
+
+    private suspend fun askWorkflowEscalation(
+        conversationId: Long,
+        input: com.andmx.agent.workflow.WorkflowAgentInput,
+        question: String,
+        context: String,
+    ): String {
+        val session = sessions[conversationId]
+            ?: return com.andmx.agent.workflow.EscalateTool.DEFERRED
+        val deferred = kotlinx.coroutines.CompletableDeferred<String>()
+        session.pendingAnswer = deferred
+        _pendingApproval.value = ApprovalRequest(
+            conversationId = conversationId,
+            toolName = "escalate",
+            risk = ToolRisk.READ,
+            summary = "workflow ${input.runId}: $question",
+            modeLabel = session.approvalMode.label,
+            kind = "ask_user",
+            questions = listOf(
+                AskQuestion(
+                    header = "workflow",
+                    question = question,
+                    options = emptyList(),
+                ),
+            ),
+        )
+        return try {
+            val raw = deferred.await()
+            val (answers, _) = AskUserQuestionParser.parseAnswersJson(raw)
+            answers.values.firstOrNull()?.jsonPrimitive?.contentOrNull
+                ?: com.andmx.agent.workflow.EscalateTool.DEFERRED
+        } finally {
+            session.pendingAnswer = null
+        }
+    }
 
     fun resolveApproval(allow: Boolean) {
         resolveApprovalScoped(allow, ApprovalScope.ONCE)
@@ -335,19 +574,21 @@ class ChatController(private val context: Context) {
         val req = _pendingApproval.value
         _pendingApproval.value = null
         val session = req?.let { sessions[it.conversationId] }
-        val allowed = allow && scope != ApprovalScope.SESSION_DENY
-        if (session != null && req != null && scope != ApprovalScope.ONCE) {
+        val allowed = allow && scope != ApprovalScope.SESSION_DENY && scope != ApprovalScope.PROJECT_DENY
+        if (req != null && session != null && scope != ApprovalScope.ONCE) {
             val rule = approvalRuleKey(req.toolName, session.pendingArgs.orEmpty())
             if (rule != null) {
                 approvalRulesByConversation
                     .computeIfAbsent(req.conversationId) { ConcurrentHashMap() }[rule] = scope
-                if (scope == ApprovalScope.PROJECT_ALLOW) {
+                val behavior = when (scope) {
+                    ApprovalScope.PROJECT_ALLOW -> ApprovalRuleStore.RuleBehavior.ALLOW
+                    ApprovalScope.PROJECT_DENY -> ApprovalRuleStore.RuleBehavior.DENY
+                    ApprovalScope.PROJECT_ASK -> ApprovalRuleStore.RuleBehavior.ASK
+                    else -> null
+                }
+                if (behavior != null) {
                     val key = rule.split(':', limit = 2)
-                    approvalRuleStore.add(
-                        projectKey(),
-                        key.first(),
-                        rule,
-                    )
+                    approvalRuleStore.add(projectKey(), key.first(), rule, behavior)
                 }
             }
         }
@@ -359,6 +600,7 @@ class ChatController(private val context: Context) {
                 if (allowed) """{"answers":{"__default__":"approved"}}""" else """{"answers":{"__default__":"rejected"}}"""
             )
             session.pendingAnswer = null
+            clearAnswerTimer(session)
         }
     }
 
@@ -398,6 +640,7 @@ class ChatController(private val context: Context) {
         val session = req?.let { sessions[it.conversationId] }
         session?.pendingAnswer?.complete(answersJson)
         session?.pendingAnswer = null
+        clearAnswerTimer(session)
         session?.pending?.complete(true)
         session?.pending = null
     }
@@ -420,12 +663,14 @@ class ChatController(private val context: Context) {
     fun stopTurn(conversationId: Long) {
         resolveApproval(false)
         orchestrators[conversationId]?.cancelAll("用户停止")
+        backgroundTasksByConversation[conversationId]?.cancelAll()
         refreshSubAgents(conversationId)
         val session = sessions[conversationId]
         session?.pending?.complete(false)
         session?.pending = null
         session?.pendingAnswer?.complete("""{"answers":{"__default__":"cancelled"}}""")
         session?.pendingAnswer = null
+        clearAnswerTimer(session)
         controllerScope.launch {
             if (hookSystem.hasHooksFor(HookSystem.HookEvent.STOP)) {
                 runCatching {
@@ -529,6 +774,14 @@ class ChatController(private val context: Context) {
     }
 
     suspend fun sendMessage(
+        conversationId: Long,
+        text: String,
+        images: List<String> = emptyList(),
+    ): Flow<ChatEvent> = sendMessageFlow(conversationId, text, images)
+        .onStart { runningConversations += conversationId }
+        .onCompletion { runningConversations -= conversationId }
+
+    private fun sendMessageFlow(
         conversationId: Long,
         text: String,
         images: List<String> = emptyList(),
@@ -877,8 +1130,9 @@ class ChatController(private val context: Context) {
      * are restored. Anything changed afterwards (by bash, the user, or another
      * tool) is reported as unsafe and left untouched.
      */
-    suspend fun revertFileChanges(): RewindResult {
+    suspend fun revertFileChanges(sinceMs: Long = 0L): RewindResult {
         val pending = com.andmx.workspace.ChangeTracker.changes.value
+            .filter { it.timestamp >= sinceMs }
         if (pending.isEmpty()) return RewindResult(0, 0, emptyList())
         var reverted = 0
         val unsafe = mutableListOf<String>()
@@ -941,19 +1195,49 @@ class ChatController(private val context: Context) {
         }.trim()
     }
 
-        private suspend fun extractMemory(session: Session, conversationId: Long) {
+        private fun extractMemory(session: Session, conversationId: Long) {
         val tools = session.turnToolOutputs.toList()
         if (tools.isEmpty()) return
         val user = session.lastUserText
         val assistant = session.lastAssistantText
         if (user.isBlank() || assistant.isBlank()) return
-        runCatching {
-            memorySystem.extractFromTurn(
-                userMessage = user,
-                assistantMessage = assistant,
-                toolOutputs = tools,
-                sessionId = conversationId.toString(),
-            )
+        controllerScope.launch {
+            runCatching {
+                memorySystem.extractFromTurn(
+                    userMessage = user,
+                    assistantMessage = assistant,
+                    toolOutputs = tools,
+                    sessionId = conversationId.toString(),
+                )
+            }
+            if (com.andmx.agent.memory.MemoryAgentRunner.shouldSkip(
+                    user, tools, MemorySystem.MEMORY_DIR,
+                )
+            ) {
+                return@launch
+            }
+            val settings = settingsStore.settings.firstOrNull() ?: return@launch
+            val provider = providerStore.providers.firstOrNull().orEmpty()
+                .firstOrNull { it.id == settings.activeProviderId && it.enabled }
+                ?: providerStore.primary.firstOrNull()
+                ?: return@launch
+            val model = settings.model.ifBlank {
+                provider.models.keys.firstOrNull().orEmpty()
+            }
+            val transcript = buildList {
+                add("[user] ${user.take(2_000)}")
+                tools.forEach { (n, o) -> add("[tool:$n] ${o.take(600)}") }
+                add("[assistant] ${assistant.take(3_000)}")
+            }
+            runCatching {
+                memoryAgent.extract(
+                    client = LlmClient(provider, trackerFor(conversationId)),
+                    provider = provider,
+                    model = model,
+                    settings = settings,
+                    transcript = transcript,
+                )
+            }
         }
     }
 
@@ -1012,8 +1296,10 @@ class ChatController(private val context: Context) {
             existing.model == settings.model
         ) {
             existing.approvalMode = execMode
-            existing.engine.setCustomInstructions(settings.customInstructions)
-            existing.engine.setPersona(settings.persona)
+            val (systemBlocks, metaUser) = buildZCodePromptParts(settings, provider)
+            existing.engine.setSystemBlocks(systemBlocks)
+            existing.engine.setMetaUserContext(metaUser)
+            existing.engine.setPlanModeProvider { existing.planModeState.active }
             if (sharedExtraTools.isNotEmpty()) {
                 val known = existing.engine.listTools().map { it.first }.toSet()
                 val missing = sharedExtraTools.filter { it.name !in known }
@@ -1037,7 +1323,7 @@ class ChatController(private val context: Context) {
                 )
                 orchestrators[conversationId] = orch
                 val known = existing.engine.listTools().map { it.first }.toSet()
-                val multi = (listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch)).filter { it.name !in known }
+                val multi = (listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId)).filter { it.name !in known }
                 if (multi.isNotEmpty()) existing.engine.addTools(multi)
                 watchSubAgents(conversationId, orch)
             } else {
@@ -1072,15 +1358,14 @@ class ChatController(private val context: Context) {
         }
         val tools = buildTools(planTool, goalState, todoState, planModeState, conversationId)
         val client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.MAIN)
-        val (system, metaUser) = buildZCodePromptParts(
+        val (systemBlocks, metaUser) = buildZCodePromptParts(
             settings = settings,
             provider = provider,
-            mode = execMode,
         )
         val engine = AgentEngine(
             tools = tools,
             client = client,
-            systemPrompt = system,
+            systemPromptBlocks = systemBlocks,
             hooks = hookSystem,
             goalState = goalState,
             approve = { tool, args ->
@@ -1110,9 +1395,8 @@ class ChatController(private val context: Context) {
             },
         )
         orchestrators[conversationId] = orch
-        engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch))
-        engine.setCustomInstructions(settings.customInstructions)
-        engine.setPersona(settings.persona)
+        engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId))
+        engine.setPlanModeProvider { planModeState.active }
 
         val history = loadHistoryForEngine(conversationId)
         engine.seed(history)
@@ -1207,9 +1491,12 @@ class ChatController(private val context: Context) {
                 val session = sessions[conversationId] ?: return@ask "会话不可用"
                 val deferred = kotlinx.coroutines.CompletableDeferred<String>()
                 session.pendingAnswer = deferred
+                session.answerSnoozed = false
                 val summary = questions.joinToString(" · ") { q ->
                     q.header.ifBlank { q.question.take(24) }
                 }.ifBlank { "需要你的决定" }
+                val startedAt = System.currentTimeMillis()
+                val autoResolve = _questionAutoResolve.value
                 _pendingApproval.value = ApprovalRequest(
                     conversationId = conversationId,
                     toolName = "AskUserQuestion",
@@ -1218,8 +1505,27 @@ class ChatController(private val context: Context) {
                     modeLabel = session.approvalMode.label,
                     kind = "ask_user",
                     questions = questions,
+                    autoDeadlineAt = if (autoResolve) startedAt + ASK_AUTO_RESOLVE_MS else null,
+                    countdownVisibleAt = if (autoResolve) startedAt + ASK_HIDDEN_GRACE_MS else null,
                 )
-                deferred.await()
+                if (autoResolve) {
+                    session.answerTimer = controllerScope.launch {
+                        delay(ASK_AUTO_RESOLVE_MS)
+                        if (!session.answerSnoozed && deferred.isActive) {
+                            deferred.complete("""{"answers":{}}""")
+                            val cur = _pendingApproval.value
+                            if (cur?.kind == "ask_user" && cur.conversationId == conversationId) {
+                                _pendingApproval.value = null
+                            }
+                        }
+                    }
+                }
+                try {
+                    deferred.await()
+                } finally {
+                    clearAnswerTimer(session)
+                    session.pendingAnswer = null
+                }
             },
             readSession = { sessionId, query, strategy, maxTokens ->
                 readSessionContext(sessionId, query, strategy, maxTokens)
@@ -1260,7 +1566,22 @@ class ChatController(private val context: Context) {
                 allowedPromptsByConversation.getOrPut(conversationId) { AllowedPrompts.Grants() }
                     .addAll(entries)
             },
-        )
+            backgroundTasks = backgroundTasksFor(conversationId),
+            listModelsProviders = { providerStore.providers.firstOrNull().orEmpty() },
+            listModelsCurrent = {
+                val s = settingsStore.settings.firstOrNull()
+                (s?.activeProviderId.orEmpty()) to (s?.model.orEmpty())
+            },
+        ) + CronTools(
+            store = cronStore,
+            conversationId = { conversationId },
+            currentModel = { settingsStore.settings.firstOrNull()?.model.orEmpty() },
+            isAutomationTurn = { automationTurnIds.contains(conversationId) },
+        ).all() + com.andmx.agent.zcode.WorkflowTools(
+            service = workflowService,
+            conversationId = { conversationId },
+            cwd = { "/" },
+        ).all()
     }
 
     private suspend fun readSessionContext(
@@ -1353,8 +1674,30 @@ class ChatController(private val context: Context) {
     ): ApprovalOutcome {
         val sessionLive = sessions[conversationId]
         val planActive = sessionLive?.planModeState?.active == true
+        val canonical = ToolArgs.canonical(tool.name)
+        val subject = ruleSubject(tool.name, args)
+        val pk = projectKey()
+        // ZCode checkPermission 位次：项目 deny/ask 规则先于一切模式放行；
+        // deny 桶绝对化（FULL 也不放行），与上游已知怪癖（yolo 先于 deny）刻意分歧。
+        approvalRuleStore.findMatch(pk, canonical, subject, ApprovalRuleStore.RuleBehavior.DENY)
+            ?.let { return ApprovalOutcome.Rejected("此操作被项目权限规则拒绝: ${it.display}") }
+        approvalRuleStore.findMatch(pk, canonical, subject, ApprovalRuleStore.RuleBehavior.ASK)
+            ?.let { return prompt(conversationId, tool, args, mode, "项目权限规则要求确认: ${it.display}") }
         if (planActive && !isPlanModeAllowed(tool.name)) {
             return ApprovalOutcome.Rejected("计划模式只允许只读工具")
+        }
+        // 会话级审批规则（ZCode sessionRules 对齐）：本会话允许/始终拒绝命中即不再弹窗。
+        when (sessionRuleFor(conversationId, tool.name, args.toString())) {
+            ApprovalScope.SESSION_ALLOW -> return ApprovalOutcome.AllowedOnce
+            ApprovalScope.SESSION_DENY, ApprovalScope.PROJECT_DENY ->
+                return ApprovalOutcome.Rejected("此操作已被你设置为始终拒绝")
+            ApprovalScope.PROJECT_ALLOW -> return ApprovalOutcome.AllowedOnce
+            else -> Unit
+        }
+        // 工具自报 alwaysAsk（ZCode 对齐）：项目 allow 与 FULL 都不能绕过，
+        // 会话级「允许本会话」在上一步已放行。
+        if (tool.alwaysAsk) {
+            return prompt(conversationId, tool, args, mode, "该操作需要逐项确认")
         }
         val command = args["command"]?.jsonPrimitive?.content
         if (tool.name == "Bash" && command != null) {
@@ -1363,21 +1706,9 @@ class ChatController(private val context: Context) {
                 return ApprovalOutcome.AllowedOnce
             }
         }
-        // 会话级审批规则（ZCode 对齐）：本会话允许/始终拒绝命中即不再弹窗。
-        when (sessionRuleFor(conversationId, tool.name, args.toString())) {
-            ApprovalScope.SESSION_ALLOW -> return ApprovalOutcome.AllowedOnce
-            ApprovalScope.SESSION_DENY -> return ApprovalOutcome.Rejected("此操作已被你设置为始终拒绝")
-            ApprovalScope.PROJECT_ALLOW -> return ApprovalOutcome.AllowedOnce
-            else -> Unit
-        }
-        // 项目级持久规则（ZCode allowForProject）：跨会话生效，仅 ALLOW。
-        val canonical = ToolArgs.canonical(tool.name)
-        val persistedRule = approvalRuleKey(tool.name, args.toString())
-        if (persistedRule != null && canonical != null) {
-            val split = persistedRule.split(':', limit = 2)
-            if (approvalRuleStore.allows(projectKey(), split.first(), persistedRule)) {
-                return ApprovalOutcome.AllowedOnce
-            }
+        // 项目级持久 allow 规则（ZCode rule.project.allow）：ruleContent 匹配。
+        if (approvalRuleStore.matches(pk, canonical, subject, ApprovalRuleStore.RuleBehavior.ALLOW)) {
+            return ApprovalOutcome.AllowedOnce
         }
         val decision = when (mode) {
             ExecMode.FULL -> Decision.AUTO
@@ -1394,25 +1725,49 @@ class ChatController(private val context: Context) {
         return when (decision) {
             Decision.AUTO -> ApprovalOutcome.AllowedOnce
             Decision.DENY -> ApprovalOutcome.Rejected("当前权限模式不允许该操作")
-            Decision.PROMPT -> {
-                // No live session means no UI can answer the question. That is
-                // not a refusal, and the model can only tell the difference if
-                // the two are reported differently.
-                val session = sessions[conversationId]
-                    ?: return ApprovalOutcome.Unavailable("会话不可用")
-                val deferred = CompletableDeferred<Boolean>()
-                session.pending = deferred
-                session.pendingArgs = args.toString()
-                val summary = buildApprovalSummary(tool, args)
-                _pendingApproval.value = ApprovalRequest(
-                    conversationId = conversationId,
-                    toolName = tool.name,
-                    risk = tool.risk,
-                    summary = summary,
-                    modeLabel = mode.label,
-                )
-                if (deferred.await()) ApprovalOutcome.AllowedOnce
-                else ApprovalOutcome.Rejected()
+            Decision.PROMPT -> prompt(conversationId, tool, args, mode)
+        }
+    }
+
+    private suspend fun prompt(
+        conversationId: Long,
+        tool: Tool,
+        args: JsonObject,
+        mode: ExecMode,
+        reason: String? = null,
+    ): ApprovalOutcome {
+        // No live session means no UI can answer the question. That is
+        // not a refusal, and the model can only tell the difference if
+        // the two are reported differently.
+        val session = sessions[conversationId]
+            ?: return ApprovalOutcome.Unavailable("会话不可用")
+        val deferred = CompletableDeferred<Boolean>()
+        session.pending = deferred
+        session.pendingArgs = args.toString()
+        val summary = buildApprovalSummary(tool, args) + (reason?.let { "（$it）" } ?: "")
+        _pendingApproval.value = ApprovalRequest(
+            conversationId = conversationId,
+            toolName = tool.name,
+            risk = tool.risk,
+            summary = summary,
+            modeLabel = mode.label,
+        )
+        return if (deferred.await()) ApprovalOutcome.AllowedOnce else ApprovalOutcome.Rejected()
+    }
+
+    /** 权限规则的匹配主体：命令原文 / 文件路径 / url，与 ruleContent 对齐比较。 */
+    private fun ruleSubject(toolName: String, args: JsonObject): String {
+        val canonical = ToolArgs.canonical(toolName)
+        return when (canonical) {
+            "shell", "git" -> ToolArgs.shellCommand(toolName, args.toString()).ifBlank {
+                args["command"]?.jsonPrimitive?.content.orEmpty()
+            }
+            else -> ToolArgs.filePath(toolName, args.toString()).ifBlank {
+                args["url"]?.jsonPrimitive?.content
+                    ?: args["path"]?.jsonPrimitive?.content
+                    ?: args["file_path"]?.jsonPrimitive?.content
+                    ?: args["pattern"]?.jsonPrimitive?.content
+                    ?: canonical
             }
         }
     }
@@ -1430,8 +1785,7 @@ class ChatController(private val context: Context) {
     private suspend fun buildZCodePromptParts(
         settings: ProviderSettings,
         provider: ProviderDefinition,
-        mode: ExecMode,
-    ): Pair<String, String> {
+    ): Pair<List<String>, String> {
         val gitPath = if (projectManager.isRemote) {
             projectManager.currentRemoteSpec()?.remotePath
                 ?: projectManager.hostPath.value
@@ -1501,10 +1855,6 @@ class ChatController(private val context: Context) {
                 appendLine("# 扩展工具")
                 appendLine("已加载 ${sharedExtraTools.size} 个 MCP/插件工具。名称带服务器前缀时表示来自 MCP。")
             }
-            if (memory.isNotBlank()) {
-                appendLine()
-                append(memory.trimEnd())
-            }
         }
         val env = ZCodePrompts.SessionEnv(
             cwd = access.guestCwd(),
@@ -1518,12 +1868,13 @@ class ChatController(private val context: Context) {
             gitUser = git?.userName.orEmpty(),
             gitStatus = gitStatus,
         )
-        val system = ZCodePrompts.assemble(
-            mode = mode,
+        val system = ZCodePrompts.assembleBlocks(
             env = env,
             customInstructions = settings.customInstructions,
             persona = settings.persona,
             extra = extra,
+            hasSkills = skillEntries.isNotEmpty(),
+            memory = memory,
         )
         val metaUser = ZCodePrompts.metaUserContext(
             instructionSources = instructionSources,
@@ -1670,6 +2021,19 @@ class ChatController(private val context: Context) {
                         bus.tryEmit(ChatEvent.SubAgentCompleted(ev.agentId, ev.result))
                     is SubAgentOrchestrator.SubAgentEvent.Failed ->
                         bus.tryEmit(ChatEvent.SubAgentFailed(ev.agentId, ev.error))
+                    is SubAgentOrchestrator.SubAgentEvent.Terminated -> {
+                        // ZCode queued_system_notification：后台子代理终态
+                        // 以 <system-reminder> 形式推回主代理的下一个模型步。
+                        if (ev.background) {
+                            val body = orch.notificationFor(ev.agentId)
+                            if (body != null) {
+                                sessions[conversationId]?.engine?.injectSystemReminder(
+                                    com.andmx.agent.SystemReminder.Source.QUEUED_SYSTEM_NOTIFICATION,
+                                    body,
+                                )
+                            }
+                        }
+                    }
                     else -> {}
                 }
             }

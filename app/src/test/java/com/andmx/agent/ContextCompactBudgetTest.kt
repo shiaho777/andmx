@@ -10,15 +10,17 @@ class ContextCompactBudgetTest {
     private val compactor = ContextCompactor(client = FakeNoopLlm)
 
     @Test
-    fun effectiveWindowSubtractsOutputReserve() {
-        assertEquals(200_000 - 32_000, compactor.effectiveContextWindow(200_000))
+    fun effectiveWindowSubtractsCappedOutputReserve() {
+        assertEquals(200_000 - 21_000, compactor.effectiveContextWindow(200_000))
+        assertEquals(200_000 - 10_000, compactor.effectiveContextWindow(200_000, maxOutputTokens = 10_000))
+        assertEquals(200_000 - 21_000, compactor.effectiveContextWindow(200_000, maxOutputTokens = 64_000))
     }
 
     @Test
-    fun thresholdIsMinOfNinetyFivePercentAndBufferedWindow() {
+    fun thresholdIsEffectiveWindowMinusBuffer() {
         val effective = compactor.effectiveContextWindow(200_000)
-        val threshold = compactor.autoCompactThresholdTokens(effective, outputReserve = 32_000)
-        assertEquals(minOf((effective * 95 / 100), effective - 32_000 - 13_000), threshold)
+        val threshold = compactor.autoCompactThresholdTokens(effective)
+        assertEquals(200_000 - 21_000 - 13_000, threshold)
         assertTrue(threshold > 0)
     }
 
@@ -35,7 +37,7 @@ class ContextCompactBudgetTest {
     @Test
     fun needsCompactionFiresOnlyPastThreshold() {
         val effective = compactor.effectiveContextWindow(200_000)
-        val threshold = compactor.autoCompactThresholdTokens(effective, outputReserve = 32_000)
+        val threshold = compactor.autoCompactThresholdTokens(effective)
         val below = com.andmx.llm.ApiMessage(role = "user", content = "a".repeat(threshold * 3 - 30))
         val above = com.andmx.llm.ApiMessage(role = "user", content = "a".repeat(threshold * 3 + 30))
         assertFalse(compactor.needsCompaction(listOf(below), contextWindow = 200_000))
@@ -43,12 +45,12 @@ class ContextCompactBudgetTest {
     }
 
     @Test
-    fun summaryExtractionPrefersSummaryBlock() {
+    fun summaryExtractionStripsAnalysisAndPrefixesSummary() {
         val raw = "<analysis>thinking</analysis>\n<summary>\nthe real summary\n</summary>"
         val method = ContextCompactor::class.java.declaredMethods.firstOrNull { it.name == "extractSummary" }
             ?: throw AssertionError("extractSummary missing")
         method.isAccessible = true
-        assertEquals("the real summary", method.invoke(compactor, raw))
+        assertEquals("Summary:\nthe real summary", method.invoke(compactor, raw))
     }
 }
 

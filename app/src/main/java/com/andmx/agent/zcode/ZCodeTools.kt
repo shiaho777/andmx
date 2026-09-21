@@ -58,6 +58,7 @@ private class GhRateLimitHintTool(
     override val description get() = inner.description
     override val parameters get() = inner.parameters
     override val risk get() = inner.risk
+    override val concurrentSafe get() = inner.concurrentSafe
 
     override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
 
@@ -84,6 +85,7 @@ private class AliasedTool(
     override val parameters: JsonObject,
     override val risk: ToolRisk = inner.risk,
     override val timeoutMs: Long? = inner.timeoutMs,
+    override val concurrentSafe: Boolean = inner.concurrentSafe,
     private val mapArgs: (JsonObject) -> JsonObject = { it },
 ) : Tool, ExecutionAwareTool {
     override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
@@ -132,6 +134,7 @@ class TodoWriteTool(
         "Update the structured todo list for the current session. " +
             "At most one item may be in_progress at a time. Pass the complete updated list."
     override val risk = ToolRisk.READ
+    override val concurrentSafe = false
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -230,36 +233,95 @@ class EnterPlanModeTool(
     private val requestApproval: (suspend (String) -> Boolean)? = null,
 ) : Tool {
     override val name = "EnterPlanMode"
-    override val description =
-        "Use this tool proactively when you're about to start a non-trivial implementation task. " +
-            "Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. " +
-            "This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.\n\n" +
-            "## When to Use This Tool\n\n" +
-            "**Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:\n\n" +
-            "1. **New Feature Implementation**: Adding meaningful new functionality\n" +
-            "2. **Multiple Valid Approaches**: The task can be solved in several different ways\n" +
-            "3. **Code Modifications**: Changes that affect existing behavior or structure\n" +
-            "4. **Architectural Decisions**: The task requires choosing between patterns or technologies\n" +
-            "5. **Multi-File Changes**: The task will likely touch more than 2-3 files\n" +
-            "6. **Unclear Requirements**: You need to explore before understanding the full scope\n\n" +
-            "## When NOT to Use This Tool\n\n" +
-            "Only skip EnterPlanMode for simple tasks:\n" +
-            "- Single-line or few-line fixes (typos, obvious bugs, small tweaks)\n" +
-            "- Adding a single function with clear requirements\n" +
-            "- Tasks where the user has given very specific, detailed instructions\n" +
-            "- Pure research/exploration tasks (use the Agent tool instead)\n\n" +
-            "## What Happens in Plan Mode\n\n" +
-            "In plan mode, you'll:\n" +
-            "1. Thoroughly explore the codebase using Glob, Grep, and Read\n" +
-            "2. Understand existing patterns and architecture\n" +
-            "3. Design an implementation approach\n" +
-            "4. Present your plan to the user for approval\n" +
-            "5. Use AskUserQuestion if you need to clarify approaches\n" +
-            "6. Exit plan mode with ExitPlanMode when ready to implement\n\n" +
-            "## Important Notes\n\n" +
-            "- If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work\n" +
-            "- Users appreciate being consulted before significant changes are made to their codebase"
+    override val description = """
+Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.
+
+## When to Use This Tool
+
+**Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:
+
+1. **New Feature Implementation**: Adding meaningful new functionality
+   - Example: "Add a logout button" - where should it go? What should happen on click?
+   - Example: "Add form validation" - what rules? What error messages?
+
+2. **Multiple Valid Approaches**: The task can be solved in several different ways
+   - Example: "Add caching to the API" - could use Redis, in-memory, file-based, etc.
+   - Example: "Improve performance" - many optimization strategies possible
+
+3. **Code Modifications**: Changes that affect existing behavior or structure
+   - Example: "Update the login flow" - what exactly should change?
+   - Example: "Refactor this component" - what's the target architecture?
+
+4. **Architectural Decisions**: The task requires choosing between patterns or technologies
+   - Example: "Add real-time updates" - WebSockets vs SSE vs polling
+   - Example: "Implement state management" - Redux vs Context vs custom solution
+
+5. **Multi-File Changes**: The task will likely touch more than 2-3 files
+   - Example: "Refactor the authentication system"
+   - Example: "Add a new API endpoint with tests"
+
+6. **Unclear Requirements**: You need to explore before understanding the full scope
+   - Example: "Make the app faster" - need to profile and identify bottlenecks
+   - Example: "Fix the bug in checkout" - need to investigate root cause
+
+7. **User Preferences Matter**: The implementation could reasonably go multiple ways
+   - If you would use AskUserQuestion to clarify the approach, use EnterPlanMode instead
+   - Plan mode lets you explore first, then present options with context
+
+## When NOT to Use This Tool
+
+Only skip EnterPlanMode for simple tasks:
+- Single-line or few-line fixes (typos, obvious bugs, small tweaks)
+- Adding a single function with clear requirements
+- Tasks where the user has given very specific, detailed instructions
+- Pure research/exploration tasks (use the Agent tool instead)
+
+## What Happens in Plan Mode
+
+In plan mode, you'll:
+1. Thoroughly explore the codebase using Glob, Grep, and Read
+2. Understand existing patterns and architecture
+3. Design an implementation approach
+4. Present your plan to the user for approval
+5. Use AskUserQuestion if you need to clarify approaches
+6. Exit plan mode with ExitPlanMode when ready to implement
+
+## Examples
+
+### GOOD - Use EnterPlanMode:
+User: "Add user authentication to the app"
+- Requires architectural decisions (session vs JWT, where to store tokens, middleware structure)
+
+User: "Optimize the database queries"
+- Multiple approaches possible, need to profile first, significant impact
+
+User: "Implement dark mode"
+- Architectural decision on theme system, affects many components
+
+User: "Add a delete button to the user profile"
+- Seems simple but involves: where to place it, confirmation dialog, API call, error handling, state updates
+
+User: "Update the error handling in the API"
+- Affects multiple files, user should approve the approach
+
+### BAD - Don't use EnterPlanMode:
+User: "Fix the typo in the README"
+- Straightforward, no planning needed
+
+User: "Add a console.log to debug this function"
+- Simple, obvious implementation
+
+User: "What files handle routing?"
+- Research task, not implementation planning
+
+## Important Notes
+
+- This tool REQUIRES user approval - they must consent to entering plan mode
+- If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work
+- Users appreciate being consulted before significant changes are made to their codebase
+""".trimIndent()
     override val risk = ToolRisk.READ
+    override val concurrentSafe = false
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") { }
@@ -272,7 +334,17 @@ class EnterPlanModeTool(
         if (!ok) return ToolResult("User declined plan mode.", isError = true)
         planMode.enter()
         onMode(ExecMode.PLAN)
-        return ToolResult("Entered plan mode. Explore with Read/Grep/Glob, design the approach, use AskUserQuestion if needed, then ExitPlanMode with the full plan.")
+        return ToolResult(
+            "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\n" +
+                "In plan mode, you should:\n" +
+                "1. Thoroughly explore the codebase to understand existing patterns\n" +
+                "2. Identify similar features and architectural approaches\n" +
+                "3. Consider multiple approaches and their trade-offs\n" +
+                "4. Use AskUserQuestion if you need to clarify the approach\n" +
+                "5. Design a concrete implementation strategy\n" +
+                "6. When ready, use ExitPlanMode to present your plan for approval\n\n" +
+                "Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.",
+        )
     }
 }
 
@@ -284,17 +356,34 @@ class ExitPlanModeTool(
     private val onAllowedPrompts: (List<com.andmx.agent.AllowedPrompts.Entry>) -> Unit = {},
 ) : Tool {
     override val name = "ExitPlanMode"
-    override val description =
-        "Use this tool when you are in plan mode and have finished writing your plan and are ready for user approval.\n\n" +
-            "## How This Tool Works\n" +
-            "- You should have already explored the codebase and finalized the plan you want the user to review\n" +
-            "- This tool presents the plan to the user; the user reviews it and approves or rejects implementation\n" +
-            "- Do NOT use AskUserQuestion to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval MUST go through this tool\n\n" +
-            "## Examples\n\n" +
-            "1. Initial task: \"Search for and understand the implementation of vim mode in the codebase\" - Do not use this tool because you are not planning the implementation steps of a task.\n" +
-            "2. Initial task: \"Help me implement yank mode for vim\" - Use this tool after you have finished planning the implementation steps of the task.\n" +
-            "3. Initial task: \"Add a new feature to handle user authentication\" - If unsure about auth method (OAuth, JWT, etc.), use AskUserQuestion first, then use this tool after clarifying the approach."
+    override val description = """
+Use this tool when you are in plan mode and have finished writing your plan and are ready for user approval.
+
+## How This Tool Works
+- You should have already explored the codebase and finalized the plan you want the user to review
+- This tool DOES take the plan content as the required plan parameter in ZCode
+- Pass the complete plan in the plan field; the user will review that content before approving implementation
+- This tool simply signals that you're done planning and ready for the user to review and approve
+- The user will see the contents of the plan parameter when they review it
+
+## When to Use This Tool
+IMPORTANT: Only use this tool when the task requires planning the implementation steps of a task that requires writing code. For research tasks where you're gathering information, searching files, reading files or in general trying to understand the codebase - do NOT use this tool.
+
+## Before Using This Tool
+Ensure your plan is complete and unambiguous:
+- If you have unresolved questions about requirements or approach, use AskUserQuestion before finalizing your plan
+- Once your plan is finalized, use THIS tool to request approval
+
+**Important:** Do NOT use AskUserQuestion to ask "Is this plan okay?" or "Should I proceed?" - that's exactly what THIS tool does. ExitPlanMode inherently requests user approval of your plan.
+
+## Examples
+
+1. Initial task: "Search for and understand the implementation of vim mode in the codebase" - Do not use the exit plan mode tool because you are not planning the implementation steps of a task.
+2. Initial task: "Help me implement yank mode for vim" - Use the exit plan mode tool after you have finished planning the implementation steps of the task.
+3. Initial task: "Add a new feature to handle user authentication" - If unsure about auth method (OAuth, JWT, etc.), use AskUserQuestion first, then use exit plan mode tool after clarifying the approach.
+""".trimIndent()
     override val risk = ToolRisk.READ
+    override val concurrentSafe = false
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -328,6 +417,13 @@ class ExitPlanModeTool(
     }
 
     override suspend fun execute(args: JsonObject): ToolResult {
+        if (!planMode.active) {
+            return ToolResult(
+                "You are not in plan mode. This tool is only for exiting plan mode after writing a plan. " +
+                    "If your plan was already approved, continue with implementation.",
+                isError = true,
+            )
+        }
         val plan = (args.str("plan") ?: args.str("summary")).orEmpty().trim()
         if (plan.isBlank()) {
             return ToolResult("plan is required (1..20000 chars)", isError = true)
@@ -345,7 +441,10 @@ class ExitPlanModeTool(
         planMode.exit()
         onMode(ExecMode.AUTO_EDIT)
         onAllowedPrompts(com.andmx.agent.AllowedPrompts.parse(args))
-        return ToolResult("Plan approved. Exited plan mode; implementation may proceed.\n\nApproved plan:\n$plan")
+        return ToolResult(
+            "User has approved your plan. You can now start coding. Start with updating your todo list if applicable.\n\n" +
+                "## Approved Plan:\n$plan",
+        )
     }
 }
 
@@ -413,6 +512,55 @@ object AskUserQuestionParser {
             }
         }
     }.toString()
+
+    private val answersJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+    /** Parse the UI-collected `{"answers":{...},"annotations":{...}}` payload. */
+    fun parseAnswersJson(text: String): Pair<JsonObject, JsonObject> {
+        val root = runCatching { answersJson.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: return JsonObject(emptyMap()) to JsonObject(emptyMap())
+        val answers = (root["answers"] as? JsonObject)
+            ?.filterKeys { it != "__default__" }
+            ?.let { JsonObject(it) }
+            ?: JsonObject(emptyMap())
+        val annotations = root["annotations"] as? JsonObject ?: JsonObject(emptyMap())
+        return answers to annotations
+    }
+
+    /**
+     * ZCode `formatAskUserQuestionModelContent` 对齐：未作答/部分作答/全部作答
+     * 三态文案——空答案明确「不是拒绝，按最佳判断继续」。
+     */
+    fun formatModelContent(
+        questions: List<AskQuestion>,
+        answers: JsonObject,
+        annotations: JsonObject = JsonObject(emptyMap()),
+    ): String {
+        if (answers.isEmpty()) {
+            return "The user did not provide answers to these questions. Continue using your " +
+                "best judgment; do not treat this as a rejection or invent a user preference."
+        }
+        val answersText = answers.entries.joinToString(", ") { (q, a) ->
+            val value = (a as? JsonPrimitive)?.contentOrNull ?: a.toString()
+            val parts = mutableListOf("\"$q\"=\"$value\"")
+            val ann = annotations[q] as? JsonObject
+            (ann?.get("preview") as? JsonPrimitive)?.contentOrNull?.let {
+                parts += "selected preview:\n$it"
+            }
+            (ann?.get("notes") as? JsonPrimitive)?.contentOrNull?.let {
+                parts += "user notes: $it"
+            }
+            parts.joinToString(" ")
+        }
+        val unanswered = questions.count { it.question !in answers }
+        if (unanswered > 0) {
+            return "The user answered some questions and skipped $unanswered. " +
+                "Provided answers: $answersText. Continue with the provided answers and " +
+                "use your best judgment for the unanswered questions; do not invent user preferences."
+        }
+        return "User has answered your questions: $answersText. " +
+            "You can now continue with the user's answers in mind."
+    }
 }
 
 class AskUserQuestionTool(
@@ -420,12 +568,35 @@ class AskUserQuestionTool(
 ) : Tool {
     override val name = "AskUserQuestion"
     override val description =
-        "Use only when blocked on a decision that is genuinely the user's to make. " +
-            "Users can always select Other for custom text. Prefer multiSelect when choices are not exclusive. " +
-            "If recommending an option, put it first and append (Recommended) to the label. " +
-            "Do not use this to ask whether a plan is ready — use ExitPlanMode. " +
-            "Optional preview on options enables side-by-side comparison (single-select only)."
+        "Use this tool only when you are blocked on a decision that is genuinely the user's to make: " +
+            "one you cannot resolve from the request, the code, or sensible defaults.\n\n" +
+            "Usage notes:\n" +
+            "- Users will always be able to select \"Other\" to provide custom text input\n" +
+            "- Use multiSelect: true to allow multiple answers to be selected for a question\n" +
+            "- If you recommend a specific option, make that the first option in the list and add \"(Recommended)\" at the end of the label\n\n" +
+            "Plan mode note: To switch into plan mode, use EnterPlanMode (not this tool). Once in plan mode, " +
+            "use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. " +
+            "Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference " +
+            "\"the plan\" in questions — the user cannot see the plan until you call ExitPlanMode for approval.\n\n" +
+            "Reserve this for decisions where the user's answer changes what you do next — not for choices " +
+            "with a conventional default or facts you can verify in the codebase yourself. In those cases " +
+            "pick the obvious option, mention it in your response, and proceed.\n\n" +
+            "Preview feature:\n" +
+            "Use the optional `preview` field on options when presenting concrete artifacts that users need " +
+            "to visually compare:\n" +
+            "- ASCII mockups of UI layouts or components\n" +
+            "- Code snippets showing different implementations\n" +
+            "- Diagram variations\n" +
+            "- Configuration examples\n\n" +
+            "Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is " +
+            "supported. When any option has a preview, the UI switches to a side-by-side layout with a " +
+            "vertical option list on the left and preview on the right. Do not use previews for simple " +
+            "preference questions where labels and descriptions suffice. Note: previews are only supported " +
+            "for single-select questions (not multiSelect)."
     override val risk = ToolRisk.READ
+    // 与上游 concurrentSafe=true 有意不同：AndMX 的问答是单卡 UI
+    // （session.pendingAnswer 单槽位），并发两个 ask 会互相覆盖 deferred。
+    override val concurrentSafe = false
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -483,16 +654,24 @@ class AskUserQuestionTool(
     }
 
     override suspend fun execute(args: JsonObject): ToolResult {
+        val questions = AskUserQuestionParser.parse(args)
         val existing = args["answers"] as? JsonObject
         if (existing != null && existing.isNotEmpty()) {
-            return ToolResult(buildJsonObject { put("answers", existing) }.toString())
+            val cleaned = JsonObject(existing.filterKeys { it != "__default__" })
+            return ToolResult(
+                AskUserQuestionParser.formatModelContent(
+                    questions,
+                    cleaned,
+                    args["annotations"] as? JsonObject ?: JsonObject(emptyMap()),
+                ),
+            )
         }
-        val questions = AskUserQuestionParser.parse(args)
         if (questions.isEmpty()) {
             return ToolResult("questions required: 1-4 items with header/options", isError = true)
         }
-        val answer = runCatching { ask(questions, args) }.getOrElse { "用户未作答: ${it.message}" }
-        return ToolResult(answer)
+        val answer = runCatching { ask(questions, args) }.getOrElse { "" }
+        val (answers, annotations) = AskUserQuestionParser.parseAnswersJson(answer)
+        return ToolResult(AskUserQuestionParser.formatModelContent(questions, answers, annotations))
     }
 }
 
@@ -599,11 +778,14 @@ fun buildZCodeToolSurface(
     requestEnterPlanApproval: (suspend (String) -> Boolean)? = null,
     requestExitPlanApproval: suspend (String) -> Boolean = { true },
     allowedPromptsSink: ((List<com.andmx.agent.AllowedPrompts.Entry>) -> Unit)? = null,
+    backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
     includeGoals: Boolean = true,
     includeLegacyAliases: Boolean = true,
+    listModelsProviders: (suspend () -> List<com.andmx.llm.provider.ProviderDefinition>)? = null,
+    listModelsCurrent: (suspend () -> Pair<String, String>)? = null,
 ): List<Tool> {
     val access = WorkspaceAccess(context)
-    val shell = ShellTool(context, cwdProvider = cwdProvider)
+    val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks)
     val shellWithHint = GhRateLimitHintTool(shell)
     val read = ReadFileTool(context)
     val write = WriteFileTool(context)
@@ -807,6 +989,7 @@ fun buildZCodeToolSurface(
             putJsonArray("required") { add("url"); add("prompt") }
         },
         risk = ToolRisk.NETWORK,
+        concurrentSafe = true,
         mapArgs = { args ->
             buildJsonObject {
                 args.forEach { (k, v) -> put(k, v) }
@@ -840,6 +1023,7 @@ fun buildZCodeToolSurface(
             putJsonArray("required") { add("query") }
         },
         risk = ToolRisk.NETWORK,
+        concurrentSafe = true,
     )
 
     val zcode = mutableListOf(
@@ -866,6 +1050,12 @@ fun buildZCodeToolSurface(
         zcode += UpdateGoalTool(goalState)
         zcode += GetGoalTool(goalState)
     }
+    if (listModelsProviders != null) {
+        zcode += ListModelsTool(
+            providers = listModelsProviders,
+            current = listModelsCurrent ?: { "" to "" },
+        )
+    }
     if (includeLegacyAliases) {
         // Keep snake_case aliases so older prompts/models still work.
         zcode += read
@@ -891,6 +1081,9 @@ fun isPlanModeAllowed(toolName: String): Boolean {
         "todoread", "todowrite", "update_plan",
         "enterplanmode", "exitplanmode", "askuserquestion",
         "readsessioncontext", "skill", "agent", "task", "taskoutput", "taskstop", "spawn_agent", "multi_agent",
+        "listmodels", "cronlist",
+        "listsavedworkflows", "listworkflowruns", "getworkflowrun",
+        "getworkflowrunroster", "evalworkflowsnippet",
         "get_goal", "create_goal", "update_goal",
         "android_preflight", "android_discover_project", "android_list_devices",
         "android_list_avds", "android_ui_status", "android_ui_describe", "android_ui_resolve",

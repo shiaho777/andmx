@@ -109,4 +109,51 @@ class ChatTimelineTest {
         val timeline = buildTimeline(messages = listOf(msg(1)), tools = emptyList())
         assertTrue(timeline.none { it is TimelineItem.Working })
     }
+
+    @Test
+    fun changeToolsGroupSeparatelyFromReads() {
+        // ZCode changes/execute 分组：Edit+Write 同组，Read 不与改动混组。
+        val timeline = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(
+                tool("r1", sortKey = 100, name = "Read"),
+                tool("r2", sortKey = 101, name = "Grep"),
+                tool("e1", sortKey = 102, name = "Edit"),
+                tool("w1", sortKey = 103, name = "Write"),
+                tool("b1", sortKey = 104, name = "Bash"),
+                tool("g1", sortKey = 105, name = "Git"),
+            ),
+        )
+        assertEquals(3, timeline.size)
+        assertTrue(timeline.all { it is TimelineItem.ToolGroup })
+        val kinds = timeline.map { (it as TimelineItem.ToolGroup).tools.map { t -> t.name } }
+        assertEquals(listOf(listOf("Read", "Grep"), listOf("Edit", "Write"), listOf("Bash", "Git")), kinds)
+    }
+
+    @Test
+    fun successfulAgentCallIsDroppedInFavorOfSubAgentCard() {
+        val timeline = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(tool("a1", sortKey = 100, name = "Agent")),
+            subAgents = listOf(SubAgentItem(id = "s1", task = "t", state = "COMPLETED", sortKey = 101)),
+        )
+        assertEquals(1, timeline.size)
+        assertTrue(timeline[0] is TimelineItem.SubAgent)
+    }
+
+    @Test
+    fun failedOrRunningAgentCallKeepsToolCard() {
+        val denied = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(tool("a1", sortKey = 100, name = "Agent", error = true)),
+            subAgents = emptyList(),
+        )
+        assertTrue(denied.single() is TimelineItem.Tool)
+        val running = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(tool("a2", sortKey = 100, name = "Agent", running = true)),
+            subAgents = emptyList(),
+        )
+        assertTrue(running.single() is TimelineItem.Tool)
+    }
 }

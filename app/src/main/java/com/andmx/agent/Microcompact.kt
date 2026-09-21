@@ -32,9 +32,10 @@ object Microcompact {
         val tokensSaved: Int get() = tokensBefore - tokensAfter
     }
 
-    fun thresholdTokens(contextWindow: Int): Int {
-        val byRatio = (contextWindow * PRESSURE_RATIO).toInt()
-        return minOf(byRatio, (contextWindow - HEADROOM_TOKENS).coerceAtLeast(0))
+    /** Upstream base is the auto-compact threshold, not the raw context window. */
+    fun thresholdTokens(autoCompactThreshold: Int): Int {
+        val byRatio = (autoCompactThreshold * PRESSURE_RATIO).toInt()
+        return minOf(byRatio, (autoCompactThreshold - HEADROOM_TOKENS).coerceAtLeast(0))
     }
 
     fun resolveTrigger(

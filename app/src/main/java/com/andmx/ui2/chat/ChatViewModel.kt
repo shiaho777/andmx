@@ -148,6 +148,12 @@ class ChatViewModel @Inject constructor(
 
     private val _pluginSlashSpecs = MutableStateFlow<List<SlashCommands.Spec>>(emptyList())
     val pluginSlashSpecs: StateFlow<List<SlashCommands.Spec>> = _pluginSlashSpecs.asStateFlow()
+
+    /** 供 @ 联想的子代理目录（内置 + 用户自定义，含启用态）。 */
+    val subAgentCatalog: StateFlow<List<com.andmx.settings.CustomSubAgent>> =
+        combine(settingsStore.customSubAgents, settingsStore.subagentState) { agents, state ->
+            com.andmx.agent.multi.SubagentCatalog.listAll(agents, state)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val skillInstaller = SkillInstaller(GuestFs(ProotRuntime(context)))
 
     /** 供应商列表 + 当前选中设置（Composer 配置链）。 */
@@ -919,6 +925,22 @@ class ChatViewModel @Inject constructor(
                 }
                 return true
             }
+            SlashResult.Fork -> {
+                forkConversation()
+                return true
+            }
+            SlashResult.Rewind -> {
+                openRewindPicker()
+                return true
+            }
+            SlashResult.Resume -> {
+                resumeSession()
+                return true
+            }
+            SlashResult.Workflows -> {
+                openWorkflows()
+                return true
+            }
             is SlashResult.Goal -> {
                 viewModelScope.launch {
                     val id = ensureConversationReady()
@@ -1170,6 +1192,8 @@ class ChatViewModel @Inject constructor(
                     ContextChipKind.CONVERSATION -> append("${chip.label} ")
                     ContextChipKind.ATTACHMENT -> append("${chip.label} ")
                     ContextChipKind.MESSAGE -> append("<quote id=\"${chip.id}\">${chip.payload}</quote> ")
+                    ContextChipKind.PASTE -> append("<paste>${chip.payload}</paste> ")
+                    ContextChipKind.AGENT -> append("@agent:${chip.payload} ")
                 }
             }
         }.trim()
@@ -1177,12 +1201,18 @@ class ChatViewModel @Inject constructor(
             val files = chips.filter { it.kind == ContextChipKind.FILE }
             val convs = chips.filter { it.kind == ContextChipKind.CONVERSATION }
             val selMsgs = chips.filter { it.kind == ContextChipKind.MESSAGE }
-            if (files.isNotEmpty() || convs.isNotEmpty() || selMsgs.isNotEmpty() || attachments.isNotEmpty()) {
+            val pastes = chips.filter { it.kind == ContextChipKind.PASTE }
+            val agents = chips.filter { it.kind == ContextChipKind.AGENT }
+            if (files.isNotEmpty() || convs.isNotEmpty() || selMsgs.isNotEmpty() ||
+                pastes.isNotEmpty() || agents.isNotEmpty() || attachments.isNotEmpty()
+            ) {
                 appendLine()
                 appendLine("[上下文]")
                 files.forEach { appendLine("- 文件: ${it.payload}") }
                 convs.forEach { appendLine("- 关联会话: ${it.label} (id=${it.payload})") }
                 selMsgs.forEach { appendLine("- 对话引用: ${it.label}") }
+                pastes.forEach { appendLine("- ${it.label}") }
+                agents.forEach { appendLine("- 子代理: ${it.payload}") }
                 attachments.forEach { appendLine("- 附件: ${it.name}") }
             }
         }
@@ -1339,6 +1369,128 @@ class ChatViewModel @Inject constructor(
     }
 
     fun clearRewindResult() { _rewindResult.value = null }
+
+    // ── /fork /rewind /resume ─────────────────────────────────────────────
+
+    private val _rewindPickerOpen = MutableStateFlow(false)
+    val rewindPickerOpen: StateFlow<Boolean> = _rewindPickerOpen.asStateFlow()
+
+    /** /rewind 的检查点候选：每条用户消息 = 「回到这轮发送前」。 */
+    val rewindCheckpoints: StateFlow<List<ChatMessage>> =
+        _messages.map { list -> list.filter { it.role == "user" } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun openRewindPicker() {
+        if (_isLoading.value) return
+        if (rewindCheckpoints.value.isEmpty()) {
+            appendLocalAssistant("没有可回滚的检查点：先发送一条用户消息。")
+            return
+        }
+        _rewindPickerOpen.value = true
+    }
+
+    fun dismissRewindPicker() { _rewindPickerOpen.value = false }
+
+    // ── /workflows ────────────────────────────────────────────
+
+    private val _workflowsOpen = MutableStateFlow(false)
+    val workflowsOpen: StateFlow<Boolean> = _workflowsOpen.asStateFlow()
+    private val _workflowDefs = MutableStateFlow<List<com.andmx.agent.workflow.WorkflowDefinition>>(emptyList())
+    val workflowDefs: StateFlow<List<com.andmx.agent.workflow.WorkflowDefinition>> = _workflowDefs.asStateFlow()
+    private val _workflowRuns = MutableStateFlow<List<com.andmx.data.WorkflowStore.RunListItem>>(emptyList())
+    val workflowRuns: StateFlow<List<com.andmx.data.WorkflowStore.RunListItem>> = _workflowRuns.asStateFlow()
+    private val _workflowDetail = MutableStateFlow<com.andmx.agent.workflow.WorkflowRunSnapshot?>(null)
+    val workflowDetail: StateFlow<com.andmx.agent.workflow.WorkflowRunSnapshot?> = _workflowDetail.asStateFlow()
+    private val _workflowDetailEvents = MutableStateFlow<List<com.andmx.agent.workflow.WorkflowEvent>>(emptyList())
+    val workflowDetailEvents: StateFlow<List<com.andmx.agent.workflow.WorkflowEvent>> = _workflowDetailEvents.asStateFlow()
+
+    fun openWorkflows() {
+        _workflowsOpen.value = true
+        viewModelScope.launch {
+            _workflowDefs.value = controller.workflowService.listDefinitions()
+            _workflowRuns.value = controller.workflowService.listRuns()
+        }
+    }
+
+    fun dismissWorkflows() {
+        _workflowsOpen.value = false
+        _workflowDetail.value = null
+        _workflowDetailEvents.value = emptyList()
+    }
+
+    fun openWorkflowDetail(runId: String) {
+        viewModelScope.launch {
+            _workflowDetail.value = controller.workflowService.getRun(runId)
+            _workflowDetailEvents.value = controller.workflowService.events(runId).takeLast(60)
+        }
+    }
+
+    fun dismissWorkflowDetail() {
+        _workflowDetail.value = null
+        _workflowDetailEvents.value = emptyList()
+    }
+
+    fun cancelWorkflowRun(runId: String) {
+        viewModelScope.launch {
+            controller.workflowService.cancel(runId)
+            _workflowRuns.value = controller.workflowService.listRuns()
+            _workflowDetail.value = controller.workflowService.getRun(runId)
+        }
+    }
+
+    /** 分叉当前会话为独立副本（复制全部消息，记录 spawn 边）。 */
+    fun forkConversation() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            val id = ensureConversationReady()
+            val newId = runCatching { repo.forkConversation(id) }.getOrNull()
+            if (newId == null) {
+                _error.value = "分叉失败"
+                return@launch
+            }
+            runCatching { repo.recordSpawnEdge(id, newId, "completed") }
+            runCatching {
+                repo.addMessage(
+                    conversationId = newId,
+                    role = "assistant",
+                    content = "已从会话 #$id 分叉，以上为复制的历史。",
+                )
+            }
+            switchToConversation(newId)
+        }
+    }
+
+    /** 回滚到某条用户消息之前：对话截断 + 该时点之后的文件改动一并还原。 */
+    fun rewindToCheckpoint(messageId: Long) {
+        if (_isLoading.value) return
+        _rewindPickerOpen.value = false
+        val conversationId = _currentConversationId.value
+        if (conversationId <= 0L) return
+        val cut = _messages.value.firstOrNull { it.id == messageId && it.role == "user" }
+            ?: return
+        viewModelScope.launch {
+            val files = runCatching { controller.revertFileChanges(sinceMs = cut.createdAt) }
+                .getOrNull()
+            truncateFromUserMessage(conversationId, messageId)
+            val fileNote = when {
+                files == null || (files.reverted == 0 && files.unsafe == 0) -> ""
+                else -> buildString {
+                    append("\n文件改动：已回滚 ${files.reverted} 个")
+                    if (files.unsafe > 0) {
+                        append("，跳过 ${files.unsafe} 个被外部改动的文件（${files.unsafePaths.joinToString("、")}）")
+                    }
+                }
+            }
+            appendLocalAssistant("已回滚到该检查点。$fileNote".trim())
+            refreshGitInfo()
+        }
+    }
+
+    /** /resume：打开会话抽屉挑选要恢复的历史会话。 */
+    fun resumeSession() {
+        appendLocalAssistant("在左侧会话列表中选择要恢复的历史会话。")
+        ChatActionBus.openDrawer()
+    }
 
     // ── 切模型上下文守卫 ───────────────────────────────────────────────────
     data class ModelSwitchGuard(
@@ -1511,6 +1663,33 @@ class ChatViewModel @Inject constructor(
             ),
         )
         return null
+    }
+
+    /** @ 提及子代理（ZCode @agents 对齐）：消息内联 @agent:<name>。 */
+    fun addAgentContext(name: String) {
+        val bare = name.trim().removePrefix("@")
+        if (bare.isBlank()) return
+        addContextChip(
+            ContextChip(
+                id = "agent:$bare",
+                kind = ContextChipKind.AGENT,
+                label = bare,
+                payload = bare,
+            ),
+        )
+    }
+
+    /** 长文本粘贴转附件 chip（ZCode paste-as-attachment 对齐）。 */
+    fun addPastedText(content: String) {
+        if (content.isBlank()) return
+        addContextChip(
+            ContextChip(
+                id = "paste:${java.util.UUID.randomUUID()}",
+                kind = ContextChipKind.PASTE,
+                label = "粘贴文本 ${content.length} 字符",
+                payload = content,
+            ),
+        )
     }
 
     fun addConversationContext(pick: ConversationPick) {
@@ -1978,7 +2157,8 @@ class ChatViewModel @Inject constructor(
 
     /** ZCode 对齐：审批作用域（允许本会话 / 始终拒绝）。 */
     fun resolveApprovalScoped(allow: Boolean, scope: ChatController.ApprovalScope) {
-        val denied = scope == ChatController.ApprovalScope.SESSION_DENY
+        val denied = scope == ChatController.ApprovalScope.SESSION_DENY ||
+            scope == ChatController.ApprovalScope.PROJECT_DENY
         resolveApproval(allow && !denied)
         controller.resolveApprovalScoped(allow, scope)
     }
@@ -1992,6 +2172,12 @@ class ChatViewModel @Inject constructor(
         }
         controller.resolveUserQuestion(answersJson)
     }
+
+    fun snoozeUserQuestion() = controller.snoozeUserQuestion()
+
+    val questionAutoResolve: StateFlow<Boolean> = controller.questionAutoResolve
+
+    fun setQuestionAutoResolve(enabled: Boolean) = controller.setQuestionAutoResolve(enabled)
 
     fun clearError() {
         _error.value = null

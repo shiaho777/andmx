@@ -19,6 +19,8 @@ object ModelCallTrace {
         COMPACT("上下文压缩"),
         SUBAGENT("子智能体"),
         GOAL_VERIFY("目标验证"),
+        MEMORY("记忆抽取"),
+        WORKFLOW("工作流"),
         UNKNOWN("未知来源"),
     }
 

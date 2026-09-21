@@ -70,6 +70,13 @@ class SubAgentOrchestrator(
         data class Delta(val agentId: String, val text: String) : SubAgentEvent
         data class Completed(val agentId: String, val result: String) : SubAgentEvent
         data class Failed(val agentId: String, val error: String) : SubAgentEvent
+        /** Terminal state reached — emitted once per run (ZCode queued_system_notification 的触发点). */
+        data class Terminated(
+            val agentId: String,
+            val status: String,
+            val result: String,
+            val background: Boolean,
+        ) : SubAgentEvent
         data class Suspended(val agentId: String, val reason: String) : SubAgentEvent
         data class Resumed(val agentId: String, val input: String) : SubAgentEvent
         data class Closed(val agentId: String) : SubAgentEvent
@@ -86,6 +93,8 @@ class SubAgentOrchestrator(
         val result: String = "",
         val history: MutableList<com.andmx.llm.ApiMessage> = mutableListOf(),
         val createdAt: Long = System.currentTimeMillis(),
+        val background: Boolean = false,
+        val agentType: String = "",
     )
 
     private val _events = MutableSharedFlow<SubAgentEvent>(extraBufferCapacity = 64)
@@ -103,6 +112,8 @@ class SubAgentOrchestrator(
         val state: AgentState,
         val result: String,
         val createdAt: Long,
+        val background: Boolean = false,
+        val agentType: String = "",
     )
 
     fun listAgents(): List<Pair<String, AgentState>> =
@@ -117,6 +128,8 @@ class SubAgentOrchestrator(
                     state = info.state,
                     result = info.result,
                     createdAt = info.createdAt,
+                    background = info.background,
+                    agentType = info.agentType,
                 )
             }
             .sortedByDescending { it.createdAt }
@@ -191,8 +204,12 @@ class SubAgentOrchestrator(
         )
 
         agentLock.withLock {
-            activeAgents[agentId] = AgentStateInfo(engine, spec.task, AgentState.RUNNING)
+            activeAgents[agentId] = AgentStateInfo(
+                engine, spec.task, AgentState.RUNNING,
+                background = spec.background, agentType = spec.agentName,
+            )
         }
+        val startedAt = System.currentTimeMillis()
 
         return try {
             semaphore.acquire()
@@ -214,6 +231,7 @@ class SubAgentOrchestrator(
                     activeAgents[agentId] = info.copy(state = AgentState.COMPLETED, result = finalResult)
                 }
             }
+            emitTerminated(agentId, "completed", finalResult, spec.background, spec.agentName, spec.task, startedAt)
             finalResult
         } catch (t: Throwable) {
             _events.tryEmit(SubAgentEvent.Failed(agentId, t.message ?: "未知错误"))
@@ -222,12 +240,46 @@ class SubAgentOrchestrator(
                     activeAgents[agentId] = info.copy(state = AgentState.FAILED, result = "失败: ${t.message}")
                 }
             }
+            emitTerminated(agentId, "failed", "失败: ${t.message}", spec.background, spec.agentName, spec.task, startedAt)
             "子代理失败: ${t.message}"
         } finally {
             agentJobs.remove(agentId)
             semaphore.release()
         }
     }
+
+    private fun emitTerminated(
+        agentId: String,
+        status: String,
+        result: String,
+        background: Boolean,
+        agentType: String,
+        task: String,
+        startedAt: Long,
+    ) {
+        _events.tryEmit(
+            SubAgentEvent.Terminated(
+                agentId = agentId,
+                status = status,
+                result = result,
+                background = background,
+            ),
+        )
+        lastNotification[agentId] = formatAgentTaskNotification(
+            taskId = agentId,
+            agentId = agentId,
+            subagentType = agentType,
+            status = status,
+            description = task,
+            result = result.takeIf { status == "completed" },
+            error = result.takeIf { status != "completed" },
+            durationMs = System.currentTimeMillis() - startedAt,
+        )
+    }
+
+    /** 最近一次终态通知体（queued_system_notification 的 body），供测试/回放用。 */
+    private val lastNotification = java.util.concurrent.ConcurrentHashMap<String, String>()
+    fun notificationFor(agentId: String): String? = lastNotification[agentId]
 
     /**
      * Resume a suspended/completed sub-agent with new input.
@@ -264,12 +316,35 @@ class SubAgentOrchestrator(
                     activeAgents[agentId] = i.copy(state = AgentState.COMPLETED, result = finalResult)
                 }
             }
+            emitTerminated(agentId, "completed", finalResult, info.background, info.agentType, info.task, info.createdAt)
             finalResult
         } catch (t: Throwable) {
+            emitTerminated(agentId, "failed", "失败: ${t.message}", info.background, info.agentType, info.task, info.createdAt)
             "子代理恢复失败: ${t.message}"
         } finally {
             semaphore.release()
         }
+    }
+
+    /**
+     * Resume a terminal-state sub-agent in the background (ZCode SendMessage 对齐):
+     * the resumed run counts as background so its terminal notification reaches
+     * the parent via queued_system_notification. Returns false for missing,
+     * running, or closed agents.
+     */
+    fun resumeAsync(agentId: String, input: String): Boolean {
+        val info = activeAgents[agentId] ?: return false
+        if (info.state == AgentState.RUNNING || info.state == AgentState.CLOSED) return false
+        activeAgents[agentId] = info.copy(background = true)
+        val job = scope.launch {
+            try {
+                resume(agentId, input)
+            } finally {
+                agentJobs.remove(agentId)
+            }
+        }
+        agentJobs[agentId] = job
+        return true
     }
 
     /**
@@ -357,13 +432,15 @@ class SubAgentOrchestrator(
     fun createTaskTools(
         resolveAgent: suspend (String?) -> CustomSubAgent? = { null },
         listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
+        backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
     ): List<Tool> {
         val agent = ZCodeAgentTool(this, resolveAgent, listTypes)
         return listOf(
             agent,
             ZCodeTaskTool(this, resolveAgent, listTypes),
-            TaskOutputTool(this),
-            TaskStopTool(this),
+            TaskOutputTool(this, backgroundTasks),
+            TaskStopTool(this, backgroundTasks),
+            SendMessageTool(this),
         )
     }
 
@@ -443,6 +520,7 @@ class SubAgentTool(private val orchestrator: SubAgentOrchestrator) : Tool {
             "共享同一个沙箱。适用于大型任务的分解并行处理。" +
             "传入任务描述和可选的上下文提示。"
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val concurrentSafe = true
 
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
@@ -568,6 +646,7 @@ class ZCodeAgentTool(
     override val description =
         "Launch a specialized sub-agent for complex multi-step work. Prefer Explore for broad read-only search; use general-purpose for multi-step research and code tasks; or pass a named custom agent."
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val concurrentSafe = true
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -671,17 +750,22 @@ class ZCodeTaskTool(
     override val description =
         "Launch a specialized task agent for multi-step work. Equivalent to Agent; prefer Explore for broad read-only search."
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val concurrentSafe = true
     override val parameters: JsonObject = agentTool.parameters
     override suspend fun execute(args: JsonObject): ToolResult = agentTool.execute(args)
 }
 
 class TaskOutputTool(
     private val orchestrator: SubAgentOrchestrator,
+    private val backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
 ) : Tool {
     override val name = "TaskOutput"
     override val description =
-        "Read the current status or final output of a background Agent/Task by id. " +
-            "Use after launching with run_in_background=true."
+        "Retrieves output from a running or completed background task (Agent/Task).\n" +
+            "- Takes a task_id parameter identifying the task\n" +
+            "- Returns the task output along with status information\n" +
+            "- Use block=true (default) to wait for task completion\n" +
+            "- Use block=false for non-blocking check of current status"
     override val risk = com.andmx.agent.ToolRisk.READ
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
@@ -694,9 +778,13 @@ class TaskOutputTool(
                 put("type", "string")
                 put("description", "Alias of task_id")
             }
-            putJsonObject("timeout_ms") {
+            putJsonObject("block") {
+                put("type", "boolean")
+                put("description", "Whether to wait for completion (default true)")
+            }
+            putJsonObject("timeout") {
                 put("type", "integer")
-                put("description", "Optional wait timeout in milliseconds before returning current status")
+                put("description", "Max wait time in ms (default 30000, max 600000)")
             }
         }
     }
@@ -705,10 +793,29 @@ class TaskOutputTool(
         val id = args["task_id"]?.jsonPrimitive?.content
             ?: args["agent_id"]?.jsonPrimitive?.content
             ?: return ToolResult("task_id required", isError = true)
-        val timeout = args["timeout_ms"]?.jsonPrimitive?.content?.toLongOrNull()?.coerceIn(0L, 120_000L) ?: 0L
+        val block = args["block"]?.let { el ->
+            runCatching { el.jsonPrimitive.content.toBooleanStrict() }.getOrNull()
+        } ?: true
+        val timeout = (
+            args["timeout"]?.jsonPrimitive?.content?.toLongOrNull()
+                ?: args["timeout_ms"]?.jsonPrimitive?.content?.toLongOrNull()
+            )?.coerceIn(0L, 600_000L) ?: 30_000L
         val snap = orchestrator.listAgentSnapshots().firstOrNull { it.id == id }
-            ?: return ToolResult("Task not found: $id", isError = true)
-        val result = if (timeout > 0L && snap.state == SubAgentOrchestrator.AgentState.RUNNING) {
+        if (snap == null) {
+            val bg = backgroundTasks?.get(id)
+                ?: return ToolResult("Task not found: $id", isError = true)
+            val tail = backgroundTasks.tail(id).orEmpty()
+            return ToolResult(
+                buildString {
+                    appendLine("task_id: $id")
+                    appendLine("state: ${bg.statusWord}")
+                    appendLine("output_file: ${bg.outputPath}")
+                    appendLine("output (tail):")
+                    append(tail.ifBlank { "(no output yet)" })
+                }.trim(),
+            )
+        }
+        val result = if (block && snap.state == SubAgentOrchestrator.AgentState.RUNNING) {
             orchestrator.wait(id, timeout)
         } else {
             snap.result
@@ -726,12 +833,81 @@ class TaskOutputTool(
     }
 }
 
+class SendMessageTool(
+    private val orchestrator: SubAgentOrchestrator,
+) : Tool {
+    override val name = "SendMessage"
+    override val description =
+        "# SendMessage\n\n" +
+            "Send a message to another agent.\n\n" +
+            "```json\n" +
+            "{\"to\": \"agent_<uuid>\", \"summary\": \"assign task 1\", \"message\": \"start on task #1\"}\n" +
+            "```\n\n" +
+            "Your plain text output is NOT visible to other agents — to communicate, you MUST call " +
+            "this tool. Messages from agents are delivered automatically; you don't check an inbox. " +
+            "Refer to local agents by the `agentId` returned in the Agent spawn result. To resume a " +
+            "completed agent, use its `agentId`; it resumes in the background and you'll be notified " +
+            "when it finishes.\n"
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("to") {
+                put("type", "string")
+                put("description", "Target agent id returned by Agent/Task spawn")
+            }
+            putJsonObject("summary") {
+                put("type", "string")
+                put("description", "Short label for this message")
+            }
+            putJsonObject("message") {
+                put("type", "string")
+                put("description", "Message content delivered to the agent")
+            }
+        }
+        putJsonArray("required") { add("to"); add("message") }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val to = args["to"]?.jsonPrimitive?.content
+            ?: args["agent_id"]?.jsonPrimitive?.content
+            ?: return ToolResult("to required", isError = true)
+        val message = args["message"]?.jsonPrimitive?.content
+            ?: return ToolResult("message required", isError = true)
+        val summary = args["summary"]?.jsonPrimitive?.content.orEmpty()
+        return when (orchestrator.getState(to)) {
+            null -> ToolResult("Agent not found: $to", isError = true)
+            SubAgentOrchestrator.AgentState.RUNNING ->
+                ToolResult(
+                    "Agent $to is still running; wait for its completion notification, then SendMessage again",
+                    isError = true,
+                )
+            SubAgentOrchestrator.AgentState.CLOSED ->
+                ToolResult("Agent $to is closed; spawn a new Agent instead", isError = true)
+            else -> {
+                val input = if (summary.isBlank()) message else "[$summary] $message"
+                if (orchestrator.resumeAsync(to, input)) {
+                    ToolResult(
+                        "Message sent to $to; it resumes in the background and you'll be notified when it finishes.",
+                    )
+                } else {
+                    ToolResult("Agent $to cannot be resumed", isError = true)
+                }
+            }
+        }
+    }
+}
+
 class TaskStopTool(
     private val orchestrator: SubAgentOrchestrator,
+    private val backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
 ) : Tool {
     override val name = "TaskStop"
     override val description =
-        "Stop a running background Agent/Task by id and free its slot."
+        "\n- Stops a running background task by its ID\n" +
+            "- Takes a task_id parameter identifying the task to stop\n" +
+            "- Returns a success or failure status\n" +
+            "- Use this tool when you need to terminate a long-running task\n"
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
@@ -753,10 +929,51 @@ class TaskStopTool(
             ?: args["agent_id"]?.jsonPrimitive?.content
             ?: return ToolResult("task_id required", isError = true)
         val ok = orchestrator.close(id)
-        return if (ok) {
-            ToolResult("Task stopped: $id")
-        } else {
-            ToolResult("Task not found: $id", isError = true)
+        if (ok) return ToolResult("Task stopped: $id")
+        val bg = backgroundTasks
+        if (bg != null && bg.get(id) != null) {
+            return if (bg.stop(id)) {
+                ToolResult("Task stopped: $id")
+            } else {
+                ToolResult("Task $id is not running", isError = true)
+            }
         }
+        return ToolResult("Task not found: $id", isError = true)
     }
 }
+
+private const val TASK_NOTIFICATION_MAX_CHARS = 120_000
+
+/**
+ * ZCode `formatLocalAgentTaskNotification` 对齐：后台任务终态推送的
+ * `<task-notification>` XML 体（queued_system_notification 的 body）。
+ */
+internal fun formatAgentTaskNotification(
+    taskId: String,
+    agentId: String,
+    subagentType: String,
+    status: String,
+    description: String,
+    result: String? = null,
+    error: String? = null,
+    durationMs: Long? = null,
+): String {
+    val summary = buildString {
+        append("Agent ").append(subagentType.ifBlank { "subagent" })
+        append(" task \"").append(description).append("\" ").append(status).append('.')
+        if (status == "failed" && !error.isNullOrBlank()) append(' ').append(error.trim())
+    }
+    val lines = mutableListOf("<task-notification>", "<task-id>${esc(taskId)}</task-id>")
+    lines += "<agent-id>${esc(agentId)}</agent-id>"
+    if (subagentType.isNotBlank()) lines += "<subagent-type>${esc(subagentType)}</subagent-type>"
+    lines += "<status>${esc(status)}</status>"
+    lines += "<summary>${esc(summary)}</summary>"
+    if (result != null) lines += "<result>${esc(result)}</result>"
+    if (error != null) lines += "<error>${esc(error)}</error>"
+    if (durationMs != null) lines += "<usage><duration-ms>$durationMs</duration-ms></usage>"
+    lines += "</task-notification>"
+    return lines.joinToString("\n").take(TASK_NOTIFICATION_MAX_CHARS)
+}
+
+private fun esc(s: String): String = s
+    .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

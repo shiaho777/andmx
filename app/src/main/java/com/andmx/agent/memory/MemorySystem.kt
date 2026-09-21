@@ -31,12 +31,34 @@ class MemorySystem(
 ) {
     companion object {
         private const val TAG = "MemorySystem"
-        private const val MEMORY_DIR = "/root/.andmx/memory"
+        const val MEMORY_DIR = "/root/.andmx/memory"
         private const val RAW_MEMORIES = "$MEMORY_DIR/raw_memories.md"
         private const val MEMORY_MD = "$MEMORY_DIR/MEMORY.md"
         private const val MEMORY_SUMMARY = "$MEMORY_DIR/memory_summary.md"
         private const val SKILLS_DIR = "$MEMORY_DIR/skills"
         private const val MAX_RAW_MEMORIES = 200
+
+        /** Redact secrets from text. */
+        fun redactSecrets(text: String): String {
+            var result = text
+            // OpenAI API keys
+            result = Regex("(sk-[a-zA-Z0-9]{20,})").replace(result, "[REDACTED_SECRET]")
+            // Bearer tokens
+            result = Regex("(Bearer\\s+[a-zA-Z0-9._-]{20,})", RegexOption.IGNORE_CASE).replace(result, "Bearer [REDACTED_SECRET]")
+            // Password assignments
+            result = Regex("(password|passwd|pwd|secret|token|api_key|apikey)\\s*[=:]\\s*\\S+", RegexOption.IGNORE_CASE)
+                .replace(result) { "${it.groupValues[1]}=[REDACTED_SECRET]" }
+            // AWS access keys
+            result = Regex("(AKIA[0-9A-Z]{16})").replace(result, "[REDACTED_SECRET]")
+            // AWS secret keys (40 char base64 after key id)
+            result = Regex("([A-Za-z0-9/+=]{40})").replace(result) { m ->
+                if (m.value.startsWith("AKIA")) m.value else "[REDACTED_SECRET]"
+            }
+            // Private keys
+            result = Regex("-----BEGIN [A-Z ]+PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]+PRIVATE KEY-----")
+                .replace(result, "[REDACTED_SECRET]")
+            return result
+        }
     }
 
     private val consolidateThreshold get() = config.maxRawMemoriesForConsolidation
@@ -445,25 +467,4 @@ class MemorySystem(
         }
     }
 
-    /** Redact secrets from text. */
-    fun redactSecrets(text: String): String {
-        var result = text
-        // OpenAI API keys
-        result = Regex("(sk-[a-zA-Z0-9]{20,})").replace(result, "[REDACTED_SECRET]")
-        // Bearer tokens
-        result = Regex("(Bearer\\s+[a-zA-Z0-9._-]{20,})", RegexOption.IGNORE_CASE).replace(result, "Bearer [REDACTED_SECRET]")
-        // Password assignments
-        result = Regex("(password|passwd|pwd|secret|token|api_key|apikey)\\s*[=:]\\s*\\S+", RegexOption.IGNORE_CASE)
-            .replace(result) { "${it.groupValues[1]}=[REDACTED_SECRET]" }
-        // AWS access keys
-        result = Regex("(AKIA[0-9A-Z]{16})").replace(result, "[REDACTED_SECRET]")
-        // AWS secret keys (40 char base64 after key id)
-        result = Regex("([A-Za-z0-9/+=]{40})").replace(result) { m ->
-            if (m.value.startsWith("AKIA")) m.value else "[REDACTED_SECRET]"
-        }
-        // Private keys
-        result = Regex("-----BEGIN [A-Z ]+PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]+PRIVATE KEY-----")
-            .replace(result, "[REDACTED_SECRET]")
-        return result
-    }
 }

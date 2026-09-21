@@ -69,8 +69,12 @@ class TracedLlm(
         }
     }
 
-    private fun finishOf(msg: ApiMessage): ModelCallTrace.Finish =
-        if (msg.toolCalls.isNullOrEmpty()) ModelCallTrace.Finish.STOP else ModelCallTrace.Finish.TOOL_CALLS
+    private fun finishOf(msg: ApiMessage): ModelCallTrace.Finish = when {
+        msg.finishReason == "length" -> ModelCallTrace.Finish.LENGTH
+        msg.finishReason == "content_filter" -> ModelCallTrace.Finish.CONTENT_FILTER
+        msg.toolCalls.isNullOrEmpty() -> ModelCallTrace.Finish.STOP
+        else -> ModelCallTrace.Finish.TOOL_CALLS
+    }
 
     private fun inputPreview(request: ChatRequest): String {
         val last = request.messages.lastOrNull { it.role != "system" }

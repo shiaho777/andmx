@@ -36,7 +36,8 @@ object ToolPresentation {
     private fun deniedOrStopped(output: String?): ToolPresentation.Status? {
         if (output.isNullOrBlank()) return null
         return when {
-            output.contains("已被用户拒绝") || output.contains("已拒绝") -> Status.DENIED
+            output.contains("已被用户拒绝") || output.contains("已被拒绝执行") ||
+                output.contains("已拒绝") -> Status.DENIED
             output.contains("已停止") || output.contains("已取消") -> Status.STOPPED
             else -> null
         }
@@ -128,13 +129,48 @@ object ToolPresentation {
 
     fun defaultExpanded(tc: ToolCall): Boolean {
         if (tc.isRunning || tc.isError) return true
-        return isEditTool(tc.name)
+        return isEditTool(tc.name) || ToolArgs.canonical(tc.name) == "todo"
+    }
+
+    /** ZCode 分组语义：changes（写改）/ execute（命令）/ read（只读扇出）。 */
+    enum class GroupKind { READ, CHANGE, EXECUTE }
+
+    fun groupKind(name: String): GroupKind? = when (ToolArgs.canonical(name)) {
+        "read", "list", "grep", "glob", "goal", "todoread" -> GroupKind.READ
+        "write", "edit", "multiedit", "patch" -> GroupKind.CHANGE
+        "shell", "git" -> GroupKind.EXECUTE
+        else -> null
     }
 
     /** Read-only fan-out tools group together when batched in sequence. */
-    fun shouldGroup(name: String): Boolean = when (ToolArgs.canonical(name)) {
-        "read", "list", "grep", "glob", "git", "goal", "todoread" -> true
-        else -> false
+    fun shouldGroup(name: String): Boolean = groupKind(name) != null
+
+    /** TodoWrite 参数解析（todo 专属卡用）。 */
+    data class TodoEntry(val content: String, val status: String, val priority: String)
+
+    fun todoItems(tc: ToolCall): List<TodoEntry>? {
+        if (ToolArgs.canonical(tc.name) != "todo") return null
+        val obj = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(tc.args)
+        }.getOrNull() as? kotlinx.serialization.json.JsonObject ?: return null
+        val arr = obj["todos"] as? kotlinx.serialization.json.JsonArray ?: return null
+        val items = arr.mapNotNull { el ->
+            val o = el as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+            val content = o["content"]
+                ?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                ?.trim().orEmpty()
+            if (content.isBlank()) return@mapNotNull null
+            TodoEntry(
+                content = content,
+                status = o["status"]
+                    ?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                    ?: "pending",
+                priority = o["priority"]
+                    ?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                    ?: "medium",
+            )
+        }
+        return items.takeIf { it.isNotEmpty() }
     }
 
     sealed class Action(val label: String) {

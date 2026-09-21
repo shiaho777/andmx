@@ -43,21 +43,25 @@ class ApprovalRuleStoreTest {
         val rules = mapOf(
             "/sdcard/proj" to setOf(
                 ApprovalRuleStore.Rule("shell", "shell:prefix:npm"),
-                ApprovalRuleStore.Rule("edit", "edit:file:app/src/Main.kt"),
+                ApprovalRuleStore.Rule("edit", "edit:file:app/src/Main.kt", ApprovalRuleStore.RuleBehavior.DENY),
             ),
             "ssh://host/work" to setOf(ApprovalRuleStore.Rule("webfetch", "webfetch:any")),
         )
-        // 使用私有方法的镜像：通过公共 API 校验语义（allows 逻辑依赖内存 map）
+        // 三桶格式镜像：{"<project>": {"allow": [{tool,key}], "deny": [...], "ask": [...]}}
         val store = object {
             fun serialize(all: Map<String, Set<ApprovalRuleStore.Rule>>): String {
                 val json = kotlinx.serialization.json.buildJsonObject {
                     all.forEach { (project, rs) ->
-                        put(project, kotlinx.serialization.json.JsonArray(rs.map { r ->
-                            kotlinx.serialization.json.buildJsonObject {
-                                put("tool", kotlinx.serialization.json.JsonPrimitive(r.toolCanonical))
-                                put("key", kotlinx.serialization.json.JsonPrimitive(r.key))
+                        put(project, kotlinx.serialization.json.buildJsonObject {
+                            rs.groupBy { it.behavior }.forEach { (b, bucket) ->
+                                put(b.name.lowercase(), kotlinx.serialization.json.JsonArray(bucket.map { r ->
+                                    kotlinx.serialization.json.buildJsonObject {
+                                        put("tool", kotlinx.serialization.json.JsonPrimitive(r.toolCanonical))
+                                        put("key", kotlinx.serialization.json.JsonPrimitive(r.key))
+                                    }
+                                }))
                             }
-                        }))
+                        })
                     }
                 }
                 return json.toString()
@@ -68,6 +72,8 @@ class ApprovalRuleStoreTest {
         assertTrue(raw.contains("shell:prefix:npm"))
         assertTrue(raw.contains("edit:file:app/src/Main.kt"))
         assertTrue(raw.contains("webfetch:any"))
+        assertTrue(raw.contains("\"deny\""))
+        assertTrue(raw.contains("\"allow\""))
     }
 
     @Test
@@ -78,5 +84,66 @@ class ApprovalRuleStoreTest {
         val all = mapOf("/p1" to a, "/p2" to b)
         assertTrue(all["/p1"].orEmpty().any { it.toolCanonical == "shell" })
         assertFalse(all["/p2"].orEmpty().any { it.toolCanonical == "shell" })
+    }
+
+    // ---- ZCode ruleContent 匹配语义 ----
+
+    @Test
+    fun prefixRuleMatchesCommandHead() {
+        val rule = ApprovalRuleStore.Rule("shell", "shell:prefix:npm")
+        assertTrue(ApprovalRuleStore.ruleAppliesTo(rule, "shell", "npm install"))
+        assertTrue(ApprovalRuleStore.ruleAppliesTo(rule, "shell", "npm"))
+        assertFalse(ApprovalRuleStore.ruleAppliesTo(rule, "shell", "npmx install"))
+        assertFalse(ApprovalRuleStore.ruleAppliesTo(rule, "shell", "pnpm npm"))
+    }
+
+    @Test
+    fun fileRuleMatchesExactPathOnly() {
+        val rule = ApprovalRuleStore.Rule("edit", "edit:file:app/src/Main.kt")
+        assertTrue(ApprovalRuleStore.ruleAppliesTo(rule, "edit", "app/src/Main.kt"))
+        assertFalse(ApprovalRuleStore.ruleAppliesTo(rule, "edit", "app/src/Other.kt"))
+        assertFalse(ApprovalRuleStore.ruleAppliesTo(rule, "read", "app/src/Main.kt"))
+    }
+
+    @Test
+    fun anyRuleMatchesAllSubjects() {
+        val rule = ApprovalRuleStore.Rule("webfetch", "webfetch:any")
+        assertTrue(ApprovalRuleStore.ruleAppliesTo(rule, "webfetch", "https://a.b"))
+        assertTrue(ApprovalRuleStore.ruleAppliesTo(rule, "webfetch", ""))
+    }
+
+    @Test
+    fun wildcardRuleContentMatchesSubstringPattern() {
+        assertTrue(ApprovalRuleStore.matchContent("app/src/a/Main.kt", "app/*/Main.kt"))
+        assertTrue(ApprovalRuleStore.matchContent("https://x.com/a", "https://*.com/*"))
+        assertFalse(ApprovalRuleStore.matchContent("app/src/a/Other.kt", "app/*/Main.kt"))
+    }
+
+    @Test
+    fun trailingColonStarMatchesCommandPrefix() {
+        assertTrue(ApprovalRuleStore.matchContent("npm run build", "npm:*"))
+        assertTrue(ApprovalRuleStore.matchContent("npm", "npm:*"))
+        assertFalse(ApprovalRuleStore.matchContent("npmx run", "npm:*"))
+    }
+
+    @Test
+    fun writeInheritsEditRules() {
+        val editRule = ApprovalRuleStore.Rule("edit", "edit:file:app/src/Main.kt")
+        assertTrue(ApprovalRuleStore.ruleAppliesTo(editRule, "write", "app/src/Main.kt"))
+        assertFalse(ApprovalRuleStore.ruleAppliesTo(editRule, "shell", "app/src/Main.kt"))
+    }
+
+    @Test
+    fun behaviorBucketsAreIndependent() {
+        val rules = setOf(
+            ApprovalRuleStore.Rule("shell", "shell:prefix:npm", ApprovalRuleStore.RuleBehavior.ALLOW),
+            ApprovalRuleStore.Rule("shell", "shell:prefix:rm", ApprovalRuleStore.RuleBehavior.DENY),
+        )
+        val allow = rules.filter { it.behavior == ApprovalRuleStore.RuleBehavior.ALLOW }
+        val deny = rules.filter { it.behavior == ApprovalRuleStore.RuleBehavior.DENY }
+        assertEquals(1, allow.size)
+        assertEquals(1, deny.size)
+        assertTrue(allow.all { it.key.contains("npm") })
+        assertTrue(deny.all { it.key.contains("rm") })
     }
 }

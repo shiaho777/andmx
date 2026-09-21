@@ -51,6 +51,14 @@ object AnthropicMessagesAdapter : WireAdapter {
     /** Anthropic spec: thinking budget_tokens must be at least 1024. */
     internal const val MIN_THINKING_BUDGET = 1024
 
+    /**
+     * Leading system blocks that get their own ephemeral cache breakpoint —
+     * the ZCode prompt emits exactly 3 (cli_prefix / stable / dynamic).
+     * Anthropic allows at most 4 cache_control breakpoints per request; the
+     * remaining slot is the last-message anchor below.
+     */
+    internal const val MAX_CACHEABLE_SYSTEM_BLOCKS = 3
+
     override fun endpointUrl(base: String): String = base.trimEnd('/') + "/v1/messages"
 
     override fun authHeader(apiKey: String): Pair<String, String>? =
@@ -62,11 +70,29 @@ object AnthropicMessagesAdapter : WireAdapter {
     // ── Request encoding ──────────────────────────────────────────────────────
 
     override fun encodeRequest(req: ChatRequest, provider: ProviderDefinition): String {
-        // Split off the leading system message(s); Anthropic wants them top-level.
-        val systemText = req.messages
-            .filter { it.role == "system" }
-            .joinToString("\n\n") { it.content.orEmpty() }
-            .ifBlank { null }
+        // Split off system message(s); Anthropic wants them top-level. Emit as
+        // a block array so the leading ZCode-style prompt blocks (cli_prefix /
+        // stable / dynamic) each carry an ephemeral cache breakpoint — edits to
+        // the dynamic block then reuse the cached stable prefix. Mid-history
+        // system reminders stay plain blocks. Breakpoint budget: ≤3 system
+        // blocks + 1 message anchor = Anthropic's 4-breakpoint cap.
+        val systemMsgs = req.messages.filter { it.role == "system" }
+        val leadingSystem = req.messages.takeWhile { it.role == "system" }.size
+        val systemJson = if (systemMsgs.isEmpty()) {
+            null
+        } else {
+            buildJsonArray {
+                systemMsgs.forEachIndexed { i, m ->
+                    addJsonObject {
+                        put("type", "text")
+                        put("text", m.content.orEmpty())
+                        if (i < minOf(leadingSystem, MAX_CACHEABLE_SYSTEM_BLOCKS)) {
+                            putJsonObject("cache_control") { put("type", "ephemeral") }
+                        }
+                    }
+                }
+            }
+        }
 
         // Translate the remaining OpenAI-style message flow into Anthropic
         // content blocks. tool messages become tool_result blocks under a user
@@ -89,7 +115,7 @@ object AnthropicMessagesAdapter : WireAdapter {
             put("model", req.model)
             // Anthropic requires max_tokens; default to a generous cap when unset.
             put("max_tokens", provider.models[req.model]?.maxOutputTokens?.takeIf { it > 0 } ?: 8_192)
-            if (systemText != null) put("system", systemText)
+            if (systemJson != null) put("system", systemJson)
             put("messages", anthropicMessages)
             req.stream.let { if (it) put("stream", true) }
             // Extended thinking — only when the model declares the THINKING style.
@@ -216,7 +242,9 @@ object AnthropicMessagesAdapter : WireAdapter {
     override fun parseResponse(body: String): ApiMessage {
         val root = json.parseToJsonElement(body).jsonObject
         val blocks = root["content"]?.jsonArray ?: return ApiMessage(role = "assistant")
-        return assembleFromBlocks(blocks)
+        return assembleFromBlocks(blocks).copy(
+            finishReason = normalizeStopReason(root["stop_reason"]?.jsonPrimitive?.contentOrNull),
+        )
     }
 
     override fun extractUsage(body: String): JsonObject? =
@@ -244,6 +272,16 @@ object AnthropicMessagesAdapter : WireAdapter {
         )
     }
 
+    /**
+     * Map provider stop reasons onto the engine's contract: only output-token
+     * truncation is normalized to "length" (drives automatic continuation);
+     * everything else passes through raw for observability.
+     */
+    private fun normalizeStopReason(raw: String?): String? = when (raw) {
+        "max_tokens" -> "length"
+        else -> raw
+    }
+
     // ── SSE stream parsing ────────────────────────────────────────────────────
 
     /**
@@ -263,6 +301,7 @@ object AnthropicMessagesAdapter : WireAdapter {
         val text = StringBuilder()
         var inputTokens: Int? = null
         var outputTokens: Int? = null
+        var stopReason: String? = null
 
         for (raw in lines) {
             val line = raw.trim()
@@ -310,6 +349,7 @@ object AnthropicMessagesAdapter : WireAdapter {
                 }
                 "content_block_stop" -> { /* block complete; nothing to do */ }
                 "message_delta" -> {
+                    ev["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.contentOrNull?.let { stopReason = it }
                     ev["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
                     val merged = buildJsonObject {
                         inputTokens?.let { put("input_tokens", it) }
@@ -330,6 +370,7 @@ object AnthropicMessagesAdapter : WireAdapter {
             role = "assistant",
             content = text.toString().takeIf { it.isNotEmpty() },
             toolCalls = toolCalls,
+            finishReason = normalizeStopReason(stopReason),
         )
     }
 
