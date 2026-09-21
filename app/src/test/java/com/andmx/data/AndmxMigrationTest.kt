@@ -18,7 +18,7 @@ import org.robolectric.annotation.SQLiteMode
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class AndmxMigrationTest {
     @Test
-    fun productionMigrationRegistrationPreservesVersionOneRowsThroughVersionThirteen() = runBlocking {
+    fun productionMigrationRegistrationPreservesVersionOneRowsThroughVersionFourteen() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase("andmx.db")
         context.openOrCreateDatabase("andmx.db", Context.MODE_PRIVATE, null).use { legacy ->
@@ -41,7 +41,7 @@ class AndmxMigrationTest {
         val database = AndmxDatabase.get(context)
         try {
             val sqlite = database.openHelper.writableDatabase
-            assertEquals(13, sqlite.version)
+            assertEquals(15, sqlite.version)
             val dao = database.dao()
             val conversation = requireNotNull(dao.getConversation(41))
             assertEquals("/offline/project", conversation.project)
@@ -79,6 +79,13 @@ class AndmxMigrationTest {
             assertTrue(newId > 41)
             dao.deleteConversation(41)
             assertTrue(dao.messagesFor(41).isEmpty())
+            for (table in listOf(
+                "cron_automations", "workflow_definitions", "workflow_runs", "workflow_events",
+            )) {
+                sqlite.query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'"
+                ).use { c -> assertTrue("$table missing", c.moveToFirst()) }
+            }
             sqlite.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
         } finally {
             database.close()

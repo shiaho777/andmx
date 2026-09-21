@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -130,6 +131,8 @@ fun Composer(
     onPickConversation: (ConversationPick) -> Unit = {},
     skillSuggestions: List<SkillSuggestion> = emptyList(),
     onPickSkill: (SkillSuggestion) -> Unit = {},
+    mentionSuggestions: List<MentionSuggestion> = emptyList(),
+    onPickMention: (MentionSuggestion) -> Unit = {},
     placeholder: String = DEFAULT_PLACEHOLDER,
     flat: Boolean = false,
     modifier: Modifier = Modifier,
@@ -201,6 +204,44 @@ fun Composer(
                         },
                         trailing = pick.subtitle,
                         onClick = { onPickConversation(pick) },
+                    )
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible = mentionSuggestions.isNotEmpty() && slashSuggestions.isEmpty() &&
+                conversationSuggestions.isEmpty() && skillSuggestions.isEmpty(),
+        ) {
+            SuggestionPanel {
+                mentionSuggestions.forEach { m ->
+                    SuggestionRow(
+                        leading = {
+                            Icon(
+                                when (m.kind) {
+                                    MentionKind.AGENT -> Icons.Outlined.Psychology
+                                    MentionKind.SESSION -> Icons.AutoMirrored.Outlined.Chat
+                                    MentionKind.PLUGIN -> Icons.Outlined.Terminal
+                                    MentionKind.FILE_BROWSER -> Icons.AutoMirrored.Outlined.InsertDriveFile
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                when (m.kind) {
+                                    MentionKind.AGENT -> "@${m.label}"
+                                    MentionKind.SESSION -> "#${m.label}"
+                                    else -> m.label
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailing = m.subtitle,
+                        onClick = { onPickMention(m) },
                     )
                 }
             }
@@ -980,6 +1021,14 @@ private fun MentionChipView(
             val c = if (isDark) Color(0xFFC4B5FD) else Color(0xFF6D28D9)
             c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
         }
+        ContextChipKind.PASTE -> {
+            val c = if (isDark) Color(0xFFFDBA74) else Color(0xFFC2410C)
+            c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
+        }
+        ContextChipKind.AGENT -> {
+            val c = if (isDark) Color(0xFF86EFAC) else Color(0xFF15803D)
+            c to c.copy(alpha = if (isDark) 0.16f else 0.10f)
+        }
     }
     val display = when (kind) {
         ContextChipKind.SKILL -> label.removePrefix("$")
@@ -1082,6 +1131,8 @@ private fun ContextChipKind.icon(): ImageVector = when (this) {
     ContextChipKind.SKILL -> Icons.Outlined.AutoAwesome
     ContextChipKind.ATTACHMENT -> Icons.Outlined.AttachFile
     ContextChipKind.MESSAGE -> Icons.Outlined.FormatQuote
+    ContextChipKind.PASTE -> Icons.Outlined.ContentPaste
+    ContextChipKind.AGENT -> Icons.Outlined.Psychology
 }
 
 /**
@@ -1110,6 +1161,17 @@ data class Attachment(val name: String, val uri: String)
 data class SkillSuggestion(
     val name: String,
     val path: String,
+)
+
+/** @ 提及联想项（ZCode @ 面板对齐：子代理 / 会话 / 插件命令 / 文件浏览入口）。 */
+enum class MentionKind { AGENT, SESSION, PLUGIN, FILE_BROWSER }
+
+data class MentionSuggestion(
+    val kind: MentionKind,
+    val label: String,
+    val subtitle: String = "",
+    val payload: String = "",
+    val conversationId: Long = 0L,
 )
 
 /** ZCode 对齐占位符。 */

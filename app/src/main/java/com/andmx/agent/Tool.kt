@@ -25,6 +25,22 @@ interface Tool {
      */
     val timeoutMs: Long? get() = null
 
+    /**
+     * May this tool run concurrently with other calls in one model-requested
+     * batch (ZCode canRunInParallel)? The scheduler keeps all other calls
+     * serial and preserves request order. Default: READ-risk tools are safe;
+     * tools that mutate session/workspace state must override to false, and
+     * side-effect-free network reads (WebFetch/WebSearch) opt back in.
+     */
+    val concurrentSafe: Boolean get() = risk == ToolRisk.READ
+
+    /**
+     * ZCode `alwaysAsk` 对齐：声明后每次调用都必须经用户确认——项目 allow
+     * 规则与 FULL 模式都不能放行；项目 deny / 会话拒绝仍可阻断。
+     * 仅会话级「允许本会话」可以免确认。
+     */
+    val alwaysAsk: Boolean get() = false
+
     suspend fun execute(args: JsonObject): ToolResult
 
     fun toApiTool(): ApiTool = ApiTool(

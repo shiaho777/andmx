@@ -184,6 +184,83 @@ data class LogEntity(
     val level: String = "info",
 )
 
+// ── v14: Scheduled automations (mirrors ZCode cron automations) ──
+
+@Entity(
+    tableName = "cron_automations",
+    indices = [Index("conversationId"), Index("nextRunAt")],
+)
+data class CronAutomationEntity(
+    @PrimaryKey val id: String,
+    /** Bound conversation — the scheduled prompt runs as a turn in it. */
+    val conversationId: Long,
+    val title: String,
+    val prompt: String,
+    /** 5-field carrier cron (display + calendar slots when no interval rule). */
+    val cronExpr: String,
+    /** IntervalUnit name + interval for "every N units" rules; empty = plain cron. */
+    val intervalUnit: String = "",
+    val interval: Int = 0,
+    val anchorAt: Long = 0L,
+    val enabled: Boolean = true,
+    val recurring: Boolean = true,
+    val maxRuns: Int = 0,
+    val runCount: Int = 0,
+    val nextRunAt: Long = 0L,
+    val lastRunAt: Long = 0L,
+    /** active | completed | failed */
+    val lifecycleStatus: String = "active",
+    val model: String = "",
+    val createdAtMs: Long = System.currentTimeMillis(),
+)
+
+@Entity(tableName = "workflow_definitions")
+data class WorkflowDefinitionEntity(
+    @PrimaryKey val id: String,
+    val version: String,
+    val kind: String,
+    val title: String,
+    val description: String = "",
+    val enabled: Boolean = true,
+    val source: String = "user",
+    val definitionJson: String,
+    val createdAtMs: Long = System.currentTimeMillis(),
+    val updatedAtMs: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "workflow_runs",
+    indices = [Index("conversationId"), Index("status"), Index("updatedAtMs")],
+)
+data class WorkflowRunEntity(
+    @PrimaryKey val runId: String,
+    val conversationId: Long,
+    val definitionId: String,
+    val kind: String,
+    val task: String,
+    val status: String,
+    val cwd: String,
+    val snapshotJson: String,
+    val createdAtMs: Long = System.currentTimeMillis(),
+    val updatedAtMs: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "workflow_events",
+    indices = [Index("runId"), Index(value = ["runId", "seq"], unique = true)],
+)
+data class WorkflowEventEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val runId: String,
+    val seq: Long,
+    val type: String,
+    val phase: String = "",
+    val nodeId: String = "",
+    val message: String = "",
+    val payloadJson: String = "",
+    val timestamp: String,
+)
+
 // ── v8: Model providers (mirrors Codex model_providers + ZCode provider map) ──
 
 /**

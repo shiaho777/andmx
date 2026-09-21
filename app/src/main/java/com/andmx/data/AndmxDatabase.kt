@@ -16,8 +16,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LogEntity::class,
         ProviderEntity::class,
         TaskGroupEntity::class,
+        CronAutomationEntity::class,
+        WorkflowDefinitionEntity::class,
+        WorkflowRunEntity::class,
+        WorkflowEventEntity::class,
     ],
-    version = 13,
+    version = 15,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -41,6 +45,8 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_10_11,
                     MIGRATION_11_12,
                     MIGRATION_12_13,
+                    MIGRATION_13_14,
+                    MIGRATION_14_15,
                 )
                 .build()
                 .also { instance = it }
@@ -225,6 +231,93 @@ abstract class AndmxDatabase : RoomDatabase() {
         private val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE providers ADD COLUMN claudeMappingJson TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * v13 → v14: `cron_automations` 定时任务表（ZCode automations 对齐）。
+         * intervalUnit+interval+anchorAt 承载「每 N 单位」scheduleRule，
+         * cronExpr 兼容展示与日历槽位。
+         */
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS cron_automations (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        conversationId INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        prompt TEXT NOT NULL,
+                        cronExpr TEXT NOT NULL,
+                        intervalUnit TEXT NOT NULL DEFAULT '',
+                        interval INTEGER NOT NULL DEFAULT 0,
+                        anchorAt INTEGER NOT NULL DEFAULT 0,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        recurring INTEGER NOT NULL DEFAULT 1,
+                        maxRuns INTEGER NOT NULL DEFAULT 0,
+                        runCount INTEGER NOT NULL DEFAULT 0,
+                        nextRunAt INTEGER NOT NULL DEFAULT 0,
+                        lastRunAt INTEGER NOT NULL DEFAULT 0,
+                        lifecycleStatus TEXT NOT NULL DEFAULT 'active',
+                        model TEXT NOT NULL DEFAULT '',
+                        createdAtMs INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_cron_automations_conversationId ON cron_automations(conversationId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_cron_automations_nextRunAt ON cron_automations(nextRunAt)")
+            }
+        }
+
+        /**
+         * v14 → v15: dwf 工作流三表——definition 库、run 快照（JSON）、事件流水。
+         */
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS workflow_definitions (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        version TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT NOT NULL DEFAULT '',
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        source TEXT NOT NULL DEFAULT 'user',
+                        definitionJson TEXT NOT NULL,
+                        createdAtMs INTEGER NOT NULL,
+                        updatedAtMs INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS workflow_runs (
+                        runId TEXT NOT NULL PRIMARY KEY,
+                        conversationId INTEGER NOT NULL,
+                        definitionId TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        task TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        cwd TEXT NOT NULL,
+                        snapshotJson TEXT NOT NULL,
+                        createdAtMs INTEGER NOT NULL,
+                        updatedAtMs INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_workflow_runs_conversationId ON workflow_runs(conversationId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_workflow_runs_status ON workflow_runs(status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_workflow_runs_updatedAtMs ON workflow_runs(updatedAtMs)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS workflow_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        runId TEXT NOT NULL,
+                        seq INTEGER NOT NULL,
+                        type TEXT NOT NULL,
+                        phase TEXT NOT NULL DEFAULT '',
+                        nodeId TEXT NOT NULL DEFAULT '',
+                        message TEXT NOT NULL DEFAULT '',
+                        payloadJson TEXT NOT NULL DEFAULT '',
+                        timestamp TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_workflow_events_runId ON workflow_events(runId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_workflow_events_runId_seq ON workflow_events(runId, seq)")
             }
         }
 

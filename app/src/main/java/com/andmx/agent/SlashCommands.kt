@@ -12,6 +12,10 @@ sealed interface SlashResult {
     data object Tools : SlashResult
     data object Handoff : SlashResult
     data object Export : SlashResult
+    data object Fork : SlashResult
+    data object Rewind : SlashResult
+    data object Resume : SlashResult
+    data object Workflows : SlashResult
     data object OpenModel : SlashResult
     data class Mode(val mode: ApprovalMode) : SlashResult
     data class Goal(val action: GoalAction, val text: String = "") : SlashResult
@@ -46,6 +50,10 @@ object SlashCommands {
         Spec("/export", "导出当前对话", keywords = listOf("导出")),
         Spec("/regen", "重新生成上一轮回复", aliases = listOf("/retry", "/regenerate"), keywords = listOf("重试")),
         Spec("/checkpoint", "生成交接检查点", aliases = listOf("/handoff-checkpoint"), keywords = listOf("检查点")),
+        Spec("/fork", "分叉当前对话为新会话", aliases = listOf("/branch"), keywords = listOf("分叉", "分支")),
+        Spec("/rewind", "回滚到某个检查点（对话+文件改动）", aliases = listOf("/rollback"), keywords = listOf("回滚", "回退")),
+        Spec("/resume", "恢复历史会话", aliases = listOf("/sessions"), keywords = listOf("恢复", "历史")),
+        Spec("/workflows", "查看工作流定义与运行", aliases = listOf("/workflow"), keywords = listOf("工作流", "workflow", "dwf")),
     )
 
     fun suggestions(
@@ -102,6 +110,10 @@ object SlashCommands {
             "/goal", "/target", "/objective" -> parseGoal(t)
             "/handoff", "/summary" -> SlashResult.Handoff
             "/export" -> SlashResult.Export
+            "/fork", "/branch" -> SlashResult.Fork
+            "/rewind", "/rollback" -> SlashResult.Rewind
+            "/resume", "/sessions" -> SlashResult.Resume
+            "/workflows", "/workflow" -> SlashResult.Workflows
             "/help", "/?" -> SlashResult.Help
             else -> SlashResult.Unknown(t.substringBefore(' '))
         }

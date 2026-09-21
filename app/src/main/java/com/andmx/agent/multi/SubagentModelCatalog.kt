@@ -32,6 +32,13 @@ object SubagentModelCatalog {
         return v.substring(0, idx) to v.substring(idx + SEP.length)
     }
 
+    /** Split a `provider::model$level` spec into (base spec, level?). Mirrors ZCode's `$level` suffix. */
+    fun splitLevel(value: String): Pair<String, String?> {
+        val i = value.lastIndexOf('$')
+        if (i <= 0) return value to null
+        return value.substring(0, i) to value.substring(i + 1).ifBlank { null }
+    }
+
     fun displayLabel(value: String?, options: List<SubagentModelOption> = emptyList()): String {
         if (isInherit(value)) return "继承默认"
         options.firstOrNull { it.value == value }?.let { return it.label }

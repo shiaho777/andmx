@@ -46,6 +46,26 @@ class SlashCommandsTest {
     }
 
     @Test
+    fun recognizesForkRewindResume() {
+        assertTrue(SlashCommands.parse("/fork") is SlashResult.Fork)
+        assertTrue(SlashCommands.parse("/branch") is SlashResult.Fork)
+        assertTrue(SlashCommands.parse("/rewind") is SlashResult.Rewind)
+        assertTrue(SlashCommands.parse("/rollback") is SlashResult.Rewind)
+        assertTrue(SlashCommands.parse("/resume") is SlashResult.Resume)
+        assertTrue(SlashCommands.parse("/sessions") is SlashResult.Resume)
+    }
+
+    @Test
+    fun suggestionsMatchForkRewindResumeAliases() {
+        assertEquals("/fork", SlashCommands.suggestions("/branch").first().name)
+        assertEquals("/rewind", SlashCommands.suggestions("/rollback").first().name)
+        assertEquals("/resume", SlashCommands.suggestions("/sessions").first().name)
+        assertEquals("/rewind", SlashCommands.suggestions("/回滚").first().name)
+        assertEquals("/fork", SlashCommands.suggestions("/分叉").first().name)
+        assertEquals("/resume", SlashCommands.suggestions("/恢复").first().name)
+    }
+
+    @Test
     fun recognizesApprovalModes() {
         assertEquals(ApprovalMode.FULL, (SlashCommands.parse("/full") as SlashResult.Mode).mode)
         assertEquals(ApprovalMode.ASK, (SlashCommands.parse("/ask") as SlashResult.Mode).mode)

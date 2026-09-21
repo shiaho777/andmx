@@ -234,6 +234,38 @@ class OpenAiResponsesAdapterTest {
     }
 
     @Test
+    fun incompleteMaxOutputTokensBecomesLengthNotError() = runTest {
+        val lines = listOf(
+            """data: {"type":"response.output_text.delta","delta":"partial"}""",
+            """data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}]}}""",
+        ).asSequence()
+        val msg = adapter.parseStream(lines, onContent = {}, onReasoning = {}, onToolCall = { _, _, _, _ -> })
+        assertEquals("partial", msg.content)
+        assertEquals("length", msg.finishReason)
+    }
+
+    @Test
+    fun incompleteOtherReasonStillThrows() = runTest {
+        val lines = listOf(
+            """data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}""",
+        ).asSequence()
+        try {
+            adapter.parseStream(lines, onContent = {}, onReasoning = {}, onToolCall = { _, _, _, _ -> })
+            error("expected failure")
+        } catch (e: IllegalStateException) {
+            assertEquals("content_filter", e.message)
+        }
+    }
+
+    @Test
+    fun nonStreamingIncompleteMapsToLength() {
+        val body = """{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"half"}]}]}"""
+        val msg = adapter.parseResponse(body)
+        assertEquals("half", msg.content)
+        assertEquals("length", msg.finishReason)
+    }
+
+    @Test
     fun usageExtractsAndParses() {
         val usage = adapter.extractUsage("""{"usage":{"input_tokens":10,"output_tokens":5}}""")
             ?: error("missing usage")

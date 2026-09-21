@@ -49,4 +49,24 @@ class SseParserTest {
         assertEquals("run_shell", calls.first().function.name)
         assertEquals("""{"command":"ls -la"}""", calls.first().function.arguments)
     }
+
+    @Test
+    fun capturesFinishReasonFromTerminalChunk() = runTest {
+        val lines = sequenceOf(
+            """data: {"choices":[{"delta":{"content":"partial"}}]}""",
+            """data: {"choices":[{"delta":{},"finish_reason":"length"}]}""",
+            "data: [DONE]",
+        )
+        val msg = adapter.parseStream(lines, onContent = {})
+        assertEquals("partial", msg.content)
+        assertEquals("length", msg.finishReason)
+    }
+
+    @Test
+    fun nonStreamingResponseCarriesFinishReason() {
+        val body = """{"choices":[{"message":{"role":"assistant","content":"cut"},"finish_reason":"length"}]}"""
+        val msg = adapter.parseResponse(body)
+        assertEquals("cut", msg.content)
+        assertEquals("length", msg.finishReason)
+    }
 }

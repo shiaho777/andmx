@@ -19,6 +19,33 @@ class ConversationRepository(context: Context) {
 
     suspend fun conversation(id: Long): ConversationEntity? = dao.getConversation(id)
 
+    /**
+     * Fork a conversation: clone the row (fresh rollout/session ids) and copy
+     * every message verbatim. Returns the new conversation id, or null when the
+     * source does not exist.
+     */
+    suspend fun forkConversation(fromId: Long): Long? {
+        val src = dao.getConversation(fromId) ?: return null
+        val now = System.currentTimeMillis()
+        val newId = dao.insertConversation(
+            src.copy(
+                id = 0,
+                title = src.title.ifBlank { "未命名会话" } + " · 分叉",
+                createdAt = now,
+                updatedAt = now,
+                rolloutPath = "",
+                sessionId = "",
+                archived = false,
+                pinned = false,
+            ),
+        )
+        dao.messagesFor(fromId).forEach { m ->
+            dao.insertMessage(m.copy(id = 0, conversationId = newId))
+        }
+        dao.touchConversation(newId, src.title.ifBlank { "未命名会话" } + " · 分叉", now)
+        return newId
+    }
+
     suspend fun addMessage(
         conversationId: Long,
         role: String,

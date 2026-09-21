@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,7 @@ fun AskUserQuestionPanel(
     request: ChatController.ApprovalRequest,
     onSubmit: (String) -> Unit,
     onCancel: () -> Unit,
+    onSnooze: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val questions = request.questions
@@ -56,6 +58,15 @@ fun AskUserQuestionPanel(
     val useOther = remember(request.id) { mutableStateMapOf<String, Boolean>() }
     val notes = remember(request.id) { mutableStateMapOf<String, String>() }
     val focusedPreview = remember(request.id) { mutableStateMapOf<String, String>() }
+    var nowMs by remember(request.id) { mutableStateOf(System.currentTimeMillis()) }
+    if (request.autoDeadlineAt != null) {
+        LaunchedEffect(request.id) {
+            while (true) {
+                kotlinx.coroutines.delay(1_000)
+                nowMs = System.currentTimeMillis()
+            }
+        }
+    }
 
     Surface(
         modifier = modifier
@@ -124,6 +135,33 @@ fun AskUserQuestionPanel(
                     onNotesChange = { notes[q.question] = it },
                 )
                 if (index < questions.lastIndex) Spacer(Modifier.height(12.dp))
+            }
+            val deadline = request.autoDeadlineAt
+            val visibleAt = request.countdownVisibleAt
+            if (deadline != null && visibleAt != null && nowMs >= visibleAt) {
+                val remainSec = ((deadline - nowMs).coerceAtLeast(0L) + 999L) / 1000L
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${remainSec / 60}:${"%02d".format(remainSec % 60)} 后将按空答案自动继续",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "稍后",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = onSnooze)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
             }
             Row(
                 Modifier

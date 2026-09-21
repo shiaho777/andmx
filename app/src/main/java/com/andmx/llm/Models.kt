@@ -16,6 +16,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -50,6 +51,13 @@ data class ApiMessage(
     val toolCallId: String? = null,
     val name: String? = null,
     val imageUrls: List<String>? = null,
+    /**
+     * Response-side stop reason, normalized at the adapter boundary:
+     * "length" means the reply was cut by the output-token cap (drives the
+     * engine's output-token continuation), other provider values pass through.
+     * Never serialized into requests.
+     */
+    val finishReason: String? = null,
 )
 
 object ApiMessageSerializer : KSerializer<ApiMessage> {
@@ -113,6 +121,7 @@ object ApiMessageSerializer : KSerializer<ApiMessage> {
             toolCalls = toolCalls,
             toolCallId = obj["tool_call_id"]?.jsonPrimitive?.content,
             name = obj["name"]?.jsonPrimitive?.content,
+            finishReason = (obj["finish_reason"] as? JsonPrimitive)?.contentOrNull,
         )
     }
 }

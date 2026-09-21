@@ -67,8 +67,8 @@ class ContextCompactor(
 
     /**
      * Estimate if compaction is needed based on token count, using ZCode's
-     * budget math: effective window = context − output reserve; threshold =
-     * min(95% of effective, effective − buffer).
+     * current preflight budget math: effective window = context − min(output
+     * reserve, 21K); threshold = effective − 13K buffer.
      */
     fun needsCompaction(
         history: List<ApiMessage>,
@@ -78,32 +78,31 @@ class ContextCompactor(
         if (autoCompactTokenLimit > 0) {
             return estimateTokens(history) > autoCompactTokenLimit
         }
-        val effective = effectiveContextWindow(contextWindow)
-        val reserve = outputReserveTokens(contextWindow, maxOutputTokens)
-        return estimateTokens(history) >= autoCompactThresholdTokens(effective, reserve)
+        val effective = effectiveContextWindow(contextWindow, maxOutputTokens)
+        return estimateTokens(history) >= autoCompactThresholdTokens(effective)
     }
 
     fun isContextWindowExceeded(
         history: List<ApiMessage>,
         contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
         maxOutputTokens: Int = 0,
-    ): Boolean = estimateTokens(history) > effectiveContextWindow(contextWindow)
+    ): Boolean = estimateTokens(history) > effectiveContextWindow(contextWindow, maxOutputTokens)
 
-    fun effectiveContextWindow(contextWindow: Int): Int =
-        (contextWindow.toLong() - outputReserveTokens(contextWindow, 0)).toInt().coerceAtLeast(0)
+    fun effectiveContextWindow(contextWindow: Int, maxOutputTokens: Int = 0): Int =
+        (contextWindow.toLong() - outputReserveTokens(contextWindow, maxOutputTokens)).toInt().coerceAtLeast(0)
 
     private fun outputReserveTokens(contextWindow: Int, maxOutputTokens: Int): Long {
         val declared = maxOutputTokens.takeIf { it > 0 } ?: OUTPUT_RESERVE_TOKENS
-        return minOf(declared, contextWindow).toLong()
+        return minOf(declared, PREFLIGHT_OUTPUT_RESERVE_TOKENS, contextWindow).toLong()
     }
 
-    fun autoCompactThresholdTokens(effectiveWindow: Int, outputReserve: Long): Int {
-        val byPercent = (effectiveWindow * AUTO_COMPACT_THRESHOLD_PERCENT / 100L).toInt()
-        val byBuffer = (effectiveWindow - outputReserve - BUFFER_TOKENS).toInt().coerceAtLeast(0)
-        return minOf(byPercent, byBuffer).coerceAtLeast(0)
-    }
+    fun autoCompactThresholdTokens(effectiveWindow: Int): Int =
+        (effectiveWindow - BUFFER_TOKENS).coerceAtLeast(0)
 
-    fun microcompactThresholdTokens(contextWindow: Int): Int = Microcompact.thresholdTokens(contextWindow)
+    fun microcompactThresholdTokens(contextWindow: Int, maxOutputTokens: Int = 0): Int =
+        Microcompact.thresholdTokens(
+            autoCompactThresholdTokens(effectiveContextWindow(contextWindow, maxOutputTokens)),
+        )
 
     /** Estimate total tokens in the conversation history. */
     fun estimateTokens(history: List<ApiMessage>): Int = TokenEstimate.forCompaction(history)
@@ -136,10 +135,10 @@ class ContextCompactor(
 
         val tokensBefore = estimateTokens(history)
 
-        // Find the system message(s) at the start
-        val systemEnd = history.indexOfLast { it.role == "system" } + 1
-        val systemMsgs = history.take(systemEnd)
-        val nonSystem = history.drop(systemEnd)
+        // Find the system message(s) at the start — contiguous prefix only;
+        // mid-history system reminders must not be mistaken for the prefix.
+        val systemMsgs = history.takeWhile { it.role == "system" }
+        val nonSystem = history.drop(systemMsgs.size)
 
         if (nonSystem.size <= keepRecentMessages) return null
 
@@ -180,7 +179,14 @@ class ContextCompactor(
             val summary = extractSummary(raw)
 
             val compacted = systemMsgs +
-                ApiMessage(role = "user", content = "[上下文摘要] 以下是之前对话的关键信息:\n\n$summary") +
+                ApiMessage(
+                    role = "user",
+                    content = buildCompactSummaryMessage(
+                        summary,
+                        recentMessagesPreserved = true,
+                        suppressFollowup = true,
+                    ),
+                ) +
                 toKeep
 
             val tokensAfter = estimateTokens(compacted)
@@ -190,8 +196,14 @@ class ContextCompactor(
     }
 
     private fun extractSummary(raw: String): String {
-        val match = SUMMARY_REGEX.find(raw) ?: return raw.trim()
-        return match.groupValues[1].trim()
+        var formatted = raw.trim()
+        if (formatted.isEmpty()) return ""
+        formatted = formatted.replaceFirst(ANALYSIS_REGEX, "")
+        val match = SUMMARY_REGEX.find(formatted)
+        if (match != null) {
+            formatted = formatted.replaceFirst(SUMMARY_REGEX, "Summary:\n" + match.groupValues[1].trim())
+        }
+        return formatted.replace(Regex("\n\n+"), "\n\n").trim()
     }
 
     /**
@@ -211,9 +223,8 @@ class ContextCompactor(
         goal: String = "",
     ): CompactionResult? {
         val tokensBefore = estimateTokens(history)
-        val systemEnd = history.indexOfLast { it.role == "system" } + 1
-        val systemMsgs = history.take(systemEnd)
-        val nonSystem = history.drop(systemEnd)
+        val systemMsgs = history.takeWhile { it.role == "system" }
+        val nonSystem = history.drop(systemMsgs.size)
 
         if (nonSystem.isEmpty()) return null
 
@@ -330,13 +341,36 @@ class ContextCompactor(
     companion object {
         const val DEFAULT_CONTEXT_WINDOW = 200_000
         const val OUTPUT_RESERVE_TOKENS = 32_000
+        /** Upstream caps the preflight output reserve at 21K for threshold math. */
+        const val PREFLIGHT_OUTPUT_RESERVE_TOKENS = 21_000
         const val BUFFER_TOKENS = 13_000
-        const val AUTO_COMPACT_THRESHOLD_PERCENT = 95L
 
         private val SUMMARY_REGEX = Regex(
             "<summary>\\s*([\\s\\S]*?)\\s*</summary>",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
+        private val ANALYSIS_REGEX = Regex(
+            "<analysis>\\s*[\\s\\S]*?\\s*</analysis>",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+        )
+
+        fun buildCompactSummaryMessage(
+            summary: String,
+            recentMessagesPreserved: Boolean = false,
+            suppressFollowup: Boolean = false,
+        ): String {
+            var message = "This session is being continued from a previous conversation that ran out of context. " +
+                "The summary below covers the earlier portion of the conversation.\n\n$summary"
+            if (recentMessagesPreserved) {
+                message += "\n\nRecent messages are preserved verbatim."
+            }
+            if (suppressFollowup) {
+                message += "\nContinue the conversation from where it left off without asking the user any further questions. " +
+                    "Resume directly — do not acknowledge the summary, do not recap what was happening, " +
+                    "do not preface with \"I'll continue\" or similar. Pick up the last task as if the break never happened."
+            }
+            return message
+        }
 
         private const val COMPACT_REMINDER =
             "\n\nREMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> block " +
@@ -348,8 +382,17 @@ class ContextCompactor(
                 "摘要必须足够完整，使接手者无需阅读原始对话即可继续工作。" +
                 "保留所有关键的技术细节、文件路径、错误信息和验证结果。"
 
-        /** Verbatim from the ZCode bundle (buildCompactPrompt): 9-section summary contract. */
-        val COMPACTION_SYSTEM_PROMPT = """
+        private const val NO_TOOLS_PREAMBLE = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+
+- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
+- You already have all the context you need in the conversation above.
+- Tool calls will be REJECTED and will waste your only turn — you will fail the task.
+- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+
+"""
+
+        /** Verbatim from upstream compact/prompt.ts buildCompactPrompt: 9-section summary contract. */
+        val COMPACTION_SYSTEM_PROMPT = NO_TOOLS_PREAMBLE + """
 Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
 
@@ -378,12 +421,73 @@ Your summary should include the following sections:
 5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
 6. All user messages: List ALL user messages that are not tool results. These are critical for understanding the users' feedback and changing intent. Preserve any security-relevant instructions or constraints verbatim so they remain in effect after compaction.
 7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages and both user and assistant. Include file names and code snippets where applicable.
+8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
 9. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.
                        If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.
 
+Here's an example of how your output should be structured:
+
+<example>
+<analysis>
+[Your thought process, ensuring all points are covered thoroughly and accurately]
+</analysis>
+
+<summary>
+1. Primary Request and Intent:
+   [Detailed description]
+
+2. Key Technical Concepts:
+   - [Concept 1]
+   - [Concept 2]
+   - [...]
+
+3. Files and Code Sections:
+   - [File Name 1]
+      - [Summary of why this file is important]
+      - [Summary of the changes made to this file, if any]
+      - [Important Code Snippet]
+   - [File Name 2]
+      - [Important Code Snippet]
+   - [...]
+
+4. Errors and fixes:
+    - [Detailed description of error 1]:
+      - [How you fixed the error]
+      - [User feedback on the error if any]
+    - [...]
+
+5. Problem Solving:
+   [Description of solved problems and ongoing troubleshooting]
+
+6. All user messages:
+    - [Detailed non tool use user message]
+    - [...]
+
+7. Pending Tasks:
+   - [Task 1]
+   - [Task 2]
+   - [...]
+
+8. Current Work:
+   [Precise description of current work]
+
+9. Optional Next Step:
+   [Optional Next step to take]
+
+</summary>
+</example>
+
 Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.
 
-There may be additional summarization instructions provided in the included context. If so, remember to follow these instructions when creating the above summary.""".trimIndent()
+There may be additional summarization instructions provided in the included context. If so, remember to follow these instructions when creating the above summary. Examples of instructions include:
+<example>
+## Compact Instructions
+When summarizing the conversation focus on typescript code changes and also remember the mistakes you made and how you fixed them.
+</example>
+
+<example>
+# Summary instructions
+When you are using compact - please focus on test output and code changes. Include file reads verbatim.
+</example>""".trimIndent()
     }
 }

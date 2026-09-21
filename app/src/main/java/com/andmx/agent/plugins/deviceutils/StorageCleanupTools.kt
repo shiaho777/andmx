@@ -894,6 +894,7 @@ private class StorageCleanTool(private val context: Context) : Tool {
     override val description =
         "Delete files from a previewed plan. Requires userConfirmed=true and confirmToken. Returns structured before/after stats, not a chart."
     override val risk = ToolRisk.WRITE
+    override val alwaysAsk = true
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {

@@ -64,7 +64,8 @@ object OpenAiChatAdapter : WireAdapter {
 
     override fun parseResponse(body: String): ApiMessage {
         val resp = json.decodeFromString(ChatResponse.serializer(), body)
-        return resp.choices.firstOrNull()?.message
+        val choice = resp.choices.firstOrNull()
+        return choice?.message?.copy(finishReason = choice.finishReason)
             ?: error("空响应")
     }
 
@@ -80,6 +81,7 @@ object OpenAiChatAdapter : WireAdapter {
     ): ApiMessage {
         val contentBuf = StringBuilder()
         val toolAcc = sortedMapOf<Int, Acc>()
+        var finishReason: String? = null
         for (raw in lines) {
             val line = raw.trim()
             if (!line.startsWith("data:")) continue
@@ -87,7 +89,9 @@ object OpenAiChatAdapter : WireAdapter {
             if (data == "[DONE]") break
             val chunk = runCatching { json.decodeFromString(com.andmx.llm.ChatStreamChunk.serializer(), data) }.getOrNull() ?: continue
             chunk.usage?.let { onUsage(it) }
-            val delta = chunk.choices.firstOrNull()?.delta ?: continue
+            val choice = chunk.choices.firstOrNull() ?: continue
+            choice.finishReason?.let { finishReason = it }
+            val delta = choice.delta ?: continue
             delta.content?.let { if (it.isNotEmpty()) { contentBuf.append(it); onContent(it) } }
             val reasoningPiece = delta.reasoningContent ?: delta.reasoning
             reasoningPiece?.let { if (it.isNotEmpty()) onReasoning(it) }
@@ -110,6 +114,7 @@ object OpenAiChatAdapter : WireAdapter {
             role = "assistant",
             content = contentBuf.toString().takeIf { it.isNotEmpty() },
             toolCalls = toolCalls,
+            finishReason = finishReason,
         )
     }
 

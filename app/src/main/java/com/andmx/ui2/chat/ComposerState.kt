@@ -69,6 +69,27 @@ enum class ContextChipKind {
     SKILL,      // $skill
     ATTACHMENT, // 附件
     MESSAGE,    // 对话引用（ZCode chat.selections 对齐）
+    PASTE,      // 长文本粘贴转附件（ZCode paste-as-attachment 对齐）
+    AGENT,      // @ 提及的子代理（ZCode @agents 对齐）
+}
+
+/** 粘贴转附件阈值：单次插入超过该字符数的长文本收进 chip 而非塞进输入框。 */
+const val PASTE_AS_CHIP_MIN_CHARS = 800
+
+/**
+ * 提取一次输入变化中插入的片段（最长公共前后缀）。返回 null 表示非插入或太短。
+ * ZCode 对齐：粘贴大段文本转附件 chip，保持输入框可读。
+ */
+data class PastedSegment(val text: String, val start: Int, val endExclusive: Int)
+
+fun extractPastedSegment(old: String, new: String, minChars: Int = PASTE_AS_CHIP_MIN_CHARS): PastedSegment? {
+    if (new.length - old.length < minChars) return null
+    var pre = 0
+    while (pre < old.length && pre < new.length && old[pre] == new[pre]) pre++
+    var suf = 0
+    while (suf < old.length - pre && old[old.length - 1 - suf] == new[new.length - 1 - suf]) suf++
+    val seg = new.substring(pre, new.length - suf)
+    return if (seg.length >= minChars) PastedSegment(seg, pre, new.length - suf) else null
 }
 
 /**
