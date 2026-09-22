@@ -185,7 +185,7 @@ AndMX 目前所有提醒都是裸 system 消息（TodoReminder、RepeatCallGuard
 | ReadSessionContext | ✅ | — |
 | CronCreate/List/Update/Delete | ✅ | `CronStore`+`CronTools`+应用内 15s ticker；delayMinutes/5 段 cron/intervalUnit 规则、stale one-shot 拒绝、automation 回合禁写 |
 | ListModels | ✅ | `ListModelsTool` 读 live provider 目录，`providerId/modelId` 规范形、`$level` 推理档后缀、`[current]`/`[disabled]` 标记 |
-| js (node_repl) | ❌ | MCP host 的 JS REPL，配 browser-use 插件；Android 无对应物，可后置 |
+| js (node_repl) | ✅ | `JsReplTool`+`JsReplRuntime`：常驻 WebView JS 引擎做等价 REPL——per-conversation 实例、`globalThis` 跨调用保状态、console.* 捕获进 logs、Promise 轮询 settle、timeout_ms（≤120s）、title 必填；对象结果 JSON 序列化；会话删除时 dispose WebView |
 | submit_result / escalate | ✅ | `WorkflowActorTools`：submit_result 存结构化结果，escalate 经 ask_user 审批路径回到 run 所属会话用户；无会话时 deferred 兜底 |
 | CreateWorkflow/AmendWorkflow/SaveWorkflow/List*/Get*/Resume*/Cancel*/EvalWorkflowSnippet | ✅ | `WorkflowTools` 十工具面；差异：authoring 用 spec JSON（无 JS runtime，上游 TS DSL 不落地）；ResolveWorkflowQuestion 由 escalate/ask_user 路径覆盖 |
 | ApplyPatch | ✅ AndMX 独有保留 | ZCode 源码里注释掉了（`// applyPatchToolEntry`） |
@@ -310,9 +310,13 @@ TUI 侧对应 app-*.ts）：
 - 工具清单终态核对：上游 builtInTools 35 项全部有对应物或刻意差异——
   provider-visible-order 里的 EnterWorktree/ExitWorktree/LSP/NotebookEdit/
   TaskCreate/TaskGet/TaskList/TaskUpdate/ScheduleWakeup 上游仅有排序声明
-  无 handler 实现（Claude-compat 占位），不视为缺口；offPeakCreate/
-  offPeakList 依赖上游套餐额度端口 offPeakPort（无对应基建，刻意差异）；
-  js/node_repl 无 JS runtime（既有刻意差异）。
+  无 handler 实现（Claude-compat 占位），不视为缺口。
+- OffPeakCreate/OffPeakList 已落地（P8）：闲时窗口由设置项
+  `offPeakStartHour`（默认 0:00，设置页可改）驱动，挂 CronStore
+  `createDeferred` 单发排程；状态枚举 queued/paused/completed/failed
+  对齐上游。与上游差异仅在窗口来源——上游读套餐额度时段，AndMX
+  由用户自定义。
+- js/node_repl 已落地（P8）：见上表——WebView REPL 等价物。
 
 ## 七、会话管理
 
@@ -334,7 +338,7 @@ TUI 侧对应 app-*.ts）：
   plan usage meter、quota_exceeded 错误码——AndMX 只做三方自定义 provider。
 - Remote control / 手机远控桌面、relay、attachment 调度——AndMX 自身即移动端。
 - Electron 桌面层、`::code-comment` 渲染指令、mock-cdn 远程资源。
-- node_repl/browser-use 官方插件链——Android 上可用自有 ComputerUse 替代。
+- browser-use 官方插件链——Android 上可用自有 ComputerUse 替代（js REPL 本体已由 WebView 落地）。
 - OTel 遥测体系（AndMX 的 ModelCallTrace 埋点已够用，可按需补指标名对齐）。
 
 ---
@@ -511,11 +515,39 @@ TUI 侧对应 app-*.ts）：
   已齐；`TaskCreate/TaskGet/TaskList/TaskUpdate`/`EnterWorktree`/
   `ExitWorktree`/`LSP`/`NotebookEdit`/`ScheduleWakeup` 上游仅有
   provider-visible-order 占位、无 handler 无契约，确认非缺口。
+- ✅ `Bash` stdout 内嵌 `data:image/...` 提取为 imageUrls（上游
+  bash-image-output 对齐；>6MB 丢弃保文本）。
+- ✅ `Read` 视频抽帧：mp4/mov/mkv/avi/webm/3gp/m4v 经
+  MediaMetadataRetriever 取头/中/尾 3 帧 JPEG（上游 read-video 等价——
+  provider 无 video block，帧图替代）。
+- ✅ cancelled-stream-persistence：stop 时已到达的流式文本落 history +
+  AssistantComplete（此前取消即丢整段部分回复）。
+- ✅ assistant-feedback：messages.feedback 列（v16→v17）+ assistant
+  动作条 👍/👎 切换持久化（上游 setAssistantFeedback 对齐）。
+- ✅ `/continue`（恢复最近会话）+ `/AGENTS`（/init 别名）——上游
+  slash 注册表 22 枚全齐（除 /login /logout 官方登录协议不抄）。
 - ✅ 工具执行计时（上游 CommandExecutionTelemetry.runMs 对齐）：
   `AgentEvent.ToolFinished.durationMs` 全链路（单发/并发波/goal 校验
   三处派发点计时）→ ToolCall.durationMs → 卡片头显示 `123ms/1.2s`。
   firstOutputMs/noOutputMs/hash 属远端 trace 维度，本地无 trace exporter，
   标为不做。
+
+### P8 续：剩余刻意差异清零（js REPL + off-peak + 输出落盘 + diff 统计）
+
+- ✅ `js`（上游 node_repl）：`JsReplTool`+`JsReplRuntime`——常驻 WebView
+  JS 引擎做 per-conversation 持久 REPL，`globalThis` 跨调用保状态；
+  console.* 捕获进 logs、Promise 轮询 settle、timeout_ms≤120s、title 必填
+  （上游 JsInputSchema 对齐）；对象结果 JSON 序列化；会话删除 dispose。
+- ✅ `OffPeakCreate`/`OffPeakList`：闲时延迟任务挂 CronStore
+  `createDeferred`（单发 nextRunAt=下一个窗口起点）；窗口由设置项
+  `offPeakStartHour` 驱动（默认 0:00，设置「任务管理」组可改）。与上游
+  差异仅在窗口来源（上游读套餐额度时段）。
+- ✅ Bash `persistOutput=on_truncate` 等价：四条执行路径截断时完整
+  stdout 落 `<cwd>/.andmx/outputs/shell-<ts>.log` 并在结果里回路径——
+  模型可再 read/grep 全文，不再截断即丢。bounded 路径流式写盘，
+  remote/persistent/fallback 三条走 WorkspaceAccess.writeText（远端也覆盖）。
+- ✅ `file_diff` 统计等价：write_file 覆盖已存在文件、edit_file 成功后
+  输出追加真实 `(+adds -dels)`（DiffEngine 计算），不再只报字符数。
 
 ## 验证方式
 

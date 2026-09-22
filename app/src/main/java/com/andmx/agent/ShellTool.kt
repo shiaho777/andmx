@@ -165,7 +165,7 @@ class ShellTool(
                     ShellEvent.Finished(callId, command, res.exitCode, isError = res.exitCode != 0),
                 )
             }
-            return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+            return ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0)
         }
 
         if (bounded) {
@@ -183,7 +183,9 @@ class ShellTool(
                     append(res.stdout.ifBlank { "(无输出)" })
                     append("\n[exit=${res.exitCode}]")
                 }
-                return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+                return withImageOutput(
+                    ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0),
+                )
             }
             // Persistent shell failed — fall through to fork+exec
         }
@@ -197,7 +199,21 @@ class ShellTool(
             append(res.stdout.ifBlank { "(无输出)" })
             append("\n[exit=${res.exitCode}]")
         }
-        return ToolResult(out.take(16_000), isError = res.exitCode != 0)
+        return withImageOutput(
+            ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0),
+        )
+    }
+
+    /** 上游 persistOutput=on_truncate 等价：超限时完整 stdout 落 .andmx/outputs/ 并把路径回给模型。 */
+    private suspend fun withPersistedOverflow(rawStdout: String, rendered: String, limit: Int): String {
+        if (rendered.length <= limit) return rendered
+        val guest = "${cwdProvider().trimEnd('/')}/.andmx/outputs/shell-${System.currentTimeMillis()}.log"
+        val saved = runCatching {
+            access.writeText(guest, rawStdout)
+            guest
+        }.getOrNull()
+        val marker = "\n…[截断]${saved?.let { " 完整输出: $it" }.orEmpty()}"
+        return rendered.take((limit - marker.length).coerceAtLeast(0)) + marker
     }
 
     private suspend fun executeBounded(
@@ -230,6 +246,8 @@ class ShellTool(
             val buffer = ByteArray(8_192)
             var timedOut = false
             var truncated = false
+            var overflowWriter: java.io.BufferedWriter? = null
+            var overflowGuestPath: String? = null
             val started = System.nanoTime()
             val reader = process.inputStream
             try {
@@ -247,21 +265,40 @@ class ShellTool(
                         val chunk = String(buffer, 0, n, StandardCharsets.UTF_8)
                         val remaining = maxOutputChars - output.length
                         output.append(chunk.take(remaining))
-                        if (chunk.length > remaining) truncated = true
+                        if (chunk.length > remaining) {
+                            if (!truncated) {
+                                truncated = true
+                                // 上游 bash persistOutput=on_truncate 等价：截断后完整输出落盘，
+                                // 路径回给模型（本地工作区才落；远端无 host fd 保持纯截断）。
+                                val guest = "${cwdProvider().trimEnd('/')}/.andmx/outputs/" +
+                                    "shell-${System.currentTimeMillis()}.log"
+                                overflowGuestPath = guest
+                                overflowWriter = runCatching {
+                                    access.hostFile(guest)?.also { f ->
+                                        f.parentFile?.mkdirs()
+                                    }?.bufferedWriter(StandardCharsets.UTF_8)
+                                }.getOrNull()
+                                overflowWriter?.write(output.toString())
+                            }
+                            runCatching { overflowWriter?.write(chunk) }
+                        }
                     } else if (!process.isAlive) {
                         break
                     } else {
                         delay(25)
                     }
                 }
+                runCatching { overflowWriter?.close() }
                 val exitCode = if (timedOut) 124 else process.exitValue()
                 val suffix = if (timedOut) "\n(超时,已终止)\n[exit=124]" else "\n[exit=$exitCode]"
                 val text = output.toString().replace("\r", "").trimEnd().ifBlank { "(无输出)" }
-                val marker = "\n…[截断]"
+                val persisted = overflowGuestPath?.let { " 完整输出: $it" }.orEmpty()
+                val marker = "\n…[截断]$persisted"
                 val rendered = if (truncated || text.length + suffix.length > maxOutputChars) {
                     text.take((maxOutputChars - marker.length - suffix.length).coerceAtLeast(0)) + marker + suffix
                 } else text + suffix
                 ToolResult(rendered.takeLast(maxOutputChars), isError = timedOut || exitCode != 0)
+                    .let { withImageOutput(it) }
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
@@ -389,5 +426,23 @@ class ShellTool(
     fun disablePersistentShell() {
         usePersistent = false
         persistentShell.destroy()
+    }
+
+    /**
+     * 上游 bash-image-output：stdout 里的 data:image/... 提取为 imageUrls
+     * 返回给模型，文本里留占位行。
+     */
+    private fun withImageOutput(result: ToolResult): ToolResult {
+        val m = IMAGE_DATA_URL.find(result.output) ?: return result
+        val dataUrl = m.value
+        if (dataUrl.length > IMAGE_DATA_URL_MAX_CHARS) return result
+        val cleaned = result.output.replace(m.value, "[image output]")
+        return result.copy(output = cleaned, imageUrls = listOf(dataUrl))
+    }
+
+    companion object {
+        private val IMAGE_DATA_URL =
+            Regex("data:image/(?:png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=\\r\\n]+")
+        private const val IMAGE_DATA_URL_MAX_CHARS = 6 * 1024 * 1024
     }
 }

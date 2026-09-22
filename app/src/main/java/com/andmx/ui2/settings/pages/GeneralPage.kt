@@ -202,6 +202,24 @@ fun GeneralPage(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                HorizontalDivider()
+                StackedSettingRow(
+                    title = "闲时窗口",
+                    description = "OffPeak 任务排入每日该时刻启动的闲时窗口（本地时间）。",
+                ) {
+                    SegmentedRow(
+                        options = listOf(
+                            "0" to "0:00",
+                            "2" to "2:00",
+                            "4" to "4:00",
+                            "6" to "6:00",
+                            "22" to "22:00",
+                        ),
+                        selected = s.offPeakStartHour.toString(),
+                        onSelect = { save(s.copy(offPeakStartHour = it.toInt())) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
             SettingsGroup("自定义指令") {

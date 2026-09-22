@@ -79,6 +79,8 @@ data class ProviderSettings(
     val indexNewFoldersUserConfigured: Boolean = false,
     val instantGrep: Boolean = false,
     val indexFileLimit: Int = 50_000,
+    /** 闲时窗口起始小时（本地 0-23），OffPeak* 工具排程用。 */
+    val offPeakStartHour: Int = 0,
 ) {
     /**
      * Whether the agent can take a turn. Provider readiness (key present etc.)
@@ -124,6 +126,7 @@ class SettingsStore(
     private val indexNewFoldersUserConfiguredKey = androidx.datastore.preferences.core.booleanPreferencesKey("index_new_folders_user_configured")
     private val instantGrepKey = androidx.datastore.preferences.core.booleanPreferencesKey("instant_grep")
     private val indexFileLimitKey = androidx.datastore.preferences.core.intPreferencesKey("index_file_limit")
+    private val offPeakStartHourKey = androidx.datastore.preferences.core.intPreferencesKey("off_peak_start_hour")
 
     // Legacy keys retained only for one-time migration into the providers table.
     internal val legacyBaseUrlKey = stringPreferencesKey("base_url")
@@ -163,6 +166,7 @@ class SettingsStore(
             indexNewFoldersUserConfigured = p[indexNewFoldersUserConfiguredKey] ?: def.indexNewFoldersUserConfigured,
             instantGrep = p[instantGrepKey] ?: def.instantGrep,
             indexFileLimit = p[indexFileLimitKey] ?: def.indexFileLimit,
+            offPeakStartHour = p[offPeakStartHourKey] ?: def.offPeakStartHour,
         )
     }
 
@@ -197,6 +201,7 @@ class SettingsStore(
             p[indexNewFoldersUserConfiguredKey] = settings.indexNewFoldersUserConfigured
             p[instantGrepKey] = settings.instantGrep
             p[indexFileLimitKey] = settings.indexFileLimit
+            p[offPeakStartHourKey] = settings.offPeakStartHour
         }
     }
 

@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowRunEntity::class,
         WorkflowEventEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -48,6 +48,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_13_14,
                     MIGRATION_14_15,
                     MIGRATION_15_16,
+                    MIGRATION_16_17,
                 )
                 .build()
                 .also { instance = it }
@@ -326,6 +327,13 @@ abstract class AndmxDatabase : RoomDatabase() {
         private val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE conversations ADD COLUMN pendingQueueJson TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v16 → v17: messages.feedback——assistant 消息赞/踩（上游 assistant-feedback）。 */
+        private val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN feedback INTEGER NOT NULL DEFAULT 0")
             }
         }
 

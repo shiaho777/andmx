@@ -28,6 +28,8 @@ class CronTools(
     private val conversationId: suspend () -> Long,
     private val currentModel: suspend () -> String,
     private val isAutomationTurn: suspend () -> Boolean,
+    /** 闲时窗口起始小时（本地 0-23）——上游 off-peak 窗口由套餐侧给定，AndMX 由设置决定。 */
+    private val offPeakStartHour: suspend () -> Int = { 0 },
 ) {
     private fun noStore() = ToolResult(
         "automation_unavailable: this session cannot manage scheduled automations",
@@ -208,5 +210,82 @@ class CronTools(
         }
     }
 
-    fun all(): List<Tool> = listOf(Create(), ListAll(), Update(), Delete())
+    /** 上游 OffPeakCreate：把任务排进下一个闲时窗口（local offPeakStartHour:00）。 */
+    inner class OffPeakCreate : Tool {
+        override val name = "OffPeakCreate"
+        override val description =
+            "Queue an unattended task to run at the next off-peak window. The prompt continues THIS conversation later with full history, so it may reference established context; state the deliverable explicitly and never ask the run to schedule another task."
+        override val risk = ToolRisk.WRITE
+        override val parameters: JsonObject = buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+                putJsonObject("title") { put("type", "string") }
+                putJsonObject("prompt") { put("type", "string") }
+                putJsonObject("model") {
+                    put("type", "string")
+                    put("description", "Optional model id for the deferred run")
+                }
+            }
+            putJsonArray("required") { add("title"); add("prompt") }
+        }
+
+        override suspend fun execute(args: JsonObject): ToolResult {
+            denyInAutomation(name)?.let { return it }
+            val s = store ?: return noStore()
+            val title = args["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val prompt = args["prompt"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (title.isEmpty() || prompt.isEmpty()) {
+                return ToolResult("title and prompt are required", isError = true)
+            }
+            val hour = offPeakStartHour().coerceIn(0, 23)
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, hour)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+                if (timeInMillis <= System.currentTimeMillis()) {
+                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+                }
+            }
+            val entity = s.createDeferred(
+                conversationId = conversationId(),
+                title = title,
+                prompt = prompt,
+                model = args["model"]?.jsonPrimitive?.contentOrNull ?: currentModel(),
+                runAtMs = cal.timeInMillis,
+            )
+            return ToolResult(
+                "{\"status\":\"queued\",\"id\":\"${entity.id}\",\"runAt\":${entity.nextRunAt},\"title\":\"${title.replace("\"", "'")}\"}",
+            )
+        }
+    }
+
+    /** 上游 OffPeakList：列出闲时任务与状态（queued/paused/completed/failed）。 */
+    inner class OffPeakList : Tool {
+        override val name = "OffPeakList"
+        override val description = "List queued idle-time (off-peak) tasks in the current workspace."
+        override val risk = ToolRisk.READ
+        override val parameters: JsonObject = buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {}
+        }
+
+        override suspend fun execute(args: JsonObject): ToolResult {
+            val s = store ?: return noStore()
+            val tasks = s.list().filter { it.title.startsWith("[闲时]") }
+            if (tasks.isEmpty()) return ToolResult("{\"tasks\":[]}")
+            val items = tasks.joinToString(",") { a ->
+                val status = when {
+                    a.lifecycleStatus == "completed" -> "completed"
+                    a.lifecycleStatus == "failed" -> "failed"
+                    !a.enabled -> "paused"
+                    else -> "queued"
+                }
+                "{\"id\":\"${a.id}\",\"status\":\"$status\",\"title\":\"${a.title.removePrefix("[闲时] ").replace("\"", "'")}\",\"createdAt\":${a.anchorAt},\"runAt\":${a.nextRunAt}}"
+            }
+            return ToolResult("{\"tasks\":[$items]}")
+        }
+    }
+
+    fun all(): List<Tool> = listOf(Create(), ListAll(), Update(), Delete(), OffPeakCreate(), OffPeakList())
 }

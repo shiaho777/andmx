@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.ThumbDown
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -52,6 +56,7 @@ fun MessageBubble(
     onEdit: (() -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
     onSideChat: (() -> Unit)? = null,
+    onFeedback: ((Int) -> Unit)? = null,
     isEditing: Boolean = false,
 ) {
     val isUser = message.role == "user"
@@ -73,6 +78,7 @@ fun MessageBubble(
             onBranch = onBranch,
             onQuote = onQuote,
             onSideChat = onSideChat,
+            onFeedback = onFeedback,
         )
     }
 }
@@ -192,6 +198,7 @@ private fun AssistantProcessBlock(
     onBranch: (() -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
     onSideChat: (() -> Unit)? = null,
+    onFeedback: ((Int) -> Unit)? = null,
 ) {
     val process = message.isProcess
     // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
@@ -252,6 +259,8 @@ private fun AssistantProcessBlock(
                 onRegenerate = onRegenerate,
                 onQuote = onQuote,
                 onSideChat = onSideChat,
+                onFeedback = onFeedback,
+                feedback = message.feedback,
             )
         }
     }
@@ -266,6 +275,8 @@ private fun AssistantActionBar(
     onRegenerate: (() -> Unit)?,
     onQuote: (() -> Unit)? = null,
     onSideChat: (() -> Unit)? = null,
+    onFeedback: ((Int) -> Unit)? = null,
+    feedback: Int = 0,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
@@ -317,6 +328,18 @@ private fun AssistantActionBar(
                     onClick = onSideChat,
                 )
             }
+            if (onFeedback != null) {
+                FeedbackChip(
+                    icon = if (feedback == 1) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                    active = feedback == 1,
+                    onClick = { onFeedback(1) },
+                )
+                FeedbackChip(
+                    icon = if (feedback == -1) Icons.Filled.ThumbDown else Icons.Outlined.ThumbDown,
+                    active = feedback == -1,
+                    onClick = { onFeedback(-1) },
+                )
+            }
         }
         val timeLabel = formatMessageTime(createdAt, completedAt)
         if (timeLabel.isNotBlank()) {
@@ -356,6 +379,24 @@ private fun ActionChip(
             style = MaterialTheme.typography.labelMedium,
             color = color,
         )
+    }
+}
+
+@Composable
+private fun FeedbackChip(
+    icon: ImageVector,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val tint = if (active) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Icon(icon, null, Modifier.size(15.dp), tint = tint)
     }
 }
 

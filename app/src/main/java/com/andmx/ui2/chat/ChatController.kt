@@ -1679,11 +1679,12 @@ class ChatController(private val context: Context) {
             conversationId = { conversationId },
             currentModel = { settingsStore.settings.firstOrNull()?.model.orEmpty() },
             isAutomationTurn = { automationTurnIds.contains(conversationId) },
+            offPeakStartHour = { settingsStore.settings.firstOrNull()?.offPeakStartHour ?: 0 },
         ).all() + com.andmx.agent.zcode.WorkflowTools(
             service = workflowService,
             conversationId = { conversationId },
             cwd = { "/" },
-        ).all()
+        ).all() + com.andmx.agent.JsReplTool(context, "conv-$conversationId")
     }
 
     private suspend fun summarizeFetchedContent(
