@@ -58,6 +58,12 @@ data class ApiMessage(
      * Never serialized into requests.
      */
     val finishReason: String? = null,
+    /**
+     * Provider-reported usage for the request that produced this assistant
+     * message. Engine-side only (attached from LlmStreamEvent.UsageUpdate);
+     * never serialized. Drives the auto-compact provider_usage override.
+     */
+    val tokenUsage: TokenUsage? = null,
 )
 
 object ApiMessageSerializer : KSerializer<ApiMessage> {

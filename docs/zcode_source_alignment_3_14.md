@@ -107,9 +107,8 @@ ctx=200K/maxOut=32K 时：ZCode 阈值 166K，AndMX 123K——提前 43K 压缩�
 - 压缩后 user 消息改走 `buildCompactSummaryMessage` 原文
   （continued-session 文案 + `recentMessagesPreserved` + `suppressFollowup`）。
 
-未做：`transcriptPath`（依赖会话落盘指针）、`replStateCleared`（无 REPL）、
-`customInstructions` 附加段（AndMX `customCompactPrompt` 是整段替换语义，
-属扩展，保留）。
+`replStateCleared` 无 REPL 对应物不做；`customInstructions` 附加段（AndMX
+`customCompactPrompt` 是整段替换语义，属扩展，保留）。
 
 ### 7. microcompact：语义已对齐，两处细节 ✅ 已修
 
@@ -180,8 +179,8 @@ AndMX 目前所有提醒都是裸 system 消息（TodoReminder、RepeatCallGuard
 | EnterPlanMode/ExitPlanMode | ✅ | EnterPlanMode 描述有完整 when-to-use 7 条+反例（源码 `plan-mode-prompts.ts`，比逆向版全）；ExitPlanMode 有 model instructions 全文 |
 | AskUserQuestion | ✅ | — |
 | Agent + Task | ✅（经 createZCodeAgentTools） | 源码 Agent 描述含 run_in_background/output_file/SendMessage 续聊/并行发射约定；缺 `Task` 别名入口确认 |
-| TaskOutput / TaskStop | ⚠️ 渲染层有名字 | 引擎侧是 SubAgentOrchestrator.wait/close；缺「Bash 后台任务」投影（ZCode 的 TaskOutput 同时管后台 agent 和后台 bash） |
-| SendMessage / RespondToCoordinator | ❌ | 给运行中子代理发消息（steering）+ 子代理回报协调器；AndMX orchestrator 有 resume() 但无工具面 |
+| TaskOutput / TaskStop | ✅ | orchestrator wait/close + Bash run_in_background 投影（输出落访客文件，TaskOutput 同管 agent 与后台 bash） |
+| SendMessage / RespondToCoordinator | ✅ | SendMessage 工具面续聊运行中子代理 + resumeAsync 后台续跑终态通知 |
 | Skill | ✅ | — |
 | ReadSessionContext | ✅ | — |
 | CronCreate/List/Update/Delete | ✅ | `CronStore`+`CronTools`+应用内 15s ticker；delayMinutes/5 段 cron/intervalUnit 规则、stale one-shot 拒绝、automation 回合禁写 |
@@ -190,8 +189,8 @@ AndMX 目前所有提醒都是裸 system 消息（TodoReminder、RepeatCallGuard
 | submit_result / escalate | ✅ | `WorkflowActorTools`：submit_result 存结构化结果，escalate 经 ask_user 审批路径回到 run 所属会话用户；无会话时 deferred 兜底 |
 | CreateWorkflow/AmendWorkflow/SaveWorkflow/List*/Get*/Resume*/Cancel*/EvalWorkflowSnippet | ✅ | `WorkflowTools` 十工具面；差异：authoring 用 spec JSON（无 JS runtime，上游 TS DSL 不落地）；ResolveWorkflowQuestion 由 escalate/ask_user 路径覆盖 |
 | ApplyPatch | ✅ AndMX 独有保留 | ZCode 源码里注释掉了（`// applyPatchToolEntry`） |
-| Bash readonly-policy argv 引擎 | ❌ | 20+ 文件的命令只读判定（给 plan 模式/Explore 用）；AndMX plan 模式用名字白名单 `isPlanModeAllowed`，够用但粒度粗 |
-| WebFetch egress-guard + cache + 模型摘要 | ⚠️ 部分 | AndMX BrowseTool 直接返回正文；ZCode 有 SSRF 防护、缓存、内部模型提取（web_fetch_processing） |
+| Bash readonly-policy argv 引擎 | ✅ | `BashReadonlyPolicy`：shell tokenize + 管道/命令替换/复合命令递归检查、wrapper（env 等）识别、写操作/重定向/后台/畸形语法拒绝；仅用于 plan 模式 Bash 授权 |
+| WebFetch egress-guard + cache + 模型摘要 | ✅ | `WebFetchGuard`（私网/本地 IP+主机名拦截、HTTP→HTTPS、有界重定向校验）+ TTL 缓存（15min/50MB）+ 命中 prompt 时模型摘要；10MB 响应上限/100K 输入上限 |
 
 ## 三、上下文工程差距
 
@@ -200,14 +199,14 @@ AndMX 目前所有提醒都是裸 system 消息（TodoReminder、RepeatCallGuard
 | meta_user 首条注入 | ✅ |
 | 三段 system + 分块 cache_control | ✅ |
 | microcompact | ✅（阈值分母已改；media 三类无对应消息字段，无需补） |
-| auto-compact 公式 | ✅（双重扣 reserve 已修）；⚠️ 仍缺 usage 覆盖 + 连败熔断 + 回合数门槛 |
-| compact 提示词 | ✅（NO_TOOLS 前后置、example、security 保留、suppressFollowup 已补）；⚠️ transcriptPath 未透传 |
+| auto-compact 公式 | ✅（双扣修复 + provider usage 覆盖 + 3 连败熔断 + hasEnoughMessagesToCompact 门槛） |
+| compact 提示词 | ✅（NO_TOOLS 前后置、example、security 保留、suppressFollowup + transcriptPath——TurnContext 携带 rolloutPath，压缩摘要附「read the full transcript at:」指引行） |
 | token 估算 | ✅（toolCalls 入参已计；reasoning 无消息字段，无可补） |
 | todo reminder | ✅（10 轮节流对齐） |
 | runtime_mode / plan_mode_exit reminder | ✅ |
-| 其余 reminder kinds（24 种） | ⚠️ `SystemReminder` 27-source 骨架 + 统一包装已落；已接 queued_system_notification（子代理终态 `<task-notification>`）、runtime_mode、todo、date_change；仍缺 task_status、shell_environment_change、model_anomaly、conversation_fork、rewind_notice、goal_state_change 等触发点 |
-| ReadFileState + 压缩后读文件回放 | ❌（逆向期就推迟的项，现在有源码：`tool/read-file-state*.ts` + `agent/read-file-state-hydrator.ts` + `runtime/helpers/compact-post-reminders.ts`） |
-| Memory | ✅ `MemoryAgentRunner` 子代理回合：受限工具面（读 Read/Grep/Glob，写删限 memory 目录 canonical 校验）、有界 prompt+manifest、coalescing、`ModelCallTrace.Source.MEMORY`；dream/recall 内部调用未做 |
+| 其余 reminder kinds（24 种） | ✅ 已接：queued_system_notification（子代理/后台终态）、runtime_mode、todo、date_change、task_status、shell_environment_change、model_anomaly、conversation_fork、rewind_notice、goal_state_change/resume_goal_state、tool_result_warning、prompt_attachment、plan_file_reference、selection_side_chat；上游 request-local 的部分源 AndMX 持久化进历史（刻意差异） |
+| ReadFileState + 压缩后读文件回放 | ✅ `ReadFileState`（path/content/offset/limit/时间戳记录+seed hydrate）+ 压缩后 `RESUME_REFERENCED_SESSION_CONTEXT` 回放（近期优先、大文件引用式、数量/token 双上限、已保留 Read 条目去重、成功后清空） |
+| Memory | ✅ `MemoryAgentRunner` 子代理回合：受限工具面（读 Read/Grep/Glob，写删限 memory 目录 canonical 校验）、有界 prompt+manifest、coalescing、`ModelCallTrace.Source.MEMORY`（已覆盖上游 memory-agent-loop 全部语义） |
 | Goal verifier 循环 | ✅ 已对齐 |
 
 ## 四、模式 / 模型切换
@@ -237,27 +236,83 @@ TUI 侧对应 app-*.ts）：
 | 粘贴长文本→自动转附件 | ✅ 长粘贴转 PASTE chip，有界预览注入上下文 |
 | 图片粘贴/拖拽文件入输入框 | ⚠️ 有附件，无拖拽（手机端拖拽可豁免） |
 | 中文输入法 `、`→`/` 归一 | ✅ `、`与 `／` 均归一为 `/` |
-| 输入历史上/下键翻阅 | ❌（移动端可用其他手势替代，低优先） |
+| 输入历史上/下键翻阅 | ✅ InputHistoryMenu：composer + 旁历史钮→近 20 条已发输入去重回填（移动端菜单替代方向键） |
 | 快捷键：Ctrl+M 模型菜单 / 切模式 / 切思考档（可改绑） | ⚠️ AndMX 有 pill 点击循环；无键盘快捷键体系（手机端合理） |
 | queue vs guide 双车道 | ✅ QueueStrip（排队+暂停原因）+ injectUserMessage(steer)；ZCode 的 guide 在工具边界消费、queue 等回合结束，语义一致 |
 | AskUserQuestion 5 分钟无回答自动继续 | ✅ 60s 隐藏宽限→可见倒计时→300s 自动 accept(空答案)+snooze+全局开关 |
-| 斜杠命令 | ⚠️ 已补 /fork /rewind /resume（语义见 P2-20）；仍缺 /init /locale /effort /mcp /plugins（均为低优先或 AndMX 已有等价入口） |
+| 斜杠命令 | ✅ /fork /rewind /resume /workflows(/dwf) /init /effort(/variant) /mcp /plugins(→PLUGIN 设置页) /locale(system/zh-CN/en-US) /mode(查看+切换 ExecMode) /skill(列表+chip+任务) /expert(status/stop/resume/<task> 启动)；/login /logout 属官方登录协议不抄 |
 | SteerBar（运行中插话） | ✅ |
 
 ## 六、输出渲染 / 工具渲染
 
 | ZCode | AndMX |
 |---|---|
-| Markdown：streamdown + ai-elements 组件族（code-block/mermaid/diagram/table/attachment/sources/snippet/terminal/test-results/checkpoint/plan/task/queue/reasoning/persona…） | 自研 MarkdownEngine + IncrementalMarkdown + CodeHighlight；**缺 mermaid/diagram 渲染、table 增强、artifact** |
-| 工具渲染：`ToolCallBlocks/renderers/` 40+ 每工具专属（edit 内联 diff、changes-group 改动分组、execute-group 命令分组、agent 卡片、todo 卡片、webfetch/search 结果卡、cua 截图组、workflow 卡片…） | ⚠️ family 分组 + ToolEditDiff + ToolCallCard + todo 清单卡 + agent/task 卡；仍未做 40+ 逐工具专属渲染（cua 截图组/webfetch 结果卡等可后补） |
+| Markdown：streamdown + ai-elements 组件族（code-block/mermaid/diagram/table/attachment/sources/snippet/terminal/test-results/checkpoint/plan/task/queue/reasoning/persona…） | 自研 MarkdownEngine + IncrementalMarkdown + CodeHighlight + GFM table + MermaidBlock（assets/mermaid.min.js + WebView 离线真渲染，渲染失败回退源码；复制/缩放保留） |
+| 工具渲染：`ToolCallBlocks/renderers/` 40+ 每工具专属（edit 内联 diff、changes-group 改动分组、execute-group 命令分组、agent 卡片、todo 卡片、webfetch/search 结果卡、cua 截图组、workflow 卡片…） | ⚠️ family 分组 + ToolEditDiff + ToolCallCard + todo 清单卡 + agent/task 卡 + CUA 截图条（imageUrls→缩略图横条+放大）+ StructuredToolCard（workflow/cron/webfetch/search 字段行）+ computer/cron/workflow/listmodels canonical 标签 + webfetch OpenUrl 动作；40+ 逐工具专属卡不逐一复刻 |
 | 工具分组 ×3：Explore(连续读搜)/Terminal(连续非只读 shell)/Changes(连续写改) | ✅ `groupKind` 语义分组：read-search / execute / changes，异类交错不成组，标题带差异化摘要 |
 | ModelTrajectory：完整模型 I/O 时间线 + 搜索栏 + 展开控制 | ✅ ModelTrajectoryPage 已有（finish reason 已补 length/content_filter 映射） |
-| TurnGroup / TurnNavigator（回合分组+导航） | ⚠️ TurnLog/TurnMetrics 有回合概念，无导航器 |
-| 选中消息文本→引用/侧聊（SelectionActionMenu、selection_side_chat） | ⚠️ 有 MESSAGE chip 引用，无侧聊 |
-| ConversationShare*（分享选区/权限/确认 dock） | ❌ |
-| FileRewindDialog / FileSummaryPanel（逐文件回滚+变更摘要） | ⚠️ RewindBar 整批回滚，无逐文件 dialog |
-| PendingCommandRecoveryBanner | ❌ |
-| 思考过程显示开关 / 待办显示开关 / 性能模式（精简渲染） | ⚠️ ReasoningCard 有；显示开关不全 |
+| TurnGroup / TurnNavigator（回合分组+导航） | ✅ TurnNavigator：回合锚点（用户消息）间 ↑/↓ 跳转 + k/N 计数 |
+| 选中消息文本→引用/侧聊（SelectionActionMenu、selection_side_chat） | ✅ MESSAGE chip 引用 + 「侧聊」action→SideChatDialog→新会话注入 SELECTION_SIDE_CHAT reminder（带选段）后发问题 |
+| ConversationShare*（分享选区/权限/确认 dock） | ✅ 顶栏分享钮→markdown 落 cache+FileProvider→ACTION_SEND 分享表；SideChatDialog「分享选段」→EXTRA_TEXT 分享（上游权限/确认 dock 移动端简化为系统分享表） |
+| FileRewindDialog / FileSummaryPanel（逐文件回滚+变更摘要） | ✅ FileRewindDialog：逐文件列表（新建/修改、+/-行数、时间戳、路径）+ 单文件还原（同一安全闸）+ 全部还原 |
+| PendingCommandRecoveryBanner | ✅ busy 排队输入落 `pendingQueueJson`（v16 迁移），重启/切回后 banner 恢复或丢弃 |
+| 思考过程显示开关 / 待办显示开关 / 性能模式（精简渲染） | ✅ showReasoning/showTodos 设置已接入 timeline 过滤（此前已存在，本批核实） |
+
+**P4 续轮补齐**
+- turn_complete 兜底：Done 时本回合无 Assistant 事件且 history 末尾有新回答 → 补写
+  `AssistantComplete`+落库（内容判等防双写），对齐上游 applyTurnCompleteFallbackResponse。
+- 子代理转写：`SubAgentEvent.ToolActivity`（ToolStarted/Finished 穿透）→
+  ChatEvent → SubAgentItem.activities（30 条封顶）→ 卡内展开显示工具活动行。
+- 回合终态系统通知：`TurnNotifier`（channel=agent_turns、前台静默、Android 13+
+  运行时权限请求、通知声开关生效）——任务完成/失败/工具审批/ask_user/工作流
+  escalate 五处接入，复用既有 notification/notificationSound 死设置。
+- 斜杠补齐上游全集：/mode、/skill、/expert(status/stop/resume/<task>)、/dwf→/workflows。
+- Mermaid 真渲染：assets/mermaid.min.js(10.9.3, MIT)+WebView 离线渲染对话框，
+  strict 安全级+JS 桥错误回退源码。
+- StructuredToolCard：workflow/cron/webfetch/search 四族字段行专属卡。
+
+**P5 移动端完善轮（ai-elements/TUI 残余面审计 + 移动端交互加固）**
+
+- 审批面板对齐上游 approval-panel：标题带工具名+模式、reason 行、mono 输入
+  预览块（previewPermissionInput 等价）、「长期授权规则」scope 预览行
+  （approvalPermissionScopes 等价，显示将持久化的命令前缀/文件规则）、
+  允许/拒绝触觉反馈（LongPress haptic）。
+- AskUserQuestion 对齐 question-panel：新增复核步（提交→逐题答案+备注预览→
+  返回修改/确认提交，上游 review 流程等价）、多问题时「已答 n/N」进度。
+- sources 卡：webfetch/search 结果自动提取 URL→「来源」chip 行（域名标签，
+  点击经 ChatActionBus.openUrl 系统浏览器打开，≤8 条去重）。
+- test-results 卡：工具输出末尾检测 `N passed/failed/skipped` 摘要→
+  ✓/✗/○ 三色徽标行（通用检测，非单一工具绑定）。
+- terminal 等价：MetaBlock 显示层剥离 ANSI 转义序列（CSI/OSC/字符集序列），
+  上游 terminal.tsx ansi-to-react 的移动端等价（单色渲染、去乱码）。
+- 图片画廊：截图条点击→HorizontalPager 画廊对话框（从点击张起始、左右滑动
+  翻页、n/N 计数），替代单张放大，对齐 image-thumbnail-gallery。
+- 消息动作移动端加固：动作行横滚（窄屏不挤压溢出）、用户气泡长按复制手势。
+- ai-elements 审计结论：persona（Rive WebGL 头像动画，无 Android 等价物，
+  刻意差异）；sandbox/task/checkpoint/plan/artifact 均有等价物覆盖
+  （工具卡折叠态/todo 卡/压缩标记/ExitPlan 审批板/工作流产物页）。
+
+**P6 细粒度对账轮（逐文件过 upstream tui/src 85 个源文件 + tool handlers）**
+
+- `RespondToCoordinator` 工具补齐：子代理→协调者回话通道（上游
+  coordinatorResponsePort 等价）——子代理此前 SendMessage 主代理会
+  "Agent not found"，现为 `<agent-message from>` 注入主会话 pending 队列。
+- 斜杠参数补全面板（上游 mode/model/effort-suggestion-panel 对齐）：
+  `/mode`（4 档+描述）`/model`（当前 provider 模型表）`/effort`（档位+current）
+  `/locale` `/skill` `/expert`（workflow defs 惰性加载）——`/<cmd> <partial>`
+  触发 ArgSuggestion 面板，点选回填。
+- workflow 时间线活卡（上游 app-workflow-card 对齐）：workflow 工具卡内嵌
+  实时运行行——runId 从 args/output 提取，2s 轮询 workflowService.getRun，
+  显示 `run <id> · status · 阶段 n/N`。
+- 网络重试显示（上游 app-network-events 对齐）：`AgentEvent.Retrying` →
+  `ChatEvent.Retrying` → WorkingIndicator 文本变为「请求失败，Ns 后重试
+  （n/M）」，Done/Error 时清除。
+- 工具清单终态核对：上游 builtInTools 35 项全部有对应物或刻意差异——
+  provider-visible-order 里的 EnterWorktree/ExitWorktree/LSP/NotebookEdit/
+  TaskCreate/TaskGet/TaskList/TaskUpdate/ScheduleWakeup 上游仅有排序声明
+  无 handler 实现（Claude-compat 占位），不视为缺口；offPeakCreate/
+  offPeakList 依赖上游套餐额度端口 offPeakPort（无对应基建，刻意差异）；
+  js/node_repl 无 JS runtime（既有刻意差异）。
 
 ## 七、会话管理
 
@@ -266,12 +321,12 @@ TUI 侧对应 app-*.ts）：
 | sqlite 会话库 + 事件溯源（SessionEvent 流） | Room + rollout jsonl（RolloutWriter/Reader/SessionResumer）✅ 等价物在 |
 | /rewind：对话回滚 **+ workspace 文件检查点双路**（selectCheckpointForRewind、restoreWorkspaceCheckpointFiles） | ✅ RewindPickerDialog（用户消息=检查点）→ truncateFromUserMessage + revertFileChanges(sinceMs) 双路；差异：文件侧按时间戳近似而非快照 |
 | /fork：会话分叉（对话 + workspace 副本） | ✅ repo.forkConversation 复制会话+消息、记 spawn 边；workspace 不复制（共享工作区，移动端合理差异） |
-| /resume + plan-file continuity（恢复时把 plan 文件引用注回） | ✅ /resume 开会话抽屉；恢复走 SessionResumer+DB 重建；plan continuity 未做 |
-| 标题生成 sidecar（首轮后自动起名） | 需确认 |
-| 会话归档/分组/pin/时间线分组 | ⚠️ drawer 有列表，分组能力待确认 |
-| PendingCommandRecoveryBanner（中断命令恢复提示） | ❌ |
-| selection_side_chat / ConversationShareSelection | ❌ |
-| CommandInbox admission（busy/running 输入串行准入） | ⚠️ QueueStrip 有排队；准入语义需对 |
+| /resume + plan-file continuity（恢复时把 plan 文件引用注回） | ✅ /resume 开会话抽屉 + `PlanFiles`：批准 plan 落 `.andmx/plans/plan-<id>.md`，恢复/压缩后注入 PLAN_FILE_REFERENCE reminder（上游文案一致） |
+| 标题生成 sidecar（首轮后自动起名） | ✅ `TitleGenerator` 异步旁路（60s 超时、1.2K 输入截断、JSON/fence/plain 解析+清洗+兜底）；仅首条用户消息且标题仍为默认时落名 |
+| 会话归档/分组/pin/时间线分组 | ✅ 抽屉已支持 pinned 区/归档视图/task_groups 自定义分组（本批核实既有实现完整） |
+| PendingCommandRecoveryBanner（中断命令恢复提示） | ✅（见渲染节） |
+| selection_side_chat / ConversationShareSelection | ✅ 侧聊已做（见渲染节）；ConversationShare* 不做 |
+| CommandInbox admission（busy/running 输入串行准入） | ✅ pending-injection 队列：运行期 system/user 注入经队列在步边界消费（不再直接改 history 竞态）；stop 暂停时不再误排空 |
 
 ## 八、明确不做（与 ZCode 解耦点）
 
@@ -358,7 +413,8 @@ TUI 侧对应 app-*.ts）：
     30min 窗口拒绝）、`cron_automations` Room 表（v13→v14 迁移）、
     `CronStore` CRUD/推进、`CronTools` 四工具（上游 schema/描述移植，
     automation 回合内禁写）、ChatController 15s ticker 调度——到期经
-    `sendMessage` 复用主循环，会话忙顺延 60s。ScheduleWakeup 未做。
+    `sendMessage` 复用主循环，会话忙顺延 60s。ScheduleWakeup 不做：上游仅在
+    provider-visible-order 中列名、无 handler 实现（占位声明）。
 23. ✅ 记忆抽取子代理：`MemoryAgentRunner` 以受限工具面跑独立
     AgentEngine 回合（读 Read/Grep/Glob、写删 canonical 限制在 memory
     目录内），prompt 有界 + 现有 manifest 注入，coalescing 快照，
@@ -397,6 +453,40 @@ TUI 侧对应 app-*.ts）：
       workflow 工具+actor 工具，trace 源 WORKFLOW）；`/workflows` 打开
       WorkflowsDialog（定义+运行列表）→ WorkflowRunDetailDialog（阶段/
       图节点/产物/事件/取消）；只读五工具进 plan 白名单。
+
+**P4 — 收尾批（源码全量审计剩余项）**
+
+26. ✅ auto-compact 三补：provider usage 覆盖（`ApiMessage.tokenUsage` 引擎侧
+    字段，白名单序列化不上行）+ 3 连败熔断 + `hasEnoughMessagesToCompact` 门槛；
+    `isContextWindowExceeded` 同走 usage 覆盖。
+27. ✅ ReadFileState + 压缩后回放：`RESUME_REFERENCED_SESSION_CONTEXT` reminder，
+    近期文件限量回放、大文件引用式、preserved Read 去重、成功后清空；seed 时
+    从持久化 toolArgs hydrate。
+28. ✅ WebFetch：`WebFetchGuard` egress 防护 + `WebFetchCache` TTL 缓存 +
+    prompt 命中时 `summarizeFetchedContent` 模型摘要（trace 源 WEB_FETCH）。
+29. ✅ reminder 源补齐：task_status、model_anomaly、conversation_fork、
+    rewind_notice、goal_state_change/resume_goal_state、shell_environment_change、
+    tool_result_warning、prompt_attachment、plan_file_reference、
+    selection_side_chat 触发点全部接线。
+30. ✅ CommandInbox 准入：运行期注入（系统通知/steer）经 pending 队列在步边界
+    消费；stop 暂停态不再被 finally drainQueue 误排空。
+31. ✅ `BashReadonlyPolicy` argv 级只读判定接入 plan 模式 Bash 授权。
+32. ✅ 标题 sidecar（P4-B1）：`TitleGenerator` + `SESSION_TITLE` trace 源。
+33. ✅ 会话抽屉分组（P4-B2）：pinned/归档/task_groups 既有实现核实完整。
+34. ✅ plan-file continuity（P4-B3）：批准 plan 落盘 `.andmx/plans/`，
+    恢复与压缩后注入 `PLAN_FILE_REFERENCE` reminder。
+35. ✅ 斜杠补齐（P4-B4）：`/init`（上游 builtin prompt 移植，AndMX 命名）、
+    `/effort`（list/档位/ off/on，ReasoningConfig levels→effortLevels→style 回退）、
+    `/mcp`（配置+连接态+工具数）。
+36. ✅ FileRewindDialog（P4-B5）：逐文件还原 `revertFileChange`（同一安全闸）+
+    变更摘要列表。
+37. ✅ PendingCommandRecoveryBanner + selection 侧聊（P4-B6）：
+    `pendingQueueJson` 持久化（v16）+ banner 恢复/丢弃；「侧聊」action →
+    SideChatDialog → 新会话 `SELECTION_SIDE_CHAT` 注入 + 问题发送。
+38. ✅ 渲染层（P4-C）：`imageUrls` 全链路透传（event→ToolCall→卡片→持久化
+    回放）+ CUA 截图条+放大；MermaidBlock 图源卡；TurnNavigator 回合跳转；
+    computer/cron/workflow/listmodels canonical 标签；showReasoning/showTodos
+    与 GFM table 此前已就绪（本批核实）。
 
 ## 验证方式
 

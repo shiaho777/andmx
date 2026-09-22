@@ -143,6 +143,8 @@ class ChatController(private val context: Context) {
     private val allowedPromptsByConversation = ConcurrentHashMap<Long, AllowedPrompts.Grants>()
     private val orchestrators = ConcurrentHashMap<Long, SubAgentOrchestrator>()
     private val backgroundTasksByConversation = ConcurrentHashMap<Long, com.andmx.agent.BackgroundTasks>()
+    private val readFileStates = ConcurrentHashMap<Long, com.andmx.agent.ReadFileState>()
+    private val titleSidecarAttempted = ConcurrentHashMap.newKeySet<Long>()
 
     private fun backgroundTasksFor(conversationId: Long): com.andmx.agent.BackgroundTasks =
         backgroundTasksByConversation.getOrPut(conversationId) {
@@ -151,7 +153,7 @@ class ChatController(private val context: Context) {
                     tasks.events.collect { ev ->
                         if (ev is com.andmx.agent.BackgroundTasks.Event.Terminated) {
                             sessions[conversationId]?.engine?.injectSystemReminder(
-                                com.andmx.agent.SystemReminder.Source.QUEUED_SYSTEM_NOTIFICATION,
+                                com.andmx.agent.SystemReminder.Source.TASK_STATUS,
                                 tasks.notificationBody(ev.task),
                             )
                         }
@@ -347,6 +349,12 @@ class ChatController(private val context: Context) {
         val planText: String = "",
         val autoDeadlineAt: Long? = null,
         val countdownVisibleAt: Long? = null,
+        /** 原始输入预览（命令/路径/URL 单行 mono 展示，上游 previewPermissionInput）。 */
+        val inputPreview: String = "",
+        /** 选择「允许本会话/本项目」时将持久化的规则描述（上游 approvalPermissionScopes）。 */
+        val rulePreview: String = "",
+        /** 审批原因（plan 模式拒绝等场景的描述字段）。 */
+        val reason: String = "",
     )
 
     private class Session(
@@ -367,6 +375,7 @@ class ChatController(private val context: Context) {
         val turnToolOutputs: MutableList<Pair<String, String>> = mutableListOf(),
         var lastUserText: String = "",
         var lastAssistantText: String = "",
+        var lastAssistantTurnId: String? = null,
     )
 
     /** 审批作用域（ZCode chat.permission 对齐）。 */
@@ -551,6 +560,7 @@ class ChatController(private val context: Context) {
                 ),
             ),
         )
+        notifyIfBackground(conversationId, "工作流等待确认", question)
         return try {
             val raw = deferred.await()
             val (answers, _) = AskUserQuestionParser.parseAnswersJson(raw)
@@ -601,6 +611,17 @@ class ChatController(private val context: Context) {
             )
             session.pendingAnswer = null
             clearAnswerTimer(session)
+        }
+    }
+
+    /** 审批面板展示用：本会话/项目级允许将持久化的规则描述（上游 scope 行）。 */
+    private fun approvalRulePreview(toolName: String, args: String): String {
+        val key = approvalRuleKey(toolName, args) ?: return ""
+        return when {
+            key.endsWith(":any") -> "所有 ${ToolArgs.canonical(toolName)} 调用"
+            key.contains(":prefix:") -> "命令前缀: ${key.substringAfter(":prefix:")} …"
+            key.contains(":file:") -> "文件: ${key.substringAfter(":file:")}"
+            else -> key
         }
     }
 
@@ -699,6 +720,14 @@ class ChatController(private val context: Context) {
      * turnSteer（ZCode 对齐）：把用户消息注入运行中会话的引擎历史，
      * 下一个模型步即会看到；仅在有活跃会话时生效。
      */
+    /** 模型可见且随会话持久化的 system-reminder（rewind/fork 等历史连续性事件）。 */
+    suspend fun injectPersistedReminder(conversationId: Long, source: com.andmx.agent.SystemReminder.Source, body: String) {
+        if (body.isBlank()) return
+        val wrapped = com.andmx.agent.SystemReminder.wrap(source, body).trimEnd()
+        runCatching { repo.addMessage(conversationId, "reminder", wrapped) }
+        sessions[conversationId]?.engine?.injectSystemReminder(source, body)
+    }
+
     fun injectUserMessage(conversationId: Long, text: String) {
         val session = sessions[conversationId] ?: return
         session.engine.injectUserMessage(text)
@@ -724,6 +753,7 @@ class ChatController(private val context: Context) {
         val session = sessions[conversationId] ?: return
         val history = rebuildHistory(conversationId)
         session.engine.seed(history)
+        injectPlanFileReminderIfPresent(conversationId, session.engine)
         session.turnToolOutputs.clear()
         session.lastUserText = history.lastOrNull { it.role == "user" }?.content.orEmpty()
     }
@@ -788,9 +818,11 @@ class ChatController(private val context: Context) {
     ): Flow<ChatEvent> = flow {
         emit(ChatEvent.UserMessage(text))
         repo.addMessage(conversationId, "user", text)
+        var firstUserMessage = false
         runCatching {
             val conv = repo.conversation(conversationId)
             if (conv != null && conv.firstUserMessage.isBlank()) {
+                firstUserMessage = true
                 val dao = com.andmx.data.AndmxDatabase.get(context).dao()
                 dao.updateSessionMetadata(
                     id = conversationId,
@@ -816,6 +848,10 @@ class ChatController(private val context: Context) {
             ?: return@flow emit(ChatEvent.Error("未配置提供商"))
         if (!provider.isUsable) {
             return@flow emit(ChatEvent.Error("当前提供商不可用，请检查 API Key"))
+        }
+
+        if (firstUserMessage && titleSidecarAttempted.add(conversationId)) {
+            launchTitleSidecar(conversationId, text, provider, settings.model)
         }
 
         ensureExtraTools(settings)
@@ -847,9 +883,13 @@ class ChatController(private val context: Context) {
                 }
             }
         }
-        val turn = TurnContext(provider, settings.model)
-        val toolArgsById = mutableMapOf<String, String>()
         ensureRolloutSession(conversationId, provider, settings)
+        val turn = TurnContext(
+            provider,
+            settings.model,
+            transcriptPath = repo.conversation(conversationId)?.rolloutPath,
+        )
+        val toolArgsById = mutableMapOf<String, String>()
         val writer = writerFor(conversationId)
         val turnId = "turn-${System.currentTimeMillis()}"
         runCatching {
@@ -916,6 +956,7 @@ class ChatController(private val context: Context) {
                 emit(ChatEvent.AssistantComplete(event.text))
                 if (event.text.isNotBlank()) {
                     session.lastAssistantText = event.text
+                    session.lastAssistantTurnId = turnId
                     repo.addMessage(conversationId, "assistant", event.text)
                     runCatching {
                         writer.writeResponseItem(
@@ -948,7 +989,7 @@ class ChatController(private val context: Context) {
                 if (session.turnToolOutputs.size > 24) {
                     session.turnToolOutputs.subList(0, session.turnToolOutputs.size - 24).clear()
                 }
-                emit(ChatEvent.ToolCallFinished(event.id, outDb, event.isError))
+                emit(ChatEvent.ToolCallFinished(event.id, outDb, event.isError, event.imageUrls))
                 repo.addMessage(
                     conversationId,
                     "tool",
@@ -956,6 +997,7 @@ class ChatController(private val context: Context) {
                     toolName = event.name,
                     toolArgs = args,
                     toolError = event.isError,
+                    imageUrls = event.imageUrls.orEmpty(),
                 )
                 runCatching {
                     writer.writeResponseItem(
@@ -1006,15 +1048,31 @@ class ChatController(private val context: Context) {
                     )
                 }
             }
+            is AgentEvent.Retrying -> {
+                emit(ChatEvent.Retrying(event.attempt, event.maxAttempts, event.delayMs))
+            }
             is AgentEvent.Failed -> {
                 runCatching {
                     writer.writeEventMsg(
                         EventMsg(type = "task_failed", turnId = turnId, errorMessage = event.message),
                     )
                 }
+                notifyIfBackground(conversationId, "任务失败", event.message)
                 emit(ChatEvent.Error(event.message))
             }
             is AgentEvent.Done -> {
+                // 上游 turn_complete 兜底：整回合无 Assistant 事件但 history 末尾已有
+                // 权威回答（流中断/通知驱动路径）时补写一条，按内容防双写。
+                if (session.lastAssistantTurnId != turnId) {
+                    val fallback = session.engine.snapshotHistory()
+                        .lastOrNull { it.role == "assistant" }?.content?.trim().orEmpty()
+                    if (fallback.isNotBlank() && fallback != session.lastAssistantText.trim()) {
+                        session.lastAssistantText = fallback
+                        session.lastAssistantTurnId = turnId
+                        repo.addMessage(conversationId, "assistant", fallback)
+                        emit(ChatEvent.AssistantComplete(fallback))
+                    }
+                }
                 extractMemory(session, conversationId)
                 runCatching {
                     val usage = trackerFor(conversationId).lastTurnUsage.value
@@ -1036,6 +1094,10 @@ class ChatController(private val context: Context) {
                 }
                 applyGoalTokenUsage(session)
                 refreshTokenUsage(conversationId)
+                notifyIfBackground(
+                    conversationId, "任务完成",
+                    session.lastAssistantText.trim().ifBlank { "回合已结束" },
+                )
                 _goal.value = session.goalState.goal
                 persistGoal(conversationId, session.goalState.goal)
                 refreshAmbient(conversationId, session)
@@ -1154,6 +1216,23 @@ class ChatController(private val context: Context) {
             }.onFailure { unsafe += change.path }
         }
         return RewindResult(reverted, unsafe.size, unsafe)
+    }
+
+    /** 单文件还原：同样的“当前内容必须仍等于记录的修改后内容”安全闸。 */
+    suspend fun revertFileChange(path: String): RewindResult {
+        val change = com.andmx.workspace.ChangeTracker.changes.value
+            .firstOrNull { com.andmx.workspace.GuestPaths.same(it.path, path) }
+            ?: return RewindResult(0, 0, emptyList())
+        val resolved = runCatching { access.resolvePath(change.path) }.getOrDefault(change.path)
+        val current = runCatching { access.readText(resolved) }.getOrNull()
+        if (current == null || current != change.newContent) {
+            return RewindResult(0, 1, listOf(change.path))
+        }
+        return runCatching {
+            if (change.isNew) access.deleteFile(resolved) else access.writeText(resolved, change.oldContent)
+            com.andmx.workspace.ChangeTracker.remove(change.path)
+            RewindResult(1, 0, emptyList())
+        }.getOrElse { RewindResult(0, 1, listOf(change.path)) }
     }
 
     suspend fun statusText(conversationId: Long): String {
@@ -1320,6 +1399,12 @@ class ChatController(private val context: Context) {
                     agentsMdProvider = {
                         runCatching { access.loadAgentsMdFragment() }.getOrDefault("")
                     },
+                    coordinatorMessageSink = { fromId, msg ->
+                        injectUserMessage(
+                            conversationId,
+                            "<agent-message from=\"${escXmlAttr(fromId)}\">$msg</agent-message>",
+                        )
+                    },
                 )
                 orchestrators[conversationId] = orch
                 val known = existing.engine.listTools().map { it.first }.toSet()
@@ -1368,6 +1453,9 @@ class ChatController(private val context: Context) {
             systemPromptBlocks = systemBlocks,
             hooks = hookSystem,
             goalState = goalState,
+            readFileState = readFileStates.getOrPut(conversationId) { com.andmx.agent.ReadFileState() },
+            shellEnvProvider = { access.guestCwd() },
+            planFileReminderProvider = { planFileReminderBody(conversationId) },
             approve = { tool, args ->
                 val liveMode = sessions[conversationId]?.approvalMode ?: execMode
                 approveTool(conversationId, liveMode, tool, args)
@@ -1393,6 +1481,12 @@ class ChatController(private val context: Context) {
             agentsMdProvider = {
                 runCatching { access.loadAgentsMdFragment() }.getOrDefault("")
             },
+            coordinatorMessageSink = { fromId, msg ->
+                injectUserMessage(
+                    conversationId,
+                    "<agent-message from=\"${escXmlAttr(fromId)}\">$msg</agent-message>",
+                )
+            },
         )
         orchestrators[conversationId] = orch
         engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId))
@@ -1400,6 +1494,7 @@ class ChatController(private val context: Context) {
 
         val history = loadHistoryForEngine(conversationId)
         engine.seed(history)
+        injectPlanFileReminderIfPresent(conversationId, engine)
         restorePlanFromHistory(conversationId, planTool)
         _planSteps.value = planTool.state.value
         watchSubAgents(conversationId, orch)
@@ -1508,6 +1603,7 @@ class ChatController(private val context: Context) {
                     autoDeadlineAt = if (autoResolve) startedAt + ASK_AUTO_RESOLVE_MS else null,
                     countdownVisibleAt = if (autoResolve) startedAt + ASK_HIDDEN_GRACE_MS else null,
                 )
+                notifyIfBackground(conversationId, "等待你的回答", summary)
                 if (autoResolve) {
                     session.answerTimer = controllerScope.launch {
                         delay(ASK_AUTO_RESOLVE_MS)
@@ -1560,7 +1656,9 @@ class ChatController(private val context: Context) {
                     kind = "exit_plan",
                     planText = plan,
                 )
-                deferred.await()
+                deferred.await().also { approved ->
+                    if (approved) writePlanFile(conversationId, plan)
+                }
             },
             allowedPromptsSink = { entries ->
                 allowedPromptsByConversation.getOrPut(conversationId) { AllowedPrompts.Grants() }
@@ -1572,6 +1670,10 @@ class ChatController(private val context: Context) {
                 val s = settingsStore.settings.firstOrNull()
                 (s?.activeProviderId.orEmpty()) to (s?.model.orEmpty())
             },
+            readFileState = readFileStates.getOrPut(conversationId) { com.andmx.agent.ReadFileState() },
+            webFetchSummarizer = { content, prompt ->
+                summarizeFetchedContent(content, prompt, conversationId)
+            },
         ) + CronTools(
             store = cronStore,
             conversationId = { conversationId },
@@ -1582,6 +1684,40 @@ class ChatController(private val context: Context) {
             conversationId = { conversationId },
             cwd = { "/" },
         ).all()
+    }
+
+    private suspend fun summarizeFetchedContent(
+        content: String,
+        prompt: String,
+        conversationId: Long,
+    ): String? {
+        val settings = settingsStore.settings.firstOrNull() ?: return null
+        val providers = providerStore.providers.firstOrNull().orEmpty()
+        val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
+            ?: providerStore.primary.firstOrNull() ?: return null
+        val client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.WEB_FETCH)
+        val instruction = """
+            Provide a concise response based only on the content above. In your response:
+             - Enforce a strict 125-character maximum for quotes from any source document. Open Source Software is ok as long as we respect the license.
+             - Use quotation marks for exact language from articles; any language outside of the quotation should never be word-for-word the same.
+             - You are not a lawyer and never comment on the legality of your own prompts and responses.
+             - Never produce or reproduce exact song lyrics.
+        """.trimIndent()
+        val text = """
+            Web page content:
+            ---
+            $content
+            ---
+
+            $prompt
+
+            $instruction
+        """.trimIndent()
+        val req = com.andmx.llm.ChatRequest(
+            model = settings.model,
+            messages = listOf(com.andmx.llm.ApiMessage(role = "user", content = text)),
+        )
+        return client.chat(req).getOrNull()?.content?.takeIf { it.isNotBlank() }
     }
 
     private suspend fun readSessionContext(
@@ -1684,7 +1820,14 @@ class ChatController(private val context: Context) {
         approvalRuleStore.findMatch(pk, canonical, subject, ApprovalRuleStore.RuleBehavior.ASK)
             ?.let { return prompt(conversationId, tool, args, mode, "项目权限规则要求确认: ${it.display}") }
         if (planActive && !isPlanModeAllowed(tool.name)) {
-            return ApprovalOutcome.Rejected("计划模式只允许只读工具")
+            // 上游 readonly-policy：shell 工具按 argv 粒度判定，只读命令在
+            // plan 模式放行（ls/cat/git status/find 等），写命令依旧拒绝。
+            val command = args["command"]?.jsonPrimitive?.content
+            val shellReadonly = com.andmx.agent.BashReadonlyPolicy.isShellTool(tool.name) &&
+                command != null && com.andmx.agent.BashReadonlyPolicy.isReadOnly(command)
+            if (!shellReadonly) {
+                return ApprovalOutcome.Rejected("计划模式只允许只读工具")
+            }
         }
         // 会话级审批规则（ZCode sessionRules 对齐）：本会话允许/始终拒绝命中即不再弹窗。
         when (sessionRuleFor(conversationId, tool.name, args.toString())) {
@@ -1751,7 +1894,11 @@ class ChatController(private val context: Context) {
             risk = tool.risk,
             summary = summary,
             modeLabel = mode.label,
+            inputPreview = ruleSubject(tool.name, args).take(160),
+            rulePreview = approvalRulePreview(tool.name, args.toString()),
+            reason = reason.orEmpty(),
         )
+        notifyIfBackground(conversationId, "等待确认", summary)
         return if (deferred.await()) ApprovalOutcome.AllowedOnce else ApprovalOutcome.Rejected()
     }
 
@@ -2021,6 +2168,8 @@ class ChatController(private val context: Context) {
                         bus.tryEmit(ChatEvent.SubAgentCompleted(ev.agentId, ev.result))
                     is SubAgentOrchestrator.SubAgentEvent.Failed ->
                         bus.tryEmit(ChatEvent.SubAgentFailed(ev.agentId, ev.error))
+                    is SubAgentOrchestrator.SubAgentEvent.ToolActivity ->
+                        bus.tryEmit(ChatEvent.SubAgentToolActivity(ev.agentId, ev.toolName, ev.detail, ev.running))
                     is SubAgentOrchestrator.SubAgentEvent.Terminated -> {
                         // ZCode queued_system_notification：后台子代理终态
                         // 以 <system-reminder> 形式推回主代理的下一个模型步。
@@ -2038,6 +2187,13 @@ class ChatController(private val context: Context) {
                 }
             }
         }
+    }
+
+    /** 后台时发系统通知（「任务完成/失败/等待确认」），受设置页通知开关控制。 */
+    private suspend fun notifyIfBackground(conversationId: Long, title: String, body: String) {
+        val s = settingsStore.settings.firstOrNull() ?: return
+        if (!s.notification) return
+        TurnNotifier.maybeNotify(context, conversationId, title, body, s.notificationSound)
     }
 
     private fun refreshSubAgents(conversationId: Long) {
@@ -2123,6 +2279,12 @@ class ChatController(private val context: Context) {
                 ),
             ),
         )
+    }
+
+    suspend fun conversationMarkdownForShare(conversationId: Long): String {
+        val conv = repo.conversation(conversationId)
+        val msgs = repo.messages(conversationId)
+        return conversationMarkdown(conv, msgs, java.time.Instant.now())
     }
 
     suspend fun exportConversationMarkdown(conversationId: Long): String {
@@ -2327,6 +2489,52 @@ class ChatController(private val context: Context) {
         }
     }
 
+    private suspend fun writePlanFile(conversationId: Long, plan: String) {
+        if (plan.isBlank()) return
+        runCatching {
+            access.writeText(com.andmx.agent.PlanFiles.planRelativePath(conversationId), plan)
+        }
+    }
+
+    private suspend fun planFileReminderBody(conversationId: Long): String? {
+        val rel = com.andmx.agent.PlanFiles.planRelativePath(conversationId)
+        val content = runCatching {
+            access.readText(rel, com.andmx.agent.PlanFiles.MAX_PLAN_CHARS * 4)
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        return com.andmx.agent.PlanFiles.formatPlanFileReference(content, rel)
+    }
+
+    private suspend fun injectPlanFileReminderIfPresent(conversationId: Long, engine: AgentEngine) {
+        planFileReminderBody(conversationId)?.let {
+            engine.injectSystemReminder(com.andmx.agent.SystemReminder.Source.PLAN_FILE_REFERENCE, it)
+        }
+    }
+
+    fun initPrompt(args: String): String =
+        com.andmx.agent.InitPrompt.build(args, access.guestCwd())
+
+    /**
+     * 上游 title-generation-sidecar：首发消息触发一次旁路标题生成。
+     * 不阻塞当前回合；仅在标题仍为默认（或为首行兜底标题）时落名，
+     * 失败时 maybeAutoTitle 的首行兜底继续生效。
+     */
+    private fun launchTitleSidecar(
+        conversationId: Long,
+        userText: String,
+        provider: com.andmx.llm.provider.ProviderDefinition,
+        model: String,
+    ) {
+        controllerScope.launch {
+            val client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.SESSION_TITLE)
+            val title = com.andmx.agent.TitleGenerator.generate(client, model, userText) ?: return@launch
+            val conv = repo.conversation(conversationId) ?: return@launch
+            val derived = userText.lineSequence().firstOrNull { it.isNotBlank() }?.take(32)
+            if (conv.title == "新任务" || conv.title == derived) {
+                repo.rename(conversationId, title)
+            }
+        }
+    }
+
     private suspend fun maybeAutoTitle(conversationId: Long, toolName: String, userText: String) {
         if (toolName !in setOf("write_file", "edit_file", "apply_patch", "run_shell", "grep", "glob")) return
         val conv = repo.conversation(conversationId) ?: return
@@ -2335,3 +2543,6 @@ class ChatController(private val context: Context) {
         repo.rename(conversationId, title)
     }
 }
+
+private fun escXmlAttr(s: String): String =
+    s.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")

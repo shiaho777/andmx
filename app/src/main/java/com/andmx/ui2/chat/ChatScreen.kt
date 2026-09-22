@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -79,6 +81,7 @@ import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
 import com.andmx.ui2.terminal.rememberTerminalColors
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,9 +181,12 @@ fun ChatScreen(
     val fileChanges by viewModel.fileChanges.collectAsState()
     val rewindResult by viewModel.rewindResult.collectAsState()
     val rewindPickerOpen by viewModel.rewindPickerOpen.collectAsState()
+    val fileRewindOpen by viewModel.fileRewindOpen.collectAsState()
+    val recoverableQueue by viewModel.recoverableQueue.collectAsState()
     val rewindCheckpoints by viewModel.rewindCheckpoints.collectAsState()
     val workflowsOpen by viewModel.workflowsOpen.collectAsState()
     val workflowDefs by viewModel.workflowDefs.collectAsState()
+    val retryStatus by viewModel.retryStatus.collectAsState()
     val workflowRuns by viewModel.workflowRuns.collectAsState()
     val workflowDetail by viewModel.workflowDetail.collectAsState()
     val workflowDetailEvents by viewModel.workflowDetailEvents.collectAsState()
@@ -204,6 +210,7 @@ fun ChatScreen(
 
     var showTerminal by remember { mutableStateOf(false) }
     var selectionError by remember { mutableStateOf<String?>(null) }
+    var sideChatExcerpt by remember { mutableStateOf<String?>(null) }
     var showFiles by remember { mutableStateOf(false) }
     var filesInitialPath by remember { mutableStateOf<String?>(null) }
     var fileTreeRequestKey by remember { mutableStateOf(0) }
@@ -296,6 +303,10 @@ LaunchedEffect(Unit) {
                     settingsInitialPage = SettingsPage.SKILLS
                     showSettings = true
                 }
+                ChatActionBus.Action.OpenPluginsSettings -> {
+                    settingsInitialPage = SettingsPage.PLUGIN
+                    showSettings = true
+                }
                 ChatActionBus.Action.OpenSearch -> showCommandCenter = true
                 ChatActionBus.Action.OpenDrawer -> drawerOpen = true
             }
@@ -362,6 +373,62 @@ LaunchedEffect(Unit) {
             if (normalized != null && !normalized.contains(' ')) {
                 SlashCommands.suggestions(normalized, 8, extras = pluginSlashSpecs)
             } else emptyList()
+        }
+    }
+    // 上游 mode/model/effort-suggestion-panel：/<cmd> <partial> 的参数补全。
+    val argSuggestions by remember(inputText, config, skills, workflowDefs) {
+        derivedStateOf {
+            val t = inputText
+            val m = Regex("""^[/、／](\S+)\s+(\S*)$""").find(t) ?: return@derivedStateOf emptyList()
+            val cmd = m.groupValues[1].lowercase()
+            val q = m.groupValues[2].lowercase()
+            val all: List<ArgSuggestion> = when (cmd) {
+                "mode" -> ExecMode.entries.map {
+                    ArgSuggestion(it.id, "${it.id} · ${it.label}", it.description)
+                }
+                "model" -> {
+                    val p = config.primary
+                        ?: config.providers.firstOrNull { it.id == config.settings.activeProviderId }
+                        ?: config.providers.firstOrNull()
+                    p?.models?.map { (id, def) ->
+                        ArgSuggestion(id, def.displayName?.ifBlank { id } ?: id, p.name)
+                    }.orEmpty()
+                }
+                "effort", "variant" -> {
+                    val cfg = config.reasoning
+                    val levels = when {
+                        cfg == null -> emptyList()
+                        cfg.levels.isNotEmpty() -> cfg.levels.map { it.id }
+                        cfg.effortLevels.isNotEmpty() -> cfg.effortLevels
+                        cfg.style == com.andmx.llm.provider.ReasoningStyle.EFFORT ->
+                            listOf("minimal", "low", "medium", "high")
+                        cfg.style == com.andmx.llm.provider.ReasoningStyle.THINKING ->
+                            listOf("low", "medium", "high")
+                        else -> emptyList()
+                    }
+                    (listOf("off") + levels).distinct().map { lv ->
+                        val cur = config.settings.reasoningEffort.ifBlank { "off" }
+                        ArgSuggestion(lv, lv, if (lv == cur) "current" else "")
+                    }
+                }
+                "locale", "language" -> listOf(
+                    ArgSuggestion("system", "system", "跟随系统"),
+                    ArgSuggestion("zh-CN", "zh-CN", "简体中文"),
+                    ArgSuggestion("en-US", "en-US", "English"),
+                )
+                "skill" -> skills.map { ArgSuggestion(it.name, it.name, it.path.substringAfterLast('/')) }
+                "expert" -> workflowDefs.map {
+                    ArgSuggestion(it.definitionId, it.title.ifBlank { it.definitionId }, it.description.orEmpty())
+                }
+                else -> emptyList()
+            }
+            all.filter { q.isEmpty() || it.value.lowercase().contains(q) || it.label.lowercase().contains(q) }
+                .take(8)
+        }
+    }
+    LaunchedEffect(inputText) {
+        if (Regex("""^/expert\s+\S*$""").containsMatchIn(inputText)) {
+            viewModel.ensureWorkflowDefs()
         }
     }
     val conversationSuggestions by remember {
@@ -527,6 +594,14 @@ LaunchedEffect(Unit) {
             val composerBoundsModifier = Modifier.onGloballyPositioned { coords ->
                 composerBounds = coords.boundsInRoot()
             }
+            val inputHistory = remember(messages) {
+                messages.filter { it.role == "user" }
+                    .map { it.content.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .takeLast(20)
+                    .asReversed()
+            }
             @Composable
             fun ComposerBlock(flat: Boolean = false, extraModifier: Modifier = Modifier) {
                 val outerModifier = if (flat) composerBoundsModifier else extraModifier
@@ -588,6 +663,12 @@ LaunchedEffect(Unit) {
                     onInsertCommand = { insertAtCursor("/") },
                     onInsertSkill = { insertAtCursor("\$") },
                     slashSuggestions = slashSuggestions,
+                    argSuggestions = argSuggestions,
+                    onPickArg = { sug ->
+                        inputText = Regex("""^[/、／](\S+)\s+\S*$""").replace(inputText) { mr ->
+                            "/${mr.groupValues[1]} ${sug.value}"
+                        }
+                    },
                     onPickSlash = { spec ->
                         val raw = spec.name.trim()
                         val bare = raw.removePrefix("/")
@@ -613,6 +694,8 @@ LaunchedEffect(Unit) {
                         }.trimEnd()
                         viewModel.addSkillByName(skill.name, skill.path)
                     },
+                    inputHistory = inputHistory,
+                    onPickHistory = { inputText = it },
                     mentionSuggestions = mentionSuggestions,
                     onPickMention = { m ->
                         inputText = Regex("""(?:^|\s)@[^\s@]*$""").replace(inputText) { mr ->
@@ -663,6 +746,9 @@ LaunchedEffect(Unit) {
                         drawerOpen = true
                     }) {
                         Icon(Icons.Outlined.FolderOpen, "查看文件")
+                    }
+                    IconButton(onClick = { viewModel.shareConversation() }) {
+                        Icon(Icons.Outlined.Share, "分享对话")
                     }
                     IconButton(onClick = { showTerminal = !showTerminal }) {
                         Icon(
@@ -723,9 +809,16 @@ LaunchedEffect(Unit) {
                     ComposerBlock(flat = true)
                 }
             } else {
+                val listState = rememberLazyListState()
+                val userAnchorIndices = remember(timelineReversed) {
+                    timelineReversed.mapIndexedNotNull { i, it ->
+                        if (it is TimelineItem.Message && it.message.role == "user") i else null
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth(),
                     reverseLayout = true,
                 ) {
@@ -785,12 +878,24 @@ LaunchedEffect(Unit) {
                                                 )
                                             }
                                         } else null,
+                                        onSideChat = if (
+                                            item.message.role == "assistant" &&
+                                            !item.message.isStreaming &&
+                                            !item.message.isProcess &&
+                                            item.message.content.isNotBlank() &&
+                                            !isLoading
+                                        ) {
+                                            { sideChatExcerpt = item.message.content }
+                                        } else null,
                                     )
                                 }
-                                is TimelineItem.Tool -> ToolCallCard(item.tool)
+                                is TimelineItem.Tool -> ToolCallCard(
+                                    item.tool,
+                                    workflowStatus = { viewModel.workflowStatusLine(it) },
+                                )
                                 is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)
                                 is TimelineItem.Reasoning -> ReasoningCard(item.item)
-                                is TimelineItem.Working -> WorkingIndicator()
+                                is TimelineItem.Working -> WorkingIndicator(retryStatus)
                                 is TimelineItem.TurnProcess -> TurnProcessRow(
                                     fold = item.fold,
                                     expanded = item.fold.sortKey in manuallyExpandedFolds,
@@ -816,6 +921,33 @@ LaunchedEffect(Unit) {
                             }
                         }
                     }
+                }
+                if (userAnchorIndices.size > 1) {
+                    val scope = rememberCoroutineScope()
+                    val rank = userAnchorIndices
+                        .indexOfFirst { it >= listState.firstVisibleItemIndex }
+                        .let { if (it < 0) userAnchorIndices.lastIndex else it }
+                    TurnNavigator(
+                        turn = userAnchorIndices.size - rank,
+                        total = userAnchorIndices.size,
+                        onPrev = {
+                            scope.launch {
+                                userAnchorIndices.getOrNull(rank + 1)
+                                    ?.let { listState.animateScrollToItem(it) }
+                            }
+                        },
+                        onNext = {
+                            scope.launch {
+                                if (rank <= 0) listState.animateScrollToItem(0)
+                                else userAnchorIndices.getOrNull(rank - 1)
+                                    ?.let { listState.animateScrollToItem(it) }
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 14.dp, bottom = 6.dp),
+                    )
+                }
                 }
 
                 AnimatedVisibility(
@@ -870,12 +1002,39 @@ LaunchedEffect(Unit) {
                     onCompress = { viewModel.compressContext() },
                 )
                 TurnMetricsLine(metrics = lastTurnMetrics)
+                PendingCommandRecoveryBanner(
+                    items = recoverableQueue,
+                    onRecover = { viewModel.recoverPendingQueue() },
+                    onDiscard = { viewModel.discardPendingQueue() },
+                )
                 RewindBar(
                     changes = fileChanges,
                     rewindResult = rewindResult,
-                    onRewind = { viewModel.rewindFiles() },
+                    onOpen = { viewModel.openFileRewind() },
                     onDismissResult = { viewModel.clearRewindResult() },
                 )
+                sideChatExcerpt?.let { excerpt ->
+                    SideChatDialog(
+                        excerpt = excerpt,
+                        onShare = { viewModel.sharePlainText("AndMX 选段", it) },
+                        onSubmit = { q ->
+                            sideChatExcerpt = null
+                            viewModel.startSideChat(excerpt, q)
+                        },
+                        onDismiss = { sideChatExcerpt = null },
+                    )
+                }
+                if (fileRewindOpen) {
+                    FileRewindDialog(
+                        changes = fileChanges,
+                        onRevertOne = { viewModel.revertSingleFile(it) },
+                        onRevertAll = {
+                            viewModel.rewindFiles()
+                            viewModel.dismissFileRewind()
+                        },
+                        onDismiss = { viewModel.dismissFileRewind() },
+                    )
+                }
                 if (rewindPickerOpen) {
                     RewindPickerDialog(
                         checkpoints = rewindCheckpoints,

@@ -12,7 +12,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +57,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -84,7 +90,10 @@ import kotlinx.serialization.json.JsonElement
 private val prettyJson = Json { prettyPrint = true }
 
 @Composable
-fun ToolCallCard(toolCall: ToolCall) {
+fun ToolCallCard(
+    toolCall: ToolCall,
+    workflowStatus: (suspend (String) -> String?)? = null,
+) {
     val isEditTool = ToolPresentation.isEditTool(toolCall.name)
     val collapsible = ToolPresentation.isCollapsible(toolCall)
     var expanded by remember(toolCall.id) {
@@ -124,6 +133,7 @@ fun ToolCallCard(toolCall: ToolCall) {
     }
     val todoItems = remember(toolCall.id, toolCall.args) { ToolPresentation.todoItems(toolCall) }
     val family = ToolPresentation.family(toolCall.name)
+    val canonicalName = ToolArgs.canonical(toolCall.name)
     val kindLabel = if (editPreview != null) {
         editKindLabel(editPreview.operation, toolCall.isRunning, toolCall.isError)
     } else {
@@ -374,6 +384,10 @@ fun ToolCallCard(toolCall: ToolCall) {
                             MetaBlock(title = "错误", body = toolCall.output.take(4000), mono = true, emphasize = true)
                         }
                     }
+                } else if (canonicalName == "workflow" || canonicalName == "cron" ||
+                    canonicalName == "webfetch" || canonicalName == "search"
+                ) {
+                    StructuredToolCard(toolCall, canonicalName, workflowStatus)
                 } else {
                     Column(
                         Modifier
@@ -422,10 +436,269 @@ fun ToolCallCard(toolCall: ToolCall) {
                         }
                     }
                 }
+                if (!toolCall.imageUrls.isNullOrEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    ScreenshotStrip(toolCall.imageUrls.orEmpty())
+                }
             }
         }
     }
 }
+
+/** 专属卡：workflow/cron/webfetch/search 工具的结构化字段行 + 输出。 */
+@Composable
+private fun StructuredToolCard(
+    toolCall: ToolCall,
+    canonical: String,
+    workflowStatus: (suspend (String) -> String?)? = null,
+) {
+    val fieldKeys = when (canonical) {
+        "workflow" -> listOf("name", "spec", "runId", "run_id", "task", "phase", "nodeId")
+        "cron" -> listOf("name", "task", "schedule", "cron", "automationId", "id", "prompt")
+        else -> listOf("url", "query", "prompt")
+    }
+    val rows = remember(toolCall.id, toolCall.args) {
+        argsFieldRows(toolCall.args, fieldKeys)
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                MaterialTheme.colorScheme.surfaceContainerHighest.copy(
+                    alpha = if (toolCall.isError) 0.55f else 0.38f,
+                ),
+            )
+            .padding(10.dp),
+    ) {
+        if (rows.isNotEmpty()) {
+            rows.forEach { (k, v) ->
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        k,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(72.dp),
+                    )
+                    Text(
+                        v.take(160),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (!toolCall.output.isNullOrBlank() || toolCall.isRunning) {
+                Spacer(Modifier.height(8.dp))
+            }
+        } else if (toolCall.args.isNotBlank() && toolCall.args != "{}") {
+            MetaBlock(title = "参数", body = prettyArgs(toolCall.args))
+            if (!toolCall.output.isNullOrBlank() || toolCall.isRunning) {
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+        if (canonical == "workflow" && workflowStatus != null) {
+            val runId = remember(toolCall.id, toolCall.args, toolCall.output) {
+                extractWorkflowRunId(toolCall.args) ?: extractWorkflowRunId(toolCall.output.orEmpty())
+            }
+            if (runId != null) {
+                var statusLine by remember(toolCall.id) { mutableStateOf<String?>(null) }
+                LaunchedEffect(runId, toolCall.isRunning) {
+                    while (true) {
+                        statusLine = runCatching { workflowStatus(runId) }.getOrNull()
+                        if (!toolCall.isRunning && statusLine != null) break
+                        kotlinx.coroutines.delay(2_000)
+                    }
+                }
+                statusLine?.let {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "run $runId · $it",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        if ((canonical == "webfetch" || canonical == "search") && !toolCall.output.isNullOrBlank()) {
+            val links = remember(toolCall.id, toolCall.output) { extractSourceUrls(toolCall.output) }
+            if (links.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "来源",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    links.forEach { url ->
+                        Text(
+                            url.substringAfter("://").substringBefore("/").ifBlank { url }.take(28),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                .clickable { ChatActionBus.openUrl(url) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+        when {
+            !toolCall.output.isNullOrBlank() -> MetaBlock(
+                title = if (toolCall.isRunning) "输出" else "结果",
+                body = toolCall.output.take(12000),
+                mono = true,
+                emphasize = toolCall.isError,
+                stickToBottom = toolCall.isRunning,
+            )
+            toolCall.isRunning -> Text(
+                "执行中…",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+            )
+            toolCall.isError -> Text(
+                "无输出",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+private val SOURCE_URL_RE = Regex("""https?://[^\s"'()\[\]<>]+""")
+
+private fun extractSourceUrls(output: String): List<String> =
+    SOURCE_URL_RE.findAll(output).map { it.value.trimEnd('.', ',', ';', ':', ')') }
+        .distinct().take(8).toList()
+
+private val ANSI_RE = Regex(
+    "\\u001B\\[[0-9;?]*[a-zA-Z]|\\u001B\\][^\\u0007]*[\\u0007]|\\u001B[()][0-9A-B]",
+)
+
+private fun stripAnsi(text: String): String =
+    if (text.indexOf('\u001B') < 0) text else ANSI_RE.replace(text, "")
+
+private val RUN_ID_RE = Regex("""\b(?:run[_-]?id|runId)["'\s:=]+([A-Za-z0-9][A-Za-z0-9_-]{5,})""")
+
+private fun extractWorkflowRunId(text: String): String? {
+    val m = RUN_ID_RE.find(text) ?: return null
+    return m.groupValues[1]
+}
+
+private data class TestSummary(val passed: Int, val failed: Int, val skipped: Int)
+
+private val TEST_COUNT_RE = Regex("""(\d+)\s+(passed|failed|skipped|xpassed|xfailed)""")
+
+private fun detectTestSummary(output: String): TestSummary? {
+    if (output.indexOf('') >= 0 && !output.contains("pass") && !output.contains("fail")) return null
+    val tail = output.takeLast(4000)
+    var passed = 0; var failed = 0; var skipped = 0
+    var matched = false
+    TEST_COUNT_RE.findAll(tail).forEach { m ->
+        val n = m.groupValues[1].toIntOrNull() ?: return@forEach
+        when (m.groupValues[2]) {
+            "passed" -> { passed = n; matched = true }
+            "failed" -> { failed = n; matched = true }
+            "skipped" -> { skipped = n; matched = true }
+        }
+    }
+    return if (matched && passed + failed + skipped > 0) TestSummary(passed, failed, skipped) else null
+}
+
+private fun argsFieldRows(raw: String, keys: List<String>): List<Pair<String, String>> {
+    val el = runCatching {
+        prettyJson.parseToJsonElement(raw.trim()) as? kotlinx.serialization.json.JsonObject
+    }.getOrNull() ?: return emptyList()
+    return keys.mapNotNull { k ->
+        el[k]?.let { v ->
+            val text = if (v is kotlinx.serialization.json.JsonPrimitive) v.content else v.toString()
+            if (text.isBlank()) null else k to text
+        }
+    }
+}
+
+@Composable
+private fun ScreenshotStrip(urls: List<String>) {
+    var zoomIndex by remember { mutableStateOf<Int?>(null) }
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        urls.forEachIndexed { idx, url ->
+            val bmp = remember(url) { decodeDataImage(url) } ?: return@forEachIndexed
+            Image(
+                bitmap = bmp,
+                contentDescription = null,
+                modifier = Modifier
+                    .height(96.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { zoomIndex = idx },
+                contentScale = ContentScale.Fit,
+            )
+        }
+    }
+    zoomIndex?.let { start ->
+        val bitmaps = remember(urls) { urls.mapNotNull { decodeDataImage(it) } }
+        val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+            initialPage = start.coerceIn(0, (bitmaps.size - 1).coerceAtLeast(0)),
+        ) { bitmaps.size }
+        AlertDialog(
+            onDismissRequest = { zoomIndex = null },
+            confirmButton = {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (bitmaps.size > 1) {
+                        Text(
+                            "${pagerState.currentPage + 1}/${bitmaps.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
+                    TextButton(onClick = { zoomIndex = null }) { Text("关闭") }
+                }
+            },
+            text = {
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { page ->
+                    Image(
+                        bitmap = bitmaps[page],
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxWidth(),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+            },
+        )
+    }
+}
+
+private fun decodeDataImage(url: String): ImageBitmap? = runCatching {
+    val b64 = url.substringAfter("base64,", url)
+    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+}.getOrNull()
 
 @Composable
 private fun MetaBlock(
@@ -1004,7 +1277,7 @@ private fun CompactToolProcessRow(tool: ToolCall) {
 }
 
 @Composable
-fun WorkingIndicator() {
+fun WorkingIndicator(status: String? = null) {
     var elapsed by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         elapsed = 0
@@ -1025,7 +1298,7 @@ fun WorkingIndicator() {
             strokeWidth = 1.4.dp,
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
         )
-        GradientRunningLabel("思考中…")
+        GradientRunningLabel(status ?: "思考中…")
         Spacer(Modifier.weight(1f))
         Text(
             text = formatElapsed(elapsed),

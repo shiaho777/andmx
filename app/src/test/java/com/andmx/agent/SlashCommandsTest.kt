@@ -175,6 +175,16 @@ class SlashCommandsTest {
     }
 
     @Test
+    fun recognizesPluginsAndLocale() {
+        assertTrue(SlashCommands.parse("/plugins") is SlashResult.Plugins)
+        assertTrue(SlashCommands.parse("/plugin") is SlashResult.Plugins)
+        assertTrue(SlashCommands.parse("/locale") is SlashResult.Locale)
+        assertTrue(SlashCommands.parse("/language zh-CN") is SlashResult.Locale)
+        val l = SlashCommands.parse("/locale en-US") as SlashResult.Locale
+        assertEquals("en-US", l.args)
+    }
+
+    @Test
     fun commandNamesAreUnique() {
         val names = SlashCommands.list.map { it.name }
         assertEquals(names.size, names.toSet().size)
@@ -213,5 +223,29 @@ class SlashCommandsTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun recognizesInitEffortMcp() {
+        val init = SlashCommands.parse("/init focus on build commands")
+        org.junit.Assert.assertTrue(init is SlashResult.Init)
+        org.junit.Assert.assertEquals("focus on build commands", (init as SlashResult.Init).args)
+
+        val effort = SlashCommands.parse("/effort high")
+        org.junit.Assert.assertTrue(effort is SlashResult.Effort)
+        org.junit.Assert.assertEquals("high", (effort as SlashResult.Effort).args)
+
+        val variant = SlashCommands.parse("/variant low")
+        org.junit.Assert.assertTrue(variant is SlashResult.Effort)
+
+        org.junit.Assert.assertTrue(SlashCommands.parse("/mcp") is SlashResult.Mcp)
+    }
+
+    @Test
+    fun initPromptMentionsAgentsMdAndWorkspace() {
+        val prompt = InitPrompt.build("extra notes", "/root/project")
+        org.junit.Assert.assertTrue(prompt.contains("/root/project/AGENTS.md"))
+        org.junit.Assert.assertTrue(prompt.contains(".andmx/AGENTS.md"))
+        org.junit.Assert.assertTrue(prompt.contains("extra notes"))
     }
 }

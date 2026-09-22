@@ -41,7 +41,7 @@ class AndmxMigrationTest {
         val database = AndmxDatabase.get(context)
         try {
             val sqlite = database.openHelper.writableDatabase
-            assertEquals(15, sqlite.version)
+            assertEquals(16, sqlite.version)
             val dao = database.dao()
             val conversation = requireNotNull(dao.getConversation(41))
             assertEquals("/offline/project", conversation.project)
@@ -59,6 +59,7 @@ class AndmxMigrationTest {
             assertFalse(conversation.archived)
             assertFalse(conversation.pinned)
             assertEquals("", conversation.groupId)
+            assertEquals("", conversation.pendingQueueJson)
 
             val message = dao.messagesFor(41).single()
             assertEquals(51L, message.id)

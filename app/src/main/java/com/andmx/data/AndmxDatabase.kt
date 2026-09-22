@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowRunEntity::class,
         WorkflowEventEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -47,6 +47,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_12_13,
                     MIGRATION_13_14,
                     MIGRATION_14_15,
+                    MIGRATION_15_16,
                 )
                 .build()
                 .also { instance = it }
@@ -318,6 +319,13 @@ abstract class AndmxDatabase : RoomDatabase() {
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_workflow_events_runId ON workflow_events(runId)")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_workflow_events_runId_seq ON workflow_events(runId, seq)")
+            }
+        }
+
+        /** v15 → v16: pendingQueueJson——busy 期排队输入的持久化，重启后可恢复。 */
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN pendingQueueJson TEXT NOT NULL DEFAULT ''")
             }
         }
 

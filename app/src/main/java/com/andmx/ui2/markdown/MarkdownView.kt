@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.outlined.WrapText
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -113,12 +116,16 @@ fun MarkdownView(
                         }
 
                         is MdBlock.Code -> {
-                            CodeBlock(
-                                code = block.code,
-                                language = block.lang,
-                                isDark = isDark,
-                                lightweight = streaming,
-                            )
+                            if (block.lang.trim().lowercase() == "mermaid") {
+                                MermaidBlock(block.code)
+                            } else {
+                                CodeBlock(
+                                    code = block.code,
+                                    language = block.lang,
+                                    isDark = isDark,
+                                    lightweight = streaming,
+                                )
+                            }
                         }
 
                         is MdBlock.List -> {
@@ -288,6 +295,128 @@ private fun MarkdownTable(
             }
         }
     }
+}
+
+/** mermaid 代码块：渲染按钮 + 复制源码；图形经 assets/mermaid.min.js + WebView 离线渲染。 */
+@Composable
+private fun MermaidBlock(code: String) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var showDiagram by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f))
+            .padding(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Mermaid 图表",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { showDiagram = true }) { Text("查看图") }
+            TextButton(onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(code))
+            }) { Text("复制") }
+        }
+        if (showDiagram) {
+            MermaidDiagramDialog(code = code, onDismiss = { showDiagram = false })
+        }
+        Text(
+            code,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Mermaid 渲染对话框：WebView + assets/mermaid.min.js 离线渲染；渲染失败回退源码。 */
+@Composable
+private fun MermaidDiagramDialog(code: String, onDismiss: () -> Unit) {
+    var renderError by remember { mutableStateOf<String?>(null) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Mermaid 图表") },
+        text = {
+            if (renderError != null) {
+                Column {
+                    Text(
+                        "渲染失败：$renderError",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.padding(6.dp))
+                    Text(
+                        code,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                        modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                    )
+                }
+            } else {
+                androidx.compose.ui.viewinterop.AndroidView(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 240.dp, max = 480.dp),
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            settings.builtInZoomControls = true
+                            settings.displayZoomControls = false
+                            settings.useWideViewPort = true
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            addJavascriptInterface(
+                                object {
+                                    @android.webkit.JavascriptInterface
+                                    fun onError(message: String) {
+                                        post { renderError = message }
+                                    }
+                                },
+                                "AndroidMermaid",
+                            )
+                            loadDataWithBaseURL(
+                                "file:///android_asset/",
+                                mermaidHtml(code),
+                                "text/html",
+                                "utf-8",
+                                null,
+                            )
+                        }
+                    },
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+private fun mermaidHtml(code: String): String {
+    val encoded = android.util.Base64.encodeToString(
+        code.toByteArray(Charsets.UTF_8),
+        android.util.Base64.NO_WRAP,
+    )
+    return """<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="mermaid.min.js"></script>
+<style>body{margin:0;padding:12px;background:transparent}#d{text-align:center}.err{color:#c00;font:12px monospace;white-space:pre-wrap}</style>
+</head><body><div id="d">渲染中…</div>
+<script>
+try {
+  var src = decodeURIComponent(escape(atob("$encoded")));
+  mermaid.initialize({startOnLoad:false, theme:'neutral', securityLevel:'strict'});
+  mermaid.render('mmd', src).then(function(r){
+    document.getElementById('d').innerHTML = r.svg;
+    var s = document.querySelector('#d svg');
+    if (s) { s.removeAttribute('height'); s.style.maxWidth='100%'; s.style.height='auto'; }
+  }).catch(function(e){ AndroidMermaid.onError(String(e && e.message || e)); });
+} catch (e) { AndroidMermaid.onError(String(e && e.message || e)); }
+</script></body></html>"""
 }
 
 @Composable

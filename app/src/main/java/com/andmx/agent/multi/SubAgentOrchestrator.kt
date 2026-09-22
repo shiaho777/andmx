@@ -63,12 +63,21 @@ class SubAgentOrchestrator(
         client to turnProvider()
     },
     private val agentsMdProvider: suspend () -> String = { "" },
+    /** 子代理→协调者回话（上游 RespondToCoordinator 的投递端口）。 */
+    private val coordinatorMessageSink: (fromAgentId: String, message: String) -> Unit = { _, _ -> },
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
         data class Started(val agentId: String, val task: String) : SubAgentEvent
         data class Delta(val agentId: String, val text: String) : SubAgentEvent
         data class Completed(val agentId: String, val result: String) : SubAgentEvent
+        /** 子代理内部工具调用活动（上游 subagent transcript 对齐）。 */
+        data class ToolActivity(
+            val agentId: String,
+            val toolName: String,
+            val detail: String,
+            val running: Boolean,
+        ) : SubAgentEvent
         data class Failed(val agentId: String, val error: String) : SubAgentEvent
         /** Terminal state reached — emitted once per run (ZCode queued_system_notification 的触发点). */
         data class Terminated(
@@ -187,7 +196,8 @@ class SubAgentOrchestrator(
             injectAgentsMd = spec.injectAgentsMd,
         )
         val baseTools = toolsFactory()
-        val tools = SubagentCatalog.filterTools(baseTools, agentDef)
+        val tools = SubagentCatalog.filterTools(baseTools, agentDef) +
+            RespondToCoordinatorTool(agentId, coordinatorMessageSink)
         val maxSteps = (spec.maxTurns ?: 25).coerceIn(1, 80)
 
         val (runClient, turn) = resolveRun(spec.model)
@@ -221,6 +231,10 @@ class SubAgentOrchestrator(
                         result.append(event.text)
                         _events.tryEmit(SubAgentEvent.Completed(agentId, event.text))
                     }
+                    is AgentEvent.ToolStarted ->
+                        _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.arguments.take(120), true))
+                    is AgentEvent.ToolFinished ->
+                        _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.output.take(120), false))
                     is AgentEvent.Failed -> _events.tryEmit(SubAgentEvent.Failed(agentId, event.message))
                     else -> {}
                 }
@@ -306,6 +320,10 @@ class SubAgentOrchestrator(
                         result.append(event.text)
                         _events.tryEmit(SubAgentEvent.Completed(agentId, event.text))
                     }
+                    is AgentEvent.ToolStarted ->
+                        _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.arguments.take(120), true))
+                    is AgentEvent.ToolFinished ->
+                        _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.output.take(120), false))
                     is AgentEvent.Failed -> _events.tryEmit(SubAgentEvent.Failed(agentId, event.message))
                     else -> {}
                 }
@@ -977,3 +995,37 @@ internal fun formatAgentTaskNotification(
 
 private fun esc(s: String): String = s
     .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+/** 子代理→协调者回话（上游 RespondToCoordinator）：仅注册进子代理工具面。 */
+class RespondToCoordinatorTool(
+    private val agentId: String,
+    private val sink: (fromAgentId: String, message: String) -> Unit,
+) : Tool {
+    override val name = "RespondToCoordinator"
+    override val description =
+        "# RespondToCoordinator\n\n" +
+            "Reply to the agent that spawned or messaged you.\n\n" +
+            "```json\n" +
+            "{\"message\": \"done: found 3 candidates, recommend option B\"}\n" +
+            "```\n\n" +
+            "Your plain text output is NOT delivered to the coordinator — you MUST call this tool " +
+            "to answer its message or report a final result it asked for.\n"
+    override val risk = com.andmx.agent.ToolRisk.EXECUTE
+    override val parameters: JsonObject = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") {
+            putJsonObject("message") {
+                put("type", "string")
+                put("description", "Reply content delivered to the coordinator")
+            }
+        }
+        putJsonArray("required") { add("message") }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val message = args["message"]?.jsonPrimitive?.content
+            ?: return ToolResult("{\"success\":false,\"message\":\"message required\"}", isError = true)
+        sink(agentId, message.take(4_096))
+        return ToolResult("{\"success\":true,\"message\":\"Delivered to coordinator\"}")
+    }
+}

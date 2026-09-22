@@ -97,6 +97,10 @@ object ToolPresentation {
             "sessionctx" -> if (running) "读取上下文" else "已读取上下文"
             "goal" -> if (running) "更新目标" else "目标已更新"
             "mcp" -> if (running) "调用中" else "已调用"
+            "computer" -> if (running) "操作屏幕中" else "已操作屏幕"
+            "listmodels" -> if (running) "列出模型" else "已列出模型"
+            "cron" -> if (running) "更新定时任务" else "定时任务已更新"
+            "workflow" -> if (running) "工作流操作" else "工作流已更新"
             else -> if (running) "运行中" else family(tc.name).label
         }
     }

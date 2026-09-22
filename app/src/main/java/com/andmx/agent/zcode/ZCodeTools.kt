@@ -710,7 +710,12 @@ class ReadSessionContextTool(
         val maxTokens = args.int("maxTokens") ?: 4000
         val text = runCatching { resolve(sid, query, strategy, maxTokens) }
             .getOrElse { "无法读取会话上下文: ${it.message}" }
-        return ToolResult(text)
+        return ToolResult(
+            com.andmx.agent.SystemReminder.wrap(
+                com.andmx.agent.SystemReminder.Source.REFERENCED_SESSION_CONTEXT,
+                text,
+            ).trimEnd(),
+        )
     }
 }
 
@@ -783,17 +788,19 @@ fun buildZCodeToolSurface(
     includeLegacyAliases: Boolean = true,
     listModelsProviders: (suspend () -> List<com.andmx.llm.provider.ProviderDefinition>)? = null,
     listModelsCurrent: (suspend () -> Pair<String, String>)? = null,
+    readFileState: com.andmx.agent.ReadFileState? = null,
+    webFetchSummarizer: (suspend (content: String, prompt: String) -> String?)? = null,
 ): List<Tool> {
     val access = WorkspaceAccess(context)
     val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks)
     val shellWithHint = GhRateLimitHintTool(shell)
-    val read = ReadFileTool(context)
-    val write = WriteFileTool(context)
-    val edit = EditFileTool(context)
+    val read = ReadFileTool(context, readFileState)
+    val write = WriteFileTool(context, readFileState)
+    val edit = EditFileTool(context, readFileState)
     val grep = GrepTool(context)
     val glob = GlobTool(context)
     val listDir = ListDirTool(context)
-    val browse = BrowseTool(networkPolicy)
+    val browse = BrowseTool(networkPolicy, summarizer = webFetchSummarizer)
     val search = WebSearchTool(networkPolicy)
 
     fun mapPath(args: JsonObject): JsonObject {

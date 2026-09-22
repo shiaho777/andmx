@@ -63,6 +63,12 @@ object ToolArgs {
             "AskUserQuestion" -> "ask"
             "ReadSessionContext" -> "sessionctx"
             "get_goal", "create_goal", "update_goal" -> "goal"
+            "computer", "Computer" -> "computer"
+            "ListModels" -> "listmodels"
+            "CronCreate", "CronList", "CronUpdate", "CronDelete" -> "cron"
+            "CreateWorkflow", "AmendWorkflow", "SaveWorkflow", "ListSavedWorkflows",
+            "ListWorkflowRuns", "GetWorkflowRun", "GetWorkflowRunRoster",
+            "ResumeWorkflowRun", "CancelWorkflowRun", "EvalWorkflowSnippet" -> "workflow"
             else -> if (isMcpName(n)) "mcp" else n.lowercase()
         }
     }

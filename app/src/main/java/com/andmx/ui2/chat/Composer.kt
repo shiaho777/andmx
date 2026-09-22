@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.FormatQuote
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.ListAlt
 import androidx.compose.material.icons.outlined.PanTool
@@ -127,12 +128,16 @@ fun Composer(
     onInsertSkill: () -> Unit = {},
     slashSuggestions: List<SlashCommands.Spec> = emptyList(),
     onPickSlash: (SlashCommands.Spec) -> Unit = {},
+    argSuggestions: List<ArgSuggestion> = emptyList(),
+    onPickArg: (ArgSuggestion) -> Unit = {},
     conversationSuggestions: List<ConversationPick> = emptyList(),
     onPickConversation: (ConversationPick) -> Unit = {},
     skillSuggestions: List<SkillSuggestion> = emptyList(),
     onPickSkill: (SkillSuggestion) -> Unit = {},
     mentionSuggestions: List<MentionSuggestion> = emptyList(),
     onPickMention: (MentionSuggestion) -> Unit = {},
+    inputHistory: List<String> = emptyList(),
+    onPickHistory: (String) -> Unit = {},
     placeholder: String = DEFAULT_PLACEHOLDER,
     flat: Boolean = false,
     modifier: Modifier = Modifier,
@@ -182,7 +187,26 @@ fun Composer(
                 }
             }
         }
-        AnimatedVisibility(visible = conversationSuggestions.isNotEmpty() && slashSuggestions.isEmpty()) {
+        AnimatedVisibility(visible = argSuggestions.isNotEmpty() && slashSuggestions.isEmpty()) {
+            SuggestionPanel {
+                argSuggestions.forEach { sug ->
+                    SuggestionRow(
+                        leading = {
+                            Text(
+                                sug.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailing = sug.desc,
+                        onClick = { onPickArg(sug) },
+                    )
+                }
+            }
+        }
+        AnimatedVisibility(visible = conversationSuggestions.isNotEmpty() && slashSuggestions.isEmpty() && argSuggestions.isEmpty()) {
             SuggestionPanel {
                 conversationSuggestions.forEach { pick ->
                     SuggestionRow(
@@ -376,6 +400,9 @@ fun Composer(
                         onInsertCommand = onInsertCommand,
                         onInsertSkill = onInsertSkill,
                     )
+                    if (inputHistory.isNotEmpty()) {
+                        InputHistoryMenu(history = inputHistory, onPick = onPickHistory)
+                    }
                     ExecModePill(mode = execMode, onSelect = onExecModeSelected)
                     if (planOverlayActive) {
                         PlanOverlayChip(onExit = onExitPlanMode)
@@ -439,6 +466,37 @@ private fun SteerBar(
         } else {
             androidx.compose.material3.TextButton(onClick = onGuide) {
                 Text("引导", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+// ── 输入历史 ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun InputHistoryMenu(
+    history: List<String>,
+    onPick: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        CircleIcon(Icons.Outlined.History, "输入历史") { expanded = true }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            history.take(20).forEach { entry ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            entry.replace('\n', ' ').take(80),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onPick(entry)
+                    },
+                )
             }
         }
     }
@@ -1148,6 +1206,13 @@ private fun ExecMode.icon(): ImageVector = when (this) {
     ExecMode.PLAN -> Icons.Outlined.ListAlt
     ExecMode.FULL -> Icons.Outlined.RocketLaunch
 }
+
+/** 斜杠命令参数联想项（上游 mode/model/effort suggestion panel 对齐）。 */
+data class ArgSuggestion(
+    val value: String,
+    val label: String,
+    val desc: String = "",
+)
 
 data class ConversationPick(
     val id: Long,

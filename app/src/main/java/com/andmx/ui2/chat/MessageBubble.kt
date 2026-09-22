@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -32,6 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +51,7 @@ fun MessageBubble(
     onBranch: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
+    onSideChat: (() -> Unit)? = null,
     isEditing: Boolean = false,
 ) {
     val isUser = message.role == "user"
@@ -66,6 +72,7 @@ fun MessageBubble(
             onCopy = onCopy,
             onBranch = onBranch,
             onQuote = onQuote,
+            onSideChat = onSideChat,
         )
     }
 }
@@ -90,6 +97,13 @@ private fun UserProcessBubble(
             modifier = Modifier
                 .widthIn(max = maxBubble)
                 .clip(RoundedCornerShape(18.dp))
+                .then(
+                    if (onCopy != null) {
+                        Modifier.pointerInput(message.id) {
+                            detectTapGestures(onLongPress = { onCopy() })
+                        }
+                    } else Modifier,
+                )
                 .background(
                     if (isEditing) {
                         MaterialTheme.colorScheme.tertiaryContainer
@@ -177,6 +191,7 @@ private fun AssistantProcessBlock(
     onCopy: (() -> Unit)? = null,
     onBranch: (() -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
+    onSideChat: (() -> Unit)? = null,
 ) {
     val process = message.isProcess
     // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
@@ -236,6 +251,7 @@ private fun AssistantProcessBlock(
                 onBranch = onBranch,
                 onRegenerate = onRegenerate,
                 onQuote = onQuote,
+                onSideChat = onSideChat,
             )
         }
     }
@@ -249,6 +265,7 @@ private fun AssistantActionBar(
     onBranch: (() -> Unit)?,
     onRegenerate: (() -> Unit)?,
     onQuote: (() -> Unit)? = null,
+    onSideChat: (() -> Unit)? = null,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
@@ -259,6 +276,9 @@ private fun AssistantActionBar(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -288,6 +308,13 @@ private fun AssistantActionBar(
                     icon = Icons.Outlined.FormatQuote,
                     label = "引用",
                     onClick = onQuote,
+                )
+            }
+            if (onSideChat != null) {
+                ActionChip(
+                    icon = Icons.Outlined.ChatBubbleOutline,
+                    label = "侧聊",
+                    onClick = onSideChat,
                 )
             }
         }

@@ -20,6 +20,7 @@ object ModelCallTrace {
         SUBAGENT("子智能体"),
         GOAL_VERIFY("目标验证"),
         MEMORY("记忆抽取"),
+        WEB_FETCH("网页摘要"),
         WORKFLOW("工作流"),
         UNKNOWN("未知来源"),
     }

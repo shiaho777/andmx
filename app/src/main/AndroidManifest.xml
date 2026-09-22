@@ -19,6 +19,9 @@
     <!-- On-device Android plugin: open system package installer for built APKs -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Turn-completion notifications (Android 13+ runtime permission; settings toggle in General) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".AndmxApp"
         android:allowBackup="true"

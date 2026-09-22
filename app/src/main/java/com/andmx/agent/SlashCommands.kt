@@ -16,6 +16,14 @@ sealed interface SlashResult {
     data object Rewind : SlashResult
     data object Resume : SlashResult
     data object Workflows : SlashResult
+    data object Mcp : SlashResult
+    data object Plugins : SlashResult
+    data class Locale(val args: String) : SlashResult
+    data class ExecModeSwitch(val args: String) : SlashResult
+    data class SkillInvoke(val name: String, val task: String) : SlashResult
+    data class Expert(val args: String) : SlashResult
+    data class Init(val args: String) : SlashResult
+    data class Effort(val args: String) : SlashResult
     data object OpenModel : SlashResult
     data class Mode(val mode: ApprovalMode) : SlashResult
     data class Goal(val action: GoalAction, val text: String = "") : SlashResult
@@ -53,7 +61,15 @@ object SlashCommands {
         Spec("/fork", "分叉当前对话为新会话", aliases = listOf("/branch"), keywords = listOf("分叉", "分支")),
         Spec("/rewind", "回滚到某个检查点（对话+文件改动）", aliases = listOf("/rollback"), keywords = listOf("回滚", "回退")),
         Spec("/resume", "恢复历史会话", aliases = listOf("/sessions"), keywords = listOf("恢复", "历史")),
-        Spec("/workflows", "查看工作流定义与运行", aliases = listOf("/workflow"), keywords = listOf("工作流", "workflow", "dwf")),
+        Spec("/workflows", "查看工作流定义与运行", aliases = listOf("/workflow", "/dwf"), keywords = listOf("工作流", "workflow", "dwf")),
+        Spec("/expert", "启动或管理专家工作流", keywords = listOf("专家", "expert")),
+        Spec("/mode", "查看或切换执行模式", keywords = listOf("模式", "mode")),
+        Spec("/skill", "列出或手动调用技能", keywords = listOf("技能", "skill")),
+        Spec("/init", "生成或更新 AGENTS.md 项目指令文件", keywords = listOf("初始化", "agents.md", "指令")),
+        Spec("/effort", "查看或设置推理强度", aliases = listOf("/variant"), keywords = listOf("推理", "effort", "思考")),
+        Spec("/mcp", "查看 MCP 服务器与工具状态", keywords = listOf("mcp", "服务器")),
+        Spec("/plugins", "打开插件管理页", aliases = listOf("/plugin"), keywords = listOf("插件", "plugin")),
+        Spec("/locale", "查看或设置界面语言", aliases = listOf("/language"), keywords = listOf("语言", "locale")),
     )
 
     fun suggestions(
@@ -113,7 +129,21 @@ object SlashCommands {
             "/fork", "/branch" -> SlashResult.Fork
             "/rewind", "/rollback" -> SlashResult.Rewind
             "/resume", "/sessions" -> SlashResult.Resume
-            "/workflows", "/workflow" -> SlashResult.Workflows
+            "/workflows", "/workflow", "/dwf" -> SlashResult.Workflows
+            "/expert" -> SlashResult.Expert(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/mode" -> SlashResult.ExecModeSwitch(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/skill" -> {
+                val rest = t.substringAfter(' ', missingDelimiterValue = "").trim()
+                SlashResult.SkillInvoke(
+                    name = rest.substringBefore(' ').trim(),
+                    task = rest.substringAfter(' ', missingDelimiterValue = "").trim(),
+                )
+            }
+            "/init" -> SlashResult.Init(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/effort", "/variant" -> SlashResult.Effort(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/mcp" -> SlashResult.Mcp
+            "/plugins", "/plugin" -> SlashResult.Plugins
+            "/locale", "/language" -> SlashResult.Locale(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/help", "/?" -> SlashResult.Help
             else -> SlashResult.Unknown(t.substringBefore(' '))
         }
