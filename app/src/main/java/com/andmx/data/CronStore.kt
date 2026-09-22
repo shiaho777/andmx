@@ -47,6 +47,29 @@ class CronStore(context: android.content.Context) {
         return entity to null
     }
 
+    /** 闲时延迟任务（上游 off-peak port 等价）：固定 nextRunAt 触发一次。 */
+    suspend fun createDeferred(
+        conversationId: Long,
+        title: String,
+        prompt: String,
+        model: String,
+        runAtMs: Long,
+    ): CronAutomationEntity {
+        val entity = CronAutomationEntity(
+            id = "auto_${UUID.randomUUID().toString().take(12)}",
+            conversationId = conversationId,
+            title = "[闲时] $title",
+            prompt = prompt,
+            cronExpr = "",
+            recurring = false,
+            maxRuns = 1,
+            nextRunAt = runAtMs,
+            model = model,
+        )
+        dao.upsertAutomation(entity)
+        return entity
+    }
+
     suspend fun list(): List<CronAutomationEntity> = dao.allAutomations()
 
     suspend fun get(id: String): CronAutomationEntity? = dao.automation(id)

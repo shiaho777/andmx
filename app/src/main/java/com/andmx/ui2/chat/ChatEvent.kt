@@ -73,6 +73,8 @@ data class ChatMessage(
     val isProcess: Boolean = false,
     val createdAt: Long = sortKey,
     val completedAt: Long = 0L,
+    /** 0 无, 1 赞, -1 踩（上游 assistant-feedback）。 */
+    val feedback: Int = 0,
 )
 
 data class ToolCall(

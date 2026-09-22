@@ -78,6 +78,11 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
         if (ext == "pdf") {
             return readPdf(resolved)
         }
+        // 视频 → MediaMetadataRetriever 抽帧（上游 read-video 等价；无 provider
+        // video block，用 3 帧截图代替）。
+        if (ext in VIDEO_EXTS) {
+            return readVideo(resolved)
+        }
         return runCatching {
             val text = access.readText(path)
             val lines = text.split('\n')
@@ -143,6 +148,45 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
         }.getOrElse { ToolResult("PDF 读取失败: ${it.message}", isError = true) }
     }
 
+    /** 本地视频抽 3 帧（头/中/尾）为 PNG——上游 read-video 的移动端等价。 */
+    private fun readVideo(resolved: String): ToolResult {
+        val host = access.hostFile(resolved)
+            ?: return ToolResult("远端工作区暂不支持视频读取", isError = true)
+        if (!host.exists()) return ToolResult("文件不存在: $resolved", isError = true)
+        return runCatching {
+            val mmr = android.media.MediaMetadataRetriever()
+            val images = mutableListOf<String>()
+            try {
+                mmr.setDataSource(host.absolutePath)
+                val durMs = mmr.extractMetadata(
+                    android.media.MediaMetadataRetriever.METADATA_KEY_DURATION,
+                )?.toLongOrNull() ?: 0L
+                for (t in listOf(0L, durMs / 2, (durMs - 100).coerceAtLeast(0))) {
+                    val bmp = mmr.getFrameAtTime(
+                        t * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    ) ?: continue
+                    val scale = minOf(1f, 1024f / bmp.width.coerceAtLeast(1))
+                    val scaled = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(
+                        bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true,
+                    ) else bmp
+                    val bos = java.io.ByteArrayOutputStream()
+                    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, bos)
+                    images += "data:image/jpeg;base64," +
+                        android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP)
+                    if (scaled !== bmp) bmp.recycle()
+                    scaled.recycle()
+                }
+            } finally {
+                runCatching { mmr.release() }
+            }
+            if (images.isEmpty()) return ToolResult("视频抽帧失败: $resolved", isError = true)
+            ToolResult(
+                "[video ${resolved.substringAfterLast('/')} · ${images.size} 帧]",
+                imageUrls = images,
+            )
+        }.getOrElse { ToolResult("视频读取失败: ${it.message}", isError = true) }
+    }
+
     companion object {
         const val DEFAULT_LINE_LIMIT = 2000
         const val MAX_LINE_LIMIT = 5000
@@ -150,6 +194,7 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
         const val IMAGE_MAX_DIM = 2000
         const val IMAGE_RAW_MAX_BYTES = 4 * 1024 * 1024
         val IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+        val VIDEO_EXTS = setOf("mp4", "mov", "mkv", "avi", "webm", "3gp", "m4v")
     }
 }
 
@@ -192,7 +237,12 @@ class WriteFileTool(context: Context, private val readFileState: ReadFileState? 
             access.writeText(resolved, content)
             ChangeTracker.record(resolved, old, content, existedBefore = existed)
             readFileState?.record(resolved, content, sourceTool = ReadFileState.WRITE_TOOL)
-            ToolResult("已写入 $resolved (${content.length} 字符)")
+            // 上游 file_diff payload 等价：覆盖已存在文件时回真实增删行统计
+            val stat = if (existed) {
+                val d = com.andmx.diff.DiffEngine.stats(com.andmx.diff.DiffEngine.diff(old, content))
+                " (+${d.added} -${d.removed})"
+            } else " (+${content.lines().size})"
+            ToolResult("已写入 $resolved (${content.length} 字符$stat)")
         }.getOrElse { ToolResult("写入失败: ${it.message}", isError = true) }
     }
 }
@@ -246,7 +296,11 @@ class EditFileTool(context: Context, private val readFileState: ReadFileState? =
             access.writeText(resolved, updated)
             ChangeTracker.record(resolved, original, updated, existedBefore = true)
             readFileState?.record(resolved, updated, sourceTool = "edit_file")
-            ToolResult("已编辑 $resolved" + if (replaceAll) " (替换 $count 处)" else "")
+            val d = com.andmx.diff.DiffEngine.stats(com.andmx.diff.DiffEngine.diff(original, updated))
+            ToolResult(
+                "已编辑 $resolved (+${d.added} -${d.removed})" +
+                    if (replaceAll) " (替换 $count 处)" else "",
+            )
         }.getOrElse { ToolResult("编辑失败: ${it.message}", isError = true) }
     }
 }

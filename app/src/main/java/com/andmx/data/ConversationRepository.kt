@@ -89,6 +89,8 @@ class ConversationRepository(context: Context) {
 
     suspend fun messages(conversationId: Long): List<MessageEntity> = dao.messagesFor(conversationId)
 
+    suspend fun setMessageFeedback(id: Long, v: Int) = dao.setMessageFeedback(id, v)
+
     suspend fun rename(conversationId: Long, title: String) =
         dao.touchConversation(conversationId, title, System.currentTimeMillis())
 

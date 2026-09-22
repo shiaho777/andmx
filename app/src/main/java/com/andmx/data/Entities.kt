@@ -100,6 +100,8 @@ data class MessageEntity(
     /** Snapshot for approval messages: user-facing risk explanation at the time of the prompt. */
     val approvalRiskDescription: String = "",
     val imageUrlsJson: String = "",
+    /** 上游 assistant-feedback：0 无, 1 赞, -1 踩。 */
+    val feedback: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
 )
 

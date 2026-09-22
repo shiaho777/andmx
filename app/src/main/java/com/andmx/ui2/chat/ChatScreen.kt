@@ -902,6 +902,13 @@ LaunchedEffect(Unit) {
                                         ) {
                                             { sideChatExcerpt = item.message.content }
                                         } else null,
+                                        onFeedback = if (
+                                            item.message.role == "assistant" &&
+                                            !item.message.isStreaming &&
+                                            !item.message.isProcess
+                                        ) {
+                                            { v -> viewModel.setMessageFeedback(item.message.id, v) }
+                                        } else null,
                                     )
                                 }
                                 is TimelineItem.Tool -> ToolCallCard(

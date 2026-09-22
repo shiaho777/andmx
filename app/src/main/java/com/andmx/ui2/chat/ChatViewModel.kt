@@ -263,6 +263,7 @@ class ChatViewModel @Inject constructor(
                         isProcess = false,
                         createdAt = msg.createdAt,
                         completedAt = msg.createdAt,
+                        feedback = msg.feedback,
                     )
                     "tool" -> {
                         tools += ToolCall(
@@ -941,6 +942,10 @@ class ChatViewModel @Inject constructor(
             }
             SlashResult.Resume -> {
                 resumeSession()
+                return true
+            }
+            SlashResult.ContinueLatest -> {
+                continueLatestSession()
                 return true
             }
             SlashResult.Workflows -> {
@@ -1809,6 +1814,29 @@ class ChatViewModel @Inject constructor(
     fun resumeSession() {
         appendLocalAssistant("在左侧会话列表中选择要恢复的历史会话。")
         ChatActionBus.openDrawer()
+    }
+
+    /** assistant 消息赞/踩（上游 assistant-feedback）：同值再点清除。 */
+    fun setMessageFeedback(messageId: Long, value: Int) {
+        val cur = _messages.value.firstOrNull { it.id == messageId } ?: return
+        val next = if (cur.feedback == value) 0 else value
+        _messages.value = _messages.value.map {
+            if (it.id == messageId) it.copy(feedback = next) else it
+        }
+        viewModelScope.launch { runCatching { repo.setMessageFeedback(messageId, next) } }
+    }
+
+    /** /continue：直接恢复最近一条会话（上游 /continue 对齐）。 */
+    fun continueLatestSession() {
+        viewModelScope.launch {
+            val latest = repo.conversationsByArchived(false)
+                .firstOrNull { it.id != _currentConversationId.value }
+            if (latest == null) {
+                appendLocalAssistant("没有可恢复的历史会话。")
+            } else {
+                switchToConversation(latest.id)
+            }
+        }
     }
 
     // ── 切模型上下文守卫 ───────────────────────────────────────────────────

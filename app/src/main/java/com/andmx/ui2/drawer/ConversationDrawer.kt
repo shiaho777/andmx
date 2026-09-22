@@ -421,6 +421,7 @@ fun ConversationDrawer(
             },
             onConfirm = {
                 scope.launch { dao.deleteConversation(target.id) }
+                com.andmx.agent.JsReplRuntime.dispose("conv-${target.id}")
                 deleteTarget = null
                 deleteArchived = false
             },

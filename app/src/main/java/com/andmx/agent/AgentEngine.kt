@@ -574,13 +574,18 @@ class AgentEngine(
             emit(AgentEvent.StepStarted(turnCount, step, System.currentTimeMillis()))
             val toolArgBuf = sortedMapOf<Int, StringBuilder>()
             val toolMeta = sortedMapOf<Int, Pair<String?, String?>>()
-            val msg = streamWithRetry(
+            // 上游 cancelled-stream-persistence：stop 时已到达的文本落盘，
+            // 否则取消会丢掉整段部分回复。
+            val stepText = StringBuilder()
+            val msg = try {
+                streamWithRetry(
                 request,
                 onContent = {
                     if (!firstTokenSent) {
                         firstTokenSent = true
                         emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
                     }
+                    stepText.append(it)
                     emit(AgentEvent.AssistantDelta(it))
                 },
                 onReasoning = {
@@ -611,6 +616,14 @@ class AgentEngine(
                     )
                 },
             )
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                val partial = stepText.toString().trim()
+                if (partial.isNotEmpty()) {
+                    emit(AgentEvent.Assistant(partial))
+                    history += ApiMessage(role = "assistant", content = partial)
+                }
+                throw cancel
+            }
             if (sawReasoning) emit(AgentEvent.ReasoningDone)
             if (msg == null) {
                 emit(AgentEvent.Failed("多次重试后仍无响应"))
