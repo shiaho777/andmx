@@ -18,6 +18,7 @@ sealed class ChatEvent {
         val output: String,
         val isError: Boolean,
         val imageUrls: List<String>? = null,
+        val durationMs: Long = 0,
     ) : ChatEvent()
     data class PlanUpdated(val steps: List<PlanStepUi>) : ChatEvent()
     data class ApprovalRequested(
@@ -83,6 +84,7 @@ data class ToolCall(
     val isError: Boolean = false,
     val sortKey: Long = System.currentTimeMillis(),
     val imageUrls: List<String>? = null,
+    val durationMs: Long = 0,
 )
 
 data class ApprovalItem(

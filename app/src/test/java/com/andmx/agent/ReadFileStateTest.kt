@@ -75,4 +75,46 @@ class ReadFileStateTest {
         assertEquals("contents of a", entries[0].content)
         assertEquals(1, state.postCompactReminders(preservedPaths = setOf("/w/a.kt")).size)
     }
+
+    @Test
+    fun stalenessUnreadFile() {
+        val state = ReadFileState()
+        assertEquals("未读取", state.staleness("/w/x.kt", 1000L, 10L))
+    }
+
+    @Test
+    fun stalenessFreshAfterRead() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "abc", mtimeMs = 1000L, sizeBytes = 3L)
+        assertEquals(null, state.staleness("/w/a.kt", 1000L, 3L))
+    }
+
+    @Test
+    fun stalenessMtimeAdvanced() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "abc", mtimeMs = 1000L, sizeBytes = 3L)
+        assertEquals("已修改", state.staleness("/w/a.kt", 2000L, 3L))
+    }
+
+    @Test
+    fun stalenessSizeChanged() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "abc", mtimeMs = 1000L, sizeBytes = 3L)
+        assertEquals("已修改", state.staleness("/w/a.kt", 1000L, 10L))
+    }
+
+    @Test
+    fun stalenessUnknownMtimePasses() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "abc")
+        assertEquals(null, state.staleness("/w/a.kt", null, null))
+    }
+
+    @Test
+    fun writeThenEditRefreshesState() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "v1", sourceTool = ReadFileState.WRITE_TOOL, mtimeMs = 500L, sizeBytes = 2L)
+        assertEquals(null, state.staleness("/w/a.kt", 500L, 2L))
+        assertEquals("已修改", state.staleness("/w/a.kt", 900L, 2L))
+    }
 }
