@@ -889,12 +889,25 @@ fun buildZCodeToolSurface(
             put("type", "object")
             putJsonObject("properties") {
                 putJsonObject("command") { put("type", "string") }
-                putJsonObject("timeout") { put("type", "number") }
+                putJsonObject("timeout") {
+                    put("type", "number")
+                    put("description", "Max execution time in ms (max 600000)")
+                }
                 putJsonObject("description") { put("type", "string") }
+                putJsonObject("run_in_background") {
+                    put("type", "boolean")
+                    put("description", "Run without blocking; returns a task_id. Use TaskOutput/TaskStop to manage.")
+                }
             }
             putJsonArray("required") { add("command") }
         },
         risk = ToolRisk.EXECUTE,
+        mapArgs = { args ->
+            buildJsonObject {
+                args.forEach { (k, v) -> put(k, v) }
+                args["timeout"]?.let { put("timeout_ms", it) }
+            }
+        },
     )
     val grepZ = AliasedTool(
         inner = grep,

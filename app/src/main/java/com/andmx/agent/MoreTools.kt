@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -59,13 +60,34 @@ class WebSearchTool(
         put("type", "object")
         putJsonObject("properties") {
             putJsonObject("query") { put("type", "string"); put("description", "搜索关键词") }
+            putJsonObject("allowed_domains") {
+                put("type", "array")
+                putJsonObject("items") { put("type", "string") }
+                put("description", "Only include search results from these domains")
+            }
+            putJsonObject("blocked_domains") {
+                put("type", "array")
+                putJsonObject("items") { put("type", "string") }
+                put("description", "Never include search results from these domains")
+            }
         }
         putJsonArray("required") { add("query") }
     }
 
     override suspend fun execute(args: JsonObject): ToolResult = withContext(Dispatchers.IO) {
-        val query = args["query"]?.jsonPrimitive?.content
+        val rawQuery = args["query"]?.jsonPrimitive?.content
             ?: return@withContext ToolResult("缺少参数 query", isError = true)
+        val allowed = args["allowed_domains"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf { d -> d.isNotEmpty() } }
+            .orEmpty()
+        val blocked = args["blocked_domains"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf { d -> d.isNotEmpty() } }
+            .orEmpty()
+        val query = buildString {
+            append(rawQuery)
+            allowed.forEach { append(" site:").append(it) }
+            blocked.forEach { append(" -site:").append(it) }
+        }
 
         val searchUrl = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
         val policyDecision = networkPolicy.checkUrl(searchUrl)

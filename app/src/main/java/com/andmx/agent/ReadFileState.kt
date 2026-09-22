@@ -19,16 +19,45 @@ class ReadFileState {
         val limit: Int? = null,
         val readAtMs: Long = System.currentTimeMillis(),
         val sourceTool: String = READ_TOOL,
+        /** 读取时的文件 mtime（毫秒）——edit/write 新鲜度校验用。 */
+        val mtimeMs: Long? = null,
+        val sizeBytes: Long? = null,
+        /** 上游 isPartialView：offset/limit 截取的局部视图。 */
+        val isPartialView: Boolean = offset != null || limit != null,
     )
 
     private val map = LinkedHashMap<String, Entry>()
     private val json = Json { ignoreUnknownKeys = true }
 
     @Synchronized
-    fun record(path: String, content: String, offset: Int? = null, limit: Int? = null, sourceTool: String = READ_TOOL) {
+    fun record(
+        path: String,
+        content: String,
+        offset: Int? = null,
+        limit: Int? = null,
+        sourceTool: String = READ_TOOL,
+        mtimeMs: Long? = null,
+        sizeBytes: Long? = null,
+    ) {
         val key = normalizePath(path)
         map.remove(key)
-        map[key] = Entry(path, content, offset, limit, System.currentTimeMillis(), sourceTool)
+        map[key] = Entry(
+            path, content, offset, limit, System.currentTimeMillis(), sourceTool,
+            mtimeMs = mtimeMs, sizeBytes = sizeBytes,
+        )
+    }
+
+    /** 上游写前 freshness 校验：无记录=未读；mtime 前进或大小变化=stale。 */
+    @Synchronized
+    fun staleness(path: String, currentMtimeMs: Long?, currentSizeBytes: Long?): String? {
+        val entry = map[normalizePath(path)]
+            ?: return "未读取"
+        if (entry.mtimeMs == null || currentMtimeMs == null) return null
+        if (currentMtimeMs > entry.mtimeMs) return "已修改"
+        if (entry.sizeBytes != null && currentSizeBytes != null &&
+            currentSizeBytes != entry.sizeBytes
+        ) return "已修改"
+        return null
     }
 
     @Synchronized

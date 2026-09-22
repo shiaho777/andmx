@@ -1308,6 +1308,12 @@ fun WorkingIndicator(status: String? = null) {
     }
 }
 
+private fun formatDurationMs(ms: Long): String = when {
+    ms < 1_000 -> "${ms}ms"
+    ms < 60_000 -> "%.1fs".format(ms / 1000.0)
+    else -> "${ms / 60_000}m ${(ms % 60_000) / 1000}s"
+}
+
 private fun formatElapsed(seconds: Int): String {
     val s = seconds % 60
     return if (seconds < 60) "${s}s" else "${seconds / 60}m ${s.toString().padStart(2, '0')}s"

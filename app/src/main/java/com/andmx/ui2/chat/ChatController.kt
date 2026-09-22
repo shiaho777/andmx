@@ -989,7 +989,7 @@ class ChatController(private val context: Context) {
                 if (session.turnToolOutputs.size > 24) {
                     session.turnToolOutputs.subList(0, session.turnToolOutputs.size - 24).clear()
                 }
-                emit(ChatEvent.ToolCallFinished(event.id, outDb, event.isError, event.imageUrls))
+                emit(ChatEvent.ToolCallFinished(event.id, outDb, event.isError, event.imageUrls, event.durationMs))
                 repo.addMessage(
                     conversationId,
                     "tool",
@@ -1906,8 +1906,12 @@ class ChatController(private val context: Context) {
     private fun ruleSubject(toolName: String, args: JsonObject): String {
         val canonical = ToolArgs.canonical(toolName)
         return when (canonical) {
-            "shell", "git" -> ToolArgs.shellCommand(toolName, args.toString()).ifBlank {
-                args["command"]?.jsonPrimitive?.content.orEmpty()
+            "shell", "git" -> {
+                val desc = args["description"]?.jsonPrimitive?.content.orEmpty()
+                val cmd = ToolArgs.shellCommand(toolName, args.toString()).ifBlank {
+                    args["command"]?.jsonPrimitive?.content.orEmpty()
+                }
+                if (desc.isNotBlank()) "$desc\n$cmd" else cmd
             }
             else -> ToolArgs.filePath(toolName, args.toString()).ifBlank {
                 args["url"]?.jsonPrimitive?.content

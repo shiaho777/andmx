@@ -488,6 +488,35 @@ TUI 侧对应 app-*.ts）：
     computer/cron/workflow/listmodels canonical 标签；showReasoning/showTodos
     与 GFM table 此前已就绪（本批核实）。
 
+## P7 契约级对账（逐 schema 比对 tools/*.ts）
+
+- ✅ `Bash` 别名 timeout 静默失效修复：上游参数名 `timeout` 此前不映射到
+  原生 `timeout_ms`（传入即被丢弃），现 mapArgs 透传；`run_in_background`
+  补入 schema；`description` 参数加入并进入审批预览（上游
+  BASH_DESCRIPTION_FIELD_PROMPT 语义）。
+- ✅ `Read` cat -n 输出：文本结果带 `N\t` 行号（上游 cat -n 格式），
+  offset 切片行号与真实行号一致。
+- ✅ `Read` 图片/PDF：png/jpg/jpeg/gif/webp/bmp 走 image content 通道
+  （imageUrls data-url），超限自动降采样（≤2000px、JPEG 85）；`.pdf` 经
+  android.graphics.pdf.PdfRenderer 逐页渲染 PNG（≤8 页、1024px 宽），远端
+  工作区明确报错——替代上游 read-pdf 依赖 pdftoppm 的方案（Android 无外
+  部进程可用，PdfRenderer 为等价原生路径）。
+- ✅ `Edit`/`Write` 写前新鲜度闸（上游 read-state freshness 校验对齐）：
+  已存在文件本会话未 read → 拒绝；mtime 前进或 size 变化 → 拒绝并要求
+  重读。`ReadFileState.Entry` 补 `mtimeMs`/`sizeBytes`/`isPartialView`
+  字段（契约字段全齐）。
+- ✅ `WebSearch` allowed_domains/blocked_domains（site:/-site: 实现）。
+- ✅ `Agent`/`TaskOutput`/`TaskStop`/`SendMessage`/`AskUserQuestion`/
+  `TodoWrite`/`ReadSessionContext`/`Cron*`/workflow 族契约逐字段核对
+  已齐；`TaskCreate/TaskGet/TaskList/TaskUpdate`/`EnterWorktree`/
+  `ExitWorktree`/`LSP`/`NotebookEdit`/`ScheduleWakeup` 上游仅有
+  provider-visible-order 占位、无 handler 无契约，确认非缺口。
+- ✅ 工具执行计时（上游 CommandExecutionTelemetry.runMs 对齐）：
+  `AgentEvent.ToolFinished.durationMs` 全链路（单发/并发波/goal 校验
+  三处派发点计时）→ ToolCall.durationMs → 卡片头显示 `123ms/1.2s`。
+  firstOutputMs/noOutputMs/hash 属远端 trace 维度，本地无 trace exporter，
+  标为不做。
+
 ## 验证方式
 
 - 文本对齐项用「逐字 diff」验收：把 ZCode 源文件里的常量与 AndMX 常量对拷比较。

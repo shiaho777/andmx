@@ -72,6 +72,10 @@ class ShellTool(
                 put("type", "string")
                 put("description", "要执行的 shell 命令,例如 'ls -la /root' 或 'python3 -c \"print(1+1)\"'")
             }
+            putJsonObject("description") {
+                put("type", "string")
+                put("description", "一句话描述命令意图（如 'List files in workspace'），用于审批与转写展示")
+            }
             putJsonObject("timeout_ms") {
                 put("type", "integer")
                 put("minimum", 1)

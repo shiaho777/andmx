@@ -112,6 +112,44 @@ class WorkspaceAccess(context: Context) {
         }
     }
 
+    /** 文件最后修改毫秒（本地 GuestFs stat；远端 stat -c %Y）。 */
+    suspend fun statMtime(path: String): Long? {
+        val p = resolvePath(path)
+        return if (isRemote) {
+            val res = executeShell("stat -c %Y ${q(p)} 2>/dev/null || echo -1", cwd = guestCwd())
+            (res.stdout.trim().toLongOrNull()?.takeIf { it >= 0 })?.times(1000L)
+        } else {
+            runCatching { localFs.resolve(toGuestPath(p)).lastModified() }
+                .getOrNull()?.takeIf { it > 0L }
+        }
+    }
+
+    /** 本地访客路径映射为宿主 File（远端返回 null）——PdfRenderer 等需要真实 fd 的场景用。 */
+    fun hostFile(path: String): java.io.File? {
+        if (isRemote) return null
+        val p = resolvePath(path)
+        return runCatching { localFs.resolve(toGuestPath(p)) }.getOrNull()
+    }
+
+    /** 读文件原始字节（本地直读；远端 base64 回传，限量）。 */
+    suspend fun readBytes(path: String, maxBytes: Int = 8 * 1024 * 1024): ByteArray? {
+        val p = resolvePath(path)
+        return if (isRemote) {
+            val res = executeShell(
+                "head -c $maxBytes ${q(p)} | base64 | tr -d '\\n'",
+                cwd = guestCwd(),
+            )
+            res.stdout.trim().takeIf { it.isNotEmpty() }?.let {
+                runCatching {
+                    android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                }.getOrNull()
+            }
+        } else {
+            runCatching { localFs.resolve(toGuestPath(p)).readBytes() }
+                .getOrNull()?.takeIf { it.size <= maxBytes }
+        }
+    }
+
     suspend fun readText(path: String, limit: Int = 256 * 1024): String {
         val p = resolvePath(path)
         if (isRemote) {

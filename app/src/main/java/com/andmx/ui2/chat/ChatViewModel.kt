@@ -2411,7 +2411,7 @@ class ChatViewModel @Inject constructor(
                 if (index >= 0) {
                     current[index] = current[index].copy(
                         output = event.output, isRunning = false, isError = event.isError,
-                        imageUrls = event.imageUrls,
+                        imageUrls = event.imageUrls, durationMs = event.durationMs,
                     )
                 }
                 _toolCalls.value = current

@@ -46,6 +46,8 @@ sealed interface AgentEvent {
         val id: String, val name: String, val output: String, val isError: Boolean,
         /** Image data-urls produced by the tool (e.g. computer-use screenshots). */
         val imageUrls: List<String>? = null,
+        /** 工具执行耗时（上游 CommandExecutionTelemetry.runMs 对齐）。 */
+        val durationMs: Long = 0,
     ) : AgentEvent
     data class Failed(val message: String) : AgentEvent
     /** 模型请求即将重试（上游 network-events attempt 显示对齐）。 */
@@ -661,8 +663,8 @@ class AgentEngine(
             if (calls.size <= 1) {
                 for (call in calls) {
                     emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
-                    val result = executeToolCall(call)
-                    emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
+                    val (result, durMs) = timedExecuteToolCall(call)
+                    emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, durMs))
                     history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
                     noteRepeat(call)
                 }
@@ -689,23 +691,24 @@ class AgentEngine(
                 }
                 if (pending.isNotEmpty()) groups += pending
                 // Execute — NO emit inside async.
-                val results = mutableListOf<Pair<ApiToolCall, ToolResult>>()
+                val results = mutableListOf<Pair<ApiToolCall, Pair<ToolResult, Long>>>()
                 for (group in groups) {
                     if (group.size == 1) {
-                        results += group[0] to executeToolCall(group[0])
+                        results += group[0] to timedExecuteToolCall(group[0])
                     } else {
                         for (wave in group.chunked(MAX_PARALLEL_TOOL_CALLS)) {
                             coroutineScope {
                                 results += wave.map { call ->
-                                    async { call to executeToolCall(call) }
+                                    async { call to timedExecuteToolCall(call) }
                                 }.map { it.await() }
                             }
                         }
                     }
                 }
                 // Emit ToolFinished in order (serial, on the flow coroutine).
-                for ((call, result) in results) {
-                    emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls))
+                for ((call, timed) in results) {
+                    val result = timed.first
+                    emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, timed.second))
                     history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
                     noteRepeat(call)
                 }
@@ -828,10 +831,9 @@ class AgentEngine(
             )
             history += ApiMessage(role = "assistant", toolCalls = listOf(call))
             emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
-            val result = executeToolCall(call, validation = true).let {
-                it.copy(output = it.output.take(8_000), imageUrls = null)
-            }
-            emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError))
+            val (rawResult, valDurMs) = timedExecuteToolCall(call, validation = true)
+            val result = rawResult.copy(output = rawResult.output.take(8_000), imageUrls = null)
+            emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, durationMs = valDurMs))
             history += ApiMessage(role = "tool", content = result.output, toolCallId = call.id, name = call.function.name)
             if (result.isError) {
                 return GoalVerifier.Verdict(
@@ -958,6 +960,15 @@ class AgentEngine(
     private fun parseArgs(raw: String): JsonObject = runCatching {
         json.parseToJsonElement(raw).jsonObject
     }.getOrElse { JsonObject(emptyMap()) }
+
+    private suspend fun timedExecuteToolCall(
+        call: com.andmx.llm.ApiToolCall,
+        validation: Boolean = false,
+    ): Pair<ToolResult, Long> {
+        val t0 = System.nanoTime()
+        val r = executeToolCall(call, validation)
+        return r to (System.nanoTime() - t0) / 1_000_000
+    }
 
     /** Execute a single tool call: PRE_TOOL_USE hook → approval → run → POST_TOOL_USE hook. */
     private suspend fun executeToolCall(call: com.andmx.llm.ApiToolCall, validation: Boolean = false): ToolResult {
