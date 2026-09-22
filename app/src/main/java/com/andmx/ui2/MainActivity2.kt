@@ -30,20 +30,9 @@ class MainActivity2 : ComponentActivity() {
         com.andmx.ui2.chat.TurnNotifier.appForeground = false
     }
 
-    private val notifPermission = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-    ) { }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            androidx.core.content.ContextCompat.checkSelfPermission(
-                this, android.Manifest.permission.POST_NOTIFICATIONS,
-            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        }
 
         setContent {
             val context = LocalContext.current

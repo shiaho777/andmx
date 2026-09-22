@@ -107,6 +107,21 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val editingMessageId by viewModel.editingMessageId.collectAsState()
     val context = LocalContext.current
+    // 移动端惯例：冷启动不弹权限；首个任务发出（可能后台跑完）时才请求通知权限。
+    val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(isLoading) {
+        if (isLoading && android.os.Build.VERSION.SDK_INT >= 33 &&
+            !com.andmx.ui2.chat.TurnNotifier.notifPermissionAsked &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            com.andmx.ui2.chat.TurnNotifier.notifPermissionAsked = true
+            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val settingsStore = remember { SettingsStore(context) }
     val appSettings by settingsStore.settings.collectAsState(initial = ProviderSettings())
     val visibleReasonings = remember(reasonings, appSettings.showReasoning) {

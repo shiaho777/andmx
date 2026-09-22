@@ -19,6 +19,8 @@ object TurnNotifier {
 
     @Volatile
     var appForeground: Boolean = true
+    /** 进程内只问一次的运行时权限标记（首次发任务时在 UI 层触发）。 */
+    var notifPermissionAsked: Boolean = false
 
     private fun ensureChannel(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
