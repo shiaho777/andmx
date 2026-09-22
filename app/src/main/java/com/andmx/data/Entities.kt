@@ -55,6 +55,8 @@ data class ConversationEntity(
     val pinned: Boolean = false,
     /** Custom task group id (empty = no custom group, grouped by project instead). */
     val groupId: String = "",
+    /** 未发出的排队输入（JSON 字符串数组），进程重启后供 PendingCommandRecoveryBanner 恢复。 */
+    val pendingQueueJson: String = "",
 )
 
 @Entity(tableName = "task_groups")

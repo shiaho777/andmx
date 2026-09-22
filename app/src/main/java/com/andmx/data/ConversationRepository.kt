@@ -174,6 +174,9 @@ class ConversationRepository(context: Context) {
 
     fun observeArchived(): Flow<List<ConversationEntity>> = dao.observeArchived()
 
+    suspend fun setPendingQueue(conversationId: Long, json: String) =
+        dao.setPendingQueue(conversationId, json)
+
     suspend fun conversationsByArchived(archived: Boolean): List<ConversationEntity> =
         dao.conversationsByArchived(archived)
 

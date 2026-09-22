@@ -70,23 +70,77 @@ class ContextCompactor(
      * current preflight budget math: effective window = context − min(output
      * reserve, 21K); threshold = effective − 13K buffer.
      */
+    data class AutoCompactDecision(
+        val shouldCompact: Boolean,
+        val reason: String,
+        val tokenCount: Int,
+        val tokenSource: String,
+        val estimatedTokenCount: Int,
+        val threshold: Int,
+    )
+
+    private var consecutiveAutoCompactFailures = 0
+
+    fun noteAutoCompactOutcome(success: Boolean) {
+        consecutiveAutoCompactFailures = if (success) 0 else consecutiveAutoCompactFailures + 1
+    }
+
+    /** ZCode hasEnoughMessagesToCompact：≥2 个 assistant 起始回合 + ≥1 条 assistant。 */
+    fun hasEnoughMessagesToCompact(history: List<ApiMessage>): Boolean {
+        val nonSystem = history.dropWhile { it.role == "system" }
+        return nonSystem.count { it.role == "assistant" } >= 2
+    }
+
+    private fun providerUsageTokenOverride(history: List<ApiMessage>): Pair<Int, Int>? {
+        val idx = history.indexOfLast { it.role == "assistant" && it.tokenUsage != null && it.tokenUsage!!.inputTokens > 0 }
+        if (idx < 0) return null
+        val base = history[idx].tokenUsage!!.inputTokens
+        val incremental = estimateTokens(history.subList(idx, history.size))
+        return base + incremental to base
+    }
+
+    /** estimateCurrentModelInputTokens：usage 基线 + 增量估算，无 usage 时纯估算。 */
+    fun currentInputTokens(history: List<ApiMessage>): Int =
+        providerUsageTokenOverride(history)?.first ?: estimateTokens(history)
+
+    /**
+     * ZCode shouldAutoCompact 对齐：provider usage 覆盖 → 门槛判定前先做
+     * 消息量门槛与连败熔断。reason: disabled|not_enough_messages|
+     * circuit_breaker|below_threshold|above_threshold。
+     */
+    fun autoCompactDecision(
+        history: List<ApiMessage>,
+        contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+        maxOutputTokens: Int = 0,
+    ): AutoCompactDecision {
+        val estimated = estimateTokens(history)
+        val tokenCount = currentInputTokens(history)
+        val source = if (providerUsageTokenOverride(history) != null) "provider_usage" else "estimate"
+        val threshold = if (autoCompactTokenLimit > 0) autoCompactTokenLimit
+        else autoCompactThresholdTokens(effectiveContextWindow(contextWindow, maxOutputTokens))
+        fun decision(should: Boolean, reason: String) = AutoCompactDecision(
+            shouldCompact = should, reason = reason, tokenCount = tokenCount,
+            tokenSource = source, estimatedTokenCount = estimated, threshold = threshold,
+        )
+        if (!hasEnoughMessagesToCompact(history)) return decision(false, "not_enough_messages")
+        if (consecutiveAutoCompactFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
+            return decision(false, "circuit_breaker")
+        }
+        return if (tokenCount >= threshold) decision(true, "above_threshold")
+        else decision(false, "below_threshold")
+    }
+
     fun needsCompaction(
         history: List<ApiMessage>,
         contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
         maxOutputTokens: Int = 0,
-    ): Boolean {
-        if (autoCompactTokenLimit > 0) {
-            return estimateTokens(history) > autoCompactTokenLimit
-        }
-        val effective = effectiveContextWindow(contextWindow, maxOutputTokens)
-        return estimateTokens(history) >= autoCompactThresholdTokens(effective)
-    }
+    ): Boolean = autoCompactDecision(history, contextWindow, maxOutputTokens).shouldCompact
 
     fun isContextWindowExceeded(
         history: List<ApiMessage>,
         contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
         maxOutputTokens: Int = 0,
-    ): Boolean = estimateTokens(history) > effectiveContextWindow(contextWindow, maxOutputTokens)
+    ): Boolean = currentInputTokens(history) > effectiveContextWindow(contextWindow, maxOutputTokens)
 
     fun effectiveContextWindow(contextWindow: Int, maxOutputTokens: Int = 0): Int =
         (contextWindow.toLong() - outputReserveTokens(contextWindow, maxOutputTokens)).toInt().coerceAtLeast(0)
@@ -185,6 +239,7 @@ class ContextCompactor(
                         summary,
                         recentMessagesPreserved = true,
                         suppressFollowup = true,
+                        transcriptPath = turn.transcriptPath,
                     ),
                 ) +
                 toKeep
@@ -344,6 +399,7 @@ class ContextCompactor(
         /** Upstream caps the preflight output reserve at 21K for threshold math. */
         const val PREFLIGHT_OUTPUT_RESERVE_TOKENS = 21_000
         const val BUFFER_TOKENS = 13_000
+        const val MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 
         private val SUMMARY_REGEX = Regex(
             "<summary>\\s*([\\s\\S]*?)\\s*</summary>",
@@ -358,11 +414,16 @@ class ContextCompactor(
             summary: String,
             recentMessagesPreserved: Boolean = false,
             suppressFollowup: Boolean = false,
+            transcriptPath: String? = null,
         ): String {
             var message = "This session is being continued from a previous conversation that ran out of context. " +
                 "The summary below covers the earlier portion of the conversation.\n\n$summary"
             if (recentMessagesPreserved) {
                 message += "\n\nRecent messages are preserved verbatim."
+            }
+            if (!transcriptPath.isNullOrBlank()) {
+                message += "\n\nIf you need specific details from before compaction (like exact code snippets, " +
+                    "error messages, or content you generated), read the full transcript at: $transcriptPath"
             }
             if (suppressFollowup) {
                 message += "\nContinue the conversation from where it left off without asking the user any further questions. " +

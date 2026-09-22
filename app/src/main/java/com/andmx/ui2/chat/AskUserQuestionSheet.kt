@@ -58,6 +58,7 @@ fun AskUserQuestionPanel(
     val useOther = remember(request.id) { mutableStateMapOf<String, Boolean>() }
     val notes = remember(request.id) { mutableStateMapOf<String, String>() }
     val focusedPreview = remember(request.id) { mutableStateMapOf<String, String>() }
+    var reviewMode by remember(request.id) { mutableStateOf(false) }
     var nowMs by remember(request.id) { mutableStateOf(System.currentTimeMillis()) }
     if (request.autoDeadlineAt != null) {
         LaunchedEffect(request.id) {
@@ -95,8 +96,87 @@ fun AskUserQuestionPanel(
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
+                if (questions.size > 1) {
+                    val answered = questions.count { q ->
+                        selectedLabels[q.question].orEmpty().isNotBlank() ||
+                            (useOther[q.question] == true && otherText[q.question].orEmpty().isNotBlank())
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "已答 $answered/${questions.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
+            fun buildAnswers(): Pair<LinkedHashMap<String, String>, LinkedHashMap<String, Pair<String?, String?>>> {
+                val answers = linkedMapOf<String, String>()
+                val annotations = linkedMapOf<String, Pair<String?, String?>>()
+                questions.forEach { q ->
+                    val otherOn = useOther[q.question] == true
+                    val other = otherText[q.question].orEmpty().trim()
+                    val picks = selectedLabels[q.question].orEmpty()
+                        .split("|||")
+                        .filter { it.isNotBlank() }
+                    val value = when {
+                        otherOn && other.isNotBlank() && picks.isNotEmpty() && q.multiSelect ->
+                            (picks + other).joinToString(", ")
+                        otherOn && other.isNotBlank() -> other
+                        picks.isNotEmpty() -> picks.joinToString(", ")
+                        otherOn -> other.ifBlank { "Other" }
+                        else -> ""
+                    }
+                    if (value.isNotBlank()) answers[q.question] = value
+                    val prev = focusedPreview[q.question]?.ifBlank { null }
+                    val note = notes[q.question]?.ifBlank { null }
+                    if (prev != null || note != null) {
+                        annotations[q.question] = prev to note
+                    }
+                }
+                return answers to annotations
+            }
+            if (reviewMode) {
+                val (answers, annotations) = buildAnswers()
+                Text(
+                    "复核回答",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+                questions.forEach { q ->
+                    val ans = answers[q.question]
+                    Surface(
+                        Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) {
+                        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                            Text(q.question, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                ans ?: "（未作答）",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                fontWeight = if (ans != null) FontWeight.Medium else FontWeight.Normal,
+                            )
+                            annotations[q.question]?.second?.let {
+                                Text("备注：$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    OutlinedButton(onClick = { reviewMode = false }) { Text("返回修改") }
+                    OutlinedButton(onClick = onCancel) { Text("取消") }
+                    Button(onClick = {
+                        if (answers.isEmpty()) onCancel()
+                        else onSubmit(AskUserQuestionParser.formatAnswersJson(questions, answers, annotations))
+                    }) { Text("确认提交") }
+                }
+                return@Column
+            }
             questions.forEachIndexed { index, q ->
                 val picks = selectedLabels[q.question].orEmpty()
                     .split("|||")
@@ -172,34 +252,8 @@ fun AskUserQuestionPanel(
                 OutlinedButton(onClick = onCancel) { Text("取消") }
                 Button(
                     onClick = {
-                        val answers = linkedMapOf<String, String>()
-                        val annotations = linkedMapOf<String, Pair<String?, String?>>()
-                        questions.forEach { q ->
-                            val otherOn = useOther[q.question] == true
-                            val other = otherText[q.question].orEmpty().trim()
-                            val picks = selectedLabels[q.question].orEmpty()
-                                .split("|||")
-                                .filter { it.isNotBlank() }
-                            val value = when {
-                                otherOn && other.isNotBlank() && picks.isNotEmpty() && q.multiSelect ->
-                                    (picks + other).joinToString(", ")
-                                otherOn && other.isNotBlank() -> other
-                                picks.isNotEmpty() -> picks.joinToString(", ")
-                                otherOn -> other.ifBlank { "Other" }
-                                else -> ""
-                            }
-                            if (value.isNotBlank()) answers[q.question] = value
-                            val prev = focusedPreview[q.question]?.ifBlank { null }
-                            val note = notes[q.question]?.ifBlank { null }
-                            if (prev != null || note != null) {
-                                annotations[q.question] = prev to note
-                            }
-                        }
-                        if (answers.isEmpty()) {
-                            onCancel()
-                        } else {
-                            onSubmit(AskUserQuestionParser.formatAnswersJson(questions, answers, annotations))
-                        }
+                        val (answers, _) = buildAnswers()
+                        if (answers.isEmpty()) onCancel() else reviewMode = true
                     },
                 ) { Text("提交") }
             }

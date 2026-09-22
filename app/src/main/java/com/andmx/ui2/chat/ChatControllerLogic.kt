@@ -71,6 +71,10 @@ internal object ChatControllerLogic {
                     )
                     out += results
                 }
+                "reminder" -> {
+                    out += ApiMessage(role = "system", content = m.content)
+                    i++
+                }
                 else -> i++
             }
         }

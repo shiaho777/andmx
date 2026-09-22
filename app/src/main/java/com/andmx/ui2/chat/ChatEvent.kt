@@ -13,7 +13,12 @@ sealed class ChatEvent {
         val args: String,
     ) : ChatEvent()
     data class ToolCallStarted(val id: String, val name: String, val args: String) : ChatEvent()
-    data class ToolCallFinished(val id: String, val output: String, val isError: Boolean) : ChatEvent()
+    data class ToolCallFinished(
+        val id: String,
+        val output: String,
+        val isError: Boolean,
+        val imageUrls: List<String>? = null,
+    ) : ChatEvent()
     data class PlanUpdated(val steps: List<PlanStepUi>) : ChatEvent()
     data class ApprovalRequested(
         val id: String,
@@ -24,9 +29,17 @@ sealed class ChatEvent {
     data class ApprovalResolved(val id: String, val allowed: Boolean) : ChatEvent()
     data class SubAgentStarted(val agentId: String, val task: String) : ChatEvent()
     data class SubAgentDelta(val agentId: String, val text: String) : ChatEvent()
+    data class SubAgentToolActivity(
+        val agentId: String,
+        val toolName: String,
+        val detail: String,
+        val running: Boolean,
+    ) : ChatEvent()
     data class SubAgentCompleted(val agentId: String, val result: String) : ChatEvent()
     data class SubAgentFailed(val agentId: String, val error: String) : ChatEvent()
     data class Error(val message: String) : ChatEvent()
+    /** 模型请求重试中（上游 network attempt 行）。 */
+    data class Retrying(val attempt: Int, val maxAttempts: Int, val delayMs: Long) : ChatEvent()
 
     /** Goal 完成度验证开始（第 [iteration] 轮）。 */
     data class GoalVerifying(val iteration: Int) : ChatEvent()
@@ -69,6 +82,7 @@ data class ToolCall(
     val isRunning: Boolean = true,
     val isError: Boolean = false,
     val sortKey: Long = System.currentTimeMillis(),
+    val imageUrls: List<String>? = null,
 )
 
 data class ApprovalItem(

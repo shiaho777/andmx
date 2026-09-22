@@ -48,6 +48,8 @@ sealed interface AgentEvent {
         val imageUrls: List<String>? = null,
     ) : AgentEvent
     data class Failed(val message: String) : AgentEvent
+    /** 模型请求即将重试（上游 network-events attempt 显示对齐）。 */
+    data class Retrying(val attempt: Int, val maxAttempts: Int, val delayMs: Long) : AgentEvent
     /** 目标完成度验证开始（ZCode goalVerifier 对齐）。 */
     data class GoalVerifying(val iteration: Int) : AgentEvent
     /** 目标完成度验证结果：passed=false 时引擎会注入 continuation 续跑。 */
@@ -71,6 +73,8 @@ data class TurnContext(
     val model: String,
     /** Sub-agent `$level` override from the spawn model spec; wins over settings.reasoningEffort. */
     val reasoningOverride: String? = null,
+    /** Rollout/transcript file path; surfaced in the compact summary so the model can re-read pre-compaction detail. */
+    val transcriptPath: String? = null,
 ) {
     val modelMeta: ModelDefinition? get() = provider.models[model]
 }
@@ -104,6 +108,12 @@ class AgentEngine(
     private val approve: ApprovalGate = { _, _ -> ApprovalOutcome.AllowedOnce },
     /** Advisory guard against a model re-issuing one identical call forever. */
     private val repeatGuard: RepeatCallGuard = RepeatCallGuard(),
+    /** ZCode ReadFileStateMap：会话内已读文件状态，seed 时重建、压缩后回放。 */
+    private val readFileState: ReadFileState? = null,
+    /** 上游 shell_environment_change 对齐：提供当前 shell 工作目录，跨回合变化时提示。 */
+    private val shellEnvProvider: (() -> String)? = null,
+    /** 上游 plan-file-continuity：压缩后返回已批准 plan 的引用提示体（无 plan 返回 null）。 */
+    private val planFileReminderProvider: (suspend () -> String?)? = null,
     /**
      * When set, an ACTIVE goal turns the engine into ZCode's autonomous
      * delivery loop: each final answer triggers a goal-completion verifier
@@ -284,6 +294,18 @@ class AgentEngine(
             history += messages
         }
         rescanPlanReminderState()
+        readFileState?.hydrate(messages)
+        val goal = goalState?.goal
+        if (messages.isNotEmpty() && goal != null && goal.isActivelyPursued) {
+            lastGoalSig = goalSignature(goal)
+            injectSystemReminder(
+                SystemReminder.Source.RESUME_GOAL_STATE,
+                "Resumed with an active goal: ${goal.text}" +
+                    (goal.nextAction.takeIf { it.isNotBlank() }?.let { " Next: $it" } ?: ""),
+            )
+        } else {
+            lastGoalSig = goal?.let { goalSignature(it) }
+        }
     }
 
     /** Snapshot of the current history (used to preserve state across engine rebuilds). */
@@ -297,7 +319,10 @@ class AgentEngine(
     fun injectUserMessage(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
-        history += ApiMessage(role = "user", content = trimmed)
+        history += ApiMessage(
+            role = "user",
+            content = SystemReminder.wrap(SystemReminder.Source.INCOMING_MESSAGE, trimmed).trimEnd(),
+        )
     }
 
     suspend fun compactNow(settings: ProviderSettings, turn: TurnContext): String? {
@@ -329,7 +354,42 @@ class AgentEngine(
         humanTurnsSincePlanReminder += 1
         injectDateChangeReminder()
         injectPlanModeReminder()
+        injectGoalStateChangeReminder()
+        injectShellEnvironmentReminder()
         loop(settings, turn)
+    }
+
+    private var lastGoalSig: String? = null
+    private var lastShellEnv: String? = null
+
+    private fun goalSignature(goal: com.andmx.agent.ConversationGoal): String =
+        "${goal.text}|${goal.status}|${goal.nextAction}|${goal.goalIteration}"
+
+    /** ZCode goal_state_change：目标objective/status/nextAction 变化时提示一次。 */
+    private fun injectGoalStateChangeReminder() {
+        val goal = goalState?.goal
+        val sig = goal?.let { goalSignature(it) }
+        if (sig == lastGoalSig) return
+        val prev = lastGoalSig
+        lastGoalSig = sig
+        if (prev == null || goal == null) return
+        injectSystemReminder(
+            SystemReminder.Source.GOAL_STATE_CHANGE,
+            "Goal state changed: ${goal.text} [${goal.status}]" +
+                (goal.nextAction.takeIf { it.isNotBlank() }?.let { " — next: $it" } ?: ""),
+        )
+    }
+
+    /** ZCode shell_environment_change：工作目录跨回合变化时提示一次。 */
+    private fun injectShellEnvironmentReminder() {
+        val current = shellEnvProvider?.invoke() ?: return
+        val prev = lastShellEnv
+        lastShellEnv = current
+        if (prev == null || prev == current) return
+        injectSystemReminder(
+            SystemReminder.Source.SHELL_ENVIRONMENT_CHANGE,
+            "Shell working directory changed from $prev to $current.",
+        )
     }
 
     /**
@@ -445,20 +505,33 @@ class AgentEngine(
             }
 
             val overHardLimit = compactor.isContextWindowExceeded(history, contextWindow, maxOutputTokens)
-            if (overHardLimit || compactor.needsCompaction(history, contextWindow, maxOutputTokens)) {
+            val compactDecision = compactor.autoCompactDecision(history, contextWindow, maxOutputTokens)
+            if (overHardLimit || compactDecision.shouldCompact) {
                 hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
                 val result = compactor.compact(history, settings, turn)
                 if (result != null) {
+                    compactor.noteAutoCompactOutcome(success = true)
+                    val preservedReadPaths = ReadFileState.collectReadPaths(result.compacted, json)
+                    val readReminders = readFileState?.postCompactReminders(preservedReadPaths).orEmpty()
+                    val planReminder = planFileReminderProvider?.invoke()?.let {
+                        SystemReminder.wrap(SystemReminder.Source.PLAN_FILE_REFERENCE, it).trimEnd()
+                    }
+                    readFileState?.clear()
                     history.clear()
                     history += result.compacted
+                    readReminders.forEach { history += ApiMessage(role = "user", content = it) }
+                    planReminder?.let { history += ApiMessage(role = "user", content = it) }
                     hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_COMPACT)
                     emit(AgentEvent.AssistantDelta("\n_(上下文已自动压缩: 移除 ${result.removedCount} 条历史消息)_\n"))
-                } else if (overHardLimit) {
-                    // Compaction failed while over the hard limit — fall back to
-                    // dropping the oldest messages instead of looping forever.
-                    val dropped = dropOldestNonSystem(keepRecent = 8)
-                    if (dropped > 0) {
-                        emit(AgentEvent.AssistantDelta("\n_(压缩失败,已丢弃 $dropped 条旧消息以释放上下文)_\n"))
+                } else {
+                    compactor.noteAutoCompactOutcome(success = false)
+                    if (overHardLimit) {
+                        // Compaction failed while over the hard limit — fall back to
+                        // dropping the oldest messages instead of looping forever.
+                        val dropped = dropOldestNonSystem(keepRecent = 8)
+                        if (dropped > 0) {
+                            emit(AgentEvent.AssistantDelta("\n_(压缩失败,已丢弃 $dropped 条旧消息以释放上下文)_\n"))
+                        }
                     }
                 }
             }
@@ -723,7 +796,10 @@ class AgentEngine(
         gs.setGoal(verified)
         history += ApiMessage(
             role = "user",
-            content = goalVerifier.continuationPrompt(verified, result.verdict),
+            content = SystemReminder.wrap(
+                SystemReminder.Source.TARGET_CONTINUATION,
+                goalVerifier.continuationPrompt(verified, result.verdict),
+            ).trimEnd(),
         )
         return true
     }
@@ -794,6 +870,7 @@ class AgentEngine(
         var lastError: String? = null
         for (attempt in 0..maxRetries) {
             var message: ApiMessage? = null
+            var streamUsage: com.andmx.llm.TokenUsage? = null
             val gotContent = try {
                 client.chatStream(request).collect { ev ->
                     when (ev) {
@@ -802,6 +879,7 @@ class AgentEngine(
                         is LlmStreamEvent.ToolCallDelta -> onToolCall(ev.index, ev.id, ev.name, ev.argumentsDelta)
                         is LlmStreamEvent.Completed -> message = ev.message
                         is LlmStreamEvent.UsageUpdate -> {
+                            streamUsage = ev.usage
                             pendingGoalTokens += ev.usage.totalTokens.takeIf { it > 0 }
                                 ?: (ev.usage.inputTokens + ev.usage.outputTokens)
                         }
@@ -814,10 +892,16 @@ class AgentEngine(
                 lastError = t.message ?: "请求失败"
                 false
             }
-            if (gotContent && message != null) return message
+            if (gotContent && message != null) {
+                return streamUsage?.let { u -> message!!.copy(tokenUsage = u) } ?: message
+            }
             // Empty reply on first attempt: retry once (possibly a lost first chunk).
             if (gotContent && message == null && attempt == 0) continue
-            if (attempt < maxRetries) kotlinx.coroutines.delay(1000L shl attempt)
+            if (attempt < maxRetries) {
+                val delayMs = 1000L shl attempt
+                emit(AgentEvent.Retrying(attempt + 1, maxRetries, delayMs))
+                kotlinx.coroutines.delay(delayMs)
+            }
         }
         lastError?.let { emit(AgentEvent.Failed(it)) }
         return null
@@ -842,10 +926,16 @@ class AgentEngine(
      * Cap a tool output fed back into history, keeping head and tail around an
      * elision marker when it exceeds [historyToolOutputLimit].
      */
-    private fun trimToolOutput(output: String): String =
-        TextTrimming.elide(output, historyToolOutputLimit) { omitted ->
+    private fun trimToolOutput(output: String): String {
+        if (output.length <= historyToolOutputLimit) return output
+        val trimmed = TextTrimming.elide(output, historyToolOutputLimit) { omitted ->
             "\n…[截断 " + omitted + " 字符]…\n"
         }
+        return trimmed + SystemReminder.wrap(
+            SystemReminder.Source.TOOL_RESULT_WARNING,
+            "Tool output was truncated to fit context. Re-run with narrower input or read the file with offset/limit if you need the omitted portion.",
+        ).trimEnd()
+    }
 
     private fun cleanupOrphanToolCalls() {
         if (history.isEmpty()) return

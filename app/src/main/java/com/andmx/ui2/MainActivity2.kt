@@ -20,6 +20,16 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity2 : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        com.andmx.ui2.chat.TurnNotifier.appForeground = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.andmx.ui2.chat.TurnNotifier.appForeground = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

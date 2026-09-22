@@ -79,6 +79,7 @@ data class SubAgentItem(
     val task: String,
     val state: String,
     val result: String = "",
+    val activities: List<String> = emptyList(),
     val sortKey: Long = System.currentTimeMillis(),
 )
 
@@ -159,6 +160,7 @@ object ChatActionBus {
         data class OpenUrl(val url: String) : Action()
         data object OpenSettings : Action()
         data object OpenSkillsSettings : Action()
+        data object OpenPluginsSettings : Action()
         data object OpenSearch : Action()
         data object OpenDrawer : Action()
     }
@@ -186,6 +188,10 @@ object ChatActionBus {
 
     fun openSkillsSettings() {
         _actions.tryEmit(Action.OpenSkillsSettings)
+    }
+
+    fun openPluginsSettings() {
+        _actions.tryEmit(Action.OpenPluginsSettings)
     }
 
     fun openSearch() {

@@ -15,17 +15,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Undo
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,13 +35,11 @@ import com.andmx.workspace.FileChange
 fun RewindBar(
     changes: List<FileChange>,
     rewindResult: ChatController.RewindResult?,
-    onRewind: () -> Unit,
+    onOpen: () -> Unit,
     onDismissResult: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (changes.isEmpty() && rewindResult == null) return
-
-    var confirm by remember { mutableStateOf(false) }
 
     if (changes.isNotEmpty()) {
         Row(
@@ -56,12 +51,12 @@ fun RewindBar(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                ) { confirm = true }
+                ) { onOpen() }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Outlined.Undo,
+                Icons.AutoMirrored.Outlined.Undo,
                 null,
                 Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -79,53 +74,6 @@ fun RewindBar(
                 color = MaterialTheme.colorScheme.tertiary,
             )
         }
-    }
-
-    if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("撤回文件改动") },
-            text = {
-                Column {
-                    Text(
-                        "将把这 ${changes.size} 项 agent 改动恢复到编辑前的原始内容。" +
-                            "已被外部（shell / 你手动 / 其它工具）改动的文件会跳过，不会覆盖。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.padding(4.dp))
-                    Text(
-                        "涉及文件：",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    changes.take(8).forEach {
-                        Text(
-                            "· ${it.path}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (changes.size > 8) {
-                        Text(
-                            "… 另有 ${changes.size - 8} 项",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = false
-                    onRewind()
-                }) { Text("撤回") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = false }) { Text("取消") }
-            },
-        )
     }
 
     val res = rewindResult

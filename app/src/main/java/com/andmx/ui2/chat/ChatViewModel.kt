@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -96,6 +97,8 @@ class ChatViewModel @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+    private val _retryStatus = MutableStateFlow<String?>(null)
+    val retryStatus: StateFlow<String?> = _retryStatus.asStateFlow()
 
     /** 工作区名（项目目录名），跟随 hostPath 变化。 */
     val projectName: StateFlow<String> =
@@ -237,6 +240,7 @@ class ChatViewModel @Inject constructor(
         _goalVerifications.value = emptyList()
         _error.value = null
         viewModelScope.launch {
+            loadRecoverableQueue(id)
             val history = runCatching { repo.messages(id) }.getOrDefault(emptyList())
             val msgs = mutableListOf<ChatMessage>()
             val tools = mutableListOf<ToolCall>()
@@ -269,6 +273,7 @@ class ChatViewModel @Inject constructor(
                             isRunning = false,
                             isError = msg.toolError,
                             sortKey = msg.createdAt,
+                            imageUrls = decodeImageUrls(msg.imageUrlsJson),
                         )
                         if (msg.toolName in setOf("spawn_agent", "multi_agent", "Agent", "Task", "TaskOutput", "TaskStop")) {
                             val task = runCatching {
@@ -746,6 +751,7 @@ class ChatViewModel @Inject constructor(
         val images = attachments.mapNotNull { resolveImageDataUrl(it) }
         if (_isLoading.value) {
             _queue.value = _queue.value + withContext
+            persistQueue()
             return
         }
         _contextChips.value = emptyList()
@@ -941,6 +947,119 @@ class ChatViewModel @Inject constructor(
                 openWorkflows()
                 return true
             }
+            is SlashResult.Init -> {
+                viewModelScope.launch {
+                    sendMessage(controller.initPrompt(cmd.args))
+                }
+                return true
+            }
+            is SlashResult.Effort -> {
+                viewModelScope.launch {
+                    handleEffortSlash(cmd.args)
+                }
+                return true
+            }
+            SlashResult.Mcp -> {
+                viewModelScope.launch {
+                    val settings = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+                    val configured = runCatching {
+                        com.andmx.mcp.McpServerConfig.parse(settings.mcpServers)
+                    }.getOrDefault(emptyList())
+                    val connected = controller.mcpStatus.value
+                    val body = buildString {
+                        if (configured.isEmpty() && connected.isEmpty()) {
+                            appendLine("未配置 MCP 服务器（在设置 → MCP 中添加）。")
+                        } else {
+                            appendLine("MCP 服务器：")
+                            configured.forEach { cfg ->
+                                val live = connected.firstOrNull { it.name == cfg.name }
+                                val state = if (live != null) "已连接 · ${live.tools.size} tools" else "未连接"
+                                appendLine("- ${cfg.name} (${cfg.transport}) · $state")
+                            }
+                            connected.filter { live -> configured.none { it.name == live.name } }
+                                .forEach { appendLine("- ${it.name} (${it.transport}) · 已连接 · ${it.tools.size} tools") }
+                        }
+                    }.trim()
+                    appendLocalAssistant(body)
+                }
+                return true
+            }
+            SlashResult.Plugins -> {
+                ChatActionBus.openPluginsSettings()
+                return true
+            }
+            is SlashResult.Locale -> {
+                viewModelScope.launch {
+                    val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+                    if (cmd.args.isBlank()) {
+                        appendLocalAssistant(
+                            "当前界面语言：`${cur.locale}`（system=跟随系统）\n" +
+                                "可选：`system` / `zh-CN` / `en-US`，用法 `/locale <值>`",
+                        )
+                        return@launch
+                    }
+                    val normalized = when (cmd.args.lowercase()) {
+                        "system", "auto", "系统", "默认" -> "system"
+                        "zh", "zh-cn", "zh_cn", "中文", "简体" -> "zh-CN"
+                        "en", "en-us", "en_us", "english" -> "en-US"
+                        else -> null
+                    }
+                    if (normalized == null) {
+                        appendLocalAssistant("未知语言 `${cmd.args}`，可选：`system` / `zh-CN` / `en-US`")
+                    } else {
+                        settingsStore.update(cur.copy(locale = normalized))
+                        appendLocalAssistant("界面语言已设为 `$normalized`（重启或重进页面后完全生效）")
+                    }
+                }
+                return true
+            }
+            is SlashResult.ExecModeSwitch -> {
+                val cur = composerConfig.value.execMode
+                if (cmd.args.isBlank()) {
+                    appendLocalAssistant(
+                        "当前执行模式：`${cur.id}`（${cur.label}）\n可选：" +
+                            ExecMode.entries.joinToString(" / ") { "`${it.id}`" } +
+                            "\n用法 `/mode <id>`",
+                    )
+                } else {
+                    val target = ExecMode.entries.firstOrNull {
+                        it.id.equals(cmd.args, true) || it.name.equals(cmd.args, true)
+                    }
+                    if (target == null) {
+                        appendLocalAssistant(
+                            "未知模式 `${cmd.args}`，可选：" +
+                                ExecMode.entries.joinToString(" / ") { "`${it.id}`" },
+                        )
+                    } else {
+                        setExecMode(target)
+                        appendLocalAssistant("已切换执行模式：${target.label}")
+                    }
+                }
+                return true
+            }
+            is SlashResult.SkillInvoke -> {
+                if (cmd.name.isBlank()) {
+                    val names = _skills.value.map { it.name }
+                    appendLocalAssistant(
+                        if (names.isEmpty()) "没有已安装的技能（在设置 → 技能中安装）。"
+                        else "已安装技能（${names.size}）：\n" + names.joinToString("\n") { "- `$it`" } +
+                            "\n用法 `/skill <名称> [任务]`",
+                    )
+                } else {
+                    val skill = _skills.value.firstOrNull { it.name.equals(cmd.name, true) }
+                    if (skill == null) {
+                        appendLocalAssistant("未找到技能 `${cmd.name}`。")
+                    } else {
+                        addSkillByName(skill.name, skill.path)
+                        if (cmd.task.isNotBlank()) sendMessage(cmd.task)
+                    }
+                }
+                return true
+            }
+            is SlashResult.Expert -> {
+                handleExpertSlash(cmd.args)
+                return true
+            }
             is SlashResult.Goal -> {
                 viewModelScope.launch {
                     val id = ensureConversationReady()
@@ -994,6 +1113,117 @@ class ChatViewModel @Inject constructor(
         val live = list.filter { it.state == "RUNNING" || it.state == "WAITING" }
         val done = list.filterNot { it.state == "RUNNING" || it.state == "WAITING" }.takeLast(16)
         return live + done
+    }
+
+    private fun handleExpertSlash(args: String) {
+        viewModelScope.launch {
+            val svc = controller.workflowService
+            val parts = args.split(Regex("\\s+")).filter { it.isNotBlank() }
+            when (parts.firstOrNull()?.lowercase()) {
+                "status" -> {
+                    val runId = parts.getOrNull(1)
+                    val runs = svc.listRuns().filter {
+                        it.kind == com.andmx.agent.workflow.ExpertWorkflow.KIND &&
+                            (runId == null || it.runId == runId)
+                    }
+                    val lines = runs.map { r ->
+                        val phase = svc.getRun(r.runId)?.currentPhase ?: "-"
+                        "- `${r.runId}` · ${r.status} · phase=$phase · ${r.task.take(60)}"
+                    }
+                    appendLocalAssistant(
+                        if (lines.isEmpty()) "没有专家工作流运行。" else lines.joinToString("\n"),
+                    )
+                }
+                "stop", "cancel" -> {
+                    val runId = parts.getOrNull(1)
+                    if (runId == null) {
+                        appendLocalAssistant("用法 `/expert stop <runId>`")
+                    } else {
+                        val (ok, err) = svc.cancel(runId)
+                        appendLocalAssistant(if (ok) "已请求取消运行 `$runId`。" else "无法取消 `$runId`：${err ?: "未知原因"}")
+                    }
+                }
+                "resume" -> {
+                    val runId = parts.getOrNull(1)
+                    if (runId == null) {
+                        appendLocalAssistant("用法 `/expert resume <runId>`")
+                    } else {
+                        val (snap, err) = svc.resume(runId)
+                        appendLocalAssistant(
+                            if (snap != null) "已恢复运行 `$runId`（phase=${snap.currentPhase ?: "-"}）。"
+                            else "无法恢复 `$runId`：${err ?: "未知原因"}",
+                        )
+                    }
+                }
+                else -> {
+                    val task = args.trim()
+                    if (task.isBlank()) {
+                        openWorkflows()
+                        return@launch
+                    }
+                    val convId = ensureConversationReady()
+                    val snap = svc.start(
+                        definition = com.andmx.agent.workflow.ExpertWorkflow.definition(),
+                        task = task,
+                        conversationId = convId,
+                        cwd = "/",
+                        parentSessionId = null,
+                    )
+                    appendLocalAssistant(
+                        "专家工作流已启动：runId=`${snap.runId}`，后台运行中。\n" +
+                            "用 `/expert status` 或 /workflows 查看进度。",
+                    )
+                }
+            }
+        }
+    }
+
+    fun shareConversation() {
+        val id = currentConversationId.value.takeIf { it > 0 } ?: return
+        viewModelScope.launch {
+            val md = controller.conversationMarkdownForShare(id)
+            val conv = repo.conversation(id)
+            val file = java.io.File(
+                context.cacheDir,
+                "share/andmx-${(conv?.title ?: "conversation").take(24).replace(Regex("[^\\w\\u4e00-\\u9fff-]"), "_")}-$id.md",
+            )
+            runCatching {
+                file.parentFile?.mkdirs()
+                file.writeText(md)
+            }.onFailure {
+                sharePlainText("AndMX 对话", md)
+                return@launch
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", file,
+            )
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/markdown"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                putExtra(android.content.Intent.EXTRA_TEXT, md.take(4000))
+                putExtra(android.content.Intent.EXTRA_SUBJECT, conv?.title ?: "AndMX 对话")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = android.content.ClipData.newUri(context.contentResolver, "conversation", uri)
+            }
+            startChooser(intent, "分享对话")
+        }
+    }
+
+    fun sharePlainText(subject: String, text: String) {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, text)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+        }
+        startChooser(intent, "分享")
+    }
+
+    private fun startChooser(intent: android.content.Intent, title: String) {
+        runCatching {
+            val chooser = android.content.Intent.createChooser(intent, title)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        }
     }
 
     private fun appendLocalAssistant(text: String) {
@@ -1206,14 +1436,22 @@ class ChatViewModel @Inject constructor(
             if (files.isNotEmpty() || convs.isNotEmpty() || selMsgs.isNotEmpty() ||
                 pastes.isNotEmpty() || agents.isNotEmpty() || attachments.isNotEmpty()
             ) {
+                val body = buildString {
+                    appendLine("[上下文]")
+                    files.forEach { appendLine("- 文件: ${it.payload}") }
+                    convs.forEach { appendLine("- 关联会话: ${it.label} (id=${it.payload})") }
+                    selMsgs.forEach { appendLine("- 对话引用: ${it.label}") }
+                    pastes.forEach { appendLine("- ${it.label}") }
+                    agents.forEach { appendLine("- 子代理: ${it.payload}") }
+                    attachments.forEach { appendLine("- 附件: ${it.name}") }
+                }.trimEnd()
                 appendLine()
-                appendLine("[上下文]")
-                files.forEach { appendLine("- 文件: ${it.payload}") }
-                convs.forEach { appendLine("- 关联会话: ${it.label} (id=${it.payload})") }
-                selMsgs.forEach { appendLine("- 对话引用: ${it.label}") }
-                pastes.forEach { appendLine("- ${it.label}") }
-                agents.forEach { appendLine("- 子代理: ${it.payload}") }
-                attachments.forEach { appendLine("- 附件: ${it.name}") }
+                appendLine(
+                    com.andmx.agent.SystemReminder.wrap(
+                        com.andmx.agent.SystemReminder.Source.PROMPT_ATTACHMENT,
+                        body,
+                    ).trimEnd(),
+                )
             }
         }
         return buildString {
@@ -1291,12 +1529,15 @@ class ChatViewModel @Inject constructor(
                 }
             } finally {
                 _isLoading.value = false
-                drainQueue()
+                // 上游 CommandInbox 语义：stop/error 触发的队列暂停要先于 drain；
+                // 否则取消路径会把已暂停的队列继续排空。
+                if (_queuePaused.value == QueuePause.NONE) drainQueue()
             }
         }
     }
 
     fun stop() {
+        pauseQueue(QueuePause.STOPPED)
         turnJob?.cancel()
         turnJob = null
         finalizeReasoning()
@@ -1304,7 +1545,6 @@ class ChatViewModel @Inject constructor(
         if (id > 0L) controller.stopTurn(id)
         else controller.resolveApproval(false)
         _isLoading.value = false
-        pauseQueue(QueuePause.STOPPED)
         val running = _toolCalls.value.map {
             if (it.isRunning) it.copy(isRunning = false, isError = true, output = it.output ?: "已停止") else it
         }
@@ -1370,6 +1610,45 @@ class ChatViewModel @Inject constructor(
 
     fun clearRewindResult() { _rewindResult.value = null }
 
+    private val _fileRewindOpen = MutableStateFlow(false)
+    val fileRewindOpen: StateFlow<Boolean> = _fileRewindOpen.asStateFlow()
+
+    fun openFileRewind() {
+        if (fileChanges.value.isEmpty()) return
+        _fileRewindOpen.value = true
+    }
+
+    fun dismissFileRewind() { _fileRewindOpen.value = false }
+
+    fun revertSingleFile(path: String) {
+        viewModelScope.launch {
+            val res = controller.revertFileChange(path)
+            _rewindResult.value = res
+            refreshGitInfo()
+            if (fileChanges.value.isEmpty()) _fileRewindOpen.value = false
+        }
+    }
+
+    /** ZCode selection side-chat 对齐：针对一段回复开独立会话，注入选段上下文。 */
+    fun startSideChat(excerpt: String, question: String) {
+        viewModelScope.launch {
+            val project = projectManager.hostPath.value ?: projectManager.guestMountPath
+            val id = repo.createConversation(project = project, title = "新任务")
+            val body = buildString {
+                append("The user opened a side chat about this excerpt from the parent conversation:\n\n---\n")
+                append(excerpt.take(6_000))
+                append("\n---\n\nAnswer their question about it.")
+            }
+            controller.injectPersistedReminder(
+                id,
+                com.andmx.agent.SystemReminder.Source.SELECTION_SIDE_CHAT,
+                body,
+            )
+            switchToConversation(id)
+            sendMessage(question)
+        }
+    }
+
     // ── /fork /rewind /resume ─────────────────────────────────────────────
 
     private val _rewindPickerOpen = MutableStateFlow(false)
@@ -1409,6 +1688,27 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             _workflowDefs.value = controller.workflowService.listDefinitions()
             _workflowRuns.value = controller.workflowService.listRuns()
+        }
+    }
+
+    /** 时间线 workflow 卡的实时状态行（上游 workflow-card 等价）。 */
+    suspend fun workflowStatusLine(runId: String): String? {
+        val snap = controller.workflowService.getRun(runId) ?: return null
+        val done = snap.phases.count {
+            it.status == com.andmx.agent.workflow.WorkflowNodeStatus.completed
+        }
+        return buildString {
+            append(snap.status.name.lowercase())
+            snap.currentPhase?.let { append(" · $it") }
+            if (snap.phases.isNotEmpty()) append(" · 阶段 $done/${snap.phases.size}")
+        }
+    }
+
+    /** /expert 参数联想等轻量消费者：defs 为空时惰性加载一次。 */
+    fun ensureWorkflowDefs() {
+        if (_workflowDefs.value.isNotEmpty()) return
+        viewModelScope.launch {
+            _workflowDefs.value = controller.workflowService.listDefinitions()
         }
     }
 
@@ -1452,6 +1752,16 @@ class ChatViewModel @Inject constructor(
             runCatching {
                 repo.addMessage(
                     conversationId = newId,
+                    role = "reminder",
+                    content = com.andmx.agent.SystemReminder.wrap(
+                        com.andmx.agent.SystemReminder.Source.CONVERSATION_FORK,
+                        "This conversation was forked from session #$id. The messages above were copied verbatim.",
+                    ).trimEnd(),
+                )
+            }
+            runCatching {
+                repo.addMessage(
+                    conversationId = newId,
                     role = "assistant",
                     content = "已从会话 #$id 分叉，以上为复制的历史。",
                 )
@@ -1472,6 +1782,15 @@ class ChatViewModel @Inject constructor(
             val files = runCatching { controller.revertFileChanges(sinceMs = cut.createdAt) }
                 .getOrNull()
             truncateFromUserMessage(conversationId, messageId)
+            runCatching {
+                controller.injectPersistedReminder(
+                    conversationId,
+                    com.andmx.agent.SystemReminder.Source.REWIND_NOTICE,
+                    "The conversation was rewound to a checkpoint before the user's next message. " +
+                        "Messages and tool calls after that point were removed; file changes made " +
+                        "after the checkpoint were reverted where possible.",
+                )
+            }
             val fileNote = when {
                 files == null || (files.reverted == 0 && files.unsafe == 0) -> ""
                 else -> buildString {
@@ -1551,6 +1870,7 @@ class ChatViewModel @Inject constructor(
         _steeringMessage.value = null
         val next = _queue.value.firstOrNull() ?: return
         _queue.value = _queue.value.drop(1)
+        persistQueue()
         runTurn(next)
     }
 
@@ -1567,13 +1887,66 @@ class ChatViewModel @Inject constructor(
 
     fun removeFromQueue(index: Int) {
         _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
+        persistQueue()
     }
 
     fun sendQueuedNow(index: Int) {
         val item = _queue.value.getOrNull(index) ?: return
         if (_isLoading.value) return
         _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
+        persistQueue()
         runTurn(item)
+    }
+
+    private fun decodeImageUrls(json: String): List<String>? {
+        if (json.isBlank()) return null
+        return runCatching {
+            (kotlinx.serialization.json.Json.parseToJsonElement(json)
+                as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
+
+    /** busy 期排队输入落盘：进程重启后经 PendingCommandRecoveryBanner 恢复。 */
+    private fun persistQueue() {
+        val id = _currentConversationId.value
+        if (id <= 0L) return
+        val json = if (_queue.value.isEmpty()) "" else
+            kotlinx.serialization.json.JsonArray(
+                _queue.value.map { kotlinx.serialization.json.JsonPrimitive(it) },
+            ).toString()
+        viewModelScope.launch {
+            runCatching { repo.setPendingQueue(id, json) }
+        }
+    }
+
+    private val _recoverableQueue = MutableStateFlow<List<String>>(emptyList())
+    val recoverableQueue: StateFlow<List<String>> = _recoverableQueue.asStateFlow()
+
+    private suspend fun loadRecoverableQueue(conversationId: Long) {
+        val raw = runCatching { repo.conversation(conversationId)?.pendingQueueJson.orEmpty() }
+            .getOrDefault("")
+        _recoverableQueue.value = if (raw.isBlank()) emptyList() else runCatching {
+            (kotlinx.serialization.json.Json.parseToJsonElement(raw)
+                as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                .orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    fun recoverPendingQueue() {
+        val items = _recoverableQueue.value
+        if (items.isEmpty()) return
+        _queue.value = _queue.value + items
+        _recoverableQueue.value = emptyList()
+        persistQueue()
+    }
+
+    fun discardPendingQueue() {
+        _recoverableQueue.value = emptyList()
+        val id = _currentConversationId.value
+        if (id > 0L) viewModelScope.launch { runCatching { repo.setPendingQueue(id, "") } }
     }
 
     // ── 配置链写入 ─────────────────────────────────────────────────────────
@@ -1599,6 +1972,50 @@ class ChatViewModel @Inject constructor(
             val cur = settingsStore.settings.firstOrNull() ?: ProviderSettings()
             settingsStore.update(cur.copy(reasoningEffort = effort))
         }
+    }
+
+    private suspend fun handleEffortSlash(args: String) {
+        val settings = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+        val cfg = composerConfig.first().reasoning
+        val levels = when {
+            cfg == null -> emptyList()
+            cfg.levels.isNotEmpty() -> cfg.levels.map { it.id }
+            cfg.effortLevels.isNotEmpty() -> cfg.effortLevels
+            cfg.style == com.andmx.llm.provider.ReasoningStyle.EFFORT ->
+                listOf("minimal", "low", "medium", "high")
+            cfg.style == com.andmx.llm.provider.ReasoningStyle.THINKING ->
+                listOf("low", "medium", "high")
+            else -> emptyList()
+        }
+        if (cfg == null || cfg.style == com.andmx.llm.provider.ReasoningStyle.NONE && levels.isEmpty()) {
+            appendLocalAssistant("当前模型不支持推理档位。")
+            return
+        }
+        val arg = args.trim()
+        if (arg.isEmpty() || arg.equals("list", true)) {
+            val cur = settings.reasoningEffort.ifBlank { "off" }
+            val body = buildString {
+                appendLine("推理强度：")
+                (listOf("off") + levels).distinct().forEach {
+                    appendLine(if (it == cur) "- $it  [current]" else "- $it")
+                }
+            }.trim()
+            appendLocalAssistant(body)
+            return
+        }
+        val target = if (arg.equals("off", true) || arg.equals("on", true)) {
+            if (arg.equals("on", true)) cfg.defaultLevel.ifBlank { cfg.defaultEffort } else "off"
+        } else {
+            cfg.levels.firstOrNull { it.id.equals(arg, true) }?.id
+                ?: levels.firstOrNull { it.equals(arg, true) }
+        }
+        if (target == null) {
+            val options = (listOf("off") + levels).distinct().joinToString("、")
+            appendLocalAssistant("未知推理档位「$arg」。可选：$options")
+            return
+        }
+        setReasoningEffort(target)
+        appendLocalAssistant("已设置推理强度：$target")
     }
 
     fun setExecMode(mode: ExecMode) {
@@ -1994,6 +2411,7 @@ class ChatViewModel @Inject constructor(
                 if (index >= 0) {
                     current[index] = current[index].copy(
                         output = event.output, isRunning = false, isError = event.isError,
+                        imageUrls = event.imageUrls,
                     )
                 }
                 _toolCalls.value = current
@@ -2019,6 +2437,7 @@ class ChatViewModel @Inject constructor(
             }
             is ChatEvent.SubAgentStarted,
             is ChatEvent.SubAgentDelta,
+            is ChatEvent.SubAgentToolActivity,
             is ChatEvent.SubAgentCompleted,
             is ChatEvent.SubAgentFailed -> handleSideEvent(event)
             is ChatEvent.GoalVerifying -> {
@@ -2044,11 +2463,16 @@ class ChatViewModel @Inject constructor(
                     list + item
                 }
             }
+            is ChatEvent.Retrying -> {
+                _retryStatus.value = "请求失败，${event.delayMs / 1000}s 后重试（${event.attempt}/${event.maxAttempts}）"
+            }
             is ChatEvent.Error -> {
+                _retryStatus.value = null
                 _error.value = event.message
                 pauseQueue(QueuePause.ERROR)
             }
             is ChatEvent.Done -> {
+                _retryStatus.value = null
                 finalizeReasoning()
                 // Turn 指标收口（诚实规则：时间戳不完整则不产出）。
                 turnEndedAtMs = System.currentTimeMillis()
@@ -2118,6 +2542,22 @@ class ChatViewModel @Inject constructor(
                 if (idx >= 0) {
                     val cur = list[idx]
                     list[idx] = cur.copy(result = (cur.result + event.text).takeLast(4000), state = "RUNNING")
+                    _subAgentItems.value = list
+                }
+            }
+            is ChatEvent.SubAgentToolActivity -> {
+                val list = _subAgentItems.value.toMutableList()
+                val idx = list.indexOfFirst { it.id == event.agentId }
+                if (idx >= 0) {
+                    val cur = list[idx]
+                    val line = buildString {
+                        append(if (event.running) "▶ " else "✓ ")
+                        append(event.toolName)
+                        val d = event.detail.trim().replace('\n', ' ')
+                        if (d.isNotBlank()) append(" · ").append(d.take(80))
+                    }
+                    val acts = (cur.activities + line).takeLast(30)
+                    list[idx] = cur.copy(activities = acts, state = "RUNNING")
                     _subAgentItems.value = list
                 }
             }

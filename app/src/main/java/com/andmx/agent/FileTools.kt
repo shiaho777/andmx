@@ -13,7 +13,7 @@ import kotlinx.serialization.json.putJsonObject
 
 private fun JsonObject.str(key: String): String? = this[key]?.jsonPrimitive?.content
 
-class ReadFileTool(context: Context) : Tool {
+class ReadFileTool(context: Context, private val readFileState: ReadFileState? = null) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "read_file"
     override val description =
@@ -34,14 +34,17 @@ class ReadFileTool(context: Context) : Tool {
         val offset = (args["offset"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
         val limit = (args["limit"]?.jsonPrimitive?.content?.toIntOrNull() ?: DEFAULT_LINE_LIMIT).coerceIn(1, MAX_LINE_LIMIT)
         return runCatching {
+            val resolved = access.resolvePath(path)
             val text = access.readText(path)
             val lines = text.split('\n')
             val total = lines.size
             if (total <= limit) {
+                readFileState?.record(resolved, text)
                 ToolResult(text)
             } else {
                 val end = (offset + limit).coerceAtMost(total)
                 val slice = lines.subList(offset, end).joinToString("\n")
+                readFileState?.record(resolved, slice, offset, limit)
                 val note = buildString {
                     append("\n\n... (已截断: 显示第 ${offset + 1}-$end 行, 共 $total 行)")
                     if (end < total) append("; 用 offset=$end 继续读取后续内容")
@@ -58,7 +61,7 @@ class ReadFileTool(context: Context) : Tool {
     }
 }
 
-class WriteFileTool(context: Context) : Tool {
+class WriteFileTool(context: Context, private val readFileState: ReadFileState? = null) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "write_file"
     override val description = "创建或覆盖当前工作区中的文件。会生成可在 diff 中审查的变更。"
@@ -81,12 +84,13 @@ class WriteFileTool(context: Context) : Tool {
             val old = if (existed) access.readText(resolved) else ""
             access.writeText(resolved, content)
             ChangeTracker.record(resolved, old, content, existedBefore = existed)
+            readFileState?.record(resolved, content, sourceTool = ReadFileState.WRITE_TOOL)
             ToolResult("已写入 $resolved (${content.length} 字符)")
         }.getOrElse { ToolResult("写入失败: ${it.message}", isError = true) }
     }
 }
 
-class EditFileTool(context: Context) : Tool {
+class EditFileTool(context: Context, private val readFileState: ReadFileState? = null) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "edit_file"
     override val description =
@@ -120,6 +124,7 @@ class EditFileTool(context: Context) : Tool {
             val updated = if (replaceAll) original.replace(oldStr, newStr) else original.replaceFirst(oldStr, newStr)
             access.writeText(resolved, updated)
             ChangeTracker.record(resolved, original, updated, existedBefore = true)
+            readFileState?.record(resolved, updated, sourceTool = "edit_file")
             ToolResult("已编辑 $resolved" + if (replaceAll) " (替换 $count 处)" else "")
         }.getOrElse { ToolResult("编辑失败: ${it.message}", isError = true) }
     }

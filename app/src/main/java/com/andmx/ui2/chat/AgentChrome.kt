@@ -64,6 +64,7 @@ fun ApprovalBanner(
         tonalElevation = 2.dp,
     ) {
         Column(Modifier.padding(12.dp)) {
+            val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.Shield,
@@ -73,10 +74,36 @@ fun ApprovalBanner(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "等待确认 · ${request.modeLabel}",
+                    "等待确认 · ${request.toolName} · ${request.modeLabel}",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+            if (request.reason.isNotBlank()) {
+                Text(
+                    request.reason,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            if (request.inputPreview.isNotBlank()) {
+                Text(
+                    request.inputPreview,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 12.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    ),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
                 )
             }
             Text(
@@ -87,6 +114,14 @@ fun ApprovalBanner(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 6.dp),
             )
+            if (request.rulePreview.isNotBlank()) {
+                Text(
+                    "长期授权规则：${request.rulePreview}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             // ZCode 对齐：会话/项目级 allow·deny 作用域；普通允许/拒绝走 ONCE。
             Row(
                 Modifier
@@ -118,8 +153,14 @@ fun ApprovalBanner(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Spacer(Modifier.weight(1f))
-                OutlinedButton(onClick = onDeny) { Text("拒绝") }
-                Button(onClick = onAllow) { Text("允许") }
+                OutlinedButton(onClick = {
+                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    onDeny()
+                }) { Text("拒绝") }
+                Button(onClick = {
+                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    onAllow()
+                }) { Text("允许") }
             }
         }
     }
@@ -383,6 +424,26 @@ fun SubAgentTimelineCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            AnimatedVisibility(
+                visible = expanded && item.activities.isNotEmpty(),
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Column(Modifier.padding(top = 6.dp)) {
+                    item.activities.forEach { act ->
+                        Text(
+                            act,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 11.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
             AnimatedVisibility(
                 visible = expanded && item.result.isNotBlank(),
                 enter = expandVertically(),
