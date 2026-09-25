@@ -113,6 +113,7 @@ fun WorkflowRunDetailDialog(
     snapshot: WorkflowRunSnapshot,
     events: List<WorkflowEvent>,
     onCancel: (String) -> Unit,
+    onResume: (String) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -189,11 +190,21 @@ fun WorkflowRunDetailDialog(
             }
         },
         confirmButton = {
-            if (snapshot.status == WorkflowRunStatus.running ||
-                snapshot.status == WorkflowRunStatus.paused
-            ) {
-                TextButton(onClick = { onCancel(snapshot.runId) }) {
-                    Text("取消运行", color = MaterialTheme.colorScheme.error)
+            Row {
+                if (snapshot.status == WorkflowRunStatus.paused ||
+                    snapshot.status == WorkflowRunStatus.failed ||
+                    snapshot.status == WorkflowRunStatus.cancelled
+                ) {
+                    TextButton(onClick = { onResume(snapshot.runId) }) {
+                        Text("恢复运行")
+                    }
+                }
+                if (snapshot.status == WorkflowRunStatus.running ||
+                    snapshot.status == WorkflowRunStatus.paused
+                ) {
+                    TextButton(onClick = { onCancel(snapshot.runId) }) {
+                        Text("取消运行", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         },

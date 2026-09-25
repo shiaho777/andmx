@@ -24,7 +24,7 @@ class ConversationRepository(context: Context) {
      * every message verbatim. Returns the new conversation id, or null when the
      * source does not exist.
      */
-    suspend fun forkConversation(fromId: Long): Long? {
+    suspend fun forkConversation(fromId: Long, untilMessageId: Long = Long.MAX_VALUE): Long? {
         val src = dao.getConversation(fromId) ?: return null
         val now = System.currentTimeMillis()
         val newId = dao.insertConversation(
@@ -39,7 +39,7 @@ class ConversationRepository(context: Context) {
                 pinned = false,
             ),
         )
-        dao.messagesFor(fromId).forEach { m ->
+        dao.messagesFor(fromId).filter { it.id < untilMessageId }.forEach { m ->
             dao.insertMessage(m.copy(id = 0, conversationId = newId))
         }
         dao.touchConversation(newId, src.title.ifBlank { "未命名会话" } + " · 分叉", now)

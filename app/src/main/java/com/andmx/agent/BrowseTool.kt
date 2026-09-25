@@ -55,8 +55,11 @@ class BrowseTool(
         }
 
         val cacheKey = url.toString()
-        cache.get(cacheKey)?.let { return@withContext ToolResult(it) }
+        cache.get(cacheKey)?.let {
+            return@withContext ToolResult("$it\n[cache: hit]")
+        }
 
+        val startedAt = System.currentTimeMillis()
         runCatching {
             val fetched = fetch(url)
             val text = when (fetched) {
@@ -65,12 +68,18 @@ class BrowseTool(
                     val title = HtmlExtractor.title(fetched.html)
                     val body = HtmlExtractor.toText(fetched.html)
                     onBrowseUrl(fetched.finalUrl.toString())
+                    val durationMs = System.currentTimeMillis() - startedAt
                     val summarized = if (prompt.isNotBlank() && summarizer != null) {
                         summarizer.invoke(body.take(MAX_MODEL_INPUT_CHARS), prompt)
                     } else null
                     buildString {
                         if (title != null) appendLine("# $title")
                         appendLine(fetched.finalUrl)
+                        appendLine(
+                            "[status: ${fetched.status} · ${fetched.contentType} · " +
+                                "${fetched.bytes} bytes · ${durationMs}ms" +
+                                (if (fetched.redirects > 0) " · redirects: ${fetched.redirects}" else "") + "]",
+                        )
                         if (summarized != null) {
                             appendLine()
                             appendLine(summarized)
@@ -85,7 +94,12 @@ class BrowseTool(
                             }
                             append(body)
                         }
-                    }.take(MAX_OUTPUT_CHARS)
+                    }.let { full ->
+                        if (full.length > MAX_OUTPUT_CHARS) {
+                            full.take(MAX_OUTPUT_CHARS) +
+                                "\n[truncated: output exceeded ${MAX_OUTPUT_CHARS} chars]"
+                        } else full
+                    }
                 }
             }
             text.also { cache.put(cacheKey, it) }
@@ -110,12 +124,20 @@ class BrowseTool(
         }
 
     private sealed interface Fetched {
-        data class Page(val finalUrl: URI, val html: String) : Fetched
+        data class Page(
+            val finalUrl: URI,
+            val html: String,
+            val status: Int,
+            val contentType: String,
+            val bytes: Int,
+            val redirects: Int,
+        ) : Fetched
         data class Redirect(val location: String, val status: Int) : Fetched
     }
 
     private fun fetch(url: URI): Fetched {
         var current = url
+        var redirects = 0
         repeat(WebFetchGuard.MAX_REDIRECTS) {
             WebFetchGuard.assertLiteralEgress(current)
             val conn = (current.toURL().openConnection() as HttpURLConnection).apply {
@@ -134,15 +156,26 @@ class BrowseTool(
                         return Fetched.Redirect(location = next.toString(), status = code)
                     }
                     current = next
+                    redirects += 1
                 }
                 in 200..299 -> {
+                    val status = conn.responseCode
+                    val contentType = conn.contentType?.substringBefore(';')?.trim()
+                        ?: "application/octet-stream"
                     val html = try {
                         conn.inputStream.bufferedReader().use(BufferedReader::readText)
                             .take(MAX_RESPONSE_CHARS)
                     } finally {
                         conn.disconnect()
                     }
-                    return Fetched.Page(finalUrl = current, html = html)
+                    return Fetched.Page(
+                        finalUrl = current,
+                        html = html,
+                        status = status,
+                        contentType = contentType,
+                        bytes = html.length,
+                        redirects = redirects,
+                    )
                 }
                 else -> {
                     val c = conn.responseCode

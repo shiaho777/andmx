@@ -41,7 +41,8 @@ class SlashCommandsTest {
         assertTrue(SlashCommands.parse("/handoff") is SlashResult.Handoff)
         assertTrue(SlashCommands.parse("/summary") is SlashResult.Handoff)
         assertTrue(SlashCommands.parse("/export") is SlashResult.Export)
-        assertTrue(SlashCommands.parse("/model") is SlashResult.OpenModel)
+        assertTrue(SlashCommands.parse("/model") is SlashResult.ModelSwitch)
+        assertTrue(SlashCommands.parse("/model list") is SlashResult.ModelSwitch)
         assertTrue(SlashCommands.parse("/settings") is SlashResult.OpenModel)
     }
 

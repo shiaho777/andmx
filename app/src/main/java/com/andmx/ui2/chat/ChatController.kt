@@ -1163,7 +1163,7 @@ class ChatController(private val context: Context) {
     }
 
 
-    suspend fun compactConversation(conversationId: Long): String {
+    suspend fun compactConversation(conversationId: Long, instructions: String = ""): String {
         val settings = settingsStore.settings.firstOrNull()
             ?: return "设置未初始化"
         val providers = providerStore.providers.firstOrNull().orEmpty()
@@ -1173,7 +1173,7 @@ class ChatController(private val context: Context) {
         ensureExtraTools(settings)
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
-        val msg = session.engine.compactNow(settings, TurnContext(provider, settings.model))
+        val msg = session.engine.compactNow(settings, TurnContext(provider, settings.model), instructions)
             ?: return "上下文较短，无需压缩"
         refreshTokenUsage(conversationId)
         return msg
@@ -1360,6 +1360,49 @@ class ChatController(private val context: Context) {
             _mcpStatus.value = mcpManager.connected
         }
     }
+
+    /** /mcp connect <server>：按配置名连接单个 MCP 服务器并把工具挂入会话工具面。 */
+    suspend fun mcpConnect(name: String): String {
+        val settings = settingsStore.settings.firstOrNull() ?: return "设置不可用。"
+        val cfg = com.andmx.mcp.McpServerConfig.parse(settings.mcpServers)
+            .firstOrNull { it.name == name } ?: return "未配置服务器 `$name`。"
+        if (mcpManager.connected.any { it.name == name }) return "`$name` 已连接。"
+        val added = runCatching { mcpManager.connectOne(cfg) }
+            .getOrElse { return "连接失败：${it.message}" }
+        if (added.isEmpty()) return "连接失败：未获得工具（查看日志）。"
+        mcpTools = mcpTools + added
+        _mcpStatus.value = mcpManager.connected
+        return "已连接 `$name` · ${added.size} tools"
+    }
+
+    /** /mcp disconnect <server>：断开并按 `name__` 前缀摘掉该服务器的工具。 */
+    fun mcpDisconnect(name: String): String {
+        if (!mcpManager.disconnect(name)) return "`$name` 未连接。"
+        mcpTools = mcpTools.filterNot { it.name.startsWith("${name}__") }
+        _mcpStatus.value = mcpManager.connected
+        return "已断开 `$name`。"
+    }
+
+    /** /plugins enable|disable <id>：持久化开关并重载插件工具面。 */
+    suspend fun pluginSetEnabled(name: String, enabled: Boolean): String {
+        val found = runCatching { pluginSystem.discover().plugins }
+            .getOrDefault(emptyList())
+            .firstOrNull { it.manifest.name.equals(name, true) || it.manifest.name == name }
+            ?: return "未找到插件 `$name`。"
+        val ok = runCatching { pluginSystem.setEnabled(found.manifest.name, enabled) }
+            .getOrDefault(false)
+        if (!ok) return "无法${if (enabled) "启用" else "禁用"} `$name`。"
+        lastPluginReloadToken = -1L
+        pluginTools = runCatching { pluginSystem.loadPluginTools(context) }.getOrDefault(pluginTools)
+        return "已${if (enabled) "启用" else "禁用"}插件 `${found.manifest.name}`（新会话生效全部能力）。"
+    }
+
+    suspend fun pluginStatusLines(): List<String> = runCatching {
+        pluginSystem.discover().plugins.map { p ->
+            "- ${if (p.enabled) "✓" else "○"} `${p.manifest.name}`" +
+                (p.manifest.description.take(50).takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+        }
+    }.getOrDefault(emptyList())
 
     private suspend fun obtainSession(
         conversationId: Long,
@@ -1900,6 +1943,20 @@ class ChatController(private val context: Context) {
             reason = reason.orEmpty(),
         )
         notifyIfBackground(conversationId, "等待确认", summary)
+        // 上游 PermissionRequest hook：与审批 UI 并行触发（外部审批桥接语义），不阻塞 deferred
+        if (hookSystem.hasHooksFor(com.andmx.agent.hooks.HookSystem.HookEvent.PERMISSION_REQUEST)) {
+            controllerScope.launch {
+                runCatching {
+                    hookSystem.runEvent(
+                        com.andmx.agent.hooks.HookSystem.HookEvent.PERMISSION_REQUEST,
+                        com.andmx.agent.hooks.HookSystem.HookContext(
+                            toolName = tool.name,
+                            toolArgs = args.toString(),
+                        ),
+                    )
+                }
+            }
+        }
         return if (deferred.await()) ApprovalOutcome.AllowedOnce else ApprovalOutcome.Rejected()
     }
 

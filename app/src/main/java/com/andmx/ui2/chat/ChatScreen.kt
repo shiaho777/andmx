@@ -399,7 +399,13 @@ LaunchedEffect(Unit) {
             val q = m.groupValues[2].lowercase()
             val all: List<ArgSuggestion> = when (cmd) {
                 "mode" -> ExecMode.entries.map {
-                    ArgSuggestion(it.id, "${it.id} · ${it.label}", it.description)
+                    val alias = when (it) {
+                        ExecMode.CONFIRM -> "build"
+                        ExecMode.AUTO_EDIT -> "edit"
+                        ExecMode.FULL -> "yolo"
+                        ExecMode.PLAN -> "plan"
+                    }
+                    ArgSuggestion(it.id, "${it.id} · ${it.label}", "${it.description}（别名 $alias）")
                 }
                 "model" -> {
                     val p = config.primary
@@ -474,6 +480,15 @@ LaunchedEffect(Unit) {
         }
     }
     // ZCode 对齐：行尾 @query → 子代理 / 会话 / 插件命令 / 文件浏览 混合面板。
+    // 上游 file-mention-panel 等价：索引文件参与 @ 行内补全。
+    var indexedFiles by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(hostPath) {
+        indexedFiles = hostPath?.let {
+            runCatching {
+                com.andmx.workspace.WorkspaceIndex.get(context).listIndexedFiles(it)
+            }.getOrNull()
+        } ?: emptyList()
+    }
     val mentionSuggestions by remember {
         derivedStateOf {
             val t = inputText
@@ -526,6 +541,20 @@ LaunchedEffect(Unit) {
                                 label = it.name,
                                 subtitle = it.desc.take(40),
                                 payload = it.name,
+                            ),
+                        )
+                    }
+                indexedFiles.asSequence()
+                    .filter { q.isNotBlank() && it.lowercase().contains(q) }
+                    .sortedBy { it.length }
+                    .take(4)
+                    .forEach { f ->
+                        add(
+                            MentionSuggestion(
+                                kind = MentionKind.FILE,
+                                label = f,
+                                subtitle = f.substringBeforeLast('/', ""),
+                                payload = f,
                             ),
                         )
                     }
@@ -669,6 +698,10 @@ LaunchedEffect(Unit) {
                         attachments = attachments.filterIndexed { idx, _ -> idx != i }
                     },
                     onAddAttachment = { imagePicker.launch("image/*") },
+                    onPasteClipboardImage = { uri ->
+                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "剪贴板图片"
+                        attachments = attachments + Attachment(name = name, uri = uri.toString())
+                    },
                     onInsertMention = {
                         fileTreeRequestPath = null
                         fileTreeRequestKey += 1
@@ -722,6 +755,7 @@ LaunchedEffect(Unit) {
                                 ConversationPick(id = m.conversationId, title = m.label),
                             )
                             MentionKind.PLUGIN -> viewModel.addCommandByName(m.payload)
+                            MentionKind.FILE -> viewModel.addFileContext(m.payload)
                             MentionKind.FILE_BROWSER -> {
                                 fileTreeRequestPath = null
                                 fileTreeRequestKey += 1
@@ -1077,6 +1111,7 @@ LaunchedEffect(Unit) {
                         snapshot = snap,
                         events = workflowDetailEvents,
                         onCancel = { viewModel.cancelWorkflowRun(it) },
+                        onResume = { viewModel.resumeWorkflowRun(it) },
                         onDismiss = { viewModel.dismissWorkflowDetail() },
                     )
                 }

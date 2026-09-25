@@ -65,46 +65,65 @@ class McpManager(private val context: Context) {
         val configs = McpServerConfig.parse(configText)
         if (configs.isEmpty()) return emptyList()
         val tools = mutableListOf<Tool>()
-        val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
         for (cfg in configs) {
-            runCatching {
-                when (cfg.transport) {
-                    McpTransport.HTTP, McpTransport.WEBSOCKET -> {
-                        val transport = McpHttpTransport(cfg.name, cfg.command)
-                        val descs = transport.connect()
-                        httpTransports += transport
-                        // Wrap HTTP transport tools — need an adapter
-                        descs.forEach { desc ->
-                            tools += object : Tool {
-                                override val name = "${cfg.name}__${desc.name}"
-                                override val description = "[${cfg.name}] ${desc.description}"
-                                override val risk = com.andmx.agent.ToolRisk.EXECUTE
-                                override val parameters = desc.inputSchema
-                                override suspend fun execute(args: kotlinx.serialization.json.JsonObject): com.andmx.agent.ToolResult {
-                                    val result = transport.callTool(desc.name, args)
-                                    return com.andmx.agent.ToolResult(result.take(16_000))
-                                }
-                            }
-                        }
-                        _connected += Connected(cfg.name, descs.map { it.name }, cfg.transport.name)
-                        onLog("MCP ${cfg.name} (HTTP): ${descs.size} 个工具")
-                    }
-                    McpTransport.STDIO -> {
-                        val argv = runtime.prootArgv(
-                            command = listOf(sh, "-lc", cfg.command),
-                            rootfs = runtime.rootfsDir.takeIf { it.exists() },
-                        )
-                        val client = McpClient(cfg.name, argv, runtime.env())
-                        val descs = client.connect()
-                        clients += client
-                        descs.forEach { tools += McpTool(client, it) }
-                        _connected += Connected(cfg.name, descs.map { it.name }, "STDIO")
-                        onLog("MCP ${cfg.name} (stdio): ${descs.size} 个工具")
-                    }
-                }
-            }.onFailure { onLog("MCP ${cfg.name} 连接失败: ${it.message}") }
+            tools += connectOne(cfg, onLog)
         }
         return tools
+    }
+
+    /** Connect a single configured server; returns its tools (empty on failure). */
+    suspend fun connectOne(cfg: McpServerConfig, onLog: (String) -> Unit = {}): List<Tool> {
+        if (_connected.any { it.name == cfg.name }) return emptyList()
+        val tools = mutableListOf<Tool>()
+        val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
+        runCatching {
+            when (cfg.transport) {
+                McpTransport.HTTP, McpTransport.WEBSOCKET -> {
+                    val transport = McpHttpTransport(cfg.name, cfg.command)
+                    val descs = transport.connect()
+                    httpTransports += transport
+                    descs.forEach { desc ->
+                        tools += object : Tool {
+                            override val name = "${cfg.name}__${desc.name}"
+                            override val description = "[${cfg.name}] ${desc.description}"
+                            override val risk = com.andmx.agent.ToolRisk.EXECUTE
+                            override val parameters = desc.inputSchema
+                            override suspend fun execute(args: kotlinx.serialization.json.JsonObject): com.andmx.agent.ToolResult {
+                                val result = transport.callTool(desc.name, args)
+                                return com.andmx.agent.ToolResult(result.take(16_000))
+                            }
+                        }
+                    }
+                    _connected += Connected(cfg.name, descs.map { it.name }, cfg.transport.name)
+                    onLog("MCP ${cfg.name} (HTTP): ${descs.size} 个工具")
+                }
+                McpTransport.STDIO -> {
+                    val argv = runtime.prootArgv(
+                        command = listOf(sh, "-lc", cfg.command),
+                        rootfs = runtime.rootfsDir.takeIf { it.exists() },
+                    )
+                    val client = McpClient(cfg.name, argv, runtime.env())
+                    val descs = client.connect()
+                    clients += client
+                    descs.forEach { tools += McpTool(client, it) }
+                    _connected += Connected(cfg.name, descs.map { it.name }, "STDIO")
+                    onLog("MCP ${cfg.name} (stdio): ${descs.size} 个工具")
+                }
+            }
+        }.onFailure { onLog("MCP ${cfg.name} 连接失败: ${it.message}") }
+        return tools
+    }
+
+    /** Disconnect a single server by name; returns true when one was connected. */
+    fun disconnect(name: String): Boolean {
+        val idx = _connected.indexOfFirst { it.name == name }
+        if (idx < 0) return false
+        _connected.removeAt(idx)
+        clients.filter { it.serverName == name }.forEach { it.close() }
+        clients.removeAll { it.serverName == name }
+        httpTransports.filter { it.serverName == name }.forEach { it.close() }
+        httpTransports.removeAll { it.serverName == name }
+        return true
     }
 
     /** Subscribe to a resource update on a specific server. */

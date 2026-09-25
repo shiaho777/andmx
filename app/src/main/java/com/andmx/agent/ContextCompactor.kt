@@ -184,6 +184,7 @@ class ContextCompactor(
         history: List<ApiMessage>,
         @Suppress("UNUSED_PARAMETER") settings: ProviderSettings,
         turn: TurnContext,
+        instructions: String = "",
     ): CompactionResult? {
         if (history.size <= keepRecentMessages + 1) return null
 
@@ -216,7 +217,12 @@ class ContextCompactor(
         if (toCompact.isEmpty()) return null
 
         // Build a structured compaction prompt
-        val compactPrompt = buildCompactionPrompt(toCompact)
+        val compactPrompt = buildCompactionPrompt(toCompact) +
+            if (instructions.isNotBlank()) {
+                "\n\n--- Additional summary instructions from the user ---\n$instructions"
+            } else {
+                ""
+            }
         val systemPrompt = if (customCompactPrompt.isNotBlank()) customCompactPrompt else COMPACTION_SYSTEM_PROMPT
 
         val request = ChatRequest(
