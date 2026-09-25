@@ -122,6 +122,7 @@ fun Composer(
     attachments: List<Attachment> = emptyList(),
     onRemoveAttachment: (Int) -> Unit = {},
     onAddAttachment: () -> Unit = {},
+    onPasteClipboardImage: (android.net.Uri) -> Unit = {},
     onInsertMention: () -> Unit = {},
     onInsertConversation: () -> Unit = {},
     onInsertCommand: () -> Unit = {},
@@ -245,6 +246,7 @@ fun Composer(
                                     MentionKind.AGENT -> Icons.Outlined.Psychology
                                     MentionKind.SESSION -> Icons.AutoMirrored.Outlined.Chat
                                     MentionKind.PLUGIN -> Icons.Outlined.Terminal
+                                    MentionKind.FILE -> Icons.AutoMirrored.Outlined.InsertDriveFile
                                     MentionKind.FILE_BROWSER -> Icons.AutoMirrored.Outlined.InsertDriveFile
                                 },
                                 contentDescription = null,
@@ -256,6 +258,7 @@ fun Composer(
                                 when (m.kind) {
                                     MentionKind.AGENT -> "@${m.label}"
                                     MentionKind.SESSION -> "#${m.label}"
+                                    MentionKind.FILE -> "@${m.label}"
                                     else -> m.label
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
@@ -395,6 +398,7 @@ fun Composer(
                 ) {
                     PlusMenu(
                         onAddAttachment = onAddAttachment,
+                        onPasteClipboardImage = onPasteClipboardImage,
                         onInsertMention = onInsertMention,
                         onInsertConversation = onInsertConversation,
                         onInsertCommand = onInsertCommand,
@@ -507,6 +511,7 @@ private fun InputHistoryMenu(
 @Composable
 private fun PlusMenu(
     onAddAttachment: () -> Unit,
+    onPasteClipboardImage: (android.net.Uri) -> Unit,
     onInsertMention: () -> Unit,
     onInsertConversation: () -> Unit,
     onInsertCommand: () -> Unit,
@@ -519,6 +524,26 @@ private fun PlusMenu(
             PlusMenuItem(Icons.Outlined.AttachFile, "添加附件", "上传截图、文档作为上下文") {
                 expanded = false
                 onAddAttachment()
+            }
+            // 上游 app-clipboard-image 等价：剪贴板含图片时提供直接粘贴为附件。
+            val clipCtx = androidx.compose.ui.platform.LocalContext.current
+            val clipImage = remember {
+                val cm = clipCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as? android.content.ClipboardManager
+                val clip = cm?.primaryClip
+                (0 until (clip?.itemCount ?: 0))
+                    .mapNotNull { clip?.getItemAt(it)?.uri }
+                    .firstOrNull { u ->
+                        runCatching {
+                            clipCtx.contentResolver.getType(u)?.startsWith("image/") == true
+                        }.getOrDefault(false)
+                    }
+            }
+            if (clipImage != null) {
+                PlusMenuItem(Icons.Outlined.ContentPaste, "粘贴剪贴板图片", "将剪贴板中的图片添加为附件") {
+                    expanded = false
+                    onPasteClipboardImage(clipImage)
+                }
             }
             PlusMenuItem(Icons.AutoMirrored.Outlined.InsertDriveFile, "插入 @ 引用", "引用工作区文件") {
                 expanded = false
@@ -1229,7 +1254,7 @@ data class SkillSuggestion(
 )
 
 /** @ 提及联想项（ZCode @ 面板对齐：子代理 / 会话 / 插件命令 / 文件浏览入口）。 */
-enum class MentionKind { AGENT, SESSION, PLUGIN, FILE_BROWSER }
+enum class MentionKind { AGENT, SESSION, PLUGIN, FILE, FILE_BROWSER }
 
 data class MentionSuggestion(
     val kind: MentionKind,

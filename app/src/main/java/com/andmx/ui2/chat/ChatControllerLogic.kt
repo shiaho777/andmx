@@ -27,7 +27,11 @@ internal object ChatControllerLogic {
         appendLine()
         appendLine()
         appendLine("Treat the skill body as loaded instructions for this turn. Do not re-invoke Skill for the same name.")
-    }.take(SKILL_PAYLOAD_LIMIT)
+    }.let { full ->
+        if (full.length > SKILL_PAYLOAD_LIMIT) {
+            full.take(SKILL_PAYLOAD_LIMIT) + "\n[truncated: skill payload exceeded $SKILL_PAYLOAD_LIMIT chars]"
+        } else full
+    }
 
     fun rebuildHistory(msgs: List<MessageEntity>): List<ApiMessage> {
         val out = mutableListOf<ApiMessage>()

@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import com.andmx.data.MessageEntity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -133,7 +134,11 @@ class ChatControllerLogicTest {
     @Test
     fun skillPayloadIsCappedAt14kChars() {
         val payload = ChatControllerLogic.formatSkillPayload("s", "/p", "x".repeat(50_000), emptyList(), null)
-        assertEquals(ChatControllerLogic.SKILL_PAYLOAD_LIMIT, payload.length)
+        assertTrue(payload.length <= ChatControllerLogic.SKILL_PAYLOAD_LIMIT + 80)
+        assertTrue(payload.endsWith("]"))
+        assertTrue(payload.contains("truncated"))
+        val small = ChatControllerLogic.formatSkillPayload("s", "/p", "short", emptyList(), null)
+        assertFalse(small.contains("truncated"))
     }
 
     @Test

@@ -5,20 +5,21 @@ sealed interface SlashResult {
     data object Clear : SlashResult
     data object Help : SlashResult
     data object Status : SlashResult
-    data object Compact : SlashResult
+    data class Compact(val args: String) : SlashResult
     data object Checkpoint : SlashResult
     data object Regenerate : SlashResult
     data object Stop : SlashResult
     data object Tools : SlashResult
     data object Handoff : SlashResult
     data object Export : SlashResult
-    data object Fork : SlashResult
-    data object Rewind : SlashResult
-    data object Resume : SlashResult
+    data class Fork(val target: String) : SlashResult
+    data class Rewind(val target: String) : SlashResult
+    data class Resume(val sessionId: String) : SlashResult
     data object ContinueLatest : SlashResult
-    data object Workflows : SlashResult
-    data object Mcp : SlashResult
-    data object Plugins : SlashResult
+    data class Workflows(val args: String) : SlashResult
+    data class Mcp(val args: String) : SlashResult
+    data class Plugins(val args: String) : SlashResult
+    data class ModelSwitch(val args: String) : SlashResult
     data class Locale(val args: String) : SlashResult
     data class ExecModeSwitch(val args: String) : SlashResult
     data class SkillInvoke(val name: String, val task: String) : SlashResult
@@ -115,24 +116,32 @@ object SlashCommands {
         if (!t.startsWith("/")) return SlashResult.NotCommand
         return when (t.substringBefore(' ').lowercase()) {
             "/clear", "/new" -> SlashResult.Clear
-            "/compact", "/compress", "/summarize" -> SlashResult.Compact
+            "/compact", "/compress", "/summarize" ->
+                SlashResult.Compact(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/checkpoint", "/handoff-checkpoint" -> SlashResult.Checkpoint
             "/regen", "/retry", "/regenerate" -> SlashResult.Regenerate
             "/stop", "/cancel" -> SlashResult.Stop
             "/full" -> SlashResult.Mode(ApprovalMode.FULL)
             "/ask" -> SlashResult.Mode(ApprovalMode.ASK)
             "/readonly", "/read" -> SlashResult.Mode(ApprovalMode.READ_ONLY)
-            "/model", "/settings" -> SlashResult.OpenModel
+            "/model" -> SlashResult.ModelSwitch(
+                t.substringAfter(' ', missingDelimiterValue = "").trim(),
+            )
+            "/settings" -> SlashResult.OpenModel
             "/status" -> SlashResult.Status
             "/tools", "/capabilities" -> SlashResult.Tools
             "/goal", "/target", "/objective" -> parseGoal(t)
             "/handoff", "/summary" -> SlashResult.Handoff
             "/export" -> SlashResult.Export
-            "/fork", "/branch" -> SlashResult.Fork
-            "/rewind", "/rollback" -> SlashResult.Rewind
-            "/resume", "/sessions" -> SlashResult.Resume
+            "/fork", "/branch" ->
+                SlashResult.Fork(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/rewind", "/rollback" ->
+                SlashResult.Rewind(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/resume", "/sessions" ->
+                SlashResult.Resume(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/continue" -> SlashResult.ContinueLatest
-            "/workflows", "/workflow", "/dwf" -> SlashResult.Workflows
+            "/workflows", "/workflow", "/dwf" ->
+                SlashResult.Workflows(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/expert" -> SlashResult.Expert(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/mode" -> SlashResult.ExecModeSwitch(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/skill" -> {
@@ -144,8 +153,9 @@ object SlashCommands {
             }
             "/init", "/agents" -> SlashResult.Init(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/effort", "/variant" -> SlashResult.Effort(t.substringAfter(' ', missingDelimiterValue = "").trim())
-            "/mcp" -> SlashResult.Mcp
-            "/plugins", "/plugin" -> SlashResult.Plugins
+            "/mcp" -> SlashResult.Mcp(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/plugins", "/plugin" ->
+                SlashResult.Plugins(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/locale", "/language" -> SlashResult.Locale(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/help", "/?" -> SlashResult.Help
             else -> SlashResult.Unknown(t.substringBefore(' '))

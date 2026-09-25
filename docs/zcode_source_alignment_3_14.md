@@ -549,6 +549,68 @@ TUI 侧对应 app-*.ts）：
 - ✅ `file_diff` 统计等价：write_file 覆盖已存在文件、edit_file 成功后
   输出追加真实 `(+adds -dels)`（DiffEngine 计算），不再只报字符数。
 
+### P9 细粒度命令审计轮（上游 slash 注册表逐字段核对）
+
+对照 `zcode-slash-command-help.ts` 21 枚内置命令 + 别名逐条对齐：
+
+- ✅ `/resume [sessionId]`：无参开抽屉选择器（上游 picker 等价），
+  带 id/前缀直恢复指定会话。`/continue` 恢复最近会话不变。
+- ✅ `/rewind [status|latest|checkpointId]`：新增 status（显示最近检查点）
+  与 latest/消息 id 直回滚（跳过选择器）。
+- ✅ `/fork [latest|checkpointId]`：repo.forkConversation 加 untilMessageId，
+  带参从检查点截断分叉（上游 workspace-checkpoint 分叉等价）。
+- ✅ `/dwf [list|cancel [runId]|resume <runId>]`：斜杠子命令直通
+  workflowService.cancel/resume；详情对话框加「恢复运行」按钮
+  （paused/failed/cancelled 可恢复）。
+- ✅ `/model [list|provider/model]`：`list` 文本列出全部 provider 模型
+  （标记 current）；`provider/model` 或裸 modelId 直切（走原有
+  ModelSwitchGuard 上下文守卫）。无参仍开设置页（移动端等价）。
+- ✅ `/mcp [connect <server>|disconnect <server>]`：McpManager 重构出
+  `connectOne`/`disconnect`（per-server），controller 侧 `mcpConnect`/
+  `mcpDisconnect` 同步 mcpTools（按 `name__` 前缀摘挂）与 mcpStatus。
+- ✅ `/plugins [list|enable <id>|disable <id>]`：PluginSystem.setEnabled
+  持久化 + 重载插件工具面；`list` 输出 ✓/○ 行（上游面板行格式等价）。
+- ✅ `/compact [instructions]`：指令透传至压缩 prompt（上游
+  "forwards optional summary instructions" 对齐）。
+- ✅ `/mode` 上游别名：build→confirm、edit→auto_edit、yolo→full。
+- ✅ 模糊编辑匹配：`EditMatcher` 8 级策略（exact/quote/行号前缀/转义/
+  unicode 转义/line-trim/indent-flex/block-anchor），歧义拒绝、
+  replace_all 限定策略、弯引号风格保留。
+- ✅ Read `pages` 参数（PDF 页选 1-indexed 区间）；Edit/Write 前
+  ReadFileState 新鲜度闸（mtime/size 变化拒绝）；Bash 别名 timeout→
+  timeout_ms 映射修复。
+
+### P9 终审补丁（契约元数据与结果格式）
+
+- ✅ `WebFetch` 结果元数据：结果头部追加
+  `[status: 200 · text/html · N bytes · Nms · redirects: N]`，
+  截断追加 `[truncated]`，缓存命中追加 `[cache: hit]`
+  （对齐上游 WebFetchOutput 结构化字段 finalUrl/status/contentType/
+  bytes/durationMs/redirects/cacheHit/truncated）。
+- ✅ `Skill` 载荷截断标记：超过 SKILL_PAYLOAD_LIMIT 时追加
+  `[truncated]`（对齐上游 skill 输出 `truncated` 字段）。
+- ✅ `Agent`/`Task` 工具结果格式对齐上游
+  `formatAgentOutputForModel`：结果体 +
+  `agentId: <id> (use SendMessage with to: '<id>' to continue this agent)`
+  + `<usage>tool_uses/duration_ms</usage>`；后台启动文案改为上游
+  "Async agent launched successfully." 三行式。`SubAgentOrchestrator`
+  新增 `RunStats`（toolUseCount/durationMs），spawn/resume 两条
+  runTurn 路径统计 `ToolStarted` 次数；终态通知 `<usage>` 块补
+  `<tool-uses>`（对齐上游 `totalToolUseCount`）。
+- ✅ Hook 事件面对齐确认：上游 7 事件（SessionStart/
+  UserPromptSubmit/PreToolUse/PostToolUse/PostToolUseFailure/
+  PermissionRequest/Stop）全覆盖，另含 PRE_COMPACT。
+- ✅ 审批面板对齐确认：reason/输入预览/长期规则作用域行 +
+  会话/项目/每次询问/允许/拒绝按钮组（上游 allow_once/
+  allow_project/deny + scope 预览行的移动端超集）。
+- ✅ 会话级已改文件追踪 = ChangeTracker + Diff/Files 审查面板
+  （上游 modified-files 侧栏的超集：带保留/丢弃动作）。
+- ✅ 工作流工具族全齐：CreateWorkflow/AmendWorkflow/SaveWorkflow/
+  ListSavedWorkflows/ListWorkflowRuns/GetWorkflowRun/
+  GetWorkflowRunRoster/ResumeWorkflowRun/CancelWorkflowRun/
+  EvalWorkflowSnippet + actor 侧 submit_result/escalate。
+  `ResolveWorkflowQuestion` 维持刻意差异（escalate 直达审批表）。
+
 ## 验证方式
 
 - 文本对齐项用「逐字 diff」验收：把 ZCode 源文件里的常量与 AndMX 常量对拷比较。

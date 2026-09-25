@@ -6,6 +6,7 @@ import com.andmx.workspace.WorkspaceAccess
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -25,6 +26,7 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
             putJsonObject("path") { put("type", "string"); put("description", "文件路径，相对或绝对") }
             putJsonObject("offset") { put("type", "integer"); put("description", "起始行号(从 0 开始),默认 0"); put("default", 0) }
             putJsonObject("limit") { put("type", "integer"); put("description", "最多返回的行数,默认 2000"); put("default", 2000) }
+            putJsonObject("pages") { put("type", "string"); put("description", "PDF 页选（1-indexed，如 \"1-5\"/\"3\"/\"10-20\"，单次≤20页）；仅 PDF 有效") }
         }
         putJsonArray("required") { add("path") }
     }
@@ -76,7 +78,7 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
         }
         // PDF → PdfRenderer 逐页渲染为 PNG（本地访客路径；远端不支持）。
         if (ext == "pdf") {
-            return readPdf(resolved)
+            return readPdf(resolved, args["pages"]?.jsonPrimitive?.contentOrNull)
         }
         // 视频 → MediaMetadataRetriever 抽帧（上游 read-video 等价；无 provider
         // video block，用 3 帧截图代替）。
@@ -109,8 +111,11 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
         }.getOrElse { ToolResult("读取失败: ${it.message}", isError = true) }
     }
 
-    /** 本地 PDF 逐页渲染（android.graphics.pdf.PdfRenderer，无三方依赖）。 */
-    private fun readPdf(resolved: String): ToolResult {
+    /**
+     * 本地 PDF 逐页渲染（android.graphics.pdf.PdfRenderer，无三方依赖）。
+     * `pages` 对齐上游契约："1-5" / "3" / "10-20"，1-indexed，单次 ≤20 页。
+     */
+    private fun readPdf(resolved: String, pagesSpec: String?): ToolResult {
         val host = access.hostFile(resolved)
             ?: return ToolResult("远端工作区暂不支持 PDF 读取", isError = true)
         if (!host.exists()) return ToolResult("文件不存在: $resolved", isError = true)
@@ -118,10 +123,15 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
             val pfd = android.os.ParcelFileDescriptor.open(host, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
             val renderer = android.graphics.pdf.PdfRenderer(pfd)
             val totalPages = renderer.pageCount
+            val pageIndices = parsePdfPages(pagesSpec, totalPages)
+                ?: return@runCatching ToolResult(
+                    "Invalid pages parameter: \"$pagesSpec\". " +
+                        "Use formats like \"1-5\", \"3\", or \"10-20\". Pages are 1-indexed.",
+                    isError = true,
+                )
             val images = mutableListOf<String>()
             try {
-                val pages = totalPages.coerceAtMost(MAX_PDF_PAGES)
-                for (i in 0 until pages) {
+                for (i in pageIndices) {
                     val page = renderer.openPage(i)
                     val scale = 1024f / page.width.coerceAtLeast(1)
                     val bmp = android.graphics.Bitmap.createBitmap(
@@ -142,10 +152,24 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
                 renderer.close(); pfd.close()
             }
             ToolResult(
-                "[pdf ${resolved.substringAfterLast('/')} · $totalPages 页, 渲染前 ${images.size} 页]",
+                "[pdf ${resolved.substringAfterLast('/')} · $totalPages 页, 渲染第 ${pageIndices.first() + 1}-${pageIndices.last() + 1} 页]",
                 imageUrls = images,
             )
         }.getOrElse { ToolResult("PDF 读取失败: ${it.message}", isError = true) }
+    }
+
+    /** 上游 read-pdf 页选："1-5"/"3"/"10-20" → 0-indexed 页码表，越界收敛到 totalPages。 */
+    private fun parsePdfPages(spec: String?, totalPages: Int): List<Int>? {
+        if (spec.isNullOrBlank()) return (0 until totalPages.coerceAtMost(MAX_PDF_PAGES)).toList()
+        val s = spec.trim()
+        val m = Regex("""^(\d+)(?:-(\d+))?$""").matchEntire(s) ?: return null
+        val a = m.groupValues[1].toIntOrNull() ?: return null
+        val b = m.groupValues[2].toIntOrNull() ?: a
+        if (a < 1 || b < a) return null
+        val lo = a - 1
+        val hi = (b - 1).coerceAtMost(totalPages - 1)
+        if (lo > hi) return null
+        return (lo..hi).toList().take(MAX_PDF_PAGES)
     }
 
     /** 本地视频抽 3 帧（头/中/尾）为 PNG——上游 read-video 的移动端等价。 */
@@ -190,7 +214,7 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
     companion object {
         const val DEFAULT_LINE_LIMIT = 2000
         const val MAX_LINE_LIMIT = 5000
-        const val MAX_PDF_PAGES = 8
+        const val MAX_PDF_PAGES = 20
         const val IMAGE_MAX_DIM = 2000
         const val IMAGE_RAW_MAX_BYTES = 4 * 1024 * 1024
         val IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
@@ -287,18 +311,38 @@ class EditFileTool(context: Context, private val readFileState: ReadFileState? =
                     )
                 }
             }
-            val count = original.split(oldStr).size - 1
-            if (count == 0) return@runCatching ToolResult("未找到匹配的 old_str", isError = true)
+            // 上游 edit-matchers 对齐：exact 失败后按策略链回退（引号/行号前缀/转义/缩进/块锚点）
+            val match = EditMatcher.findEditMatch(original, oldStr, replaceAll)
+            val actualOld = when (match) {
+                is EditMatcher.Result.NotFound -> return@runCatching ToolResult(
+                    "未找到匹配的 old_str\nString: $oldStr",
+                    isError = true,
+                )
+                is EditMatcher.Result.Ambiguous -> return@runCatching ToolResult(
+                    "old_str 模糊匹配到 ${match.candidateCount} 处（${match.strategy.name.lowercase()}），" +
+                        "请提供更唯一的匹配或设置 replace_all=true",
+                    isError = true,
+                )
+                is EditMatcher.Result.Matched -> match.actualString
+            }
+            val count = original.split(actualOld).size - 1
             if (!replaceAll && count > 1) {
                 return@runCatching ToolResult("old_str 出现 $count 次，请提供更唯一的匹配或设置 replace_all=true", isError = true)
             }
-            val updated = if (replaceAll) original.replace(oldStr, newStr) else original.replaceFirst(oldStr, newStr)
+            val normalizedNew = EditMatcher.normalizeReplacementForMatch(
+                (match as EditMatcher.Result.Matched).strategy, newStr,
+            )
+            val actualNew = EditMatcher.preserveQuoteStyle(oldStr, actualOld, normalizedNew)
+            val updated = if (replaceAll) original.replace(actualOld, actualNew) else original.replaceFirst(actualOld, actualNew)
             access.writeText(resolved, updated)
             ChangeTracker.record(resolved, original, updated, existedBefore = true)
             readFileState?.record(resolved, updated, sourceTool = "edit_file")
             val d = com.andmx.diff.DiffEngine.stats(com.andmx.diff.DiffEngine.diff(original, updated))
+            val strat = if ((match as EditMatcher.Result.Matched).strategy != EditMatcher.Strategy.EXACT) {
+                " (match: ${match.strategy.name.lowercase()})"
+            } else ""
             ToolResult(
-                "已编辑 $resolved (+${d.added} -${d.removed})" +
+                "已编辑 $resolved (+${d.added} -${d.removed})$strat" +
                     if (replaceAll) " (替换 $count 处)" else "",
             )
         }.getOrElse { ToolResult("编辑失败: ${it.message}", isError = true) }

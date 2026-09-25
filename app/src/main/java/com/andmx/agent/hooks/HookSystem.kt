@@ -48,6 +48,8 @@ class HookSystem(
                 "user_prompt_submit", "user_prompt" -> HookEvent.USER_PROMPT_SUBMIT
                 "pre_tool_use", "pretooluse" -> HookEvent.PRE_TOOL_USE
                 "post_tool_use", "posttooluse" -> HookEvent.POST_TOOL_USE
+                "post_tool_use_failure", "posttoolusefailure" -> HookEvent.POST_TOOL_USE_FAILURE
+                "permission_request", "permissionrequest" -> HookEvent.PERMISSION_REQUEST
                 "pre_compact", "precompact" -> HookEvent.PRE_COMPACT
                 "post_compact", "postcompact" -> HookEvent.POST_COMPACT
                 "stop", "session_stop", "session_end" -> HookEvent.STOP
@@ -61,6 +63,8 @@ class HookSystem(
         USER_PROMPT_SUBMIT,
         PRE_TOOL_USE,
         POST_TOOL_USE,
+        POST_TOOL_USE_FAILURE,
+        PERMISSION_REQUEST,
         PRE_COMPACT,
         POST_COMPACT,
         STOP,

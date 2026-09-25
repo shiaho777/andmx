@@ -90,6 +90,10 @@ class ShellTool(
                 put("type", "boolean")
                 put("description", "Fail if the workspace directory is unavailable; do not fall back to home.")
             }
+            putJsonObject("dangerouslyDisableSandbox") {
+                put("type", "boolean")
+                put("description", "Set true to run this command directly on the Android host shell instead of the proot Linux guest (still subject to approval mode).")
+            }
             putJsonObject("run_in_background") {
                 put("type", "boolean")
                 put("description", "Run without blocking; returns a task_id and output file path. Use TaskOutput/TaskStop to manage.")
@@ -168,15 +172,17 @@ class ShellTool(
             return ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0)
         }
 
+        val noSandbox = (args["dangerouslyDisableSandbox"] as? JsonPrimitive)?.booleanOrNull == true
+
         if (bounded) {
-            return executeBounded(cdCommand, timeoutMs, maxOutputChars)
+            return executeBounded(cdCommand, timeoutMs, maxOutputChars, noSandbox)
         }
 
         if (callId.isNotBlank()) {
-            return executeBound(callId, command, cwd, cdCommand)
+            return executeBound(callId, command, cwd, cdCommand, noSandbox)
         }
 
-        if (usePersistent && persistentShell.isAlive) {
+        if (usePersistent && !noSandbox && persistentShell.isAlive) {
             val res = persistentShell.exec(cdCommand)
             if (res.error == null) {
                 val out = buildString {
@@ -220,14 +226,19 @@ class ShellTool(
         cdCommand: String,
         timeoutMs: Long,
         maxOutputChars: Int,
+        noSandbox: Boolean = false,
     ): ToolResult {
         val install = runtime.install()
         if (!install.ok) {
             return ToolResult("执行失败: ${install.message}", isError = true)
         }
-        val rootfs = runtime.rootfsDir.takeIf { it.exists() }
+        val rootfs = runtime.rootfsDir.takeIf { it.exists() && !noSandbox }
         val sh = if (rootfs != null) "/bin/sh" else "/system/bin/sh"
-        val argv = runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = rootfs)
+        val argv = if (noSandbox) {
+            listOf(sh, "-lc", cdCommand)
+        } else {
+            runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = rootfs)
+        }
 
         return withContext(Dispatchers.IO) {
             val process = runCatching {
@@ -318,6 +329,7 @@ class ShellTool(
         command: String,
         cwd: String,
         cdCommand: String,
+        noSandbox: Boolean = false,
     ): ToolResult = withContext(Dispatchers.IO) {
         _events.tryEmit(ShellEvent.Started(callId, command, cwd))
 
@@ -338,12 +350,16 @@ class ShellTool(
             }
         }
 
-        val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
-        val argv = runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = runtime.rootfsDir.takeIf { it.exists() })
+        val sh = if (runtime.rootfsDir.exists() && !noSandbox) "/bin/sh" else "/system/bin/sh"
+        val argv = if (noSandbox) {
+            listOf(sh, "-lc", cdCommand)
+        } else {
+            runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = runtime.rootfsDir.takeIf { it.exists() })
+        }
         val envp = runtime.env().map { "${it.key}=${it.value}" }.toTypedArray()
         val process = runCatching {
             PtyProcess.start(
-                command = runtime.prootBin.path,
+                command = if (noSandbox) sh else runtime.prootBin.path,
                 argv = argv.toTypedArray(),
                 envp = envp,
                 cwd = context.filesDir.path,

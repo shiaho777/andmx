@@ -820,10 +820,10 @@ class ChatViewModel @Inject constructor(
                 regenerate()
                 return true
             }
-            SlashResult.Compact -> {
+            is SlashResult.Compact -> {
                 viewModelScope.launch {
                     val id = ensureConversationReady()
-                    val msg = controller.compactConversation(id)
+                    val msg = controller.compactConversation(id, cmd.args)
                     appendLocalAssistant(msg)
                     refreshContextUsage()
                 }
@@ -932,24 +932,24 @@ class ChatViewModel @Inject constructor(
                 }
                 return true
             }
-            SlashResult.Fork -> {
-                forkConversation()
+            is SlashResult.Fork -> {
+                forkConversation(cmd.target)
                 return true
             }
-            SlashResult.Rewind -> {
-                openRewindPicker()
+            is SlashResult.Rewind -> {
+                handleRewindSlash(cmd.target)
                 return true
             }
-            SlashResult.Resume -> {
-                resumeSession()
+            is SlashResult.Resume -> {
+                resumeSession(cmd.sessionId)
                 return true
             }
             SlashResult.ContinueLatest -> {
                 continueLatestSession()
                 return true
             }
-            SlashResult.Workflows -> {
-                openWorkflows()
+            is SlashResult.Workflows -> {
+                handleWorkflowSlash(cmd.args)
                 return true
             }
             is SlashResult.Init -> {
@@ -964,33 +964,73 @@ class ChatViewModel @Inject constructor(
                 }
                 return true
             }
-            SlashResult.Mcp -> {
+            is SlashResult.Mcp -> {
                 viewModelScope.launch {
-                    val settings = settingsStore.settings.firstOrNull() ?: ProviderSettings()
-                    val configured = runCatching {
-                        com.andmx.mcp.McpServerConfig.parse(settings.mcpServers)
-                    }.getOrDefault(emptyList())
-                    val connected = controller.mcpStatus.value
-                    val body = buildString {
-                        if (configured.isEmpty() && connected.isEmpty()) {
-                            appendLine("未配置 MCP 服务器（在设置 → MCP 中添加）。")
-                        } else {
-                            appendLine("MCP 服务器：")
-                            configured.forEach { cfg ->
-                                val live = connected.firstOrNull { it.name == cfg.name }
-                                val state = if (live != null) "已连接 · ${live.tools.size} tools" else "未连接"
-                                appendLine("- ${cfg.name} (${cfg.transport}) · $state")
-                            }
-                            connected.filter { live -> configured.none { it.name == live.name } }
-                                .forEach { appendLine("- ${it.name} (${it.transport}) · 已连接 · ${it.tools.size} tools") }
+                    val sub = cmd.args.substringBefore(' ').trim().lowercase()
+                    val arg = cmd.args.substringAfter(' ', "").trim()
+                    when (sub) {
+                        "connect" -> {
+                            if (arg.isBlank()) appendLocalAssistant("用法 `/mcp connect <server>`")
+                            else appendLocalAssistant(controller.mcpConnect(arg))
                         }
-                    }.trim()
-                    appendLocalAssistant(body)
+                        "disconnect" -> {
+                            if (arg.isBlank()) appendLocalAssistant("用法 `/mcp disconnect <server>`")
+                            else appendLocalAssistant(controller.mcpDisconnect(arg))
+                        }
+                        else -> {
+                            val settings = settingsStore.settings.firstOrNull() ?: ProviderSettings()
+                            val configured = runCatching {
+                                com.andmx.mcp.McpServerConfig.parse(settings.mcpServers)
+                            }.getOrDefault(emptyList())
+                            val connected = controller.mcpStatus.value
+                            val body = buildString {
+                                if (configured.isEmpty() && connected.isEmpty()) {
+                                    appendLine("未配置 MCP 服务器（在设置 → MCP 中添加）。")
+                                } else {
+                                    appendLine("MCP 服务器：")
+                                    configured.forEach { cfg ->
+                                        val live = connected.firstOrNull { it.name == cfg.name }
+                                        val state = if (live != null) "已连接 · ${live.tools.size} tools" else "未连接"
+                                        appendLine("- ${cfg.name} (${cfg.transport}) · $state")
+                                    }
+                                    connected.filter { live -> configured.none { it.name == live.name } }
+                                        .forEach { appendLine("- ${it.name} (${it.transport}) · 已连接 · ${it.tools.size} tools") }
+                                }
+                            }.trim()
+                            appendLocalAssistant(body)
+                        }
+                    }
                 }
                 return true
             }
-            SlashResult.Plugins -> {
-                ChatActionBus.openPluginsSettings()
+            is SlashResult.Plugins -> {
+                val sub = cmd.args.substringBefore(' ').trim().lowercase()
+                val arg = cmd.args.substringAfter(' ', "").trim()
+                when (sub) {
+                    "enable", "disable" -> {
+                        if (arg.isBlank()) {
+                            appendLocalAssistant("用法 `/plugins $sub <plugin>`")
+                        } else {
+                            viewModelScope.launch {
+                                appendLocalAssistant(
+                                    controller.pluginSetEnabled(arg, sub == "enable"),
+                                )
+                            }
+                        }
+                    }
+                    "list" -> viewModelScope.launch {
+                        val lines = controller.pluginStatusLines()
+                        appendLocalAssistant(
+                            if (lines.isEmpty()) "没有已发现的插件。"
+                            else "插件：\n" + lines.joinToString("\n"),
+                        )
+                    }
+                    else -> ChatActionBus.openPluginsSettings()
+                }
+                return true
+            }
+            is SlashResult.ModelSwitch -> {
+                viewModelScope.launch { handleModelSlash(cmd.args) }
                 return true
             }
             is SlashResult.Locale -> {
@@ -1029,6 +1069,12 @@ class ChatViewModel @Inject constructor(
                 } else {
                     val target = ExecMode.entries.firstOrNull {
                         it.id.equals(cmd.args, true) || it.name.equals(cmd.args, true)
+                    } ?: when (cmd.args.lowercase()) {
+                        // 上游 TUI 模式名别名：build/edit/yolo → confirm/auto_edit/full
+                        "build" -> ExecMode.CONFIRM
+                        "edit" -> ExecMode.AUTO_EDIT
+                        "yolo" -> ExecMode.FULL
+                        else -> null
                     }
                     if (target == null) {
                         appendLocalAssistant(
@@ -1743,12 +1789,63 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun resumeWorkflowRun(runId: String) {
+        viewModelScope.launch {
+            val (_, err) = controller.workflowService.resume(
+                runId,
+                parentSessionId = _currentConversationId.value.takeIf { it > 0 }?.toString(),
+            )
+            _workflowRuns.value = controller.workflowService.listRuns()
+            _workflowDetail.value = controller.workflowService.getRun(runId)
+            if (err != null) appendLocalAssistant("工作流恢复失败：$err")
+        }
+    }
+
+    /** /dwf [list|cancel <runId>|resume <runId>]（上游 /dwf 子命令对齐）。 */
+    fun handleWorkflowSlash(args: String) {
+        val sub = args.substringBefore(' ').trim().lowercase()
+        val runId = args.substringAfter(' ', "").trim()
+        when {
+            args.isBlank() || sub == "list" -> openWorkflows()
+            sub == "cancel" -> {
+                if (runId.isBlank()) {
+                    openWorkflows()
+                } else {
+                    cancelWorkflowRun(runId)
+                    openWorkflows()
+                }
+            }
+            sub == "resume" -> {
+                if (runId.isBlank()) {
+                    appendLocalAssistant("用法：/dwf resume <runId>")
+                } else {
+                    resumeWorkflowRun(runId)
+                    openWorkflowDetail(runId)
+                }
+            }
+            else -> openWorkflowDetail(args)
+        }
+    }
+
     /** 分叉当前会话为独立副本（复制全部消息，记录 spawn 边）。 */
-    fun forkConversation() {
+    /** /fork [latest|checkpointId]：无参整段分叉；带参从该检查点分叉（上游对齐）。 */
+    fun forkConversation(target: String = "") {
         if (_isLoading.value) return
         viewModelScope.launch {
             val id = ensureConversationReady()
-            val newId = runCatching { repo.forkConversation(id) }.getOrNull()
+            val until = when {
+                target.isBlank() -> Long.MAX_VALUE
+                target == "latest" -> rewindCheckpoints.value.lastOrNull()?.id ?: Long.MAX_VALUE
+                else -> target.toLongOrNull()
+                    ?: _messages.value.firstOrNull {
+                        it.role == "user" && it.id.toString().startsWith(target)
+                    }?.id
+            }
+            if (until == null) {
+                appendLocalAssistant("找不到检查点 `$target`。")
+                return@launch
+            }
+            val newId = runCatching { repo.forkConversation(id, until) }.getOrNull()
             if (newId == null) {
                 _error.value = "分叉失败"
                 return@launch
@@ -1810,10 +1907,58 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** /resume：打开会话抽屉挑选要恢复的历史会话。 */
-    fun resumeSession() {
-        appendLocalAssistant("在左侧会话列表中选择要恢复的历史会话。")
-        ChatActionBus.openDrawer()
+    /** /resume [sessionId]：无参开抽屉挑选；带 id 直接恢复（上游 /resume 对齐）。 */
+    fun resumeSession(sessionId: String = "") {
+        if (sessionId.isBlank()) {
+            appendLocalAssistant("在左侧会话列表中选择要恢复的历史会话。")
+            ChatActionBus.openDrawer()
+            return
+        }
+        viewModelScope.launch {
+            val id = sessionId.toLongOrNull()
+            val all = repo.conversationsByArchived(false) + repo.conversationsByArchived(true)
+            val hit = if (id != null) {
+                all.firstOrNull { it.id == id }
+            } else {
+                all.firstOrNull { it.id.toString().startsWith(sessionId) }
+            }
+            if (hit == null) {
+                appendLocalAssistant("找不到会话 `$sessionId`。")
+            } else if (hit.id == _currentConversationId.value) {
+                appendLocalAssistant("已在该会话中。")
+            } else {
+                switchToConversation(hit.id)
+            }
+        }
+    }
+
+    /** /rewind [status|latest|checkpointId]：无参开选择器；latest/消息 id 直接回滚。 */
+    fun handleRewindSlash(target: String) {
+        if (target.isBlank()) {
+            openRewindPicker()
+            return
+        }
+        val checkpoints = rewindCheckpoints.value
+        if (target == "status") {
+            val latest = checkpoints.lastOrNull()
+            appendLocalAssistant(
+                if (latest == null) "没有可回滚的检查点：先发送一条用户消息。"
+                else "最近检查点：#${latest.id} · ${latest.content.take(60)}",
+            )
+            return
+        }
+        val hit = if (target == "latest") {
+            checkpoints.lastOrNull()
+        } else {
+            target.toLongOrNull()?.let { id -> checkpoints.firstOrNull { it.id == id } }
+                ?: checkpoints.firstOrNull { it.id.toString().startsWith(target) }
+        }
+        if (hit == null) {
+            appendLocalAssistant("找不到检查点 `$target`。可选：" +
+                checkpoints.takeLast(5).joinToString("、") { "#${it.id}" })
+            return
+        }
+        rewindToCheckpoint(hit.id)
     }
 
     /** assistant 消息赞/踩（上游 assistant-feedback）：同值再点清除。 */
@@ -1851,6 +1996,46 @@ class ChatViewModel @Inject constructor(
 
     private val _modelSwitchGuard = MutableStateFlow<ModelSwitchGuard?>(null)
     val modelSwitchGuard: StateFlow<ModelSwitchGuard?> = _modelSwitchGuard.asStateFlow()
+
+    /** /model [list|provider/model|modelId]：上游语义——空/list 列可选，带参直切。 */
+    private suspend fun handleModelSlash(args: String) {
+        val providers = providerStore.providers.firstOrNull().orEmpty().filter { it.enabled }
+        if (args.isBlank()) {
+            ChatActionBus.openSettings()
+            return
+        }
+        if (args.equals("list", true)) {
+            val curProvider = providerStore.primary.firstOrNull()
+            val curModel = settingsStore.settings.firstOrNull()?.model.orEmpty()
+            val body = buildString {
+                appendLine("当前：`${curProvider?.id ?: "-"}/${curModel.ifBlank { "-" }}`")
+                appendLine("可选模型：")
+                providers.forEach { p ->
+                    p.models.keys.forEach { m ->
+                        val mark = if (p.id == curProvider?.id && m == curModel) "（current）" else ""
+                        appendLine("- `${p.id}/$m`$mark")
+                    }
+                }
+            }.trim()
+            appendLocalAssistant(body)
+            return
+        }
+        val slash = args.indexOf('/')
+        val hit = if (slash > 0) {
+            val pid = args.substringBefore('/').trim()
+            val mid = args.substringAfter('/').trim()
+            providers.firstOrNull { it.id.equals(pid, true) }?.let { p -> p to mid }
+        } else {
+            providers.firstNotNullOfOrNull { p ->
+                if (args in p.models) p to args else null
+            }
+        }
+        if (hit == null || hit.second.isBlank() || hit.second !in hit.first.models) {
+            appendLocalAssistant("未知模型 `$args`。用法 `/model <provider/model>` 或 `/model list`")
+            return
+        }
+        requestSwitchModel(hit.first.id, hit.second)
+    }
 
     fun requestSwitchModel(providerId: String, modelId: String) {
         viewModelScope.launch {

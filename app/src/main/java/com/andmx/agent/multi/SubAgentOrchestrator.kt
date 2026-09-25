@@ -224,6 +224,7 @@ class SubAgentOrchestrator(
         return try {
             semaphore.acquire()
             val result = StringBuilder()
+            var toolUseCount = 0
             engine.runTurn(settings, turn, spec.task).collect { event ->
                 when (event) {
                     is AgentEvent.AssistantDelta -> _events.tryEmit(SubAgentEvent.Delta(agentId, event.text))
@@ -231,8 +232,10 @@ class SubAgentOrchestrator(
                         result.append(event.text)
                         _events.tryEmit(SubAgentEvent.Completed(agentId, event.text))
                     }
-                    is AgentEvent.ToolStarted ->
+                    is AgentEvent.ToolStarted -> {
+                        toolUseCount += 1
                         _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.arguments.take(120), true))
+                    }
                     is AgentEvent.ToolFinished ->
                         _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.output.take(120), false))
                     is AgentEvent.Failed -> _events.tryEmit(SubAgentEvent.Failed(agentId, event.message))
@@ -245,7 +248,7 @@ class SubAgentOrchestrator(
                     activeAgents[agentId] = info.copy(state = AgentState.COMPLETED, result = finalResult)
                 }
             }
-            emitTerminated(agentId, "completed", finalResult, spec.background, spec.agentName, spec.task, startedAt)
+            emitTerminated(agentId, "completed", finalResult, spec.background, spec.agentName, spec.task, startedAt, toolUseCount)
             finalResult
         } catch (t: Throwable) {
             _events.tryEmit(SubAgentEvent.Failed(agentId, t.message ?: "未知错误"))
@@ -270,6 +273,7 @@ class SubAgentOrchestrator(
         agentType: String,
         task: String,
         startedAt: Long,
+        toolUseCount: Int = 0,
     ) {
         _events.tryEmit(
             SubAgentEvent.Terminated(
@@ -288,12 +292,18 @@ class SubAgentOrchestrator(
             result = result.takeIf { status == "completed" },
             error = result.takeIf { status != "completed" },
             durationMs = System.currentTimeMillis() - startedAt,
+            toolUseCount = toolUseCount,
         )
+        lastRunStats[agentId] = RunStats(toolUseCount, System.currentTimeMillis() - startedAt)
     }
 
     /** 最近一次终态通知体（queued_system_notification 的 body），供测试/回放用。 */
     private val lastNotification = java.util.concurrent.ConcurrentHashMap<String, String>()
     fun notificationFor(agentId: String): String? = lastNotification[agentId]
+
+    data class RunStats(val toolUseCount: Int, val durationMs: Long)
+    private val lastRunStats = java.util.concurrent.ConcurrentHashMap<String, RunStats>()
+    fun runStatsFor(agentId: String): RunStats? = lastRunStats[agentId]
 
     /**
      * Resume a suspended/completed sub-agent with new input.
@@ -310,6 +320,7 @@ class SubAgentOrchestrator(
 
         _events.tryEmit(SubAgentEvent.Resumed(agentId, input))
 
+        var toolUseCount = 0
         return try {
             semaphore.acquire()
             val result = StringBuilder()
@@ -320,8 +331,10 @@ class SubAgentOrchestrator(
                         result.append(event.text)
                         _events.tryEmit(SubAgentEvent.Completed(agentId, event.text))
                     }
-                    is AgentEvent.ToolStarted ->
+                    is AgentEvent.ToolStarted -> {
+                        toolUseCount += 1
                         _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.arguments.take(120), true))
+                    }
                     is AgentEvent.ToolFinished ->
                         _events.tryEmit(SubAgentEvent.ToolActivity(agentId, event.name, event.output.take(120), false))
                     is AgentEvent.Failed -> _events.tryEmit(SubAgentEvent.Failed(agentId, event.message))
@@ -334,10 +347,10 @@ class SubAgentOrchestrator(
                     activeAgents[agentId] = i.copy(state = AgentState.COMPLETED, result = finalResult)
                 }
             }
-            emitTerminated(agentId, "completed", finalResult, info.background, info.agentType, info.task, info.createdAt)
+            emitTerminated(agentId, "completed", finalResult, info.background, info.agentType, info.task, info.createdAt, toolUseCount)
             finalResult
         } catch (t: Throwable) {
-            emitTerminated(agentId, "failed", "失败: ${t.message}", info.background, info.agentType, info.task, info.createdAt)
+            emitTerminated(agentId, "failed", "失败: ${t.message}", info.background, info.agentType, info.task, info.createdAt, toolUseCount)
             "子代理恢复失败: ${t.message}"
         } finally {
             semaphore.release()
@@ -742,16 +755,24 @@ class ZCodeAgentTool(
         if (runBg) {
             orchestrator.spawnAsync(spec)
             return ToolResult(
-                "Agent started in background id=$agentId type=${spec.agentName} description=${description.ifBlank { "(none)" }}",
+                "Async agent launched successfully.\n" +
+                    "agentId: $agentId (internal ID - do not mention to user. " +
+                    "Use SendMessage with to: '$agentId' to continue this agent.)\n" +
+                    "The agent is working in the background. You will be notified automatically when it completes.",
             )
         }
         val result = orchestrator.spawn(spec)
+        val stats = orchestrator.runStatsFor(agentId)
         return ToolResult(
             buildString {
-                appendLine("Agent result:")
-                appendLine("type: ${spec.agentName}")
-                if (description.isNotBlank()) appendLine("description: $description")
-                appendLine(result)
+                appendLine(result.ifBlank { "(Subagent completed but returned no output.)" })
+                appendLine("agentId: $agentId (use SendMessage with to: '$agentId' to continue this agent)")
+                if (stats != null) {
+                    appendLine("<usage>")
+                    appendLine("tool_uses: ${stats.toolUseCount}")
+                    appendLine("duration_ms: ${stats.durationMs}")
+                    appendLine("</usage>")
+                }
             }.trim(),
         )
     }
@@ -975,6 +996,7 @@ internal fun formatAgentTaskNotification(
     result: String? = null,
     error: String? = null,
     durationMs: Long? = null,
+    toolUseCount: Int = 0,
 ): String {
     val summary = buildString {
         append("Agent ").append(subagentType.ifBlank { "subagent" })
@@ -988,7 +1010,9 @@ internal fun formatAgentTaskNotification(
     lines += "<summary>${esc(summary)}</summary>"
     if (result != null) lines += "<result>${esc(result)}</result>"
     if (error != null) lines += "<error>${esc(error)}</error>"
-    if (durationMs != null) lines += "<usage><duration-ms>$durationMs</duration-ms></usage>"
+    if (durationMs != null) {
+        lines += "<usage><duration-ms>$durationMs</duration-ms><tool-uses>$toolUseCount</tool-uses></usage>"
+    }
     lines += "</task-notification>"
     return lines.joinToString("\n").take(TASK_NOTIFICATION_MAX_CHARS)
 }

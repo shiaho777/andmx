@@ -139,6 +139,17 @@ class JsReplTool(context: Context, private val sessionKey: String) : Tool {
         val timeoutMs = (args["timeout_ms"]?.jsonPrimitive?.longOrNull ?: 30_000L)
             .coerceIn(1, 120_000)
         val out = JsReplRuntime.eval(sessionKey, appContext, code, timeoutMs)
-        return ToolResult(out, isError = out.contains("\"error\""))
+        // 上游 node_repl_images payload：result 是 data:image/... 时走 imageUrls 通道
+        val img = DATA_IMAGE_URL.find(out)?.value
+        return if (img != null && img.length <= 6 * 1024 * 1024) {
+            ToolResult(out.replace(img, "[image output]"), imageUrls = listOf(img))
+        } else {
+            ToolResult(out, isError = out.contains("\"error\""))
+        }
+    }
+
+    private companion object {
+        val DATA_IMAGE_URL =
+            Regex("data:image/(?:png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=\\r\\n]+")
     }
 }

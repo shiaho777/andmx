@@ -327,9 +327,13 @@ class AgentEngine(
         )
     }
 
-    suspend fun compactNow(settings: ProviderSettings, turn: TurnContext): String? {
+    suspend fun compactNow(
+        settings: ProviderSettings,
+        turn: TurnContext,
+        instructions: String = "",
+    ): String? {
         hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
-        val result = compactor.compact(history, settings, turn) ?: return null
+        val result = compactor.compact(history, settings, turn, instructions) ?: return null
         history.clear()
         history += result.compacted
         hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_COMPACT)
@@ -1023,6 +1027,13 @@ class AgentEngine(
                     toolOutput = raw.output,
                 )
                 val post = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE, postCtx)
+                // 上游 PostToolUseFailure：失败结果走独立事件
+                if (raw.isError) {
+                    hooks?.runEvent(
+                        com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE_FAILURE,
+                        postCtx,
+                    )
+                }
                 if (post?.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && post.modifiedOutput != null) {
                     raw.copy(output = post.modifiedOutput!!)
                 } else {
