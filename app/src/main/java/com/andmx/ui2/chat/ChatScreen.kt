@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
@@ -134,10 +136,13 @@ fun ChatScreen(
             n.contains("todo") || n == "update_plan"
         }
     }
-    val timeline = remember(messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications, isLoading) {
+    val pendingApproval by viewModel.pendingApproval.collectAsState()
+    val timeline = remember(messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications, isLoading, pendingApproval) {
         val hasLiveStream = messages.any { it.isStreaming } || visibleReasonings.any { it.isStreaming }
         val hasRunningTool = visibleTools.any { it.isRunning }
         val hasVerifying = goalVerifications.any { it.passed == null }
+        // ZCode shouldShowTurnChatLoading：审批/问答挂起时抑制底部 loading。
+        val hasPendingInteraction = pendingApproval != null
         buildTimeline(
             messages = messages,
             tools = visibleTools,
@@ -145,7 +150,8 @@ fun ChatScreen(
             subAgents = subAgentItems,
             reasonings = visibleReasonings,
             goalVerifications = goalVerifications,
-            showWorking = isLoading && !hasLiveStream && !hasRunningTool && !hasVerifying && visibleReasonings.none { it.isStreaming },
+            showWorking = isLoading && !hasLiveStream && !hasRunningTool && !hasVerifying &&
+                !hasPendingInteraction && visibleReasonings.none { it.isStreaming },
         )
     }
     // Turn 过程折叠（dsh web turn-process 对齐）：已关闭 Turn 的过程行默认
@@ -186,7 +192,6 @@ fun ChatScreen(
                 !it.message.isProcess
         }?.stableId
     }
-    val pendingApproval by viewModel.pendingApproval.collectAsState()
     val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val queuePaused by viewModel.queuePaused.collectAsState()
@@ -743,6 +748,12 @@ LaunchedEffect(Unit) {
                         viewModel.addSkillByName(skill.name, skill.path)
                     },
                     inputHistory = inputHistory,
+                    // ZCode 对齐：placeholder 随状态变化——运行中提示排队。
+                    placeholder = when {
+                        flat -> DEFAULT_PLACEHOLDER
+                        isLoading -> "继续输入，将在本轮结束后排队发送"
+                        else -> "继续这个任务，@ 提及文件，/ 使用命令，\$ 使用技能"
+                    },
                     onPickHistory = { inputText = it },
                     mentionSuggestions = mentionSuggestions,
                     onPickMention = { m ->
@@ -978,8 +989,8 @@ LaunchedEffect(Unit) {
                         }
                     }
                 }
+                val timelineScope = rememberCoroutineScope()
                 if (userAnchorIndices.size > 1) {
-                    val scope = rememberCoroutineScope()
                     val rank = userAnchorIndices
                         .indexOfFirst { it >= listState.firstVisibleItemIndex }
                         .let { if (it < 0) userAnchorIndices.lastIndex else it }
@@ -987,13 +998,13 @@ LaunchedEffect(Unit) {
                         turn = userAnchorIndices.size - rank,
                         total = userAnchorIndices.size,
                         onPrev = {
-                            scope.launch {
+                            timelineScope.launch {
                                 userAnchorIndices.getOrNull(rank + 1)
                                     ?.let { listState.animateScrollToItem(it) }
                             }
                         },
                         onNext = {
-                            scope.launch {
+                            timelineScope.launch {
                                 if (rank <= 0) listState.animateScrollToItem(0)
                                 else userAnchorIndices.getOrNull(rank - 1)
                                     ?.let { listState.animateScrollToItem(it) }
@@ -1003,6 +1014,55 @@ LaunchedEffect(Unit) {
                             .align(Alignment.BottomEnd)
                             .padding(end = 14.dp, bottom = 6.dp),
                     )
+                }
+                // ZCode ConversationBackToBottomButton：滚离底部后显示回底按钮。
+                val showBackToBottom by remember {
+                    derivedStateOf {
+                        listState.firstVisibleItemIndex > 0 ||
+                            listState.firstVisibleItemScrollOffset > 200
+                    }
+                }
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp),
+                ) {
+                AnimatedVisibility(
+                    visible = showBackToBottom,
+                    enter = fadeIn() + slideInVertically { it / 3 },
+                    exit = fadeOut() + slideOutVertically { it / 3 },
+                ) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                RoundedCornerShape(16.dp),
+                            )
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                            )
+                            .clickable {
+                                timelineScope.launch { listState.animateScrollToItem(0) }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.KeyboardArrowDown,
+                            "回到底部",
+                            Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                        )
+                        Text(
+                            "回到底部",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 2.dp),
+                        )
+                    }
+                }
                 }
                 }
 
@@ -1155,6 +1215,9 @@ LaunchedEffect(Unit) {
                         onResume = { viewModel.resumeQueue() },
                         onRemove = { viewModel.removeFromQueue(it) },
                         onSendNow = { viewModel.sendQueuedNow(it) },
+                        onEdit = { i ->
+                            viewModel.takeQueuedForEdit(i)?.let { inputText = it }
+                        },
                         canSendNow = !isLoading,
                         modifier = Modifier
                             .fillMaxWidth()

@@ -112,6 +112,14 @@ object ToolPresentation {
 
     /** Right-aligned secondary hint when collapsed (e.g. output line count). */
     fun secondary(tc: ToolCall): String? {
+        // ZCode todo renderer：摘要行常显 done/total，折叠态可读进度。
+        if (ToolArgs.canonical(tc.name) == "todo") {
+            val items = todoItems(tc)
+            if (items != null) {
+                val done = items.count { it.status.equals("completed", ignoreCase = true) }
+                return "$done/${items.size}"
+            }
+        }
         if (tc.isRunning) return null
         val out = tc.output ?: return null
         val lines = out.lineSequence().count { it.isNotBlank() }
@@ -127,11 +135,15 @@ object ToolPresentation {
 
     /** Collapsible by default; some tools stay single-line (read/search). */
     fun isCollapsible(tc: ToolCall): Boolean = when (ToolArgs.canonical(tc.name)) {
-        "read", "list", "grep", "glob", "todoread", "ask" -> false
+        "read", "list", "grep", "glob", "todoread" -> false
+        // ZCode ask-question：等待时单行（交互在审批面板），完成后可展开回看问答。
+        "ask" -> !tc.isRunning
         else -> true
     }
 
     fun defaultExpanded(tc: ToolCall): Boolean {
+        // ask 等待中不展开（问答交互在审批面板）；完成/失败后保持折叠，点开回看。
+        if (ToolArgs.canonical(tc.name) == "ask") return false
         if (tc.isRunning || tc.isError) return true
         return isEditTool(tc.name) || ToolArgs.canonical(tc.name) == "todo"
     }
