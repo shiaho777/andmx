@@ -952,6 +952,16 @@ class ChatViewModel @Inject constructor(
                 handleWorkflowSlash(cmd.args)
                 return true
             }
+            is SlashResult.WorkflowPrompt -> {
+                viewModelScope.launch {
+                    if (cmd.args.isBlank()) {
+                        appendLocalAssistant("用法：`/workflow <要完成的任务>` —— 加载 `dynamic-workflows` 技能后用 CreateWorkflow 启动。")
+                    } else {
+                        sendMessage(controller.workflowPrompt(cmd.args))
+                    }
+                }
+                return true
+            }
             is SlashResult.Init -> {
                 viewModelScope.launch {
                     sendMessage(controller.initPrompt(cmd.args))

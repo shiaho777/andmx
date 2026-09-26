@@ -49,6 +49,8 @@ class PluginSystem(
         val mcpServers: List<String> = emptyList(),
         val userConfigKeys: List<String> = emptyList(),
         val enabled: Boolean = true,
+        /** 上游 bundled-skills 语义：产品功能配套技能随应用分发，没有启停开关，不可禁用/卸载。 */
+        val required: Boolean = false,
     )
 
     @Serializable
@@ -680,6 +682,8 @@ suspend fun uninstall(pluginName: String): Boolean = withContext(Dispatchers.IO)
     suspend fun setEnabled(pluginName: String, enabled: Boolean): Boolean = withContext(Dispatchers.IO) {
         val discovery = discover()
         val plugin = discovery.plugins.find { it.manifest.name == pluginName } ?: return@withContext false
+        // required 插件无启停开关：禁用会让依赖其技能的工具门（如 dynamic-workflows）永远无法通过。
+        if (!enabled && plugin.manifest.required) return@withContext false
         val flag = "${plugin.dir}/$DISABLED_FLAG"
         if (enabled) {
             runCatching { fs.deleteFile(flag) }

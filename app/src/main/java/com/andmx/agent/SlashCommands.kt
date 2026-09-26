@@ -17,6 +17,7 @@ sealed interface SlashResult {
     data class Resume(val sessionId: String) : SlashResult
     data object ContinueLatest : SlashResult
     data class Workflows(val args: String) : SlashResult
+    data class WorkflowPrompt(val args: String) : SlashResult
     data class Mcp(val args: String) : SlashResult
     data class Plugins(val args: String) : SlashResult
     data class ModelSwitch(val args: String) : SlashResult
@@ -64,7 +65,9 @@ object SlashCommands {
         Spec("/rewind", "回滚到某个检查点（对话+文件改动）", aliases = listOf("/rollback"), keywords = listOf("回滚", "回退")),
         Spec("/resume", "恢复历史会话", aliases = listOf("/sessions"), keywords = listOf("恢复", "历史")),
         Spec("/continue", "恢复最近的会话", keywords = listOf("继续", "continue")),
-        Spec("/workflows", "查看工作流定义与运行", aliases = listOf("/workflow", "/dwf"), keywords = listOf("工作流", "workflow", "dwf")),
+        // 上游 3.14.3：/workflow 是内置 prompt 命令（创作入口），保留字；/workflows 仍查看定义与运行。
+        Spec("/workflow", "设计并启动动态工作流", keywords = listOf("工作流", "workflow", "dwf")),
+        Spec("/workflows", "查看工作流定义与运行", aliases = listOf("/dwf"), keywords = listOf("工作流", "workflow", "dwf")),
         Spec("/expert", "启动或管理专家工作流", keywords = listOf("专家", "expert")),
         Spec("/mode", "查看或切换执行模式", keywords = listOf("模式", "mode")),
         Spec("/skill", "列出或手动调用技能", keywords = listOf("技能", "skill")),
@@ -140,7 +143,9 @@ object SlashCommands {
             "/resume", "/sessions" ->
                 SlashResult.Resume(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/continue" -> SlashResult.ContinueLatest
-            "/workflows", "/workflow", "/dwf" ->
+            "/workflow" ->
+                SlashResult.WorkflowPrompt(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/workflows", "/dwf" ->
                 SlashResult.Workflows(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/expert" -> SlashResult.Expert(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/mode" -> SlashResult.ExecModeSwitch(t.substringAfter(' ', missingDelimiterValue = "").trim())

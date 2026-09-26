@@ -1,0 +1,15 @@
+{
+  "name": "andmx-dynamic-workflows",
+  "version": "0.1.0",
+  "description": "dynamic-workflows 技能包：CreateWorkflow/AmendWorkflow/SaveWorkflow/EvalWorkflowSnippet 的 spec 契约与创作规则。随应用分发，不可禁用。",
+  "author": "AndMX",
+  "license": "Apache-2.0",
+  "skills": [
+    "skills/dynamic-workflows/SKILL.md"
+  ],
+  "commands": [],
+  "tools": [],
+  "hooks": [],
+  "enabled": true,
+  "required": true
+}

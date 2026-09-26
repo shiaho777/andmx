@@ -1727,6 +1727,12 @@ class ChatController(private val context: Context) {
             service = workflowService,
             conversationId = { conversationId },
             cwd = { "/" },
+            hasLoadedSkill = { skillName ->
+                com.andmx.agent.LoadedSkills.sessionHasLoadedSkill(
+                    sessions[conversationId]?.engine?.snapshotHistory().orEmpty(),
+                    skillName,
+                )
+            },
         ).all() + com.andmx.agent.JsReplTool(context, "conv-$conversationId")
     }
 
@@ -2574,6 +2580,9 @@ class ChatController(private val context: Context) {
 
     fun initPrompt(args: String): String =
         com.andmx.agent.InitPrompt.build(args, access.guestCwd())
+
+    fun workflowPrompt(args: String): String =
+        com.andmx.agent.WorkflowPrompt.expand(args)
 
     /**
      * 上游 title-generation-sidecar：首发消息触发一次旁路标题生成。

@@ -67,6 +67,16 @@ class SlashCommandsTest {
     }
 
     @Test
+    fun recognizesWorkflowCommands() {
+        // 上游 3.14.3：/workflow 是创作入口 prompt 命令，/workflows 与 /dwf 仍是查看入口。
+        val prompt = SlashCommands.parse("/workflow review this PR")
+        assertTrue(prompt is SlashResult.WorkflowPrompt)
+        assertEquals("review this PR", (prompt as SlashResult.WorkflowPrompt).args)
+        assertTrue(SlashCommands.parse("/workflows") is SlashResult.Workflows)
+        assertTrue(SlashCommands.parse("/dwf list") is SlashResult.Workflows)
+    }
+
+    @Test
     fun recognizesApprovalModes() {
         assertEquals(ApprovalMode.FULL, (SlashCommands.parse("/full") as SlashResult.Mode).mode)
         assertEquals(ApprovalMode.ASK, (SlashCommands.parse("/ask") as SlashResult.Mode).mode)
