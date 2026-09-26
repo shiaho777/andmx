@@ -1,5 +1,6 @@
 package com.andmx.agent.zcode
 
+import com.andmx.agent.LoadedSkills
 import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
@@ -28,10 +29,29 @@ class WorkflowTools(
     private val conversationId: suspend () -> Long,
     private val cwd: suspend () -> String,
     private val isAutomationTurn: suspend () -> Boolean = { false },
+    /**
+     * 上游 3.14.3 workflow-skill-gate 移植：「这个会话此刻加载着某技能吗」的探针，
+     * 由 provider 可见历史回答（compact 后自动回到未加载）。默认放行=调用方不参与门。
+     */
+    private val hasLoadedSkill: suspend (String) -> Boolean = { true },
 ) {
     private fun noService() = ToolResult(
         "workflow_unavailable: this session cannot run workflows", isError = true,
     )
+
+    /**
+     * 没读过 `dynamic-workflows` 技能就拒绝创作类调用。上游用 errorCode 428 区分
+     * 「参数错」与「先去读技能」；AndMX ToolResult 无错误码，用稳定前缀承担同一职责。
+     */
+    private suspend fun requireWorkflowSkill(toolName: String): ToolResult? {
+        if (hasLoadedSkill(LoadedSkills.DYNAMIC_WORKFLOWS)) return null
+        return ToolResult(
+            "workflow_skill_not_loaded: $toolName needs the `${LoadedSkills.DYNAMIC_WORKFLOWS}` skill loaded in this session before it accepts a spec. " +
+                "Call the Skill tool with skill \"${LoadedSkills.DYNAMIC_WORKFLOWS}\" first — it carries the spec schema, the authoring rules and this tool's full contract — " +
+                "then call $toolName again. Nothing was started.",
+            isError = true,
+        )
+    }
 
     private suspend fun parseSpec(args: JsonObject): Pair<WorkflowDefinition?, String?> {
         val specEl = args["spec"] ?: return null to "spec is required"
@@ -59,12 +79,8 @@ class WorkflowTools(
     inner class Create : Tool {
         override val name = "CreateWorkflow"
         override val description =
-            "Create and launch a durable multi-agent workflow run in this workspace. The workflow executes as an ordered phase pipeline where each phase is run by a child agent session; scheduled_graph phases execute a dependency DAG of task nodes with bounded concurrency, planner expansion and a final critic loop.\n\n" +
-                "- Provide exactly one source: `name` for a saved definition (use ListSavedWorkflows; the built-in `expert` workflow is always available), or `spec` for an inline definition.\n" +
-                "- `spec` is a JSON object: {definitionId, definitionVersion, kind, title, phaseOrder[], phases[{phase,title,description,behavior(agent|scheduled_graph|critic|complete),artifactPath?,seedGraphFromArtifact?,nodePromptsFromArtifact?}],strategy}. Keep the same field names as the schema.\n" +
-                "- `task` is the user's goal passed to every child agent — write it as a complete standalone instruction.\n" +
-                "- Runs execute in the background and survive restarts; inspect with GetWorkflowRun/ListWorkflowRuns and resume a paused run with ResumeWorkflowRun.\n" +
-                "- Do not create a workflow for trivial single-step work — use it for large multi-phase tasks that benefit from decomposition, parallel execution and review."
+            "Create and launch a durable multi-agent workflow run. Provide exactly one source: `name` (a saved definition; see ListSavedWorkflows) or `spec` (an inline WorkflowDefinition JSON). " +
+                "Writing a spec requires the `dynamic-workflows` skill — load it with the Skill tool first."
         override val risk = ToolRisk.EXECUTE
         override val parameters: JsonObject = buildJsonObject {
             put("type", "object")
@@ -81,6 +97,9 @@ class WorkflowTools(
             if (isAutomationTurn()) {
                 return ToolResult("$name is not allowed while running a scheduled automation.", isError = true)
             }
+            // 上游 createWorkflowNeedsSkill 例外：按名字跑 saved 定义不是写 spec，不需要技能。
+            // 门在入参解析位（先于 service 触碰），与上游 resolveInput 同序。
+            if (args["spec"] != null) requireWorkflowSkill(this.name)?.let { return it }
             val svc = service ?: return noService()
             val task = args["task"]?.jsonPrimitive?.contentOrNull.orEmpty()
             if (task.isBlank()) return ToolResult("task is required", isError = true)
@@ -113,7 +132,7 @@ class WorkflowTools(
     inner class Amend : Tool {
         override val name = "AmendWorkflow"
         override val description =
-            "Patch an existing saved workflow definition in place. Pass `name` plus only the fields to change (title, description, strategy, or a full replacement `spec`); the definition id is preserved. Running runs keep their snapshot — amendments affect future runs."
+            "Patch a saved workflow definition in place: `name` plus only the fields to change. Passing a replacement `spec` requires the `dynamic-workflows` skill."
         override val risk = ToolRisk.WRITE
         override val parameters: JsonObject = buildJsonObject {
             put("type", "object")
@@ -127,6 +146,8 @@ class WorkflowTools(
         }
 
         override suspend fun execute(args: JsonObject): ToolResult {
+            // 上游 amendWorkflowNeedsSkill 例外：不带 spec 的纯元数据修补不是写 spec。
+            if (args["spec"] != null) requireWorkflowSkill(this.name)?.let { return it }
             val svc = service ?: return noService()
             val name = args["name"]?.jsonPrimitive?.contentOrNull
                 ?: return ToolResult("name is required", isError = true)
@@ -151,7 +172,7 @@ class WorkflowTools(
     inner class Save : Tool {
         override val name = "SaveWorkflow"
         override val description =
-            "Save a workflow `spec` into the project workflow library so it can be launched later by `name` via CreateWorkflow. The spec must be a valid WorkflowDefinition JSON object."
+            "Save a workflow `spec` into the project workflow library, launchable later by `name` via CreateWorkflow. Requires the `dynamic-workflows` skill."
         override val risk = ToolRisk.WRITE
         override val parameters: JsonObject = buildJsonObject {
             put("type", "object")
@@ -162,6 +183,7 @@ class WorkflowTools(
         }
 
         override suspend fun execute(args: JsonObject): ToolResult {
+            requireWorkflowSkill(name)?.let { return it }
             val svc = service ?: return noService()
             val (def, err) = parseSpec(args)
             def ?: return ToolResult(err ?: "spec is required", isError = true)
@@ -348,7 +370,7 @@ class WorkflowTools(
     inner class EvalSpec : Tool {
         override val name = "EvalWorkflowSnippet"
         override val description =
-            "Validate a workflow `spec` without running it: schema check, phase-order consistency, and a dry-run report of the phase graph it would execute (nodes, edges, blocked roots). Use it while authoring before CreateWorkflow."
+            "Validate a workflow `spec` without running it and report the phase graph it would execute. Requires the `dynamic-workflows` skill."
         override val risk = ToolRisk.READ
         override val parameters: JsonObject = buildJsonObject {
             put("type", "object")
@@ -359,6 +381,7 @@ class WorkflowTools(
         }
 
         override suspend fun execute(args: JsonObject): ToolResult {
+            requireWorkflowSkill(name)?.let { return it }
             val (def, err) = parseSpec(args)
             def ?: return ToolResult(err ?: "spec is required", isError = true)
             val graph = com.andmx.agent.workflow.WorkflowPrompts.createPhaseGraph(def)

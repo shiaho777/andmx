@@ -89,7 +89,6 @@ app/src/test/                  单元测试
 native/probe.c                 exec/W^X 探测二进制
 vendor/proot/                  proot .deb（proot flavor 打包用）
 tools/mock_llm_server.py       离线测试用 mock LLM 服务
-docs/                          设计分析与周报
 ```
 
 ## 许可
