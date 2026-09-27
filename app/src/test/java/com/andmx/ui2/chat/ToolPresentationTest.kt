@@ -99,9 +99,26 @@ class ToolPresentationTest {
     @Test
     fun collapsibleDefaults() {
         assertFalse(ToolPresentation.isCollapsible(tc(name = "Read")))
-        assertFalse(ToolPresentation.isCollapsible(tc(name = "AskUserQuestion")))
+        // ZCode ask-question：等待中单行不展开，完成后可展开回看问答。
+        assertFalse(ToolPresentation.isCollapsible(tc(name = "AskUserQuestion", running = true)))
+        assertTrue(ToolPresentation.isCollapsible(tc(name = "AskUserQuestion")))
         assertTrue(ToolPresentation.isCollapsible(tc(name = "Bash")))
         assertTrue(ToolPresentation.isCollapsible(tc(name = "Write")))
+    }
+
+    @Test
+    fun secondaryShowsTodoProgress() {
+        val args = """{"todos":[{"content":"a","status":"completed"},{"content":"b","status":"pending"}]}"""
+        assertEquals("1/2", ToolPresentation.secondary(tc(name = "TodoWrite", args = args)))
+        assertEquals("1/2", ToolPresentation.secondary(tc(name = "TodoWrite", args = args, running = true)))
+        assertNull(ToolPresentation.secondary(tc(name = "TodoWrite", args = """{"todos":[]}""")))
+    }
+
+    @Test
+    fun askNeverAutoExpands() {
+        assertFalse(ToolPresentation.defaultExpanded(tc(name = "AskUserQuestion")))
+        assertFalse(ToolPresentation.defaultExpanded(tc(name = "AskUserQuestion", running = true)))
+        assertFalse(ToolPresentation.defaultExpanded(tc(name = "AskUserQuestion", error = true)))
     }
 
     @Test

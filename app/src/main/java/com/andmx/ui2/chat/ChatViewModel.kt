@@ -2113,6 +2113,14 @@ class ChatViewModel @Inject constructor(
         persistQueue()
     }
 
+    /** ZCode 队列面板编辑对齐：取出排队消息回填输入框。 */
+    fun takeQueuedForEdit(index: Int): String? {
+        val item = _queue.value.getOrNull(index) ?: return null
+        _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
+        persistQueue()
+        return item
+    }
+
     fun sendQueuedNow(index: Int) {
         val item = _queue.value.getOrNull(index) ?: return
         if (_isLoading.value) return

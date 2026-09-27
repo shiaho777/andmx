@@ -1,5 +1,6 @@
 package com.andmx.ui2.chat
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -12,6 +13,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -74,11 +78,14 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.text.style.TextAlign
 import com.andmx.agent.ToolArgs
@@ -212,14 +219,35 @@ fun ToolCallCard(
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                 )
-                Text(
-                    text = summary,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
-                )
+                if (toolCall.isRunning) {
+                    // ZCode QueuedSummaryContent：运行中摘要变化时滚动切换。
+                    AnimatedContent(
+                        targetState = summary,
+                        transitionSpec = {
+                            (slideInVertically { it / 2 } + fadeIn())
+                                .togetherWith(slideOutVertically { -it / 2 } + fadeOut())
+                        },
+                        label = "summaryRoll",
+                        modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
+                    ) { s ->
+                        Text(
+                            text = s,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else {
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
+                    )
+                }
             } else {
                 Spacer(Modifier.weight(1f))
             }
@@ -384,6 +412,10 @@ fun ToolCallCard(
                             MetaBlock(title = "错误", body = toolCall.output.take(4000), mono = true, emphasize = true)
                         }
                     }
+                } else if (canonicalName == "shell" || canonicalName == "git") {
+                    ExecuteToolCard(toolCall)
+                } else if (canonicalName == "ask") {
+                    AskQuestionsCard(toolCall)
                 } else if (canonicalName == "workflow" || canonicalName == "cron" ||
                     canonicalName == "webfetch" || canonicalName == "search"
                 ) {
@@ -580,6 +612,240 @@ private fun StructuredToolCard(
     }
 }
 
+/**
+ * shell/git 专属展开体（ZCode execute.tsx 对齐）：
+ * `$` + 命令行（mono）+ 输出视口（约 5 行高、流式吸底、上滚冻结、回底恢复）。
+ * 参数不再以 pretty JSON 形式展示。
+ */
+@Composable
+private fun ExecuteToolCard(toolCall: ToolCall) {
+    val command = remember(toolCall.id, toolCall.name, toolCall.args) {
+        ToolArgs.shellCommand(toolCall.name, toolCall.args)
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                RoundedCornerShape(10.dp),
+            )
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        if (command.isNotBlank()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Text(
+                    "$",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+                Text(
+                    command,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f),
+                    maxLines = 6,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            if (!toolCall.output.isNullOrBlank() || toolCall.isRunning) {
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+        when {
+            !toolCall.output.isNullOrBlank() -> FollowableOutputText(
+                text = stripAnsi(toolCall.output.orEmpty()).take(12000),
+                following = toolCall.isRunning,
+                emphasize = toolCall.isError,
+                maxHeight = 96.dp,
+                fadeColor = MaterialTheme.colorScheme.surface,
+            )
+            toolCall.isRunning -> Text(
+                "执行中…",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+            )
+            toolCall.isError -> Text(
+                "无输出",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/** ask（AskUserQuestion）完成态展开体：逐题列出问题与用户回答（ZCode ask-question 对齐）。 */
+@Composable
+private fun AskQuestionsCard(toolCall: ToolCall) {
+    val questions = remember(toolCall.id, toolCall.args) {
+        val obj = runCatching {
+            prettyJson.parseToJsonElement(toolCall.args)
+                as? kotlinx.serialization.json.JsonObject
+        }.getOrNull() ?: return@remember emptyList()
+        com.andmx.agent.zcode.AskUserQuestionParser.parse(obj)
+    }
+    val output = toolCall.output.orEmpty()
+    val answers = remember(toolCall.id, output) { parseAskAnswers(output) }
+    val autoSkipped = output.contains("did not provide")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                MaterialTheme.colorScheme.surfaceContainerHighest.copy(
+                    alpha = if (toolCall.isError) 0.55f else 0.38f,
+                ),
+            )
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        questions.forEach { q ->
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        q.header,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        q.question,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                val answer = answers[q.question]
+                Text(
+                    when {
+                        answer != null -> "→ $answer"
+                        autoSkipped -> "— 自动继续，未作答"
+                        else -> "— 未作答"
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = if (answer != null) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    },
+                )
+            }
+        }
+        if (questions.isEmpty() && output.isNotBlank()) {
+            MetaBlock(
+                title = "结果",
+                body = output.take(4000),
+                mono = true,
+                emphasize = toolCall.isError,
+            )
+        }
+        if (toolCall.isError && output.isBlank()) {
+            Text(
+                "无输出",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+private val ASK_ANSWER_RE = Regex("\"([^\"\n]+)\"=\"([^\"\n]*)\"")
+
+private fun parseAskAnswers(output: String): Map<String, String> =
+    ASK_ANSWER_RE.findAll(output)
+        .associate { it.groupValues[1] to it.groupValues[2] }
+
+private const val FOLLOW_BOTTOM_TOLERANCE_PX = 24
+
+/**
+ * 可跟随输出视口（ZCode ExecuteOutput 对齐）：流式期间吸底跟随；
+ * 用户上滚即冻结当前文本快照，回到底部恢复跟随；结束/非流式时总是解冻。
+ * 顶部渐隐遮罩提示上方还有内容。
+ */
+@Composable
+private fun FollowableOutputText(
+    text: String,
+    following: Boolean,
+    modifier: Modifier = Modifier,
+    mono: Boolean = true,
+    emphasize: Boolean = false,
+    maxHeight: Dp = 260.dp,
+    fadeColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+) {
+    val scroll = rememberScrollState()
+    var frozen by remember { mutableStateOf<String?>(null) }
+    val latestText by rememberUpdatedState(text)
+    val display = frozen ?: text
+    var prevScroll by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(display, following, frozen == null) {
+        if (following && frozen == null && display.isNotEmpty()) {
+            scroll.scrollTo(scroll.maxValue)
+            prevScroll = scroll.value
+        }
+    }
+    LaunchedEffect(following) {
+        if (!following) {
+            frozen = null
+            return@LaunchedEffect
+        }
+        prevScroll = scroll.value
+        // 程序吸底只会增大 scroll.value；值减小即用户在上滚。
+        snapshotFlow { scroll.value to scroll.maxValue }.collect { (v, max) ->
+            val atBottom = max - v <= FOLLOW_BOTTOM_TOLERANCE_PX
+            if (frozen == null) {
+                if (v < prevScroll && !atBottom) frozen = latestText
+            } else if (atBottom) {
+                frozen = null
+            }
+            prevScroll = v
+        }
+    }
+    Box(modifier.fillMaxWidth()) {
+        Text(
+            text = display,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            ),
+            color = if (emphasize) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight)
+                .verticalScroll(scroll),
+        )
+        if (scroll.value > 8) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(14.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(fadeColor.copy(alpha = 0.92f), Color.Transparent),
+                        ),
+                    ),
+            )
+        }
+    }
+}
+
 private val SOURCE_URL_RE = Regex("""https?://[^\s"'()\[\]<>]+""")
 
 private fun extractSourceUrls(output: String): List<String> =
@@ -709,11 +975,6 @@ private fun MetaBlock(
     stickToBottom: Boolean = false,
 ) {
     val scroll = rememberScrollState()
-    LaunchedEffect(body, stickToBottom) {
-        if (stickToBottom && body.isNotEmpty()) {
-            scroll.animateScrollTo(scroll.maxValue)
-        }
-    }
     Column(Modifier.fillMaxWidth()) {
         Text(
             title,
@@ -725,23 +986,33 @@ private fun MetaBlock(
             },
         )
         Spacer(Modifier.height(4.dp))
-        Text(
-            body,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
-            ),
-            color = if (emphasize) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 260.dp)
-                .verticalScroll(scroll),
-        )
+        if (stickToBottom) {
+            FollowableOutputText(
+                text = body,
+                following = true,
+                mono = mono,
+                emphasize = emphasize,
+                maxHeight = 260.dp,
+            )
+        } else {
+            Text(
+                body,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                ),
+                color = if (emphasize) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 260.dp)
+                    .verticalScroll(scroll),
+            )
+        }
     }
 }
 
@@ -1241,37 +1512,96 @@ private fun CompactToolProcessRow(tool: ToolCall) {
     val family = ToolPresentation.family(tool.name)
     val summary = ToolPresentation.summary(tool)
     val label = ToolPresentation.kindLabel(tool)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp, horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            family.icon,
-            null,
-            Modifier.size(13.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-            color = when {
-                tool.isError -> MaterialTheme.colorScheme.error
-                tool.isRunning -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
-            },
-        )
-        if (summary.isNotBlank()) {
-            Text(
-                text = " · $summary",
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                modifier = Modifier.weight(1f),
+    // ZCode 分组的子项是完整 ToolCallBlock；这里保持单行但允许点开看输出。
+    val expandable = !tool.output.isNullOrBlank()
+    var open by remember(tool.id) { mutableStateOf(false) }
+    val motion = LocalMotion.current
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (open) 90f else 0f,
+        animationSpec = motion.defaultEffects,
+        label = "groupChildChevron",
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(enabled = expandable) { open = !open }
+                .padding(vertical = 3.dp, horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                family.icon,
+                null,
+                Modifier.size(13.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                color = when {
+                    tool.isError -> MaterialTheme.colorScheme.error
+                    tool.isRunning -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                },
+            )
+            if (summary.isNotBlank()) {
+                Text(
+                    text = " · $summary",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (expandable) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                    null,
+                    Modifier
+                        .padding(start = 2.dp)
+                        .size(13.dp)
+                        .rotate(chevronRotation)
+                        .alpha(if (open) 0.85f else 0.4f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = open,
+            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
+            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 21.dp, top = 1.dp, bottom = 3.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.3f),
+                    )
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = stripAnsi(tool.output.orEmpty()).take(3000),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    ),
+                    color = if (tool.isError) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 160.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
         }
     }
 }

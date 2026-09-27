@@ -1265,5 +1265,5 @@ data class MentionSuggestion(
 )
 
 /** ZCode 对齐占位符。 */
-private const val DEFAULT_PLACEHOLDER =
+internal const val DEFAULT_PLACEHOLDER =
     "向 AndMX 提问，@ 提及文件，/ 使用命令或子智能体，\$ 使用技能，# 关联对话"

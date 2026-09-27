@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
@@ -32,6 +33,7 @@ fun QueueStrip(
     onResume: () -> Unit,
     onRemove: (Int) -> Unit,
     onSendNow: (Int) -> Unit,
+    onEdit: (Int) -> Unit = {},
     canSendNow: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -101,6 +103,7 @@ fun QueueStrip(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                IconChip(Icons.Outlined.Edit, "编辑") { onEdit(i) }
                 if (canSendNow) {
                     IconChip(Icons.AutoMirrored.Filled.Send, "立即发送") { onSendNow(i) }
                 }
