@@ -7,30 +7,29 @@ import com.andmx.llm.ApiToolCall
 
 internal object ChatControllerLogic {
     const val MAX_SKILL_BYTES = 100_000
+    const val WORKFLOW_SKILL_MAX_BYTES = 200_000
+    const val DYNAMIC_WORKFLOW_SKILL_NAME = "dynamic-workflows"
 
     fun formatSkillPayload(
         name: String,
         path: String,
         body: String,
-        scripts: List<String>,
-        args: String?,
     ): String {
+        val maxBytes = if (name == DYNAMIC_WORKFLOW_SKILL_NAME) WORKFLOW_SKILL_MAX_BYTES else MAX_SKILL_BYTES
         val base = skillBaseDirectory(path)
         val expanded = body.replace(SKILL_DIR_VAR, base)
-        val (content, truncated) = truncateUtf8(expanded, MAX_SKILL_BYTES)
-        return buildString {
-            appendLine("""<skill_content name="$name">""")
-            appendLine("# Skill: $name")
-            appendLine()
-            if (content.isNotEmpty()) appendLine(content)
-            if (!args.isNullOrBlank()) appendLine(args)
-            appendLine()
-            appendLine("Base directory for this skill: $base")
-            appendLine("Relative paths in this skill are relative to this base directory.")
-            if (scripts.isNotEmpty()) appendLine("Bundled files: ${scripts.joinToString()}")
-            if (truncated) appendLine("[Skill content truncated]")
-            append("</skill_content>")
-        }
+        val (content, truncated) = truncateUtf8(expanded, maxBytes)
+        return listOf(
+            """<skill_content name="$name">""",
+            "# Skill: $name",
+            "",
+            content,
+            "",
+            "Base directory for this skill: $base",
+            "Relative paths in this skill are relative to this base directory.",
+            if (truncated) "[Skill content truncated]" else "",
+            "</skill_content>",
+        ).filter { it.isNotEmpty() }.joinToString("\n")
     }
 
     private val SKILL_DIR_VAR = Regex("\\$\\{(CLAUDE_SKILL_DIR|ZCODE_SKILL_DIR)\\}")

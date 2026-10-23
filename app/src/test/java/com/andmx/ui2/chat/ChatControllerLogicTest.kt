@@ -110,35 +110,59 @@ class ChatControllerLogicTest {
             name = "my-skill",
             path = "/skills/my-skill/SKILL.md",
             body = "Do the thing.",
-            scripts = listOf("helper.py"),
-            args = "extra",
         )
-        listOf(
-            "<command-name>my-skill</command-name>",
-            "<command-args>extra</command-args>",
-            "# Skill: my-skill",
-            "Path: /skills/my-skill/SKILL.md",
-            "Bundled files: helper.py",
-            "Do the thing.",
-        ).forEach { expected -> assertTrue(expected, payload.contains(expected)) }
+        assertEquals(
+            listOf(
+                "<skill_content name=\"my-skill\">",
+                "# Skill: my-skill",
+                "Do the thing.",
+                "Base directory for this skill: /skills/my-skill",
+                "Relative paths in this skill are relative to this base directory.",
+                "</skill_content>",
+            ).joinToString("\n"),
+            payload,
+        )
+        assertFalse(payload.contains("Bundled files"))
+        assertFalse(payload.contains("\n\n"))
     }
 
     @Test
-    fun skillPayloadOmitsAbsentOptionalsAndFallsBackForEmptyBody() {
-        val payload = ChatControllerLogic.formatSkillPayload("s", "/p", "", emptyList(), null)
-        assertTrue(!payload.contains("<command-args>"))
-        assertTrue(!payload.contains("Bundled files"))
-        assertTrue(payload.contains("(skill at /p; empty body)"))
+    fun skillPayloadOmitsEmptyBody() {
+        val payload = ChatControllerLogic.formatSkillPayload("s", "/p/SKILL.md", "")
+        assertEquals(
+            listOf(
+                "<skill_content name=\"s\">",
+                "# Skill: s",
+                "Base directory for this skill: /p",
+                "Relative paths in this skill are relative to this base directory.",
+                "</skill_content>",
+            ).joinToString("\n"),
+            payload,
+        )
     }
 
     @Test
-    fun skillPayloadIsCappedAt14kChars() {
-        val payload = ChatControllerLogic.formatSkillPayload("s", "/p", "x".repeat(50_000), emptyList(), null)
-        assertTrue(payload.length <= ChatControllerLogic.SKILL_PAYLOAD_LIMIT + 80)
-        assertTrue(payload.endsWith("]"))
-        assertTrue(payload.contains("truncated"))
-        val small = ChatControllerLogic.formatSkillPayload("s", "/p", "short", emptyList(), null)
+    fun skillPayloadExpandsSkillDirAndCapsBytes() {
+        val payload = ChatControllerLogic.formatSkillPayload(
+            "s",
+            "/skills/s/SKILL.md",
+            "see \${ZCODE_SKILL_DIR}/" + "x".repeat(200_000),
+        )
+        assertTrue(payload.contains("see /skills/s/"))
+        assertTrue(payload.contains("[Skill content truncated]"))
+        assertTrue(payload.contains("</skill_content>"))
+        val small = ChatControllerLogic.formatSkillPayload("s", "/p/SKILL.md", "short")
         assertFalse(small.contains("truncated"))
+        val workflow = "y".repeat(150_000)
+        val wide = ChatControllerLogic.formatSkillPayload(
+            ChatControllerLogic.DYNAMIC_WORKFLOW_SKILL_NAME,
+            "/skills/dynamic-workflows/SKILL.md",
+            workflow,
+        )
+        assertFalse(wide.contains("[Skill content truncated]"))
+        assertTrue(wide.contains(workflow))
+        val narrow = ChatControllerLogic.formatSkillPayload("s", "/p/SKILL.md", workflow)
+        assertTrue(narrow.contains("[Skill content truncated]"))
     }
 
     @Test

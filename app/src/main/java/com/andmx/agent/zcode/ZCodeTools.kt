@@ -623,14 +623,25 @@ class ReadSessionContextTool(
         if (args["attachment"] != null && strategy != "topic") {
             return ToolResult("Attachments require topic strategy", isError = true)
         }
-        if (args["attachment"] != null) {
-            val failed = SessionContextRead(
-                status = "failed",
-                source = "none",
-                content = "Topic attachment retrieval is unavailable on this runtime",
-                error = "Topic attachment retrieval is unavailable on this runtime",
+        if (strategy == "topic") {
+            if (sessionId != "current") {
+                return ToolResult("Topic history can only be read from the current session", isError = true)
+            }
+            if (args["attachment"] != null) {
+                val failed = SessionContextRead(
+                    status = "failed",
+                    source = "none",
+                    content = "Topic attachment retrieval is unavailable on this runtime",
+                    error = "Topic attachment retrieval is unavailable on this runtime",
+                )
+                return ToolResult(formatReadSessionContextModelContent(failed, sessionId), isError = true)
+            }
+            val missing = SessionContextRead(
+                status = "not_found",
+                source = "local",
+                content = TOPIC_ARCHIVE_EMPTY_CONTENT,
             )
-            return ToolResult(formatReadSessionContextModelContent(failed, sessionId), isError = true)
+            return ToolResult(formatReadSessionContextModelContent(missing, sessionId))
         }
         val maxTokens = args.int("maxTokens") ?: READ_SESSION_CONTEXT_DEFAULT_MAX_TOKENS
         if (maxTokens !in 1..READ_SESSION_CONTEXT_MAX_TOKENS) {
@@ -690,8 +701,11 @@ class SkillTool(
         val skill = raw?.trim().orEmpty().removePrefix("/")
         if (skill.isEmpty()) return ToolResult(SKILL_MISSING_NAME_ERROR, isError = true)
         val skillArgs = args.str("args")
-        val out = runCatching { invoke(skill, skillArgs) }
-            .getOrElse { "Skill failed: ${it.message}" }
+        val out = runCatching { invoke(skill, skillArgs) }.getOrElse { error ->
+            val message = error.message?.takeIf { it.isNotBlank() } ?: "Skill failed"
+            return ToolResult(message, isError = true)
+        }
+        if (out.startsWith("Skill not found:")) return ToolResult(out, isError = true)
         return ToolResult(out)
     }
 }
@@ -714,7 +728,9 @@ fun buildZCodeToolSurface(
     readSession: suspend (String, String, String, Int) -> SessionContextRead = { id, _, _, _ ->
         SessionContextRead(status = "not_found", content = "No persisted session was found for $id.")
     },
-    invokeSkill: suspend (String, String?) -> String = { name, _ -> "技能未安装: $name" },
+    invokeSkill: suspend (String, String?) -> String = { name, _ ->
+        throw IllegalStateException("Skill not found: $name")
+    },
     requestEnterPlanApproval: (suspend (String) -> Boolean)? = null,
     requestExitPlanApproval: suspend (String) -> Boolean = { true },
     allowedPromptsSink: ((List<com.andmx.agent.AllowedPrompts.Entry>) -> Unit)? = null,

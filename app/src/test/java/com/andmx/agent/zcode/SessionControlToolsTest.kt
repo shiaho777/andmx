@@ -170,6 +170,68 @@ class SessionControlToolsTest {
         assertEquals("skill", tool.permissionName)
     }
 
+    @Test
+    fun skillNotFoundAndPayloadMatchUpstream() = runTest {
+        val missing = SkillTool { name, _ ->
+            throw IllegalStateException("Skill not found: $name")
+        }.execute(buildJsonObject { put("skill", "missing-skill") })
+        assertTrue(missing.isError)
+        assertEquals("Skill not found: missing-skill", missing.output)
+        val payload = com.andmx.ui2.chat.ChatControllerLogic.formatSkillPayload(
+            "demo",
+            "/skills/demo/SKILL.md",
+            "Body line.",
+        )
+        assertEquals(
+            listOf(
+                "<skill_content name=\"demo\">",
+                "# Skill: demo",
+                "Body line.",
+                "Base directory for this skill: /skills/demo",
+                "Relative paths in this skill are relative to this base directory.",
+                "</skill_content>",
+            ).joinToString("\n"),
+            payload,
+        )
+        assertFalse(payload.contains("Bundled files"))
+        assertFalse(payload.contains("\n\n"))
+        val wide = "y".repeat(150_000)
+        val workflow = com.andmx.ui2.chat.ChatControllerLogic.formatSkillPayload(
+            "dynamic-workflows",
+            "/skills/dynamic-workflows/SKILL.md",
+            wide,
+        )
+        assertFalse(workflow.contains("[Skill content truncated]"))
+        val narrow = com.andmx.ui2.chat.ChatControllerLogic.formatSkillPayload(
+            "demo",
+            "/skills/demo/SKILL.md",
+            wide,
+        )
+        assertTrue(narrow.contains("[Skill content truncated]"))
+    }
+
+    @Test
+    fun topicStrategyDoesNotReportArchivedSuccess() = runTest {
+        val tool = ReadSessionContextTool { _, _, _, _ ->
+            error("topic must not read the keyword dump")
+        }
+        val topic = tool.execute(buildJsonObject {
+            put("query", "hello")
+            put("strategy", "topic")
+        })
+        assertFalse(topic.isError)
+        assertEquals("Session current was not found.", topic.output)
+        assertFalse(topic.output.contains("returned"))
+        assertFalse(topic.output.contains("keyword"))
+        val other = tool.execute(buildJsonObject {
+            put("query", "hello")
+            put("strategy", "topic")
+            put("sessionId", "sess_other")
+        })
+        assertTrue(other.isError)
+        assertEquals("Topic history can only be read from the current session", other.output)
+    }
+
     private fun props(tool: Tool): JsonObject = tool.parameters["properties"]!!.jsonObject
 
     private fun required(tool: Tool): List<String> = required(tool.parameters)

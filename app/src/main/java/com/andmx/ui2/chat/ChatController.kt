@@ -1800,8 +1800,8 @@ class ChatController private constructor(private val context: Context) {
             readSession = { sessionId, query, strategy, maxTokens ->
                 readSessionContext(conversationId, sessionId, query, strategy, maxTokens)
             },
-            invokeSkill = { skill, args ->
-                invokeSkillTool(skill, args)
+            invokeSkill = { skill, _ ->
+                invokeSkillTool(skill)
             },
             requestEnterPlanApproval = enter@{ reason ->
                 val session = sessions[conversationId] ?: return@enter false
@@ -1918,6 +1918,15 @@ class ChatController private constructor(private val context: Context) {
                 error = "Topic history can only be read from the current session",
             )
         }
+        if (strategy == "topic") {
+            val id = if (sessionId == "current") conversationId.toString() else sessionId
+            return com.andmx.agent.zcode.SessionContextRead(
+                status = "not_found",
+                source = "local",
+                sessionId = id,
+                content = com.andmx.agent.zcode.TOPIC_ARCHIVE_EMPTY_CONTENT,
+            )
+        }
         val lookupId = if (sessionId == "current") conversationId.toString() else sessionId
         val rawId = lookupId.removePrefix("sess_").removePrefix("#")
         val convId = when {
@@ -1960,7 +1969,7 @@ class ChatController private constructor(private val context: Context) {
         return conv.sessionId.isNotBlank() && (conv.sessionId == sessionId || conv.sessionId == sessionId.removePrefix("sess_"))
     }
 
-    private suspend fun invokeSkillTool(skill: String, args: String?): String {
+    private suspend fun invokeSkillTool(skill: String): String {
         val rawName = skill.trim().removePrefix("/")
         val installed = runCatching { com.andmx.agent.plugins.SkillInstaller(guestFs).listInstalled() }.getOrDefault(emptyList())
         val match = installed.firstOrNull {
@@ -1968,16 +1977,10 @@ class ChatController private constructor(private val context: Context) {
                 || it.name.equals(rawName.substringAfterLast(':'), true)
         }
         if (match != null) {
-            val skillPath = match.path
             val body = if (match.hasSkillMd) {
-                runCatching { access.readText("$skillPath/SKILL.md") }.getOrDefault("")
+                runCatching { access.readText("${match.path}/SKILL.md") }.getOrDefault("")
             } else ""
-            val scripts = runCatching {
-                access.list(skillPath).filter {
-                    it.endsWith(".sh") || it.endsWith(".py") || it.endsWith(".js")
-                }.take(12)
-            }.getOrDefault(emptyList())
-            return formatSkillPayload(match.name, skillPath, body, scripts, args)
+            return formatSkillPayload(match.name, match.path, body)
         }
         val pluginSkills = runCatching { pluginSystem.listInvocableSkills() }.getOrDefault(emptyList())
         val pluginHit = pluginSkills.firstOrNull { (id, path) ->
@@ -1989,25 +1992,16 @@ class ChatController private constructor(private val context: Context) {
         if (pluginHit != null) {
             val (id, path) = pluginHit
             val body = runCatching { access.readText(path) }.getOrDefault("")
-            val dir = path.substringBeforeLast('/')
-            val scripts = runCatching {
-                access.list(dir).filter {
-                    it.endsWith(".sh") || it.endsWith(".py") || it.endsWith(".js")
-                }.take(12)
-            }.getOrDefault(emptyList())
-            return formatSkillPayload(id, path, body, scripts, args)
+            return formatSkillPayload(id, path, body)
         }
-        val names = (installed.map { it.name } + pluginSkills.map { it.first }).joinToString()
-        return "技能未找到: $rawName。可用: ${names.ifBlank { "(无)" }}。Only invoke skills listed as available."
+        throw IllegalStateException("Skill not found: $rawName")
     }
 
     private fun formatSkillPayload(
         name: String,
         path: String,
         body: String,
-        scripts: List<String>,
-        args: String?,
-    ): String = ChatControllerLogic.formatSkillPayload(name, path, body, scripts, args)
+    ): String = ChatControllerLogic.formatSkillPayload(name, path, body)
 
 
     private suspend fun rebuildHistory(conversationId: Long): List<ApiMessage> =

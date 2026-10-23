@@ -21,7 +21,7 @@ class LoadedSkillsTest {
     )
 
     private val loadedPayload =
-        "<command-name>dynamic-workflows</command-name>\n<command-message>Skill loaded into context. Follow the instructions below.</command-message>\n\n# Skill: dynamic-workflows"
+        "<skill_content name=\"dynamic-workflows\">\n# Skill: dynamic-workflows"
 
     @Test
     fun emptyHistoryIsNotLoaded() {
@@ -50,7 +50,7 @@ class LoadedSkillsTest {
     fun failedResultDoesNotCount() {
         val history = listOf(
             skillCall("c1", """{"skill":"dynamic-workflows"}"""),
-            toolResult("c1", "技能未找到: dynamic-workflows。可用: foo"),
+            toolResult("c1", "Skill not found: dynamic-workflows"),
         )
         assertFalse(LoadedSkills.sessionHasLoadedSkill(history, LoadedSkills.DYNAMIC_WORKFLOWS))
     }

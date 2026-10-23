@@ -4,7 +4,6 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
 import com.andmx.llm.provider.ProviderDefinition
-import com.andmx.agent.multi.SubagentModelCatalog
 import kotlinx.serialization.json.JsonObject
 
 class ListModelsTool(
@@ -42,7 +41,7 @@ class ListModelsTool(
         }
         val lines = rows.map { (p, modelId) ->
             val def = p.models[modelId]
-            val id = SubagentModelCatalog.encode(p.id, modelId)
+            val id = "${p.id}/$modelId"
             buildString {
                 append(id)
                 val label = p.name.trim().ifBlank { null }

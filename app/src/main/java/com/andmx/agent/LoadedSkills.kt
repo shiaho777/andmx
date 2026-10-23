@@ -15,7 +15,7 @@ object LoadedSkills {
     const val DYNAMIC_WORKFLOWS = "dynamic-workflows"
     const val SKILL_TOOL_NAME = "Skill"
 
-    /** formatSkillPayload 成功载荷的稳定标记；失败回话（"技能未找到"/"Skill failed"）不含它。 */
+    /** formatSkillPayload 成功载荷的稳定标记；失败回话（"Skill not found:"/"Skill failed"）不含它。 */
     private const val SKILL_LOADED_MARKER = "<skill_content name=\""
 
     private val argsJson = Json { ignoreUnknownKeys = true }

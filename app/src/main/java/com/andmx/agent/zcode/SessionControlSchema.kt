@@ -19,6 +19,9 @@ internal const val NOT_IN_PLAN_MODE_ERROR =
         "If your plan was already approved, continue with implementation."
 
 internal const val PLAN_MODE_MAX_PLAN_CHARS = 20_000
+internal const val TOPIC_ARCHIVE_EMPTY_CONTENT =
+    """{"coverage":"Previously archived messages only; unread history is not available.","records":[]}"""
+
 internal const val READ_SESSION_CONTEXT_DEFAULT_MAX_TOKENS = 6_000
 internal const val READ_SESSION_CONTEXT_MAX_TOKENS = 12_000
 
