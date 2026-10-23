@@ -6,50 +6,59 @@ import com.andmx.llm.provider.ReasoningConfig
 import com.andmx.llm.provider.ReasoningStyle
 
 /**
- * ZCode 对齐的执行模式。
  * 持久化到 [com.andmx.settings.ProviderSettings.approvalMode]。
- *
- * 与引擎 [com.andmx.agent.ApprovalMode] 的映射见 [toEngineApproval]。
+ * 六个值与 ZCode CollaborationMode 相同。
  */
 enum class ExecMode(
     val id: String,
-    val label: String,
-    val description: String,
+    val collaboration: com.andmx.agent.permission.CollaborationMode,
+    private val labelText: String,
+    private val descriptionText: String,
 ) {
-    CONFIRM(
-        id = "confirm",
-        label = "改前确认",
-        description = "每次改文件或跑命令前都请求确认",
+    BUILD(
+        id = "build",
+        collaboration = com.andmx.agent.permission.CollaborationMode.BUILD,
+        labelText = "构建",
+        descriptionText = "只读直接执行，改文件和跑命令前要确认",
     ),
-    AUTO_EDIT(
-        id = "auto_edit",
-        label = "自动编辑",
-        description = "文件编辑自动应用，命令仍需确认",
+    EDIT(
+        id = "edit",
+        collaboration = com.andmx.agent.permission.CollaborationMode.EDIT,
+        labelText = "编辑",
+        descriptionText = "工作区文件编辑直接应用，其它副作用仍要确认",
     ),
     PLAN(
         id = "plan",
-        label = "计划模式",
-        description = "先出计划，确认后再动手",
+        collaboration = com.andmx.agent.permission.CollaborationMode.PLAN,
+        labelText = "计划",
+        descriptionText = "只做只读探索，不改文件、不跑有副作用的命令",
     ),
-    FULL(
-        id = "full",
-        label = "完全访问",
-        description = "减少打断，让 Agent 更连续推进",
+    YOLO(
+        id = "yolo",
+        collaboration = com.andmx.agent.permission.CollaborationMode.YOLO,
+        labelText = "Yolo",
+        descriptionText = "跳过权限确认，直接执行",
+    ),
+    GUARDED(
+        id = "guarded",
+        collaboration = com.andmx.agent.permission.CollaborationMode.GUARDED,
+        labelText = "Guarded",
+        descriptionText = "默认直接执行，危险命令仍要单独确认一次",
+    ),
+    AUTO(
+        id = "auto",
+        collaboration = com.andmx.agent.permission.CollaborationMode.AUTO,
+        labelText = "自动",
+        descriptionText = "保留模式，尚未实现，工具调用会被拒绝",
     );
 
+    val label: String get() = com.andmx.ui2.settings.tr(labelText)
+    val description: String get() = com.andmx.ui2.settings.tr(descriptionText)
+
     companion object {
-        /** ZCode 对齐：4 档。旧值/未知值统一回落到 CONFIRM（改前确认）。 */
         fun from(stored: String): ExecMode {
-            val s = stored.lowercase().trim()
-            return entries.firstOrNull { it.id == s }
-                ?: when (s) {
-                    "auto", "auto_edit" -> AUTO_EDIT
-                    "plan" -> PLAN
-                    "yolo", "full", "full_access" -> FULL
-                    "readonly", "read_only" -> CONFIRM
-                    // default / ask / 空 / 未知 → 改前确认（ZCode 无"默认模式"）
-                    else -> CONFIRM
-                }
+            val mode = com.andmx.agent.permission.CollaborationMode.fromWire(stored)
+            return entries.first { it.collaboration == mode }
         }
     }
 }
@@ -127,6 +136,10 @@ data class ThoughtOption(
     val label: String,
 )
 
+private val THOUGHT_OFF = setOf("off", "disabled", "none")
+
+fun isThoughtOff(value: String): Boolean = value.trim().lowercase() in THOUGHT_OFF
+
 /** 根据当前模型的 [ReasoningConfig] 生成可选思考级别；NONE 时返回空。 */
 fun thoughtOptionsFor(reasoning: ReasoningConfig?): List<ThoughtOption> {
     if (reasoning == null || reasoning.style == ReasoningStyle.NONE) return emptyList()
@@ -136,43 +149,47 @@ fun thoughtOptionsFor(reasoning: ReasoningConfig?): List<ThoughtOption> {
             val levels = reasoning.effortLevels.ifEmpty {
                 listOf("low", "medium", "high")
             }
+            val offWire = levels.firstOrNull { isThoughtOff(it) } ?: "off"
             buildList {
-                add(ThoughtOption("off", "不思考"))
+                add(ThoughtOption(offWire, effortLabel("off")))
                 levels.forEach { lv ->
+                    if (isThoughtOff(lv)) return@forEach
                     add(ThoughtOption(lv, effortLabel(lv)))
                 }
-            }
+            }.distinctBy { it.wireValue.lowercase() }
         }
-        // ZCode 对齐：不思考 / 高 / 最高
         ReasoningStyle.THINKING -> listOf(
-            ThoughtOption("off", "不思考"),
-            ThoughtOption("high", "高"),
-            ThoughtOption("max", "最高"),
+            ThoughtOption("off", effortLabel("off")),
+            ThoughtOption("high", effortLabel("high")),
+            ThoughtOption("max", effortLabel("max")),
         )
     }
 }
 
-internal fun effortLabel(level: String): String = when (level.lowercase()) {
-    "off" -> "不思考"
+internal fun effortLabel(level: String): String = com.andmx.ui2.settings.tr(when (level.lowercase()) {
+    "off", "disabled", "none" -> "关闭"
+    "enabled", "on" -> "开启"
     "minimal", "min" -> "最低"
     "low" -> "低"
     "medium", "med" -> "中"
     "high" -> "高"
     "max", "xhigh", "extra_high" -> "最高"
     else -> level.replaceFirstChar { it.uppercase() }
-}
+})
 
 fun thoughtLabel(effort: String, options: List<ThoughtOption>): String =
     options.firstOrNull { it.wireValue.equals(effort, ignoreCase = true) }?.label
-        ?: when (effort.lowercase()) {
-            "", "off" -> "不思考"
+        ?: options.firstOrNull { isThoughtOff(it.wireValue) && isThoughtOff(effort) }?.label
+        ?: com.andmx.ui2.settings.tr(when (effort.lowercase()) {
+            "", "off", "disabled", "none" -> "关闭"
+            "enabled", "on" -> "开启"
             "minimal", "min" -> "最低"
             "low" -> "低"
             "medium", "med" -> "中"
             "high" -> "高"
             "max", "xhigh", "extra_high" -> "最高"
             else -> effort.replaceFirstChar { it.uppercase() }
-        }
+        })
 
 /**
  * ZCode 默认「最高」：模型支持推理时，首次默认选最高可用档。
@@ -182,7 +199,7 @@ fun defaultEffortFor(reasoning: ReasoningConfig?): String {
     if (reasoning == null || reasoning.style == ReasoningStyle.NONE) return "off"
     val options = thoughtOptionsFor(reasoning)
     // 优先选 "max"，其次 "high"，再次最后一个非 off 选项；都找不到才 off。
-    return options.lastOrNull { it.wireValue != "off" }?.wireValue
+    return options.lastOrNull { !isThoughtOff(it.wireValue) }?.wireValue
         ?: options.firstOrNull()?.wireValue
         ?: "off"
 }
