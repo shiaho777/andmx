@@ -4,6 +4,7 @@ import com.andmx.ui2.settings.tr
 
 import com.andmx.agent.SlashCommands
 import com.andmx.agent.SlashResult
+import com.andmx.agent.WorkflowPrompt
 import com.andmx.agent.ApprovalMode
 
 import android.content.Context
@@ -989,7 +990,7 @@ class ChatViewModel @Inject constructor(
             is SlashResult.WorkflowPrompt -> {
                 viewModelScope.launch {
                     if (cmd.args.isBlank()) {
-                        appendLocalAssistant("用法：`/workflow <要完成的任务>` —— 加载 `dynamic-workflows` 技能后用 CreateWorkflow 启动。")
+                        appendLocalAssistant(WorkflowPrompt.blankArgsNotice())
                     } else {
                         sendMessage(controller.workflowPrompt(cmd.args))
                     }

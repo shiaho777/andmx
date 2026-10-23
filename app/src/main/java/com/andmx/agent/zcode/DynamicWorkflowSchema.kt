@@ -235,7 +235,7 @@ val ESCALATE_DESCRIPTION = listOf(
 
 fun workflowSkillRefusal(toolName: String): String =
     "$toolName needs the `$SKILL` skill loaded in this session before it accepts a script. " +
-        "Call the Skill tool with skill \"$SKILL\" first — it carries the facade declarations the script is checked against, the authoring rules and this tool's full contract — " +
+        "Call the Skill tool with skill \"$SKILL\" first — it carries the arguments this tool accepts and states that nothing is typechecked or started — " +
         "then call $toolName again. Nothing was started."
 
 fun applyDynamicWorkflowGate(
