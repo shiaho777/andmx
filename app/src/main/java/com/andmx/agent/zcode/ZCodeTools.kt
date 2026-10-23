@@ -58,7 +58,20 @@ private class GhRateLimitHintTool(
     override val description get() = inner.description
     override val parameters get() = inner.parameters
     override val risk get() = inner.risk
+    override val timeoutMs get() = inner.timeoutMs
     override val concurrentSafe get() = inner.concurrentSafe
+    override val destructive get() = inner.destructive
+    override val readOnly get() = inner.readOnly
+    override val needsApproval get() = inner.needsApproval
+    override val allowedInPlanMode get() = inner.allowedInPlanMode
+    override val permissionName get() = inner.permissionName
+    override val riskLevel get() = inner.riskLevel
+    override val sideEffectScope get() = inner.sideEffectScope
+    override val alwaysAsk get() = inner.alwaysAsk
+    override val userApprovalRule get() = inner.userApprovalRule
+    override val stopTurnOnSuccess get() = inner.stopTurnOnSuccess
+    override val maxOutputBytes get() = inner.maxOutputBytes
+    override fun resolveTimeoutMs(args: JsonObject): Long? = inner.resolveTimeoutMs(args)
 
     override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
 
@@ -86,6 +99,17 @@ private class AliasedTool(
     override val risk: ToolRisk = inner.risk,
     override val timeoutMs: Long? = inner.timeoutMs,
     override val concurrentSafe: Boolean = inner.concurrentSafe,
+    override val destructive: Boolean = inner.destructive,
+    override val readOnly: Boolean = risk == ToolRisk.READ && !destructive,
+    override val needsApproval: Boolean = !readOnly,
+    override val permissionName: String? = inner.permissionName,
+    override val sideEffectScope: String? = if (readOnly) "none" else "workspace",
+    override val riskLevel: String = when {
+        destructive -> "high"
+        readOnly -> "low"
+        risk == ToolRisk.WRITE || risk == ToolRisk.NETWORK -> "medium"
+        else -> "high"
+    },
     private val mapArgs: (JsonObject) -> JsonObject = { it },
 ) : Tool, ExecutionAwareTool {
     override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
@@ -102,8 +126,21 @@ private class AliasedTool(
 class PlanModeState {
     private val _inPlan = MutableStateFlow(false)
     val inPlan: StateFlow<Boolean> = _inPlan
-    fun enter() { _inPlan.value = true }
-    fun exit() { _inPlan.value = false }
+    var previous: com.andmx.ui2.chat.ExecMode = com.andmx.ui2.chat.ExecMode.BUILD
+        private set
+    private var captured = false
+    fun enter(from: com.andmx.ui2.chat.ExecMode? = null) {
+        if (!captured && from != null && from != com.andmx.ui2.chat.ExecMode.PLAN) {
+            previous = from
+            captured = true
+        }
+        _inPlan.value = true
+    }
+    fun exit(): com.andmx.ui2.chat.ExecMode {
+        _inPlan.value = false
+        captured = false
+        return previous
+    }
     val active: Boolean get() = _inPlan.value
 }
 
@@ -438,8 +475,8 @@ Ensure your plan is complete and unambiguous:
                 isError = true,
             )
         }
-        planMode.exit()
-        onMode(ExecMode.AUTO_EDIT)
+        val back = planMode.exit()
+        onMode(back)
         onAllowedPrompts(com.andmx.agent.AllowedPrompts.parse(args))
         return ToolResult(
             "User has approved your plan. You can now start coding. Start with updating your todo list if applicable.\n\n" +
@@ -594,6 +631,7 @@ class AskUserQuestionTool(
             "preference questions where labels and descriptions suffice. Note: previews are only supported " +
             "for single-select questions (not multiSelect)."
     override val risk = ToolRisk.READ
+    override val sideEffectScope = "userInteraction"
     // 与上游 concurrentSafe=true 有意不同：AndMX 的问答是单卡 UI
     // （session.pendingAnswer 单槽位），并发两个 ask 会互相覆盖 deferred。
     override val concurrentSafe = false
@@ -738,7 +776,11 @@ class SkillTool(
             "- Do not invoke a skill that is already running\n" +
             "- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)\n" +
             "- If you see a <command-name> tag in the current conversation turn, the skill has ALREADY been loaded - follow the instructions directly instead of calling this tool again"
-    override val risk = ToolRisk.EXECUTE
+    override val risk = ToolRisk.READ
+    override val concurrentSafe = true
+    override val sideEffectScope = "session"
+    override val timeoutMs = 30_000L
+    override val maxOutputBytes = 100_000
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -797,198 +839,12 @@ fun buildZCodeToolSurface(
     val read = ReadFileTool(context, readFileState)
     val write = WriteFileTool(context, readFileState)
     val edit = EditFileTool(context, readFileState)
-    val grep = GrepTool(context)
-    val glob = GlobTool(context)
+    val grep = GrepTool(context, cwdProvider)
+    val glob = GlobTool(context, cwdProvider)
     val listDir = ListDirTool(context)
     val browse = BrowseTool(networkPolicy, summarizer = webFetchSummarizer)
     val search = WebSearchTool(networkPolicy)
 
-    fun mapPath(args: JsonObject): JsonObject {
-        val filePath = args.str("file_path") ?: args.str("path")
-        if (filePath == null) return args
-        return buildJsonObject {
-            args.forEach { (k, v) ->
-                if (k != "file_path") put(k, v)
-            }
-            put("path", filePath)
-        }
-    }
-
-    val readZ = AliasedTool(
-        inner = read,
-        name = "Read",
-        description = "Reads a file from the local filesystem. `file_path` may be absolute or workspace-relative. Optional offset/limit for large files.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("file_path") { put("type", "string"); put("description", "Path to the file to read") }
-                putJsonObject("offset") { put("type", "integer"); put("description", "Start line (0-based)") }
-                putJsonObject("limit") { put("type", "integer"); put("description", "Max lines") }
-            }
-            putJsonArray("required") { add("file_path") }
-        },
-        risk = ToolRisk.READ,
-        mapArgs = ::mapPath,
-    )
-    val writeZ = AliasedTool(
-        inner = write,
-        name = "Write",
-        description = "Writes a file, overwriting if it exists. Prefer Edit for partial changes.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("file_path") { put("type", "string") }
-                putJsonObject("content") { put("type", "string") }
-            }
-            putJsonArray("required") { add("file_path"); add("content") }
-        },
-        risk = ToolRisk.WRITE,
-        mapArgs = ::mapPath,
-    )
-    val editZ = AliasedTool(
-        inner = edit,
-        name = "Edit",
-        description = "Exact string replacement in a file. Read first. old_string must be unique unless replace_all.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("file_path") { put("type", "string") }
-                putJsonObject("old_string") { put("type", "string") }
-                putJsonObject("new_string") { put("type", "string") }
-                putJsonObject("replace_all") { put("type", "boolean") }
-            }
-            putJsonArray("required") { add("file_path"); add("old_string"); add("new_string") }
-        },
-        risk = ToolRisk.WRITE,
-        mapArgs = { args ->
-            val mapped = mapPath(args)
-            buildJsonObject {
-                mapped.forEach { (k, v) ->
-                    when (k) {
-                        "old_string" -> put("old_str", v)
-                        "new_string" -> put("new_str", v)
-                        "replace_all" -> put("replace_all", v)
-                        else -> put(k, v)
-                    }
-                }
-            }
-        },
-    )
-    val bashZ = AliasedTool(
-        inner = shellWithHint,
-        name = "Bash",
-        description = "Executes a bash command and returns its output.\n\n" +
-            "- Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile.\n" +
-            "- IMPORTANT: Avoid using this tool to run `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.\n\n" +
-            "# Git\n" +
-            "- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.\n" +
-            "- Use the `gh` CLI for GitHub operations (PRs, issues, API).\n" +
-            "- Commit or push only when the user asks. If on the default branch, branch first.\n" +
-            "- On Android/AndMX the shell runs in a proot Alpine guest (or remote SSH); paths under /root/project map to the workspace.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("command") { put("type", "string") }
-                putJsonObject("timeout") {
-                    put("type", "number")
-                    put("description", "Max execution time in ms (max 600000)")
-                }
-                putJsonObject("description") { put("type", "string") }
-                putJsonObject("run_in_background") {
-                    put("type", "boolean")
-                    put("description", "Run without blocking; returns a task_id. Use TaskOutput/TaskStop to manage.")
-                }
-            }
-            putJsonArray("required") { add("command") }
-        },
-        risk = ToolRisk.EXECUTE,
-        mapArgs = { args ->
-            buildJsonObject {
-                args.forEach { (k, v) -> put(k, v) }
-                args["timeout"]?.let { put("timeout_ms", it) }
-            }
-        },
-    )
-    val grepZ = AliasedTool(
-        inner = grep,
-        name = "Grep",
-        description = "Content search built on ripgrep-compatible search. Prefer this over grep/rg via Bash. " +
-            "Full regex; filter with glob or type; output_mode content|files_with_matches|count; multiline supported.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("pattern") {
-                    put("type", "string")
-                    put("description", "The ripgrep-compatible regular expression pattern")
-                }
-                putJsonObject("path") {
-                    put("type", "string")
-                    put("description", "Optional file or directory to search")
-                }
-                putJsonObject("glob") {
-                    put("type", "string")
-                    put("description", "Ripgrep-style glob to filter files, e.g. *.{ts,tsx}")
-                }
-                putJsonObject("output_mode") {
-                    put("type", "string")
-                    putJsonArray("enum") {
-                        add("content"); add("files_with_matches"); add("count")
-                    }
-                }
-                putJsonObject("-B") { put("type", "integer") }
-                putJsonObject("-A") { put("type", "integer") }
-                putJsonObject("-C") { put("type", "integer") }
-                putJsonObject("context") { put("type", "integer") }
-                putJsonObject("-n") { put("type", "boolean") }
-                putJsonObject("-i") { put("type", "boolean") }
-                putJsonObject("type") { put("type", "string") }
-                putJsonObject("head_limit") { put("type", "integer") }
-                putJsonObject("offset") { put("type", "integer") }
-                putJsonObject("multiline") { put("type", "boolean") }
-                putJsonObject("case_insensitive") { put("type", "boolean") }
-                putJsonObject("max_results") { put("type", "integer") }
-            }
-            putJsonArray("required") { add("pattern") }
-        },
-        risk = ToolRisk.READ,
-        mapArgs = { args ->
-            buildJsonObject {
-                args.forEach { (k, v) -> put(k, v) }
-                val ci = args.bool("-i") || args.bool("case_insensitive")
-                if (ci) put("case_insensitive", true)
-                val head = args.int("head_limit") ?: args.int("max_results")
-                if (head != null) put("max_results", head)
-                args.str("output_mode")?.let { put("output_mode", it) }
-                args.int("-B")?.let { put("before_context", it) }
-                args.int("-A")?.let { put("after_context", it) }
-                val ctx = args.int("-C") ?: args.int("context")
-                if (ctx != null) put("context", ctx)
-                args.str("type")?.let { put("file_type", it) }
-                if (args.bool("multiline")) put("multiline", true)
-            }
-        },
-    )
-    val globZ = AliasedTool(
-        inner = glob,
-        name = "Glob",
-        description = "Fast file pattern matching. Supports patterns like **/*.js or src/**/*.ts. " +
-            "Returns matching file paths sorted by modification time.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("pattern") {
-                    put("type", "string")
-                    put("description", "The glob pattern to match files against")
-                }
-                putJsonObject("path") {
-                    put("type", "string")
-                    put("description", "Optional directory to search")
-                }
-            }
-            putJsonArray("required") { add("pattern") }
-        },
-        risk = ToolRisk.READ,
-    )
     val fetchZ = AliasedTool(
         inner = browse,
         name = "WebFetch",
@@ -1010,6 +866,7 @@ fun buildZCodeToolSurface(
         },
         risk = ToolRisk.NETWORK,
         concurrentSafe = true,
+        readOnly = true,
         mapArgs = { args ->
             buildJsonObject {
                 args.forEach { (k, v) -> put(k, v) }
@@ -1044,10 +901,11 @@ fun buildZCodeToolSurface(
         },
         risk = ToolRisk.NETWORK,
         concurrentSafe = true,
+        readOnly = true,
     )
 
     val zcode = mutableListOf(
-        readZ, writeZ, editZ, bashZ, grepZ, globZ, fetchZ, webSearchZ,
+        read, write, edit, shellWithHint, grep, glob, fetchZ, webSearchZ,
         TodoReadTool(todo),
         TodoWriteTool(todo, planTool),
         EnterPlanModeTool(planMode, onPlanModeChange, requestEnterPlanApproval),
@@ -1077,13 +935,6 @@ fun buildZCodeToolSurface(
         )
     }
     if (includeLegacyAliases) {
-        // Keep snake_case aliases so older prompts/models still work.
-        zcode += read
-        zcode += write
-        zcode += edit
-        zcode += shell
-        zcode += grep
-        zcode += glob
         zcode += browse
         zcode += search
         zcode += planTool
