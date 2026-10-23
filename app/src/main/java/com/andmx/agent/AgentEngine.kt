@@ -954,20 +954,7 @@ class AgentEngine(
             val callById = calls.associateBy { it.id }
             val schedule = ToolScheduler(maxConcurrency = MAX_PARALLEL_TOOL_CALLS).schedule(
                 calls.map { call ->
-                    val tool = toolsByName[call.function.name]
-                    val sideEffectScope = tool?.sideEffectScope
-                    ToolDependency(
-                        toolCallId = call.id,
-                        toolName = call.function.name,
-                        readOnly = if (tool == null) {
-                            null
-                        } else {
-                            tool.risk == ToolRisk.READ && sideEffectScope == "none"
-                        },
-                        destructive = tool?.destructive,
-                        concurrentSafe = tool?.concurrentSafe,
-                        sideEffectScope = sideEffectScope,
-                    )
+                    toolScheduleDependency(call.id, call.function.name, toolsByName[call.function.name])
                 },
             )
             val results = mutableListOf<Pair<ApiToolCall, Pair<ToolResult, Long>>>()
@@ -1531,3 +1518,13 @@ class AgentEngine(
                 com.andmx.agent.zcode.ZCodePrompts.CRAFT
     }
 }
+
+internal fun toolScheduleDependency(callId: String, toolName: String, tool: Tool?): ToolDependency =
+    ToolDependency(
+        toolCallId = callId,
+        toolName = toolName,
+        readOnly = tool?.readOnly,
+        destructive = tool?.destructive,
+        concurrentSafe = tool?.concurrentSafe,
+        sideEffectScope = tool?.sideEffectScope,
+    )

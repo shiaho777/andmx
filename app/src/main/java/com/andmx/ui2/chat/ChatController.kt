@@ -32,6 +32,9 @@ import com.andmx.agent.ToolRisk
 import com.andmx.agent.TurnContext
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.zcode.isPlanModeAllowed
+import com.andmx.agent.zcode.DYNAMIC_WORKFLOW_TOOLS_ENABLED
+import com.andmx.agent.zcode.WorkflowTools
+import com.andmx.agent.zcode.applyDynamicWorkflowGate
 import com.andmx.agent.zcode.buildZCodeToolSurface
 import com.andmx.agent.zcode.CronTools
 import com.andmx.agent.zcode.PlanModeState
@@ -1746,7 +1749,21 @@ class ChatController private constructor(private val context: Context) {
         conversationId: Long = 0L,
     ): List<Tool> {
         val cwd = { access.guestCwd() }
-        return buildZCodeToolSurface(
+        val dynamicWorkflow = if (DYNAMIC_WORKFLOW_TOOLS_ENABLED) {
+            WorkflowTools(
+                isAutomationTurn = { automationTurnIds.contains(conversationId) },
+                hasLoadedSkill = { skillName ->
+                    com.andmx.agent.LoadedSkills.sessionHasLoadedSkill(
+                        sessions[conversationId]?.engine?.snapshotHistory().orEmpty(),
+                        skillName,
+                    )
+                },
+            ).all()
+        } else {
+            emptyList()
+        }
+        return applyDynamicWorkflowGate(
+            buildZCodeToolSurface(
             context = context,
             networkPolicy = networkPolicy,
             planTool = planTool,
@@ -1854,17 +1871,8 @@ class ChatController private constructor(private val context: Context) {
             currentModel = { settingsStore.settings.firstOrNull()?.model.orEmpty() },
             isAutomationTurn = { automationTurnIds.contains(conversationId) },
             offPeakStartHour = { settingsStore.settings.firstOrNull()?.offPeakStartHour ?: 0 },
-        ).all() + com.andmx.agent.zcode.WorkflowTools(
-            service = workflowService,
-            conversationId = { conversationId },
-            cwd = { "/" },
-            hasLoadedSkill = { skillName ->
-                com.andmx.agent.LoadedSkills.sessionHasLoadedSkill(
-                    sessions[conversationId]?.engine?.snapshotHistory().orEmpty(),
-                    skillName,
-                )
-            },
-        ).all() + com.andmx.agent.JsReplTool(context, "conv-$conversationId")
+        ).all() + dynamicWorkflow + com.andmx.agent.JsReplTool(context, "conv-$conversationId"),
+        )
     }
 
     private suspend fun summarizeFetchedContent(

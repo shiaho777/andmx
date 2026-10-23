@@ -29,23 +29,32 @@ internal const val TASK_OUTPUT_MAX_LENGTH = 160_000
 internal const val TASK_STOP_LOOKUP_FAILURE_GUIDANCE =
     "This lookup failure does not mean the task has completed or stopped; use the full task_id returned when the task started to stop it."
 
-internal val AGENT_PROVIDER_DESCRIPTION = listOf(
-    "Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.",
-    "",
-    "Available agent types are listed in <system-reminder> messages in the conversation.",
-    "",
-    "When using the Agent tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.",
-    "",
-    "## When to use",
-    "",
-    "Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.",
-    "",
-    "- The agent's final message is returned to you as the tool result; it is not shown to the user — relay what matters.",
-    "- Use SendMessage with the agent's ID to continue a previously spawned agent with its context intact; a new Agent call starts fresh.",
-    "- Each agent type's model, reasoning effort, and tools come from its definition (`.zcode/agents/*.md` frontmatter).",
-    "- `run_in_background: true` runs the agent asynchronously; you'll be notified when it completes.",
-    "- If the user explicitly asks for a workflow (\"use a workflow\", \"使用 workflow\", \"用工作流\", or any phrasing naming workflow/工作流 as the means), the CreateWorkflow tool is mandatory: do not use this tool instead, however small the task.",
-).joinToString("\n")
+internal fun agentProviderDescription(
+    dynamicWorkflowEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_ENABLED,
+): String {
+    val lines = mutableListOf(
+        "Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.",
+        "",
+        "Available agent types are listed in <system-reminder> messages in the conversation.",
+        "",
+        "When using the Agent tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.",
+        "",
+        "## When to use",
+        "",
+        "Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.",
+        "",
+        "- The agent's final message is returned to you as the tool result; it is not shown to the user — relay what matters.",
+        "- Use SendMessage with the agent's ID to continue a previously spawned agent with its context intact; a new Agent call starts fresh.",
+        "- Each agent type's model, reasoning effort, and tools come from its definition (`.zcode/agents/*.md` frontmatter).",
+        "- `run_in_background: true` runs the agent asynchronously; you'll be notified when it completes.",
+    )
+    if (dynamicWorkflowEnabled) {
+        lines += "- If the user explicitly asks for a workflow (\"use a workflow\", \"使用 workflow\", \"用工作流\", or any phrasing naming workflow/工作流 as the means), the CreateWorkflow tool is mandatory: do not use this tool instead, however small the task."
+    }
+    return lines.joinToString("\n")
+}
+
+internal val AGENT_PROVIDER_DESCRIPTION = agentProviderDescription()
 
 internal val TASK_PROVIDER_DESCRIPTION = listOf(
     "Claude Code-compatible alias for the Agent tool. Use this when plugin instructions ask for the Task tool.",
