@@ -124,6 +124,16 @@ class WorkspaceAccess(context: Context) {
         }
     }
 
+    suspend fun statSize(path: String): Long? {
+        val p = resolvePath(path)
+        return if (isRemote) {
+            val res = executeShell("stat -c %s ${q(p)} 2>/dev/null || echo -1", cwd = guestCwd())
+            res.stdout.trim().toLongOrNull()?.takeIf { it >= 0 }
+        } else {
+            runCatching { localFs.resolve(toGuestPath(p)).length() }.getOrNull()?.takeIf { it >= 0L }
+        }
+    }
+
     /** 本地访客路径映射为宿主 File（远端返回 null）——PdfRenderer 等需要真实 fd 的场景用。 */
     fun hostFile(path: String): java.io.File? {
         if (isRemote) return null
