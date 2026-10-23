@@ -263,27 +263,23 @@ class ChatController private constructor(private val context: Context) {
 
     private fun syncPlanOverlay() {
         val id = focusedConversationId
-        _planOverlayActive.value = sessions[id]?.planModeState?.active == true
+        _planOverlayActive.value =
+            sessions[id]?.approvalMode?.collaboration == com.andmx.agent.permission.CollaborationMode.PLAN
     }
 
-    /**
-     * Unified exec-mode application. PLAN is a session-scoped overlay: it never
-     * persists, so new conversations always start in the baseline mode. Any
-     * non-PLAN mode persists as the new baseline and exits the overlay for the
-     * given session. This is the single entry point for both the composer pill
-     * and the Enter/ExitPlanMode tools, keeping plan-ness sourced only from
-     * [Session.planModeState] instead of two divergent flags.
-     */
+    /** PLAN is a session collaboration mode. Non-plan selections replace it. */
     fun applyExecMode(mode: ExecMode, conversationId: Long) {
         val session = sessions[conversationId]
-        if (mode == ExecMode.PLAN) {
-            val from = session?.approvalMode?.takeIf { it != ExecMode.PLAN } ?: ExecMode.BUILD
-            session?.planModeState?.enter(from)
-            if (session != null) session.approvalMode = ExecMode.PLAN
+        val state = session?.planModeState
+        if (mode.collaboration == com.andmx.agent.permission.CollaborationMode.PLAN) {
+            val from = session?.approvalMode?.takeIf {
+                it.collaboration != com.andmx.agent.permission.CollaborationMode.PLAN
+            } ?: ExecMode.BUILD
+            state?.enter(from)
         } else {
-            session?.planModeState?.exit()
-            if (session != null) session.approvalMode = mode
+            state?.adopt(mode)
         }
+        if (session != null) session.approvalMode = state?.mode ?: mode
         controllerScope.launch {
             runCatching {
                 val s = settingsStore.settings.firstOrNull() ?: return@runCatching
@@ -1514,11 +1510,18 @@ class ChatController private constructor(private val context: Context) {
             existing.providerId == provider.id &&
             existing.model == settings.model
         ) {
-            existing.approvalMode = execMode
+            if (existing.planModeState.collaboration == com.andmx.agent.permission.CollaborationMode.PLAN) {
+                existing.approvalMode = existing.planModeState.mode
+            } else {
+                existing.planModeState.syncTo(execMode)
+                existing.approvalMode = existing.planModeState.mode
+            }
             val (systemBlocks, metaUser) = buildZCodePromptParts(settings, provider)
             existing.engine.setSystemBlocks(systemBlocks)
             existing.engine.setMetaUserContext(metaUser)
-            existing.engine.setPlanModeProvider { existing.planModeState.active }
+            existing.engine.setPlanModeProvider {
+                existing.approvalMode.collaboration == com.andmx.agent.permission.CollaborationMode.PLAN
+            }
             if (sharedExtraTools.isNotEmpty()) {
                 val known = existing.engine.listTools().map { it.first }.toSet()
                 val missing = sharedExtraTools.filter { it.name !in known }
@@ -1643,7 +1646,10 @@ class ChatController private constructor(private val context: Context) {
         )
         orchestrators[conversationId] = orch
         engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId))
-        engine.setPlanModeProvider { planModeState.active }
+        engine.setPlanModeProvider {
+            (sessions[conversationId]?.approvalMode ?: planModeState.mode).collaboration ==
+                com.andmx.agent.permission.CollaborationMode.PLAN
+        }
 
         val history = loadHistoryForEngine(conversationId)
         engine.seed(history)
@@ -1663,7 +1669,7 @@ class ChatController private constructor(private val context: Context) {
             planModeState = planModeState,
             approvalMode = execMode,
         )
-        if (execMode == ExecMode.PLAN) planModeState.enter(ExecMode.BUILD)
+        planModeState.syncTo(execMode)
         _goal.value = goalState.goal
         sessions[conversationId] = session
         if (focusedConversationId == 0L) focusedConversationId = conversationId
@@ -1749,6 +1755,7 @@ class ChatController private constructor(private val context: Context) {
             planMode = planMode,
             cwdProvider = cwd,
             onPlanModeChange = { mode -> applyExecMode(mode, conversationId) },
+            currentMode = { sessions[conversationId]?.approvalMode ?: planMode.mode },
             askUser = ask@{ questions, rawArgs ->
                 val session = sessions[conversationId] ?: return@ask "会话不可用"
                 val deferred = kotlinx.coroutines.CompletableDeferred<String>()
@@ -1791,7 +1798,7 @@ class ChatController private constructor(private val context: Context) {
                 }
             },
             readSession = { sessionId, query, strategy, maxTokens ->
-                readSessionContext(sessionId, query, strategy, maxTokens)
+                readSessionContext(conversationId, sessionId, query, strategy, maxTokens)
             },
             invokeSkill = { skill, args ->
                 invokeSkillTool(skill, args)
@@ -1895,17 +1902,35 @@ class ChatController private constructor(private val context: Context) {
     }
 
     private suspend fun readSessionContext(
+        conversationId: Long,
         sessionId: String,
         query: String,
         strategy: String,
         maxTokens: Int,
-    ): String {
-        val rawId = sessionId.removePrefix("sess_").removePrefix("#")
-        val convId = rawId.toLongOrNull()
-            ?: repo.conversationsByArchived(false).firstOrNull {
-                it.sessionId == sessionId || it.sessionId == rawId || it.id.toString() == rawId
-            }?.id
-            ?: return "未找到会话 $sessionId"
+    ): com.andmx.agent.zcode.SessionContextRead {
+        val current = sessionId == "current" || matchesConversation(conversationId, sessionId)
+        if (strategy == "topic" && !current) {
+            return com.andmx.agent.zcode.SessionContextRead(
+                status = "failed",
+                source = "none",
+                sessionId = sessionId,
+                content = "Topic history can only be read from the current session",
+                error = "Topic history can only be read from the current session",
+            )
+        }
+        val lookupId = if (sessionId == "current") conversationId.toString() else sessionId
+        val rawId = lookupId.removePrefix("sess_").removePrefix("#")
+        val convId = when {
+            sessionId == "current" -> conversationId
+            else -> rawId.toLongOrNull()
+                ?: repo.conversationsByArchived(false).firstOrNull {
+                    it.sessionId == sessionId || it.sessionId == rawId || it.id.toString() == rawId
+                }?.id
+        } ?: return com.andmx.agent.zcode.SessionContextRead(
+            status = "not_found",
+            sessionId = lookupId,
+            content = "No persisted session was found for $lookupId.",
+        )
         val msgs = repo.messages(convId).takeLast(40)
         val joined = msgs.joinToString("\n") { m ->
             val role = m.role
@@ -1919,8 +1944,20 @@ class ChatController private constructor(private val context: Context) {
             }.joinToString("\n") { "[${it.role}] ${it.content.take(800)}" }
                 .ifBlank { joined }
         }
-        val header = "session=$sessionId strategy=$strategy query=$query"
-        return (header + "\n" + filtered).take(maxTokens.coerceIn(500, 12000) * 4)
+        val budget = maxTokens.coerceIn(1, 12_000) * 4
+        return com.andmx.agent.zcode.SessionContextRead(
+            status = "success",
+            source = "local",
+            sessionId = lookupId,
+            content = filtered.take(budget),
+            truncated = filtered.length > budget,
+        )
+    }
+
+    private suspend fun matchesConversation(conversationId: Long, sessionId: String): Boolean {
+        if (sessionId == conversationId.toString() || sessionId == "sess_$conversationId") return true
+        val conv = repo.conversation(conversationId) ?: return false
+        return conv.sessionId.isNotBlank() && (conv.sessionId == sessionId || conv.sessionId == sessionId.removePrefix("sess_"))
     }
 
     private suspend fun invokeSkillTool(skill: String, args: String?): String {
@@ -1982,13 +2019,8 @@ class ChatController private constructor(private val context: Context) {
         tool: Tool,
         args: JsonObject,
     ): ApprovalOutcome {
-        val sessionLive = sessions[conversationId]
-        val planActive = sessionLive?.planModeState?.active == true || mode == ExecMode.PLAN
-        val collaboration = if (planActive) {
-            com.andmx.agent.permission.CollaborationMode.PLAN
-        } else {
-            mode.collaboration
-        }
+        val collaboration = mode.collaboration
+        val planActive = collaboration == com.andmx.agent.permission.CollaborationMode.PLAN
         var capability = com.andmx.agent.permission.PermissionToolCapability(
             userApprovalRule = tool.userApprovalRule,
             allowedInPlanMode = tool.allowedInPlanMode,
@@ -2020,7 +2052,7 @@ class ChatController private constructor(private val context: Context) {
             emptyList()
         }
         val rules = approvalRuleStore.ruleset(projectKey()).let { it.copy(allow = it.allow + grantRules) }
-        val decision = (sessionLive?.permissions ?: com.andmx.agent.permission.PermissionService()).checkPermission(
+        val decision = (sessions[conversationId]?.permissions ?: com.andmx.agent.permission.PermissionService()).checkPermission(
             com.andmx.agent.permission.PermissionContext(
                 toolName = tool.name,
                 input = args,
@@ -2035,7 +2067,11 @@ class ChatController private constructor(private val context: Context) {
         return when (decision.decision) {
             "allow" -> ApprovalOutcome.AllowedOnce
             "deny" -> ApprovalOutcome.Rejected(decision.reason)
-            else -> prompt(conversationId, tool, args, mode, decision.reason)
+            else -> if (tool.name == "ExitPlanMode" && decision.ruleId == "tool.userInteraction") {
+                ApprovalOutcome.AllowedOnce
+            } else {
+                prompt(conversationId, tool, args, mode, decision.reason)
+            }
         }
     }
 

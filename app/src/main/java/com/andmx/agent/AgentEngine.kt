@@ -234,7 +234,7 @@ class AgentEngine(
         rewriteSystemPrefix()
     }
 
-    /** Source of truth for plan-mode reminders (PlanModeState.active). */
+    /** Whether collaboration mode is plan. Plan reminders read this. */
     fun setPlanModeProvider(provider: (() -> Boolean)?) {
         planModeProvider = provider
     }

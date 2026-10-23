@@ -59,8 +59,8 @@ class ListModelsToolTest {
         val tool = ListModelsTool({ providers }, { "openai" to "gpt-5" })
         val out = tool.execute(buildJsonObject {}).output
         assertTrue(out.contains("<models count=\"3\">"))
-        assertTrue(out.contains("openai::gpt-5 — OpenAI; levels: minimal,low,medium,high (default medium); ctx: 200000 [current]"))
-        assertTrue(out.contains("openai::gpt-4o — OpenAI; ctx: 128000"))
+        assertTrue(out.contains("openai::gpt-5 — OpenAI; levels: minimal,low,medium,high (default medium) [current]"))
+        assertTrue(out.contains("openai::gpt-4o — OpenAI"))
         assertTrue(out.contains("local::qwen — Local [disabled: missing api key]"))
     }
 

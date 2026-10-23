@@ -26,6 +26,7 @@ import com.andmx.agent.GetGoalTool
 import com.andmx.agent.ApplyPatchTool
 import com.andmx.agent.GitTool
 import com.andmx.exec.policy.NetworkPolicy
+import com.andmx.agent.permission.CollaborationMode
 import com.andmx.ui2.chat.ExecMode
 import com.andmx.workspace.WorkspaceAccess
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,25 +94,55 @@ private class GhRateLimitHintTool(
     }
 }
 
-class PlanModeState {
-    private val _inPlan = MutableStateFlow(false)
-    val inPlan: StateFlow<Boolean> = _inPlan
-    var previous: com.andmx.ui2.chat.ExecMode = com.andmx.ui2.chat.ExecMode.BUILD
+class PlanModeState(initial: ExecMode = ExecMode.BUILD) {
+    var mode: ExecMode = initial
         private set
-    private var captured = false
-    fun enter(from: com.andmx.ui2.chat.ExecMode? = null) {
-        if (!captured && from != null && from != com.andmx.ui2.chat.ExecMode.PLAN) {
-            previous = from
+    var previous: ExecMode = if (initial.collaboration == CollaborationMode.PLAN) ExecMode.BUILD else initial
+        private set
+    private var captured: Boolean = initial.collaboration == CollaborationMode.PLAN
+
+    val collaboration: CollaborationMode
+        get() = mode.collaboration
+
+    fun enter(from: ExecMode? = null) {
+        if (collaboration == CollaborationMode.PLAN) {
+            if (!captured) {
+                previous = from?.takeIf { it.collaboration != CollaborationMode.PLAN } ?: ExecMode.BUILD
+                captured = true
+            }
+            return
+        }
+        if (!captured) {
+            previous = from?.takeIf { it.collaboration != CollaborationMode.PLAN } ?: mode
             captured = true
         }
-        _inPlan.value = true
+        mode = ExecMode.PLAN
     }
-    fun exit(): com.andmx.ui2.chat.ExecMode {
-        _inPlan.value = false
+
+    fun exit(): ExecMode {
+        val back = previous.takeIf { it.collaboration != CollaborationMode.PLAN } ?: ExecMode.BUILD
+        mode = back
         captured = false
-        return previous
+        return back
     }
-    val active: Boolean get() = _inPlan.value
+
+    fun adopt(next: ExecMode) {
+        if (next.collaboration == CollaborationMode.PLAN) {
+            enter(null)
+            return
+        }
+        mode = next
+        previous = next
+        captured = false
+    }
+
+    fun syncTo(next: ExecMode) {
+        if (next.collaboration == CollaborationMode.PLAN) {
+            if (collaboration != CollaborationMode.PLAN) enter(ExecMode.BUILD)
+        } else {
+            adopt(next)
+        }
+    }
 }
 
 class TodoState {
@@ -137,107 +168,81 @@ class TodoWriteTool(
     private val planTool: UpdatePlanTool,
 ) : Tool {
     override val name = "TodoWrite"
-    override val description =
-        "Update the structured todo list for the current session. " +
-            "At most one item may be in_progress at a time. Pass the complete updated list."
+    override val description = TODO_WRITE_DESCRIPTION
     override val risk = ToolRisk.READ
+    override val readOnly = true
+    override val destructive = false
     override val concurrentSafe = false
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("todos") {
-                put("type", "array")
-                put("description", "The complete updated todo list. At most one item may be in_progress at a time.")
-                putJsonObject("items") {
-                    put("type", "object")
-                    putJsonObject("properties") {
-                        putJsonObject("content") {
-                            put("type", "string")
-                            put("description", "Brief description of the task")
-                        }
-                        putJsonObject("status") {
-                            put("type", "string")
-                            putJsonArray("enum") {
-                                add("pending"); add("in_progress"); add("completed")
-                            }
-                        }
-                        putJsonObject("priority") {
-                            put("type", "string")
-                            putJsonArray("enum") {
-                                add("high"); add("medium"); add("low")
-                            }
-                        }
-                    }
-                    putJsonArray("required") {
-                        add("content"); add("status"); add("priority")
-                    }
-                }
-            }
-        }
-        putJsonArray("required") { add("todos") }
-    }
+    override val needsApproval = false
+    override val timeoutMs = SESSION_TOOL_TIMEOUT_MS
+    override val maxOutputBytes = TODO_MODEL_BYTES
+    override val sideEffectScope = "session"
+    override val riskLevel = "low"
+    override val permissionName = "todo.write"
+    override val parameters = TODO_WRITE_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
         val arr = args["todos"] as? JsonArray
-            ?: return ToolResult("todos is required", isError = true)
-        val items = arr.mapNotNull { el ->
-            val o = el as? JsonObject ?: return@mapNotNull null
-            val content = o.str("content")?.trim().orEmpty()
-            if (content.isBlank()) return@mapNotNull null
-            TodoState.Item(
-                content = content,
-                status = o.str("status") ?: "pending",
-                priority = o.str("priority") ?: "medium",
-            )
+            ?: return ToolResult(missingParameter("TodoWrite", "todos"), isError = true)
+        val items = ArrayList<TodoState.Item>(arr.size)
+        for (el in arr) {
+            val o = el as? JsonObject ?: return ToolResult(missingParameter("TodoWrite", "todos"), isError = true)
+            val content = o.str("content").orEmpty()
+            val status = o.str("status").orEmpty()
+            val priority = o.str("priority").orEmpty()
+            if (content.isEmpty() || status !in TODO_STATUS || priority !in TODO_PRIORITY) {
+                return ToolResult("TodoWrite input failed inputSchema validation", isError = true)
+            }
+            items += TodoState.Item(content = content, status = status, priority = priority)
         }
-        if (items.isEmpty()) return ToolResult("todos is empty", isError = true)
-        if (items.count { it.status.equals("in_progress", true) } > 1) {
-            return ToolResult("at most one todo may be in_progress", isError = true)
-        }
+        val old = todo.items.value
         todo.set(items)
-        // Keep legacy plan panel in sync.
-        val planArgs = buildJsonObject {
-            putJsonArray("steps") {
-                items.forEach { item ->
-                    add(buildJsonObject {
-                        put("content", item.content.take(48))
-                        put("status", item.status.lowercase())
-                    })
+        if (items.isEmpty()) {
+            planTool.clear()
+        } else {
+            val planArgs = buildJsonObject {
+                putJsonArray("steps") {
+                    items.forEach { item ->
+                        add(buildJsonObject {
+                            put("content", item.content.take(48))
+                            put("status", item.status)
+                        })
+                    }
                 }
             }
+            planTool.execute(planArgs)
         }
-        planTool.execute(planArgs)
-        return ToolResult("Todos updated (${items.size})")
+        return ToolResult(formatTodoWriteModelContent(old, items))
     }
 }
 
+private val TODO_STATUS = setOf("pending", "in_progress", "completed")
+private val TODO_PRIORITY = setOf("high", "medium", "low")
+
 class TodoReadTool(private val todo: TodoState) : Tool {
     override val name = "TodoRead"
-    override val description = "Read the current session todo list."
+    override val description = TODO_READ_DESCRIPTION
     override val risk = ToolRisk.READ
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") { }
-    }
+    override val readOnly = true
+    override val destructive = false
+    override val concurrentSafe = true
+    override val needsApproval = false
+    override val timeoutMs = SESSION_TOOL_TIMEOUT_MS
+    override val maxOutputBytes = TODO_MODEL_BYTES
+    override val sideEffectScope = "none"
+    override val riskLevel = "low"
+    override val permissionName = "todo.read"
+    override val parameters = TODO_READ_PARAMETERS
 
-    override suspend fun execute(args: JsonObject): ToolResult {
-        val items = todo.items.value
-        if (items.isEmpty()) return ToolResult("(no todos)")
-        return ToolResult(items.joinToString("\n") {
-            val mark = when (it.status.lowercase()) {
-                "completed" -> "x"
-                "in_progress" -> "~"
-                else -> " "
-            }
-            "[$mark] (${it.priority}) ${it.content}"
-        })
-    }
+    override suspend fun execute(args: JsonObject): ToolResult =
+        ToolResult(formatTodoReadModelContent(todo.items.value))
 }
 
 class EnterPlanModeTool(
     private val planMode: PlanModeState,
     private val onMode: (ExecMode) -> Unit = {},
     private val requestApproval: (suspend (String) -> Boolean)? = null,
+    private val currentMode: () -> ExecMode = { planMode.mode },
 ) : Tool {
     override val name = "EnterPlanMode"
     override val description = """
@@ -328,30 +333,27 @@ User: "What files handle routing?"
 - Users appreciate being consulted before significant changes are made to their codebase
 """.trimIndent()
     override val risk = ToolRisk.READ
+    override val readOnly = false
+    override val destructive = false
     override val concurrentSafe = false
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") { }
-    }
+    override val requiresUserInteraction = false
+    override val needsApproval = false
+    override val timeoutMs = SESSION_TOOL_TIMEOUT_MS
+    override val maxOutputBytes = PLAN_MODE_MODEL_BYTES
+    override val sideEffectScope = "session"
+    override val riskLevel = "low"
+    override val permissionName = "plan.enter"
+    override val parameters = ENTER_PLAN_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
         val ok = if (requestApproval != null) {
             requestApproval("进入计划模式，先探索并设计实现方案，再开始写代码。")
         } else true
         if (!ok) return ToolResult("User declined plan mode.", isError = true)
-        planMode.enter()
+        val from = currentMode()
+        planMode.enter(from)
         onMode(ExecMode.PLAN)
-        return ToolResult(
-            "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\n" +
-                "In plan mode, you should:\n" +
-                "1. Thoroughly explore the codebase to understand existing patterns\n" +
-                "2. Identify similar features and architectural approaches\n" +
-                "3. Consider multiple approaches and their trade-offs\n" +
-                "4. Use AskUserQuestion if you need to clarify the approach\n" +
-                "5. Design a concrete implementation strategy\n" +
-                "6. When ready, use ExitPlanMode to present your plan for approval\n\n" +
-                "Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.",
-        )
+        return ToolResult(ENTER_PLAN_MODEL_CONTENT)
     }
 }
 
@@ -361,6 +363,7 @@ class ExitPlanModeTool(
     private val requestPlanApproval: suspend (String) -> Boolean = { true },
     /** Receives the plan's allowedPrompts when approved, for session pre-grants. */
     private val onAllowedPrompts: (List<com.andmx.agent.AllowedPrompts.Entry>) -> Unit = {},
+    private val currentMode: () -> ExecMode = { planMode.mode },
 ) : Tool {
     override val name = "ExitPlanMode"
     override val description = """
@@ -390,53 +393,32 @@ Ensure your plan is complete and unambiguous:
 3. Initial task: "Add a new feature to handle user authentication" - If unsure about auth method (OAuth, JWT, etc.), use AskUserQuestion first, then use exit plan mode tool after clarifying the approach.
 """.trimIndent()
     override val risk = ToolRisk.READ
+    override val readOnly = false
+    override val destructive = false
     override val concurrentSafe = false
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("plan") {
-                put("type", "string")
-                put("description", "The implementation plan to present to the user for approval.")
-                put("minLength", 1)
-                put("maxLength", 20000)
-            }
-            putJsonObject("allowedPrompts") {
-                put("type", "array")
-                put("description", "Prompt-based permissions needed to implement the plan.")
-                putJsonObject("items") {
-                    put("type", "object")
-                    putJsonObject("properties") {
-                        putJsonObject("tool") {
-                            put("type", "string")
-                            putJsonArray("enum") { add("Bash") }
-                        }
-                        putJsonObject("prompt") { put("type", "string") }
-                    }
-                    putJsonArray("required") { add("tool"); add("prompt") }
-                }
-            }
-            putJsonObject("summary") {
-                put("type", "string")
-                put("description", "Deprecated alias for plan")
-            }
-        }
-        putJsonArray("required") { add("plan") }
-    }
+    override val requiresUserInteraction = true
+    override val needsApproval = true
+    override val timeoutMs = SESSION_TOOL_TIMEOUT_MS
+    override val maxOutputBytes = PLAN_MODE_MODEL_BYTES
+    override val sideEffectScope = "session"
+    override val riskLevel = "low"
+    override val permissionName = "plan.exit"
+    override val parameters = EXIT_PLAN_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
-        if (!planMode.active) {
-            return ToolResult(
-                "You are not in plan mode. This tool is only for exiting plan mode after writing a plan. " +
-                    "If your plan was already approved, continue with implementation.",
-                isError = true,
-            )
+        if (currentMode().collaboration != CollaborationMode.PLAN) {
+            return ToolResult(NOT_IN_PLAN_MODE_ERROR, isError = true)
         }
-        val plan = (args.str("plan") ?: args.str("summary")).orEmpty().trim()
-        if (plan.isBlank()) {
-            return ToolResult("plan is required (1..20000 chars)", isError = true)
+        if (planMode.collaboration != CollaborationMode.PLAN) {
+            planMode.enter(null)
         }
-        if (plan.length > 20000) {
-            return ToolResult("plan exceeds 20000 characters", isError = true)
+        val plan = args.str("plan")
+            ?: return ToolResult(missingParameter("ExitPlanMode", "plan"), isError = true)
+        if (plan.length > PLAN_MODE_MAX_PLAN_CHARS) {
+            return ToolResult("String must contain at most 20000 character(s)", isError = true)
+        }
+        if (plan.trim().isEmpty()) {
+            return ToolResult("String must contain at least 1 character(s)", isError = true)
         }
         val approved = requestPlanApproval(plan)
         if (!approved) {
@@ -448,10 +430,7 @@ Ensure your plan is complete and unambiguous:
         val back = planMode.exit()
         onMode(back)
         onAllowedPrompts(com.andmx.agent.AllowedPrompts.parse(args))
-        return ToolResult(
-            "User has approved your plan. You can now start coding. Start with updating your todo list if applicable.\n\n" +
-                "## Approved Plan:\n$plan",
-        )
+        return ToolResult(formatExitPlanModeModelContent(plan))
     }
 }
 
@@ -574,97 +553,24 @@ class AskUserQuestionTool(
     private val ask: suspend (List<AskQuestion>, JsonObject) -> String,
 ) : Tool {
     override val name = "AskUserQuestion"
-    override val description =
-        "Use this tool only when you are blocked on a decision that is genuinely the user's to make: " +
-            "one you cannot resolve from the request, the code, or sensible defaults.\n\n" +
-            "Usage notes:\n" +
-            "- Users will always be able to select \"Other\" to provide custom text input\n" +
-            "- Use multiSelect: true to allow multiple answers to be selected for a question\n" +
-            "- If you recommend a specific option, make that the first option in the list and add \"(Recommended)\" at the end of the label\n\n" +
-            "Plan mode note: To switch into plan mode, use EnterPlanMode (not this tool). Once in plan mode, " +
-            "use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. " +
-            "Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference " +
-            "\"the plan\" in questions — the user cannot see the plan until you call ExitPlanMode for approval.\n\n" +
-            "Reserve this for decisions where the user's answer changes what you do next — not for choices " +
-            "with a conventional default or facts you can verify in the codebase yourself. In those cases " +
-            "pick the obvious option, mention it in your response, and proceed.\n\n" +
-            "Preview feature:\n" +
-            "Use the optional `preview` field on options when presenting concrete artifacts that users need " +
-            "to visually compare:\n" +
-            "- ASCII mockups of UI layouts or components\n" +
-            "- Code snippets showing different implementations\n" +
-            "- Diagram variations\n" +
-            "- Configuration examples\n\n" +
-            "Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is " +
-            "supported. When any option has a preview, the UI switches to a side-by-side layout with a " +
-            "vertical option list on the left and preview on the right. Do not use previews for simple " +
-            "preference questions where labels and descriptions suffice. Note: previews are only supported " +
-            "for single-select questions (not multiSelect)."
+    override val description = ASK_USER_DESCRIPTION
     override val risk = ToolRisk.READ
+    override val readOnly = true
+    override val destructive = false
+    override val concurrentSafe = true
+    override val requiresUserInteraction = true
+    override val needsApproval = true
+    override val timeoutMs = SESSION_TOOL_TIMEOUT_MS
+    override val maxOutputBytes = ASK_USER_MODEL_BYTES
     override val sideEffectScope = "userInteraction"
-    // 与上游 concurrentSafe=true 有意不同：AndMX 的问答是单卡 UI
-    // （session.pendingAnswer 单槽位），并发两个 ask 会互相覆盖 deferred。
-    override val concurrentSafe = false
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("questions") {
-                put("type", "array")
-                put("description", "Questions to ask the user (1-4 questions)")
-                put("minItems", 1)
-                put("maxItems", 4)
-                putJsonObject("items") {
-                    put("type", "object")
-                    putJsonObject("properties") {
-                        putJsonObject("question") {
-                            put("type", "string")
-                            put("description", "Complete question ending with ?")
-                        }
-                        putJsonObject("header") {
-                            put("type", "string")
-                            put("description", "Short chip label (max 12 chars)")
-                        }
-                        putJsonObject("options") {
-                            put("type", "array")
-                            put("minItems", 2)
-                            put("maxItems", 4)
-                            put("description", "2-4 options; do not include Other")
-                            putJsonObject("items") {
-                                put("type", "object")
-                                putJsonObject("properties") {
-                                    putJsonObject("label") { put("type", "string") }
-                                    putJsonObject("description") { put("type", "string") }
-                                    putJsonObject("preview") { put("type", "string") }
-                                }
-                                putJsonArray("required") { add("label"); add("description") }
-                            }
-                        }
-                        putJsonObject("multiSelect") {
-                            put("type", "boolean")
-                            put("default", false)
-                        }
-                    }
-                    putJsonArray("required") { add("question"); add("header"); add("options") }
-                }
-            }
-            putJsonObject("answers") {
-                put("type", "object")
-                put("description", "User answers collected by the permission component")
-            }
-            putJsonObject("metadata") {
-                put("type", "object")
-                putJsonObject("properties") {
-                    putJsonObject("source") { put("type", "string") }
-                }
-            }
-        }
-        putJsonArray("required") { add("questions") }
-    }
+    override val riskLevel = "low"
+    override val permissionName = "userInteraction.askQuestion"
+    override val parameters = ASK_USER_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
         val questions = AskUserQuestionParser.parse(args)
         val existing = args["answers"] as? JsonObject
-        if (existing != null && existing.isNotEmpty()) {
+        if (args.containsKey("answers") && existing != null) {
             val cleaned = JsonObject(existing.filterKeys { it != "__default__" })
             return ToolResult(
                 AskUserQuestionParser.formatModelContent(
@@ -684,46 +590,63 @@ class AskUserQuestionTool(
 }
 
 class ReadSessionContextTool(
-    private val resolve: suspend (sessionId: String, query: String, strategy: String, maxTokens: Int) -> String,
+    private val resolve: suspend (sessionId: String, query: String, strategy: String, maxTokens: Int) -> SessionContextRead,
 ) : Tool {
     override val name = "ReadSessionContext"
-    override val description =
-        "Read relevant or handoff context from another persisted session. " +
-            "Use when the user references #sess_* or asks to continue from a prior session."
+    override val description = READ_SESSION_DESCRIPTION
     override val risk = ToolRisk.READ
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("sessionId") {
-                put("type", "string")
-                put("description", "Target session id")
-            }
-            putJsonObject("query") {
-                put("type", "string")
-                put("description", "What context is needed")
-            }
-            putJsonObject("strategy") {
-                put("type", "string")
-                putJsonArray("enum") { add("relevant"); add("handoff") }
-            }
-            putJsonObject("maxTokens") { put("type", "integer") }
-        }
-        putJsonArray("required") { add("sessionId"); add("query") }
-    }
+    override val readOnly = true
+    override val destructive = false
+    override val concurrentSafe = true
+    override val needsApproval = false
+    override val timeoutMs = READ_SESSION_TIMEOUT_MS
+    override val maxOutputBytes = READ_SESSION_MODEL_BYTES
+    override val sideEffectScope = "session"
+    override val riskLevel = "low"
+    override val permissionName = "session.context.read"
+    override val parameters = READ_SESSION_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
-        val sid = args.str("sessionId") ?: return ToolResult("sessionId required", isError = true)
-        val query = args.str("query") ?: return ToolResult("query required", isError = true)
+        val query = args.str("query")
+            ?: return ToolResult(missingParameter("ReadSessionContext", "query"), isError = true)
+        if (query.isEmpty() || query.length > 4000) {
+            return ToolResult("ReadSessionContext input failed inputSchema validation", isError = true)
+        }
         val strategy = args.str("strategy") ?: "relevant"
-        val maxTokens = args.int("maxTokens") ?: 4000
-        val text = runCatching { resolve(sid, query, strategy, maxTokens) }
-            .getOrElse { "无法读取会话上下文: ${it.message}" }
-        return ToolResult(
-            com.andmx.agent.SystemReminder.wrap(
-                com.andmx.agent.SystemReminder.Source.REFERENCED_SESSION_CONTEXT,
-                text,
-            ).trimEnd(),
-        )
+        if (strategy !in setOf("relevant", "handoff", "topic")) {
+            return ToolResult("ReadSessionContext input failed inputSchema validation", isError = true)
+        }
+        val sessionId = args.str("sessionId") ?: "current"
+        if (sessionId == "current" && strategy != "topic") {
+            return ToolResult("Non-topic strategies require an explicit session id", isError = true)
+        }
+        if (args["attachment"] != null && strategy != "topic") {
+            return ToolResult("Attachments require topic strategy", isError = true)
+        }
+        if (args["attachment"] != null) {
+            val failed = SessionContextRead(
+                status = "failed",
+                source = "none",
+                content = "Topic attachment retrieval is unavailable on this runtime",
+                error = "Topic attachment retrieval is unavailable on this runtime",
+            )
+            return ToolResult(formatReadSessionContextModelContent(failed, sessionId), isError = true)
+        }
+        val maxTokens = args.int("maxTokens") ?: READ_SESSION_CONTEXT_DEFAULT_MAX_TOKENS
+        if (maxTokens !in 1..READ_SESSION_CONTEXT_MAX_TOKENS) {
+            return ToolResult("ReadSessionContext input failed inputSchema validation", isError = true)
+        }
+        val read = runCatching { resolve(sessionId, query, strategy, maxTokens) }.getOrElse {
+            SessionContextRead(
+                status = "failed",
+                source = "none",
+                content = "Failed to read persisted session history.",
+                error = it.message,
+            )
+        }
+        val shownId = read.sessionId ?: sessionId
+        val text = formatReadSessionContextModelContent(read, shownId)
+        return ToolResult(text, isError = read.status == "failed")
     }
 }
 
@@ -746,28 +669,26 @@ class SkillTool(
             "- Do not invoke a skill that is already running\n" +
             "- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)\n" +
             "- If you see a <command-name> tag in the current conversation turn, the skill has ALREADY been loaded - follow the instructions directly instead of calling this tool again"
-    override val risk = ToolRisk.EXECUTE
+    override val risk = ToolRisk.READ
+    override val readOnly = true
+    override val destructive = false
     override val concurrentSafe = true
-    override val timeoutMs = 30_000L
-    override val maxOutputBytes = 100_000
-    override val parameters = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("skill") {
-                put("type", "string")
-                put("description", "The name of a skill from the available-skills list. Do not guess names.")
-            }
-            putJsonObject("args") {
-                put("type", "string")
-                put("description", "Optional arguments for the skill")
-            }
-        }
-        putJsonArray("required") { add("skill") }
-    }
+    override val needsApproval = false
+    override val timeoutMs = SESSION_TOOL_TIMEOUT_MS
+    override val maxOutputBytes = SKILL_RESULT_BYTES
+    override val sideEffectScope = "session"
+    override val riskLevel = "low"
+    override val permissionName = "skill"
+    override val parameters = SKILL_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
-        val skill = args.str("skill")?.trim().orEmpty().removePrefix("/")
-        if (skill.isBlank()) return ToolResult("skill required", isError = true)
+        val raw = when {
+            args.containsKey("skill") -> args.str("skill")
+            args.containsKey("name") -> args.str("name")
+            else -> null
+        }
+        val skill = raw?.trim().orEmpty().removePrefix("/")
+        if (skill.isEmpty()) return ToolResult(SKILL_MISSING_NAME_ERROR, isError = true)
         val skillArgs = args.str("args")
         val out = runCatching { invoke(skill, skillArgs) }
             .getOrElse { "Skill failed: ${it.message}" }
@@ -788,8 +709,11 @@ fun buildZCodeToolSurface(
     planMode: PlanModeState,
     cwdProvider: () -> String,
     onPlanModeChange: (ExecMode) -> Unit = {},
+    currentMode: () -> ExecMode = { planMode.mode },
     askUser: suspend (List<AskQuestion>, JsonObject) -> String = { _, _ -> "用户未作答" },
-    readSession: suspend (String, String, String, Int) -> String = { _, _, _, _ -> "会话上下文不可用" },
+    readSession: suspend (String, String, String, Int) -> SessionContextRead = { id, _, _, _ ->
+        SessionContextRead(status = "not_found", content = "No persisted session was found for $id.")
+    },
     invokeSkill: suspend (String, String?) -> String = { name, _ -> "技能未安装: $name" },
     requestEnterPlanApproval: (suspend (String) -> Boolean)? = null,
     requestExitPlanApproval: suspend (String) -> Boolean = { true },
@@ -824,12 +748,13 @@ fun buildZCodeToolSurface(
         read, write, edit, shellWithHint, grep, glob, fetchZ, webSearchZ,
         TodoReadTool(todo),
         TodoWriteTool(todo, planTool),
-        EnterPlanModeTool(planMode, onPlanModeChange, requestEnterPlanApproval),
+        EnterPlanModeTool(planMode, onPlanModeChange, requestEnterPlanApproval, currentMode),
         ExitPlanModeTool(
             planMode,
             onPlanModeChange,
             requestExitPlanApproval,
             onAllowedPrompts = allowedPromptsSink ?: {},
+            currentMode = currentMode,
         ),
         AskUserQuestionTool(askUser),
         ReadSessionContextTool(readSession),
