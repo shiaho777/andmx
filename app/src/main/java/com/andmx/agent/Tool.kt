@@ -25,6 +25,8 @@ interface Tool {
      */
     val timeoutMs: Long? get() = null
 
+    fun resolveTimeoutMs(args: JsonObject): Long? = timeoutMs
+
     /**
      * May this tool run concurrently with other calls in one model-requested
      * batch (ZCode canRunInParallel)? The scheduler keeps all other calls
@@ -34,12 +36,51 @@ interface Tool {
      */
     val concurrentSafe: Boolean get() = risk == ToolRisk.READ
 
+    val destructive: Boolean get() = false
+
+    val readOnly: Boolean get() = risk == ToolRisk.READ && !destructive
+
+    val needsApproval: Boolean get() = !readOnly
+
+    val allowedInPlanMode: Boolean get() = false
+
+    val permissionName: String? get() = null
+
+    val riskLevel: String get() = when {
+        destructive -> "high"
+        risk == ToolRisk.READ -> "low"
+        risk == ToolRisk.WRITE || risk == ToolRisk.NETWORK -> "medium"
+        else -> "high"
+    }
+
+    val sideEffectScope: String? get() = when {
+        readOnly -> "none"
+        else -> "workspace"
+    }
+
+    val requiresUserInteraction: Boolean get() = sideEffectScope == "userInteraction"
+
+    fun executesDuringStream(): Boolean =
+        readOnly &&
+            concurrentSafe &&
+            !destructive &&
+            !needsApproval &&
+            !requiresUserInteraction &&
+            !alwaysAsk &&
+            sideEffectScope == "none"
+
+    val stopTurnOnSuccess: Boolean get() = false
+
+    val maxOutputBytes: Int? get() = null
+
     /**
      * ZCode `alwaysAsk` 对齐：声明后每次调用都必须经用户确认——项目 allow
      * 规则与 FULL 模式都不能放行；项目 deny / 会话拒绝仍可阻断。
      * 仅会话级「允许本会话」可以免确认。
      */
     val alwaysAsk: Boolean get() = false
+
+    val userApprovalRule: String? get() = null
 
     suspend fun execute(args: JsonObject): ToolResult
 
@@ -65,4 +106,5 @@ data class ToolResult(
     val output: String,
     val isError: Boolean = false,
     val imageUrls: List<String>? = null,
+    val stopTurn: Boolean = false,
 )
