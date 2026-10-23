@@ -205,13 +205,14 @@ object WebFetchCache {
     }
 
     @Synchronized
-    fun count(): Int = map.size
+    fun count(): Int = map.size + WebFetchContentCache.shared.count()
 
     @Synchronized
     fun clear(): Int {
         val removed = map.size
-        map.clear(); totalBytes = 0
-        return removed
+        map.clear()
+        totalBytes = 0
+        return removed + WebFetchContentCache.shared.clear()
     }
 }
 

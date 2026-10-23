@@ -102,9 +102,15 @@ object WebFetchPreapproved {
         val host = url.host ?: return false
         if (host in hosts) return true
         val prefixes = pathPrefixes[host] ?: return false
+        if (containsEncodedDotOrSlash(value)) return false
         val path = url.rawPath ?: url.path ?: return false
-        if (encodedDotOrSlash.containsMatchIn(path)) return false
         return prefixes.any { prefix -> path == prefix || path.startsWith("$prefix/") }
+    }
+
+    fun containsEncodedDotOrSlash(value: String): Boolean {
+        val url = runCatching { URI(value) }.getOrNull() ?: return false
+        val path = url.rawPath ?: url.path ?: return false
+        return encodedDotOrSlash.containsMatchIn(path)
     }
 
     fun domainSubject(url: String): String? {

@@ -15,6 +15,7 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
 import com.andmx.agent.UpdatePlanTool
+import com.andmx.agent.WebFetchTool
 import com.andmx.agent.WebSearchTool
 import com.andmx.agent.WriteFileTool
 import com.andmx.agent.GoalToolState
@@ -844,35 +845,9 @@ fun buildZCodeToolSurface(
     val browse = BrowseTool(networkPolicy, summarizer = webFetchSummarizer)
     val search = WebSearchTool(networkPolicy)
 
-    val fetchZ = AliasedTool(
-        inner = browse,
-        name = "WebFetch",
-        description = "Fetches a URL, converts the page to readable text, and answers prompt against it. " +
-            "Fails on authenticated/private URLs. HTTP is upgraded to HTTPS.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("url") {
-                    put("type", "string")
-                    put("description", "The URL to fetch content from")
-                }
-                putJsonObject("prompt") {
-                    put("type", "string")
-                    put("description", "The prompt to run on the fetched content")
-                }
-            }
-            putJsonArray("required") { add("url"); add("prompt") }
-        },
-        risk = ToolRisk.NETWORK,
-        concurrentSafe = true,
-        needsApproval = true,
-        sideEffectScope = "network",
-        mapArgs = { args ->
-            buildJsonObject {
-                args.forEach { (k, v) -> put(k, v) }
-                args.str("prompt")?.let { put("prompt", it) }
-            }
-        },
+    val fetchZ = WebFetchTool(
+        networkPolicy = networkPolicy,
+        summarizer = webFetchSummarizer,
     )
     val webSearchZ = AliasedTool(
         inner = search,
