@@ -21,8 +21,11 @@ import com.andmx.agent.zcode.TASK_STOP_PARAMETERS
 import com.andmx.agent.zcode.TASK_STOP_PROVIDER_DESCRIPTION
 import com.andmx.agent.zcode.TASK_STOP_TIMEOUT_MS
 import com.andmx.agent.zcode.ambiguousAgentType
+import com.andmx.agent.zcode.ModelValidationIssue
 import com.andmx.agent.zcode.formatAgentBackgroundModelContent
 import com.andmx.agent.zcode.formatAgentCompletedModelContent
+import com.andmx.agent.zcode.handlerFailureContent
+import com.andmx.agent.zcode.validationIssueContent
 import com.andmx.agent.zcode.formatTaskOutputModelContent
 import com.andmx.agent.zcode.formatTaskStopModelContent
 import com.andmx.agent.zcode.invalidTaskId
@@ -138,6 +141,7 @@ class SubAgentOrchestrator(
         val createdAt: Long = System.currentTimeMillis(),
         val background: Boolean = false,
         val agentType: String = "",
+        val outputFile: String = "",
     )
 
     private val _events = MutableSharedFlow<SubAgentEvent>(extraBufferCapacity = 64)
@@ -148,7 +152,6 @@ class SubAgentOrchestrator(
     private val activeAgents = mutableMapOf<String, AgentStateInfo>()
     private val agentJobs = mutableMapOf<String, Job>()
     private val agentLock = kotlinx.coroutines.sync.Mutex()
-    private val queuedAgentMessages = java.util.concurrent.ConcurrentHashMap<String, MutableList<String>>()
 
     data class AgentSnapshot(
         val id: String,
@@ -204,6 +207,7 @@ class SubAgentOrchestrator(
         val model: String = "inherit",
         val thoughtLevel: String = "",
         val injectAgentsMd: Boolean = true,
+        val outputFile: String = "",
     )
 
     suspend fun spawn(task: String, systemHint: String = "", agentId: String = "subagent-${System.currentTimeMillis()}"): String {
@@ -251,10 +255,12 @@ class SubAgentOrchestrator(
             systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef, agentsMd),
         )
 
+        val outputFile = spec.outputFile.ifBlank { agentOutputFile(agentId) }
         agentLock.withLock {
             activeAgents[agentId] = AgentStateInfo(
                 engine, spec.task, AgentState.RUNNING,
                 background = spec.background, agentType = spec.agentName,
+                outputFile = outputFile,
             )
         }
         val startedAt = System.currentTimeMillis()
@@ -280,7 +286,7 @@ class SubAgentOrchestrator(
                     else -> {}
                 }
             }
-            val finalResult = result.toString().ifBlank { "(子代理未返回结果)" }
+            val finalResult = result.toString()
             agentLock.withLock {
                 activeAgents[agentId]?.let { info ->
                     activeAgents[agentId] = info.copy(state = AgentState.COMPLETED, result = finalResult)
@@ -357,14 +363,12 @@ class SubAgentOrchestrator(
         } ?: return "子代理 $agentId 不存在或已关闭"
 
         _events.tryEmit(SubAgentEvent.Resumed(agentId, input))
-        val queued = drainQueuedAgentMessages(agentId)
-        val turnInput = if (queued.isBlank()) input else "$queued\n$input"
 
         var toolUseCount = 0
         return try {
             semaphore.acquire()
             val result = StringBuilder()
-            info.engine.runTurn(settings, turnProvider(), turnInput).collect { event ->
+            info.engine.runTurn(settings, turnProvider(), input).collect { event ->
                 when (event) {
                     is AgentEvent.AssistantDelta -> _events.tryEmit(SubAgentEvent.Delta(agentId, event.text))
                     is AgentEvent.Assistant -> {
@@ -381,7 +385,7 @@ class SubAgentOrchestrator(
                     else -> {}
                 }
             }
-            val finalResult = result.toString().ifBlank { "(子代理未返回结果)" }
+            val finalResult = result.toString()
             agentLock.withLock {
                 activeAgents[agentId]?.let { i ->
                     activeAgents[agentId] = i.copy(state = AgentState.COMPLETED, result = finalResult)
@@ -495,17 +499,15 @@ class SubAgentOrchestrator(
     }
 
     fun queueAgentMessage(agentId: String, message: String): Boolean {
-        if (activeAgents[agentId] == null) return false
-        synchronized(queuedAgentMessages) {
-            queuedAgentMessages.getOrPut(agentId) { mutableListOf() }.add(message)
-        }
+        val info = activeAgents[agentId] ?: return false
+        info.engine.injectUserMessage(message)
         return true
     }
 
-    private fun drainQueuedAgentMessages(agentId: String): String {
-        val queued = synchronized(queuedAgentMessages) { queuedAgentMessages.remove(agentId) } ?: return ""
-        return queued.joinToString("\n")
-    }
+    fun prepareAgentOutputFile(agentId: String): String = agentOutputFile(agentId)
+
+    fun outputFileFor(agentId: String): String =
+        activeAgents[agentId]?.outputFile?.takeIf { it.isNotBlank() } ?: agentOutputFile(agentId)
 
     /** The sub-agent tool that the main agent can call. */
     fun createSubAgentTool(): Tool = SubAgentTool(this)
@@ -755,10 +757,7 @@ class ZCodeAgentTool(
         val requested = args.asString("subagent_type")?.trim().orEmpty().ifEmpty { "general-purpose" }
         val background = args["run_in_background"]?.asBoolean() == true
         val available = listTypes()
-        val direct = resolveAgent(requested)
-        if (direct != null && !direct.enabled) {
-            return ToolResult("Subagent \"${direct.name}\" is disabled", isError = true)
-        }
+        val direct = resolveAgent(requested)?.takeIf { it.enabled }
         val resolved = when {
             direct != null -> direct
             else -> {
@@ -766,16 +765,13 @@ class ZCodeAgentTool(
                 val matches = if (norm.isEmpty()) emptyList() else available.filter { normalizeAgentType(it) == norm }
                 when {
                     matches.size > 1 -> return ToolResult(ambiguousAgentType(requested, matches), isError = true)
-                    matches.size == 1 -> resolveAgent(matches[0])
+                    matches.size == 1 -> resolveAgent(matches[0])?.takeIf { it.enabled }
                     else -> null
                 }
             }
         }
         if (resolved == null) {
             return ToolResult(unknownAgentType(requested, available), isError = true)
-        }
-        if (!resolved.enabled) {
-            return ToolResult("Subagent \"${resolved.name}\" is disabled", isError = true)
         }
         val task = if (description.isNotBlank()) "[$description] $prompt" else prompt
         val runBg = background || resolved.background
@@ -799,12 +795,13 @@ class ZCodeAgentTool(
             model = resolved.model.ifBlank { "inherit" },
             thoughtLevel = resolved.thoughtLevel,
             injectAgentsMd = resolved.injectAgentsMd,
+            outputFile = orchestrator.prepareAgentOutputFile(agentId),
         )
         if (runBg) {
             orchestrator.spawnAsync(spec)
             val names = callerToolNames().toSet()
             val canRead = names.contains("Read") || names.contains("Bash")
-            return ToolResult(formatAgentBackgroundModelContent(agentId, outputFile = null, canReadOutputFile = canRead))
+            return ToolResult(formatAgentBackgroundModelContent(agentId, spec.outputFile, canRead))
         }
         val result = orchestrator.spawn(spec)
         val stats = orchestrator.runStatsFor(agentId)
@@ -861,7 +858,7 @@ class TaskOutputTool(
     override val parameters: JsonObject = TASK_OUTPUT_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
-        val issues = strictIssues(args, TASK_OUTPUT_FIELDS, emptyList()) { key, value ->
+        val issues = strictIssues(args, TASK_OUTPUT_FIELDS, listOf("task_id")) { key, value ->
             when (key) {
                 "task_id" -> if (value.asString() == null) "string" else null
                 "block" -> if (value.asBoolean() == null) "boolean" else null
@@ -871,7 +868,7 @@ class TaskOutputTool(
         }
         if (issues.isNotEmpty()) return ToolResult(toolUseError(name, issues), isError = true)
         val id = args.asString("task_id").orEmpty()
-        if (id.isEmpty()) return ToolResult("Task ID is required", isError = true)
+        if (id.isEmpty()) return ToolResult(handlerFailureContent("Task ID is required"), isError = true)
         val block = args["block"]?.asBoolean() ?: true
         val timeout = args["timeout"]?.asDouble()?.let { raw ->
             if (raw < 0.0 || raw > 600_000.0) {
@@ -879,7 +876,7 @@ class TaskOutputTool(
             }
             raw.toLong()
         } ?: 30_000L
-        val initial = lookupTask(id) ?: return ToolResult("No task found with ID: $id", isError = true)
+        val initial = lookupTask(id) ?: return ToolResult(handlerFailureContent("No task found with ID: $id"), isError = true)
         if (!block) {
             return ToolResult(renderTask(if (initial.active) "not_ready" else "success", initial))
         }
@@ -964,13 +961,17 @@ class SendMessageTool(
         val to = args.asString("to").orEmpty()
         val summary = args.asString("summary").orEmpty()
         val message = args.asString("message").orEmpty()
-        val bounds = mutableListOf<String>()
-        if (to.isEmpty() || to.length > 200) bounds += "to"
-        if (summary.isEmpty() || summary.length > 200) bounds += "summary"
-        if (message.isEmpty() || message.length > SEND_MESSAGE_MAX_CONTENT_CHARS) bounds += "message"
-        if (bounds.isNotEmpty()) {
-            return ToolResult(toolUseError(name, bounds.map { "The required parameter `$it` is missing" }), isError = true)
+        val bounds = mutableListOf<ModelValidationIssue>()
+        fun checkBound(key: String, value: String, max: Int) {
+            when {
+                value.length < 1 -> bounds += ModelValidationIssue.TooSmall("string", 1, true, listOf(key))
+                value.length > max -> bounds += ModelValidationIssue.TooBig("string", max, true, listOf(key))
+            }
         }
+        checkBound("to", to, 200)
+        checkBound("summary", summary, 200)
+        checkBound("message", message, SEND_MESSAGE_MAX_CONTENT_CHARS)
+        if (bounds.isNotEmpty()) return ToolResult(validationIssueContent(bounds), isError = true)
         return when (orchestrator.getState(to)) {
             null, SubAgentOrchestrator.AgentState.CLOSED ->
                 ToolResult(missingLocalAgent(to), isError = true)
@@ -989,7 +990,7 @@ class SendMessageTool(
                     ToolResult(missingLocalAgent(to), isError = true)
                 } else {
                     ToolResult(
-                        "Agent \"$to\" was stopped (${agentStatus(prior)}); resumed it in the background with your message. You'll be notified when it finishes.",
+                        "Agent \"$to\" was stopped (${agentStatus(prior)}); resumed it in the background with your message. You'll be notified when it finishes. Output: ${orchestrator.outputFileFor(to)}",
                     )
                 }
             }
@@ -1063,6 +1064,14 @@ private fun agentStatus(state: SubAgentOrchestrator.AgentState): String = when (
     SubAgentOrchestrator.AgentState.COMPLETED -> "completed"
     SubAgentOrchestrator.AgentState.FAILED -> "failed"
     SubAgentOrchestrator.AgentState.CLOSED -> "killed"
+}
+
+private fun agentOutputFile(agentId: String): String {
+    val dir = java.io.File(System.getProperty("java.io.tmpdir"), "zcode-agents/local/$agentId")
+    dir.mkdirs()
+    val file = java.io.File(dir, "output.txt")
+    if (!file.exists()) file.writeText("")
+    return file.absolutePath
 }
 
 private fun normalizeAgentType(agentType: String): String {

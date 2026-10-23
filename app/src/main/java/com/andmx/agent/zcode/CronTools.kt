@@ -62,52 +62,74 @@ class CronTools(
             cronIssues(name, args, CRON_CREATE_FIELDS, listOf("prompt", "title"))?.let { return it }
             val title = args.trimmedString("title").orEmpty()
             val prompt = args.trimmedString("prompt").orEmpty()
-            if (title.isEmpty() || prompt.isEmpty()) {
-                val missing = buildList {
-                    if (prompt.isEmpty()) add("prompt")
-                    if (title.isEmpty()) add("title")
-                }
-                return ToolResult(toolUseError(name, missing.map { "The required parameter `$it` is missing" }), isError = true)
-            }
             val delay = args.optionalInt("delayMinutes")
             val cron = args.trimmedString("cron")
             val recurring = args.optionalBoolean("recurring")
             val maxRuns = args.optionalInt("maxRuns")
             val intervalUnit = args.trimmedString("intervalUnit")
             val interval = args.optionalInt("interval")
-            if (delay != null && delay !in 1..525_600) {
-                return ToolResult("delayMinutes must be a positive integer up to 525600", isError = true)
+            val constraintIssues = mutableListOf<ModelValidationIssue>()
+            constraintIssues += trimmedBlankIssues(args, listOf("cron", "prompt", "title"))
+            numberBound(delay, "delayMinutes", exclusiveMinZero = true, minInclusive = null, maxInclusive = 525_600)?.let {
+                constraintIssues += it
             }
-            if (maxRuns != null && maxRuns <= 0) {
-                return ToolResult("maxRuns must be a positive integer", isError = true)
+            numberBound(maxRuns, "maxRuns", exclusiveMinZero = true, minInclusive = null, maxInclusive = null)?.let {
+                constraintIssues += it
             }
-            if (interval != null && interval !in 1..200) {
-                return ToolResult("interval must be an integer from 1 to 200", isError = true)
+            numberBound(interval, "interval", exclusiveMinZero = false, minInclusive = 1, maxInclusive = 200)?.let {
+                constraintIssues += it
             }
             val hasDelay = delay != null
-            if (hasDelay && cron != null) {
-                return ToolResult("a relative delay must omit cron; the host computes the schedule from its real clock", isError = true)
-            }
             if (!hasDelay && cron == null) {
-                return ToolResult("cron is required when delayMinutes is not set", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("cron"),
+                    "cron is required when delayMinutes is not set",
+                )
+            }
+            if (hasDelay && cron != null) {
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("cron"),
+                    "a relative delay must omit cron; the host computes the schedule from its real clock",
+                )
             }
             if (hasDelay && recurring == true) {
-                return ToolResult("a relative delay creates a one-shot automation and cannot use recurring=true", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("recurring"),
+                    "a relative delay creates a one-shot automation and cannot use recurring=true",
+                )
             }
             if (hasDelay && maxRuns != null) {
-                return ToolResult("a relative delay runs once and cannot use maxRuns", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("maxRuns"),
+                    "a relative delay runs once and cannot use maxRuns",
+                )
             }
             if (intervalUnit != null && hasDelay) {
-                return ToolResult("intervalUnit is a recurring carrier and cannot combine with a relative delayMinutes", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("intervalUnit"),
+                    "intervalUnit is a recurring carrier and cannot combine with a relative delayMinutes",
+                )
             }
             if ((intervalUnit == null) != (interval == null)) {
-                return ToolResult("intervalUnit and interval must be set together", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("interval"),
+                    "intervalUnit and interval must be set together",
+                )
             }
             if (intervalUnit != null && recurring == false) {
-                return ToolResult("intervalUnit is a recurring carrier and requires recurring=true", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("recurring"),
+                    "intervalUnit is a recurring carrier and requires recurring=true",
+                )
             }
             if (intervalUnit != null && maxRuns != null) {
-                return ToolResult("intervalUnit is a recurring carrier and cannot combine with maxRuns", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("maxRuns"),
+                    "intervalUnit is a recurring carrier and cannot combine with maxRuns",
+                )
+            }
+            if (constraintIssues.isNotEmpty()) {
+                return ToolResult(validationIssueContent(constraintIssues), isError = true)
             }
             val s = store ?: return ToolResult(automationPortMissing(name), isError = true)
             val (created, err) = s.create(
@@ -171,36 +193,52 @@ class CronTools(
             cronIssues(name, args, CRON_UPDATE_FIELDS, listOf("id", "title"))?.let { return it }
             val id = args.trimmedString("id").orEmpty()
             val title = args.trimmedString("title").orEmpty()
-            if (id.isEmpty() || title.isEmpty()) {
-                val missing = buildList {
-                    if (!args.containsKey("id") || id.isEmpty()) add("id")
-                    if (!args.containsKey("title") || title.isEmpty()) add("title")
-                }
-                return ToolResult(toolUseError(name, missing.map { "The required parameter `$it` is missing" }), isError = true)
-            }
             val recurring = args.optionalBoolean("recurring")
             val maxRunsPresent = args.containsKey("maxRuns")
             val maxRunsNull = maxRunsPresent && args["maxRuns"] is JsonNull
             val maxRuns = if (maxRunsPresent && !maxRunsNull) args.optionalInt("maxRuns") else null
-            if (maxRunsNull && recurring != true) {
-                return ToolResult("Clearing maxRuns requires recurring=true in the same update", isError = true)
-            }
-            if (recurring == true && maxRuns != null) {
-                return ToolResult("recurring=true cannot be combined with a numeric maxRuns", isError = true)
-            }
             val intervalUnit = args.trimmedString("intervalUnit")
             val interval = args.optionalInt("interval")
+            val constraintIssues = mutableListOf<ModelValidationIssue>()
+            constraintIssues += trimmedBlankIssues(args, listOf("id", "cron", "prompt", "title"))
+            numberBound(maxRuns, "maxRuns", exclusiveMinZero = true, minInclusive = null, maxInclusive = null)?.let {
+                constraintIssues += it
+            }
+            numberBound(interval, "interval", exclusiveMinZero = false, minInclusive = 1, maxInclusive = 200)?.let {
+                constraintIssues += it
+            }
+            if (maxRunsNull && recurring != true) {
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("maxRuns"),
+                    "Clearing maxRuns requires recurring=true in the same update",
+                )
+            }
+            if (recurring == true && maxRuns != null) {
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("maxRuns"),
+                    "recurring=true cannot be combined with a numeric maxRuns",
+                )
+            }
             if ((intervalUnit == null) != (interval == null)) {
-                return ToolResult("intervalUnit and interval must be set together", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("interval"),
+                    "intervalUnit and interval must be set together",
+                )
             }
             if (intervalUnit != null && recurring == false) {
-                return ToolResult("intervalUnit is a recurring carrier and cannot combine with recurring=false", isError = true)
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("recurring"),
+                    "intervalUnit is a recurring carrier and cannot combine with recurring=false",
+                )
             }
             if (intervalUnit != null && maxRuns != null && !(maxRunsNull && recurring == true)) {
-                return ToolResult(
+                constraintIssues += ModelValidationIssue.Custom(
+                    listOf("maxRuns"),
                     "intervalUnit is a recurring carrier and only allows maxRuns=null with recurring=true",
-                    isError = true,
                 )
+            }
+            if (constraintIssues.isNotEmpty()) {
+                return ToolResult(validationIssueContent(constraintIssues), isError = true)
             }
             val s = store ?: return ToolResult(automationPortMissing(name), isError = true)
             val (updated, err) = s.update(
@@ -240,9 +278,8 @@ class CronTools(
             denyInAutomation(name)?.let { return it }
             cronIssues(name, args, listOf("id"), listOf("id"))?.let { return it }
             val id = args.trimmedString("id").orEmpty()
-            if (id.isEmpty()) {
-                return ToolResult(toolUseError(name, listOf("The required parameter `id` is missing")), isError = true)
-            }
+            val blankId = trimmedBlankIssues(args, listOf("id"))
+            if (blankId.isNotEmpty()) return ToolResult(validationIssueContent(blankId), isError = true)
             val s = store ?: return ToolResult(automationPortMissing(name), isError = true)
             return ToolResult(cronDeleteModelContent(id, s.delete(id)))
         }
@@ -394,6 +431,39 @@ private fun JsonElement.cronBoolean(): Boolean? {
         "false" -> false
         else -> null
     }
+}
+
+private fun trimmedBlankIssues(args: JsonObject, keys: List<String>): List<ModelValidationIssue> {
+    val issues = mutableListOf<ModelValidationIssue>()
+    for (key in keys) {
+        val raw = args[key] ?: continue
+        if (raw is JsonNull) continue
+        val text = raw.cronString() ?: continue
+        if (text.trim().isEmpty()) {
+            issues += ModelValidationIssue.TooSmall("string", 1, true, listOf(key))
+        }
+    }
+    return issues
+}
+
+private fun numberBound(
+    value: Int?,
+    key: String,
+    exclusiveMinZero: Boolean,
+    minInclusive: Int?,
+    maxInclusive: Int?,
+): ModelValidationIssue? {
+    if (value == null) return null
+    if (exclusiveMinZero && value <= 0) {
+        return ModelValidationIssue.TooSmall("number", 0, false, listOf(key))
+    }
+    if (minInclusive != null && value < minInclusive) {
+        return ModelValidationIssue.TooSmall("number", minInclusive, true, listOf(key))
+    }
+    if (maxInclusive != null && value > maxInclusive) {
+        return ModelValidationIssue.TooBig("number", maxInclusive, true, listOf(key))
+    }
+    return null
 }
 
 private fun JsonElement.cronInt(): Int? {

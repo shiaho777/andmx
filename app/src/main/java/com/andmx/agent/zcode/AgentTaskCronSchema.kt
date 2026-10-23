@@ -392,10 +392,10 @@ internal fun formatAgentBackgroundModelContent(
         "agentId: $agentId (internal ID - do not mention to user. Use SendMessage with to: '$agentId' to continue this agent.)",
         "The agent is working in the background. You will be notified automatically when it completes.",
     )
-    return if (canReadOutputFile && !outputFile.isNullOrBlank()) {
+    return if (canReadOutputFile) {
         (launch + listOf(
             "Do not duplicate this agent's work - avoid working with the same files or topics it is using. Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.",
-            "output_file: $outputFile",
+            "output_file: ${outputFile.orEmpty()}",
             "Do NOT Read or tail this file via the shell tool. If the user asks for progress, say the agent is still running; you'll get a completion notification.",
         )).joinToString("\n")
     } else {
@@ -403,6 +403,118 @@ internal fun formatAgentBackgroundModelContent(
             "Briefly tell the user what you launched and end your response. Do not generate any other text - agent results will arrive in a subsequent message.",
         )).joinToString("\n")
     }
+}
+
+internal sealed class ModelValidationIssue {
+    abstract fun json(): String
+
+    data class TooSmall(
+        val origin: String,
+        val minimum: Int,
+        val inclusive: Boolean,
+        val path: List<String>,
+    ) : ModelValidationIssue() {
+        override fun json(): String = boundObject(
+            origin = origin,
+            code = "too_small",
+            limitKey = "minimum",
+            limit = minimum,
+            inclusive = inclusive,
+            path = path,
+            message = sizeMessage("Too small", origin, if (inclusive) ">=" else ">", minimum),
+        )
+    }
+
+    data class TooBig(
+        val origin: String,
+        val maximum: Int,
+        val inclusive: Boolean,
+        val path: List<String>,
+    ) : ModelValidationIssue() {
+        override fun json(): String = boundObject(
+            origin = origin,
+            code = "too_big",
+            limitKey = "maximum",
+            limit = maximum,
+            inclusive = inclusive,
+            path = path,
+            message = sizeMessage("Too big", origin, if (inclusive) "<=" else "<", maximum),
+        )
+    }
+
+    data class Custom(
+        val path: List<String>,
+        val message: String,
+    ) : ModelValidationIssue() {
+        override fun json(): String = """
+            {
+              "code": "custom",
+              "path": [
+                ${path.joinToString(",\n                ") { jsonString(it) }}
+              ],
+              "message": ${jsonString(message)}
+            }
+        """.trimIndent()
+    }
+}
+
+internal fun validationIssueContent(issues: List<ModelValidationIssue>): String {
+    val body = issues.joinToString(separator = ",\n", prefix = "[\n", postfix = "\n]") { issue ->
+        issue.json().lineSequence().joinToString("\n") { "  $it" }
+    }
+    return "<tool_use_error>InputValidationError: $body</tool_use_error>"
+}
+
+internal fun handlerFailureContent(message: String): String = "<tool_use_error>$message</tool_use_error>"
+
+private fun boundObject(
+    origin: String,
+    code: String,
+    limitKey: String,
+    limit: Int,
+    inclusive: Boolean,
+    path: List<String>,
+    message: String,
+): String = """
+    {
+      "origin": ${jsonString(origin)},
+      "code": ${jsonString(code)},
+      "$limitKey": $limit,
+      "inclusive": $inclusive,
+      "path": [
+        ${path.joinToString(",\n        ") { jsonString(it) }}
+      ],
+      "message": ${jsonString(message)}
+    }
+""".trimIndent()
+
+private fun sizeMessage(label: String, origin: String, comparison: String, limit: Int): String {
+    val unit = when (origin) {
+        "string" -> "characters"
+        "array" -> "items"
+        else -> null
+    }
+    return if (unit == null) {
+        "$label: expected $origin to be $comparison$limit"
+    } else {
+        "$label: expected $origin to have $comparison$limit $unit"
+    }
+}
+
+private fun jsonString(value: String): String {
+    val escaped = buildString {
+        for (ch in value) {
+            when (ch) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(ch)
+            }
+        }
+    }
+    return "\"$escaped\""
 }
 
 internal fun unknownAgentType(type: String, available: List<String>): String =

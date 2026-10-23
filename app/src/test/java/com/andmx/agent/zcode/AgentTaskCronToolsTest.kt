@@ -19,6 +19,7 @@ import com.andmx.llm.ApiMessage
 import com.andmx.llm.ChatRequest
 import com.andmx.llm.LlmApi
 import com.andmx.llm.provider.ProviderDefinition
+import com.andmx.settings.CustomSubAgent
 import com.andmx.settings.ProviderSettings
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.booleanOrNull
@@ -141,13 +142,55 @@ class AgentTaskCronToolsTest {
                 "<usage>subagent_tokens: 4\ntool_uses: 0\nduration_ms: 1</usage>",
             formatAgentCompletedModelContent("  ", "agent_1", 0, 1, totalTokens = 4),
         )
-        assertTrue(formatAgentBackgroundModelContent("agent_1", null, true).contains("Briefly tell the user what you launched"))
-        assertFalse(formatAgentBackgroundModelContent("agent_1", null, true).contains("output_file:"))
+        val background = formatAgentBackgroundModelContent("agent_1", "/tmp/zcode-agents/agent_1/output.txt", true)
+        assertTrue(background.contains("Do not duplicate this agent's work - avoid working with the same files or topics it is using."))
+        assertTrue(background.contains("output_file: /tmp/zcode-agents/agent_1/output.txt"))
+        assertTrue(background.contains("Do NOT Read or tail this file via the shell tool."))
+        assertFalse(background.contains("Briefly tell the user what you launched"))
+        val hidden = formatAgentBackgroundModelContent("agent_1", "/tmp/zcode-agents/agent_1/output.txt", false)
+        assertTrue(hidden.contains("Briefly tell the user what you launched"))
+        assertFalse(hidden.contains("output_file:"))
+        val launched = ZCodeAgentTool(
+            orch,
+            resolveAgent = { type ->
+                CustomSubAgent(id = "built-in:${type ?: "general-purpose"}", name = type ?: "general-purpose")
+            },
+            listTypes = { listOf("general-purpose") },
+        ).execute(buildJsonObject {
+            put("description", "bg work")
+            put("prompt", "do it")
+            put("run_in_background", true)
+        })
+        assertFalse(launched.isError)
+        assertTrue(launched.output.contains("output_file:"))
+        assertTrue(launched.output.contains("output.txt"))
+        assertTrue(launched.output.contains("Do not duplicate this agent's work"))
+        val disabled = ZCodeAgentTool(
+            orch,
+            resolveAgent = { CustomSubAgent(id = "off", name = "Explore", enabled = false) },
+            listTypes = { listOf("general-purpose") },
+        ).execute(buildJsonObject {
+            put("description", "find the bug")
+            put("prompt", "look")
+            put("subagent_type", "Explore")
+        })
+        assertTrue(disabled.isError)
+        assertEquals(
+            "Agent type 'Explore' not found. Available agents: general-purpose",
+            disabled.output,
+        )
 
+        val omitted = TaskOutputTool(orch).execute(buildJsonObject {})
+        assertTrue(omitted.isError)
+        assertEquals(
+            "<tool_use_error>InputValidationError: TaskOutput failed due to the following issue:\n" +
+                "The required parameter `task_id` is missing</tool_use_error>",
+            omitted.output,
+        )
         val output = TaskOutputTool(orch).execute(buildJsonObject { put("task_id", "") })
-        assertEquals("Task ID is required", output.output)
+        assertEquals("<tool_use_error>Task ID is required</tool_use_error>", output.output)
         val missingTask = TaskOutputTool(orch).execute(buildJsonObject { put("task_id", "missing") })
-        assertEquals("No task found with ID: missing", missingTask.output)
+        assertEquals("<tool_use_error>No task found with ID: missing</tool_use_error>", missingTask.output)
         assertTrue(missingTask.isError)
         assertEquals("<retrieval_status>timeout</retrieval_status>", formatTaskOutputModelContent("timeout"))
 
@@ -171,6 +214,17 @@ class AgentTaskCronToolsTest {
         })
         assertTrue(missingSummary.isError)
         assertTrue(missingSummary.output.contains("The required parameter `summary` is missing"))
+        val emptyTo = send.execute(buildJsonObject {
+            put("to", "")
+            put("summary", "say hello now")
+            put("message", "hello")
+        })
+        assertEquals(
+            validationIssueContent(
+                listOf(ModelValidationIssue.TooSmall("string", 1, true, listOf("to"))),
+            ),
+            emptyTo.output,
+        )
         val missingAgent = send.execute(buildJsonObject {
             put("to", "agent_x")
             put("summary", "say hello now")
@@ -189,8 +243,26 @@ class AgentTaskCronToolsTest {
             put("cron", "0 9 * * *")
         })
         assertEquals(
-            "a relative delay must omit cron; the host computes the schedule from its real clock",
+            validationIssueContent(
+                listOf(
+                    ModelValidationIssue.Custom(
+                        listOf("cron"),
+                        "a relative delay must omit cron; the host computes the schedule from its real clock",
+                    ),
+                ),
+            ),
             relative.output,
+        )
+        val blankTitle = cron().Create().execute(buildJsonObject {
+            put("title", "   ")
+            put("prompt", "提醒喝水")
+            put("cron", "0 9 * * *")
+        })
+        assertEquals(
+            validationIssueContent(
+                listOf(ModelValidationIssue.TooSmall("string", 1, true, listOf("title"))),
+            ),
+            blankTitle.output,
         )
         val unconfigured = cron().Create().execute(buildJsonObject {
             put("title", "每天喝水")
