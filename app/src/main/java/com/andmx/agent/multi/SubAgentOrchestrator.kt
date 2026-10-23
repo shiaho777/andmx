@@ -53,9 +53,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.text.Normalizer
 import java.util.UUID
@@ -151,7 +151,7 @@ class SubAgentOrchestrator(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeAgents = mutableMapOf<String, AgentStateInfo>()
     private val agentJobs = mutableMapOf<String, Job>()
-    private val agentLock = kotlinx.coroutines.sync.Mutex()
+    private val agentLock = ReentrantLock()
 
     data class AgentSnapshot(
         val id: String,
@@ -164,11 +164,13 @@ class SubAgentOrchestrator(
     )
 
     fun listAgents(): List<Pair<String, AgentState>> =
-        activeAgents.entries.map { (id, info) -> id to info.state }
+        agentLock.withLock {
+            activeAgents.entries.map { (id, info) -> id to info.state }
+        }
 
-    fun listAgentSnapshots(): List<AgentSnapshot> =
-        activeAgents.entries
-            .map { (id, info) ->
+    fun listAgentSnapshots(): List<AgentSnapshot> {
+        val snapshots = agentLock.withLock {
+            activeAgents.entries.map { (id, info) ->
                 AgentSnapshot(
                     id = id,
                     task = info.task,
@@ -179,12 +181,14 @@ class SubAgentOrchestrator(
                     agentType = info.agentType,
                 )
             }
-            .sortedByDescending { it.createdAt }
+        }
+        return snapshots.sortedByDescending { it.createdAt }
+    }
 
-    fun getResult(agentId: String): String? = activeAgents[agentId]?.result
+    fun getResult(agentId: String): String? = agentLock.withLock { activeAgents[agentId]?.result }
 
     /** Get the state of a sub-agent. */
-    fun getState(agentId: String): AgentState? = activeAgents[agentId]?.state
+    fun getState(agentId: String): AgentState? = agentLock.withLock { activeAgents[agentId]?.state }
 
     /**
      * Spawn a single sub-agent for a specific task.
@@ -408,9 +412,13 @@ class SubAgentOrchestrator(
      * running, or closed agents.
      */
     fun resumeAsync(agentId: String, input: String): Boolean {
-        val info = activeAgents[agentId] ?: return false
-        if (info.state == AgentState.RUNNING || info.state == AgentState.CLOSED) return false
-        activeAgents[agentId] = info.copy(background = true)
+        val accepted = agentLock.withLock {
+            val info = activeAgents[agentId] ?: return@withLock false
+            if (info.state == AgentState.RUNNING || info.state == AgentState.CLOSED) return@withLock false
+            activeAgents[agentId] = info.copy(background = true)
+            true
+        }
+        if (!accepted) return false
         val job = scope.launch {
             try {
                 resume(agentId, input)
@@ -427,7 +435,7 @@ class SubAgentOrchestrator(
      * Mirrors Codex's waitAgent.
      */
     suspend fun wait(agentId: String, timeoutMs: Long = 60_000): String {
-        val info = activeAgents[agentId] ?: return "子代理 $agentId 不存在"
+        val info = agentLock.withLock { activeAgents[agentId] } ?: return "子代理 $agentId 不存在"
         if (info.state == AgentState.COMPLETED) return info.result
         if (info.state == AgentState.FAILED) return info.result
         // For running agents, wait on the events flow
@@ -436,7 +444,7 @@ class SubAgentOrchestrator(
                 event is SubAgentEvent.Completed && event.agentId == agentId
             } as? SubAgentEvent.Completed
         }
-        return result?.result ?: activeAgents[agentId]?.result ?: "(等待超时)"
+        return result?.result ?: agentLock.withLock { activeAgents[agentId]?.result } ?: "(等待超时)"
     }
 
     /**
@@ -445,8 +453,12 @@ class SubAgentOrchestrator(
      */
     fun close(agentId: String): Boolean {
         agentJobs.remove(agentId)?.cancel()
-        val info = activeAgents[agentId] ?: return false
-        activeAgents[agentId] = info.copy(state = AgentState.CLOSED, result = info.result.ifBlank { "(已关闭)" })
+        val closed = agentLock.withLock {
+            val info = activeAgents[agentId] ?: return@withLock false
+            activeAgents[agentId] = info.copy(state = AgentState.CLOSED, result = info.result.ifBlank { "(已关闭)" })
+            true
+        }
+        if (!closed) return false
         _events.tryEmit(SubAgentEvent.Closed(agentId))
         return true
     }
@@ -454,14 +466,20 @@ class SubAgentOrchestrator(
     fun cancelAll(reason: String = "已停止") {
         agentJobs.values.forEach { it.cancel() }
         agentJobs.clear()
-        val ids = activeAgents.keys.toList()
-        for (id in ids) {
-            val info = activeAgents[id] ?: continue
-            if (info.state == AgentState.RUNNING || info.state == AgentState.WAITING) {
-                activeAgents[id] = info.copy(state = AgentState.CLOSED, result = reason)
-                _events.tryEmit(SubAgentEvent.Failed(id, reason))
-                _events.tryEmit(SubAgentEvent.Closed(id))
+        val closedIds = agentLock.withLock {
+            activeAgents.keys.toList().mapNotNull { id ->
+                val info = activeAgents[id] ?: return@mapNotNull null
+                if (info.state == AgentState.RUNNING || info.state == AgentState.WAITING) {
+                    activeAgents[id] = info.copy(state = AgentState.CLOSED, result = reason)
+                    id
+                } else {
+                    null
+                }
             }
+        }
+        for (id in closedIds) {
+            _events.tryEmit(SubAgentEvent.Failed(id, reason))
+            _events.tryEmit(SubAgentEvent.Closed(id))
         }
     }
 
@@ -499,15 +517,16 @@ class SubAgentOrchestrator(
     }
 
     fun queueAgentMessage(agentId: String, message: String): Boolean {
-        val info = activeAgents[agentId] ?: return false
-        info.engine.injectUserMessage(message)
+        val engine = agentLock.withLock { activeAgents[agentId]?.engine } ?: return false
+        engine.injectUserMessage(message)
         return true
     }
 
     fun prepareAgentOutputFile(agentId: String): String = agentOutputFile(agentId)
 
     fun outputFileFor(agentId: String): String =
-        activeAgents[agentId]?.outputFile?.takeIf { it.isNotBlank() } ?: agentOutputFile(agentId)
+        agentLock.withLock { activeAgents[agentId]?.outputFile?.takeIf { it.isNotBlank() } }
+            ?: agentOutputFile(agentId)
 
     /** The sub-agent tool that the main agent can call. */
     fun createSubAgentTool(): Tool = SubAgentTool(this)
@@ -590,7 +609,7 @@ class SubAgentOrchestrator(
     /** Clean up all active sub-agents. */
     fun shutdown() {
         cancelAll("已关闭")
-        activeAgents.clear()
+        agentLock.withLock { activeAgents.clear() }
         agentJobs.clear()
         scope.cancel()
     }
