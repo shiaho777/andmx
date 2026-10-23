@@ -15,6 +15,7 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
 import com.andmx.agent.UpdatePlanTool
+import com.andmx.agent.LegacyWebSearchTool
 import com.andmx.agent.WebFetchTool
 import com.andmx.agent.WebSearchTool
 import com.andmx.agent.WriteFileTool
@@ -88,38 +89,6 @@ private class GhRateLimitHintTool(
             ToolResult(result.output + "\n\n" + GhRateLimitHint.HINT, isError = result.isError, imageUrls = result.imageUrls)
         } else {
             result
-        }
-    }
-}
-
-private class AliasedTool(
-    private val inner: Tool,
-    override val name: String,
-    override val description: String,
-    override val parameters: JsonObject,
-    override val risk: ToolRisk = inner.risk,
-    override val timeoutMs: Long? = inner.timeoutMs,
-    override val concurrentSafe: Boolean = inner.concurrentSafe,
-    override val destructive: Boolean = inner.destructive,
-    override val readOnly: Boolean = risk == ToolRisk.READ && !destructive,
-    override val needsApproval: Boolean = !readOnly,
-    override val permissionName: String? = inner.permissionName,
-    override val sideEffectScope: String? = if (readOnly) "none" else "workspace",
-    override val riskLevel: String = when {
-        destructive -> "high"
-        readOnly -> "low"
-        risk == ToolRisk.WRITE || risk == ToolRisk.NETWORK -> "medium"
-        else -> "high"
-    },
-    private val mapArgs: (JsonObject) -> JsonObject = { it },
-) : Tool, ExecutionAwareTool {
-    override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
-    override suspend fun execute(callId: String, args: JsonObject): ToolResult {
-        val mapped = mapArgs(args)
-        return if (inner is ExecutionAwareTool && callId.isNotBlank()) {
-            inner.execute(callId, mapped)
-        } else {
-            inner.execute(mapped)
         }
     }
 }
@@ -843,40 +812,13 @@ fun buildZCodeToolSurface(
     val glob = GlobTool(context, cwdProvider)
     val listDir = ListDirTool(context)
     val browse = BrowseTool(networkPolicy, summarizer = webFetchSummarizer)
-    val search = WebSearchTool(networkPolicy)
+    val search = LegacyWebSearchTool(networkPolicy)
 
     val fetchZ = WebFetchTool(
         networkPolicy = networkPolicy,
         summarizer = webFetchSummarizer,
     )
-    val webSearchZ = AliasedTool(
-        inner = search,
-        name = "WebSearch",
-        description = "Search the web. Returns result blocks with titles and URLs. " +
-            "allowed_domains / blocked_domains filter results. After answering, list Sources as markdown links.",
-        parameters = buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") {
-                putJsonObject("query") {
-                    put("type", "string")
-                    put("description", "The search query to use")
-                }
-                putJsonObject("allowed_domains") {
-                    put("type", "array")
-                    putJsonObject("items") { put("type", "string") }
-                    put("description", "Only include results from these domains")
-                }
-                putJsonObject("blocked_domains") {
-                    put("type", "array")
-                    putJsonObject("items") { put("type", "string") }
-                    put("description", "Never include results from these domains")
-                }
-            }
-            putJsonArray("required") { add("query") }
-        },
-        risk = ToolRisk.NETWORK,
-        concurrentSafe = true,
-    )
+    val webSearchZ = WebSearchTool(networkPolicy = networkPolicy)
 
     val zcode = mutableListOf(
         read, write, edit, shellWithHint, grep, glob, fetchZ, webSearchZ,

@@ -46,7 +46,7 @@ class ListDirTool(context: Context) : Tool {
  * If a [NetworkPolicy] is provided, the search engine host is checked against
  * the policy before making a request.
  */
-class WebSearchTool(
+class LegacyWebSearchTool(
     private val networkPolicy: com.andmx.exec.policy.NetworkPolicy = com.andmx.exec.policy.NetworkPolicy.PERMISSIVE,
 ) : Tool {
     override val name = "web_search"

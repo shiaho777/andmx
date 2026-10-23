@@ -92,14 +92,13 @@ class WebFetchToolTest {
         assertEquals(60_000L, fetch.timeoutMs)
         assertEquals(100_000, fetch.maxOutputBytes)
         val search = legacy.single { it.name == "WebSearch" }
+        assertTrue(search is WebSearchTool)
         assertFalse(search is WebFetchTool)
-        assertFalse(search.readOnly)
-        assertTrue(search.needsApproval)
-        assertEquals(
-            "Search the web. Returns result blocks with titles and URLs. " +
-                "allowed_domains / blocked_domains filter results. After answering, list Sources as markdown links.",
-            search.description,
-        )
+        assertTrue(search.readOnly)
+        assertFalse(search.needsApproval)
+        assertEquals("network", search.sideEffectScope)
+        assertEquals("low", search.riskLevel)
+        assertFalse(search.description.contains("provider-native", ignoreCase = true))
     }
 
     @Test
