@@ -34,6 +34,7 @@ class McpClient(
     private val argv: List<String>,
     private val env: Map<String, String>,
     private val protocolVersion: String = McpProtocol.LATEST_VERSION,
+    private val timeoutMs: Long = 60_000,
     private val elicitationHandler: (suspend (McpElicitationRequest) -> McpElicitationResponse)? = null,
 ) {
     private var process: Process? = null
@@ -293,7 +294,7 @@ class McpClient(
         val deferred = CompletableDeferred<JsonRpc.Response>()
         pending[id] = deferred
         synchronized(w) { w.write(JsonRpc.request(id, method, params)); w.newLine(); w.flush() }
-        val resp = runCatching { withTimeout(60_000) { deferred.await() } }.getOrNull()
+        val resp = runCatching { withTimeout(timeoutMs.takeIf { it > 0L } ?: 60_000L) { deferred.await() } }.getOrNull()
         pending.remove(id)  // Always clean up, even on timeout
         if (resp?.error != null) throw RuntimeException("MCP error: ${resp.error}")
         return resp?.result

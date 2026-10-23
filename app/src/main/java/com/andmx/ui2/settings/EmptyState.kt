@@ -36,13 +36,13 @@ fun EmptyState(
             tint = MaterialTheme.colorScheme.outline
         )
         Text(
-            text = title,
+            text = tr(title),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 16.dp)
         )
         Text(
-            text = message,
+            text = tr(message),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

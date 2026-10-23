@@ -1,5 +1,9 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,7 +33,7 @@ fun AmbientStrip(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         for (item in active) {
@@ -82,11 +86,11 @@ private fun AmbientSuggestionCard(
                 }
             }
             TextButton(onClick = onDismiss) {
-                Text("忽略")
+                Text(tr("忽略"))
             }
             if (action.isNotBlank()) {
                 TextButton(onClick = onPick) {
-                    Text("采用")
+                    Text(tr("采用"))
                 }
             }
         }

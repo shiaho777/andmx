@@ -34,6 +34,7 @@ class McpHttpTransport(
     private val endpointUrl: String,
     private val headers: Map<String, String> = emptyMap(),
     private val protocolVersion: String = McpProtocol.LATEST_VERSION,
+    private val timeoutMs: Long = 60_000,
     private val elicitationHandler: (suspend (McpElicitationRequest) -> McpElicitationResponse)? = null,
 ) : AutoCloseable {
     companion object {
@@ -109,7 +110,8 @@ class McpHttpTransport(
         val deferred = CompletableDeferred<JsonRpc.Response>()
         pending[id] = deferred
         sendHttpPost(JsonRpc.request(id, method, params))
-        val resp = runCatching { withTimeout(TIMEOUT_MS) { deferred.await() } }.getOrNull()
+        val waitMs = timeoutMs.takeIf { it > 0L } ?: TIMEOUT_MS
+        val resp = runCatching { withTimeout(waitMs) { deferred.await() } }.getOrNull()
         pending.remove(id)
         if (resp?.error != null) throw RuntimeException("MCP error: ${resp.error}")
         return resp?.result
@@ -123,8 +125,8 @@ class McpHttpTransport(
                 val url = URL(endpointUrl)
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 30_000
-                    readTimeout = 30_000
+                    connectTimeout = (timeoutMs.takeIf { it > 0L } ?: 30_000L).coerceIn(1L, 120_000L).toInt()
+                    readTimeout = (timeoutMs.takeIf { it > 0L } ?: 30_000L).coerceIn(1L, 120_000L).toInt()
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
                     setRequestProperty("Accept", "application/json, text/event-stream")

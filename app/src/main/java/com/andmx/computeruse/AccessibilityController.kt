@@ -17,6 +17,19 @@ import android.text.TextUtils
  * constraint (Codex Computer Use parity) — it refuses to act when the
  * foreground window is AndMX itself.
  */
+internal fun hostNavigationBlock(key: String, foregroundPackage: String?, hostPackage: String): String? {
+    val normalized = key.trim().lowercase()
+    val back = normalized == "back" || normalized == "返回"
+    val home = normalized == "home" || normalized == "主页"
+    if (!back && !home) return null
+    if (foregroundPackage != null && foregroundPackage != hostPackage) return null
+    return if (back) {
+        "当前前台是 AndMX 自己，按返回会关掉这个对话。先打开要操作的应用，再按返回。"
+    } else {
+        "当前前台是 AndMX 自己，按主页会离开这个对话。先切换到要操作的应用。"
+    }
+}
+
 class AccessibilityController(private val context: Context) {
 
     /** True if the user has enabled our service in system Accessibility settings. */
@@ -57,6 +70,9 @@ class AccessibilityController(private val context: Context) {
 
     fun sendKey(key: String): Result<Unit> {
         val service = AndmxAccessibilityService.instance ?: return notConnected()
+        hostNavigationBlock(key, service.foregroundPackage(), context.packageName)?.let {
+            return Result.failure(IllegalStateException(it))
+        }
         val ok = service.sendKey(key)
         return if (ok) Result.success(Unit) else Result.failure(RuntimeException("按键失败: $key"))
     }

@@ -1,5 +1,7 @@
 package com.andmx.ui2.drawer
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,7 +55,6 @@ fun ConversationRow(
     showWorkspaceMeta: Boolean = false,
     archivedMode: Boolean = false,
     streaming: Boolean = false,
-    unread: Boolean = false,
     onClick: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -62,8 +63,9 @@ fun ConversationRow(
     onTogglePin: () -> Unit,
     onMoveToGroup: () -> Unit = {},
 ) {
+    val unread = conversation.unreadAt != null
     var menuOpen by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(12.dp)
     val bg = if (selected) {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     } else {
@@ -75,7 +77,11 @@ fun ConversationRow(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val ts = if (sortMode == SortMode.CREATED) conversation.createdAt else conversation.updatedAt
+    val ts = activityTimestamp(
+        createdAt = conversation.createdAt,
+        updatedAt = conversation.updatedAt,
+        preferCreated = sortMode == SortMode.CREATED,
+    )
     val timeText = relativeTaskTime(ts)
     val title = conversation.title.ifBlank { "新任务" }
     val multiLine = showWorkspaceMeta || !compact
@@ -83,7 +89,7 @@ fun ConversationRow(
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .padding(vertical = 2.dp),
     ) {
         Row(
             Modifier
@@ -209,7 +215,7 @@ fun ConversationRow(
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     if (archivedMode) {
                         DropdownMenuItem(
-                            text = { Text("取消归档") },
+                            text = { Text(tr("取消归档")) },
                             leadingIcon = { Icon(Icons.Outlined.Unarchive, null) },
                             onClick = {
                                 menuOpen = false
@@ -217,7 +223,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("重命名任务") },
+                            text = { Text(tr("重命名任务")) },
                             leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, null) },
                             onClick = {
                                 menuOpen = false
@@ -235,7 +241,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("删除") },
+                            text = { Text(tr("删除")) },
                             leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                             onClick = {
                                 menuOpen = false
@@ -254,7 +260,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("重命名任务") },
+                            text = { Text(tr("重命名任务")) },
                             leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, null) },
                             onClick = {
                                 menuOpen = false
@@ -262,7 +268,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("移动到分组") },
+                            text = { Text(tr("移动到分组")) },
                             leadingIcon = { Icon(Icons.Outlined.Folder, null) },
                             onClick = {
                                 menuOpen = false
@@ -270,7 +276,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("归档任务") },
+                            text = { Text(tr("归档任务")) },
                             leadingIcon = { Icon(Icons.Outlined.Archive, null) },
                             onClick = {
                                 menuOpen = false
@@ -278,7 +284,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("删除") },
+                            text = { Text(tr("删除")) },
                             leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                             onClick = {
                                 menuOpen = false

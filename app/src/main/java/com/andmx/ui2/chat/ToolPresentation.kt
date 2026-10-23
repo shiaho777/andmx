@@ -12,10 +12,12 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.andmx.agent.ToolArgs
+import com.andmx.ui2.settings.tr
 
 /**
  * Resolves a tool call to its UI presentation. Single authority for the
@@ -48,7 +50,9 @@ object ToolPresentation {
         val icon: ImageVector,
     )
 
-    fun family(name: String): Family = when (ToolArgs.canonical(name)) {
+    fun family(name: String): Family = rawFamily(name).let { it.copy(label = tr(it.label)) }
+
+    private fun rawFamily(name: String): Family = when (ToolArgs.canonical(name)) {
         "shell" -> Family("终端", Icons.Outlined.Terminal)
         "git" -> Family("Git", Icons.Outlined.Terminal)
         "read", "list", "todoread" -> Family("读取", Icons.Outlined.Description)
@@ -65,11 +69,15 @@ object ToolPresentation {
         "sessionctx" -> Family("会话", Icons.Outlined.History)
         "goal" -> Family("目标", Icons.Outlined.Flag)
         "mcp" -> Family("MCP", Icons.Outlined.Code)
+        "cron" -> Family("定时", Icons.Outlined.Schedule)
+        "offpeak" -> Family("闲时", Icons.Outlined.Schedule)
         else -> Family(displayName(name), Icons.Outlined.Build)
     }
 
     /** Short verb label reflecting current status, ZCode-aligned. */
-    fun kindLabel(tc: ToolCall): String {
+    fun kindLabel(tc: ToolCall): String = tr(kindLabelZh(tc))
+
+    private fun kindLabelZh(tc: ToolCall): String {
         val st = status(tc)
         if (st == Status.FAILED) return "失败"
         if (st == Status.DENIED) return "已拒绝"
@@ -97,9 +105,10 @@ object ToolPresentation {
             "sessionctx" -> if (running) "读取上下文" else "已读取上下文"
             "goal" -> if (running) "更新目标" else "目标已更新"
             "mcp" -> if (running) "调用中" else "已调用"
-            "computer" -> if (running) "操作屏幕中" else "已操作屏幕"
+            "computer" -> if (running) "Android Use 中" else "Android Use"
             "listmodels" -> if (running) "列出模型" else "已列出模型"
             "cron" -> if (running) "更新定时任务" else "定时任务已更新"
+            "offpeak" -> if (running) "排入闲时" else "已排入闲时"
             "workflow" -> if (running) "工作流操作" else "工作流已更新"
             else -> if (running) "运行中" else family(tc.name).label
         }
@@ -126,8 +135,8 @@ object ToolPresentation {
         return when {
             tc.isError && out.isNotBlank() -> out.firstLine().take(40)
             lines <= 0 -> null
-            lines == 1 -> "1 行"
-            else -> "$lines 行"
+            lines == 1 -> tr("1 行")
+            else -> tr("$lines 行")
         }
     }
 
@@ -189,7 +198,8 @@ object ToolPresentation {
         return items.takeIf { it.isNotEmpty() }
     }
 
-    sealed class Action(val label: String) {
+    sealed class Action(private val zh: String) {
+        val label: String get() = tr(zh)
         class OpenFile(val path: String) : Action("打开文件")
         data object OpenTerminal : Action("终端")
         class OpenUrl(val url: String) : Action("打开链接")

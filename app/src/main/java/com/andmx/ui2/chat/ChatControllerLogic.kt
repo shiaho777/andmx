@@ -6,7 +6,7 @@ import com.andmx.llm.ApiMessage
 import com.andmx.llm.ApiToolCall
 
 internal object ChatControllerLogic {
-    const val SKILL_PAYLOAD_LIMIT = 14_000
+    const val MAX_SKILL_BYTES = 100_000
 
     fun formatSkillPayload(
         name: String,
@@ -14,23 +14,48 @@ internal object ChatControllerLogic {
         body: String,
         scripts: List<String>,
         args: String?,
-    ): String = buildString {
-        appendLine("<command-name>$name</command-name>")
-        appendLine("<command-message>Skill loaded into context. Follow the instructions below.</command-message>")
-        if (!args.isNullOrBlank()) appendLine("<command-args>$args</command-args>")
-        appendLine()
-        appendLine("# Skill: $name")
-        appendLine("Path: $path")
-        if (scripts.isNotEmpty()) appendLine("Bundled files: ${scripts.joinToString()}")
-        appendLine()
-        append(body.ifBlank { "(skill at $path; empty body)" })
-        appendLine()
-        appendLine()
-        appendLine("Treat the skill body as loaded instructions for this turn. Do not re-invoke Skill for the same name.")
-    }.let { full ->
-        if (full.length > SKILL_PAYLOAD_LIMIT) {
-            full.take(SKILL_PAYLOAD_LIMIT) + "\n[truncated: skill payload exceeded $SKILL_PAYLOAD_LIMIT chars]"
-        } else full
+    ): String {
+        val base = skillBaseDirectory(path)
+        val expanded = body.replace(SKILL_DIR_VAR, base)
+        val (content, truncated) = truncateUtf8(expanded, MAX_SKILL_BYTES)
+        return buildString {
+            appendLine("""<skill_content name="$name">""")
+            appendLine("# Skill: $name")
+            appendLine()
+            if (content.isNotEmpty()) appendLine(content)
+            if (!args.isNullOrBlank()) appendLine(args)
+            appendLine()
+            appendLine("Base directory for this skill: $base")
+            appendLine("Relative paths in this skill are relative to this base directory.")
+            if (scripts.isNotEmpty()) appendLine("Bundled files: ${scripts.joinToString()}")
+            if (truncated) appendLine("[Skill content truncated]")
+            append("</skill_content>")
+        }
+    }
+
+    private val SKILL_DIR_VAR = Regex("\\$\\{(CLAUDE_SKILL_DIR|ZCODE_SKILL_DIR)\\}")
+
+    private fun skillBaseDirectory(path: String): String = when {
+        path.endsWith("/SKILL.md") -> path.substringBeforeLast('/')
+        path.endsWith("SKILL.md") -> path.substringBeforeLast('/').ifBlank { path }
+        else -> path.substringBeforeLast('/').ifBlank { path }
+    }
+
+    private fun truncateUtf8(text: String, maxBytes: Int): Pair<String, Boolean> {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) return text to false
+        var end = maxBytes
+        while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
+        val lead = bytes[end].toInt() and 0xFF
+        val need = when {
+            lead and 0x80 == 0 -> 1
+            lead and 0xE0 == 0xC0 -> 2
+            lead and 0xF0 == 0xE0 -> 3
+            lead and 0xF8 == 0xF0 -> 4
+            else -> 1
+        }
+        val cut = if (end + need <= maxBytes) end + need else end
+        return bytes.copyOfRange(0, cut).toString(Charsets.UTF_8) to true
     }
 
     fun rebuildHistory(msgs: List<MessageEntity>): List<ApiMessage> {

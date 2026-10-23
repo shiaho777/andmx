@@ -171,6 +171,12 @@ class ConversationRepository(context: Context) {
     suspend fun setArchived(conversationId: Long, archived: Boolean) =
         dao.setArchived(conversationId, archived)
 
+    suspend fun setUnreadAt(conversationId: Long, at: Long?) =
+        dao.setUnreadAt(conversationId, at)
+
+    suspend fun setTaskStatus(conversationId: Long, status: String) =
+        dao.setTaskStatus(conversationId, status)
+
     suspend fun setPinned(conversationId: Long, pinned: Boolean) =
         dao.setPinned(conversationId, pinned)
 

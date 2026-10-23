@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowRunEntity::class,
         WorkflowEventEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -49,6 +49,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_14_15,
                     MIGRATION_15_16,
                     MIGRATION_16_17,
+                    MIGRATION_17_18,
                 )
                 .build()
                 .also { instance = it }
@@ -334,6 +335,13 @@ abstract class AndmxDatabase : RoomDatabase() {
         private val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE messages ADD COLUMN feedback INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN unreadAt INTEGER")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN taskStatus TEXT NOT NULL DEFAULT 'idle'")
             }
         }
 

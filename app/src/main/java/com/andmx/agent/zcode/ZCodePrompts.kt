@@ -154,13 +154,14 @@ You have exited plan mode. You can now make edits, run tools, and take actions.
         val isGitRepo: Boolean,
         val platform: String = "android",
         val shell: String = "sh",
-        val osVersion: String = "Android (proot Alpine guest)",
+        val osVersion: String = "Android",
         val modelLabel: String,
         val branch: String = "",
         val mainBranch: String = "main",
         val gitUser: String = "",
         val gitStatus: String = "",
         val recentCommits: String = "",
+        val deviceNote: String = "",
     )
 
     /** env_info section (upstream order: after memory, before context_management). */
@@ -172,6 +173,7 @@ You have exited plan mode. You can now make edits, run tools, and take actions.
         appendLine("- Platform: ${env.platform}")
         appendLine("- Shell: ${env.shell}")
         appendLine("- OS Version: ${env.osVersion}")
+        if (env.deviceNote.isNotBlank()) append(env.deviceNote.trimEnd()).appendLine()
         appendLine("- You are powered by the model named ${env.modelLabel}.")
     }
 
@@ -286,6 +288,8 @@ You have exited plan mode. You can now make edits, run tools, and take actions.
         extra: String = "",
         hasSkills: Boolean = false,
         memory: String = "",
+        outputStyleName: String = "",
+        outputStylePrompt: String = "",
     ): List<String> {
         val dynamic = buildString {
             append(CRAFT)
@@ -302,6 +306,12 @@ You have exited plan mode. You can now make edits, run tools, and take actions.
             appendLine()
             appendLine()
             append(sessionBlock(env).trimEnd())
+            if (outputStylePrompt.isNotBlank()) {
+                appendLine()
+                appendLine()
+                append("# Output Style: ${outputStyleName.ifBlank { "custom" }}\n")
+                append(outputStylePrompt.trim())
+            }
             appendLine()
             appendLine()
             append(CONTEXT_MGMT)

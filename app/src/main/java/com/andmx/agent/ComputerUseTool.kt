@@ -38,12 +38,13 @@ import kotlinx.serialization.json.putJsonObject
 class ComputerUseTool(context: Context) : Tool {
     override val name = "computer"
     override val description =
-        "操作设备屏幕(Computer Use)。纯视觉:先 screenshot 看清屏幕,再用坐标执行 click/type/scroll/swipe/key," +
-            "每次操作后自动返回新截图供你确认效果。坐标基于你上次看到的截图分辨率。" +
-            "需要用户已授权屏幕录制和无障碍权限。"
+        "Android Use：操作这台设备的屏幕。先 screenshot 看画面，再用截图像素做 click/type/scroll/swipe/key。" +
+            "截图会作为图像跟在工具结果后面，直接看图，不要用 shell 找 png。" +
+            "guest shell 没有 adb、screencap、input。输入文字如果失败就改用点击，不要把成功回执当成字已经进了输入框。" +
+            "需要屏幕录制和无障碍权限。"
     override val risk = ToolRisk.EXECUTE
 
-    private val screenCaptor = ScreenCaptor(context)
+    private val screenCaptor = ScreenCaptor.get(context)
     private val controller = AccessibilityController(context)
     private val appContext = context.applicationContext
 

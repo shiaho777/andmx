@@ -9,6 +9,7 @@ object TurnMetrics {
     /** 一个 turn 的可显示指标；null 字段表示未记录，不可据此显示。 */
     data class Reading(
         val ttftMs: Long?,
+        val totalTokens: Int?,
         val outputTokens: Int?,
         val tokensPerSecond: Double?,
     )
@@ -25,6 +26,7 @@ object TurnMetrics {
         firstTokenMs: Long,
         turnEndMs: Long,
         outputTokens: Int?,
+        totalTokens: Int? = null,
     ): Reading {
         val ttft = if (turnStartMs > 0 && firstTokenMs > turnStartMs) firstTokenMs - turnStartMs else null
         val decodeMs = if (firstTokenMs > 0 && turnEndMs > firstTokenMs) turnEndMs - firstTokenMs else null
@@ -33,12 +35,19 @@ object TurnMetrics {
         } else {
             null
         }
-        return Reading(ttftMs = ttft, outputTokens = outputTokens?.takeIf { it > 0 }, tokensPerSecond = tps)
+        return Reading(
+            ttftMs = ttft,
+            totalTokens = totalTokens?.takeIf { it > 0 },
+            outputTokens = outputTokens?.takeIf { it > 0 },
+            tokensPerSecond = tps,
+        )
     }
 
+    fun formatTokens(tokens: Int): String = "$tokens tokens"
+
     fun formatTps(tps: Double): String = when {
-        tps >= 100 -> "${tps.toInt()} tok/s"
-        else -> String.format("%.1f tok/s", tps)
+        tps >= 100 -> "${tps.toInt()} tokens/s"
+        else -> String.format("%.1f tokens/s", tps)
     }
 
     fun formatMs(ms: Long): String = when {

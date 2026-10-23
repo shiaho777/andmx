@@ -1,5 +1,9 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -45,7 +49,7 @@ fun RewindBar(
         Row(
             modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp)
+                .padding(horizontal = Chrome.gutter, vertical = 2.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f))
                 .clickable(
@@ -62,14 +66,12 @@ fun RewindBar(
                 tint = MaterialTheme.colorScheme.onTertiaryContainer,
             )
             Spacer(Modifier.width(8.dp))
-            Text(
-                "撤回 ${changes.size} 项文件改动",
+            Text(tr("撤回 ${changes.size} 项文件改动"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                "恢复",
+            Text(tr("恢复"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.tertiary,
             )
@@ -80,14 +82,13 @@ fun RewindBar(
     if (res != null) {
         AlertDialog(
             onDismissRequest = onDismissResult,
-            title = { Text("撤回结果") },
+            title = { Text(tr("撤回结果")) },
             text = {
                 Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                    Text("已恢复 ${res.reverted} 项文件改动。", style = MaterialTheme.typography.bodySmall)
+                    Text(tr("已恢复 ${res.reverted} 项文件改动。"), style = MaterialTheme.typography.bodySmall)
                     if (res.unsafe > 0) {
                         Spacer(Modifier.padding(3.dp))
-                        Text(
-                            "${res.unsafe} 项因被外部改动而跳过：",
+                        Text(tr("${res.unsafe} 项因被外部改动而跳过："),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -104,7 +105,7 @@ fun RewindBar(
                 }
             },
             confirmButton = {
-                TextButton(onClick = onDismissResult) { Text("知道了") }
+                TextButton(onClick = onDismissResult) { Text(tr("知道了")) }
             },
         )
     }

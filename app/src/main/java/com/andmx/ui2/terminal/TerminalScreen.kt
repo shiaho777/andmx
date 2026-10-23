@@ -1,5 +1,7 @@
 package com.andmx.ui2.terminal
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.ui.text.font.FontFamily
 import android.graphics.Typeface as AndroidTypeface
 import com.andmx.settings.ProviderSettings
@@ -141,8 +143,7 @@ fun TerminalScreen(
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "终端",
+            Text(tr("终端"),
                 style = MaterialTheme.typography.titleSmall,
                 color = colors.chromeContent,
                 modifier = Modifier.padding(start = 12.dp),
@@ -175,7 +176,7 @@ fun TerminalScreen(
                             unselectedContentColor = colors.chromeMuted,
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("终端 ${i + 1}", style = MaterialTheme.typography.labelMedium)
+                                    Text(tr("终端 ${i + 1}"), style = MaterialTheme.typography.labelMedium)
                                     Box(
                                         Modifier
                                             .padding(start = 6.dp)
@@ -203,7 +204,7 @@ fun TerminalScreen(
 
         if (state == null || active == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("无终端会话", color = colors.chromeMuted)
+                Text(tr("无终端会话"), color = colors.chromeMuted)
             }
             return@Column
         }

@@ -1,11 +1,9 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -99,16 +97,11 @@ fun McpPage(onBack: () -> Unit) {
         scope.launch { store.update(settings.copy(mcpServers = list.joinToString("\n") { it.toLine() })) }
     }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = view,
         transitionSpec = {
-            if (targetState is McpView.Edit) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            }
+            if (targetState is McpView.Edit) motion.push() else motion.pop()
         },
         label = "mcpView"
     ) { target ->
@@ -240,13 +233,11 @@ private fun McpListView(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(Modifier.padding(16.dp)) {
-                                    Text(
-                                        "还没有 MCP 服务器",
+                                    Text(tr("还没有 MCP 服务器"),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold
                                     )
-                                    Text(
-                                        "添加一个 MCP 服务器，让 Agent 获得额外能力。",
+                                    Text(tr("添加一个 MCP 服务器，让 Agent 获得额外能力。"),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(top = 4.dp)
@@ -290,8 +281,7 @@ private fun McpListView(
                 }
                 if (q.isNotEmpty() && totalVisible == 0 && !loadingPlugins) {
                     item {
-                        Text(
-                            "未找到匹配的 MCP 服务器",
+                        Text(tr("未找到匹配的 MCP 服务器"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 16.dp)
@@ -306,8 +296,7 @@ private fun McpListView(
 @Composable
 private fun McpHeader() {
     Column(Modifier.fillMaxWidth()) {
-        Text(
-            "管理 AndMX Agent 使用的 MCP 服务器配置。",
+        Text(tr("管理 AndMX Agent 使用的 MCP 服务器配置。"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -340,8 +329,7 @@ private fun McpSearchField(
         Spacer(Modifier.width(8.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (value.isEmpty()) {
-                Text(
-                    "搜索 MCP 服务器…",
+                Text(tr("搜索 MCP 服务器…"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
@@ -455,7 +443,7 @@ private fun McpCard(
                     is ConnState.Testing -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     is ConnState.Ok -> StatusPill("已连接 · ${state.tools} 个工具")
                     is ConnState.Fail -> StatusPill(state.reason, error = true)
-                    ConnState.Idle -> TextButton(onClick = onTest) { Text("测试连接") }
+                    ConnState.Idle -> TextButton(onClick = onTest) { Text(tr("测试连接")) }
                 }
             }
         }

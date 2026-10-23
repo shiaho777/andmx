@@ -74,6 +74,29 @@ class AndroidContextProvider(private val context: Context) {
         )
     }
 
+    fun environmentNote(): String {
+        if (_deviceContext.value == null) refresh()
+        val ctx = _deviceContext.value ?: return ""
+        val network = when (ctx.networkType) {
+            NetworkType.WIFI -> "Wi-Fi"
+            NetworkType.CELLULAR -> "cellular"
+            NetworkType.ETHERNET -> "ethernet"
+            NetworkType.NONE -> "offline"
+            NetworkType.UNKNOWN -> "connected"
+        }
+        return buildString {
+            append("- Battery: ${ctx.batteryLevel}%")
+            if (ctx.isCharging) append(" (charging)")
+            appendLine()
+            append("- Network: ").appendLine(network)
+            if (ctx.thermalState >= ThermalState.MODERATE) {
+                append("- Thermal: ").append(ctx.thermalState.name.lowercase())
+                appendLine(" — the device is warm; prefer lighter commands and shorter builds")
+            }
+            append("- UI: ").appendLine(if (ctx.isDarkMode) "dark" else "light")
+        }
+    }
+
     fun promptFragment(): String {
         val ctx = _deviceContext.value ?: return ""
         return buildString {

@@ -144,7 +144,7 @@ fun AndMX2Theme(
         }
     }
 
-    CompositionLocalProvider(LocalMotion provides Motion()) {
+    CompositionLocalProvider(LocalMotion provides rememberMotion()) {
         MaterialTheme(
             colorScheme = colorScheme,
             content = content,

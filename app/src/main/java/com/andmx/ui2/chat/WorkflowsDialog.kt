@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,10 +41,10 @@ fun WorkflowsDialog(
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("工作流") },
+        title = { Text(tr("工作流")) },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                Text("定义", style = MaterialTheme.typography.titleSmall)
+                Text(tr("定义"), style = MaterialTheme.typography.titleSmall)
                 defs.forEach { def ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                         Text(
@@ -61,8 +63,7 @@ fun WorkflowsDialog(
                     }
                 }
                 if (defs.isEmpty()) {
-                    Text(
-                        "没有已保存的工作流定义",
+                    Text(tr("没有已保存的工作流定义"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -70,7 +71,7 @@ fun WorkflowsDialog(
                 Spacer(Modifier.padding(6.dp))
                 HorizontalDivider()
                 Spacer(Modifier.padding(6.dp))
-                Text("运行", style = MaterialTheme.typography.titleSmall)
+                Text(tr("运行"), style = MaterialTheme.typography.titleSmall)
                 runs.forEach { run ->
                     Column(
                         Modifier
@@ -93,8 +94,7 @@ fun WorkflowsDialog(
                     HorizontalDivider()
                 }
                 if (runs.isEmpty()) {
-                    Text(
-                        "还没有工作流运行。让 agent 用 CreateWorkflow 起一个，或用 expert 定义。",
+                    Text(tr("还没有工作流运行。让 agent 用 CreateWorkflow 起一个，或用 expert 定义。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -103,7 +103,7 @@ fun WorkflowsDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(tr("关闭")) }
         },
     )
 }
@@ -130,7 +130,7 @@ fun WorkflowRunDetailDialog(
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.padding(4.dp))
-                Text("阶段", style = MaterialTheme.typography.titleSmall)
+                Text(tr("阶段"), style = MaterialTheme.typography.titleSmall)
                 snapshot.phases.forEach { p ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                         Text(
@@ -151,7 +151,7 @@ fun WorkflowRunDetailDialog(
                 val graphNodes = snapshot.graph.nodes
                 if (graphNodes.isNotEmpty()) {
                     Spacer(Modifier.padding(4.dp))
-                    Text("图节点 (${graphNodes.size})", style = MaterialTheme.typography.titleSmall)
+                    Text(tr("图节点 (${graphNodes.size})"), style = MaterialTheme.typography.titleSmall)
                     graphNodes.take(40).forEach { n ->
                         Text(
                             "${n.status.name.padEnd(9)} ${n.id} — ${n.title}",
@@ -163,7 +163,7 @@ fun WorkflowRunDetailDialog(
                 }
                 if (snapshot.artifacts.isNotEmpty()) {
                     Spacer(Modifier.padding(4.dp))
-                    Text("产物 (${snapshot.artifacts.size})", style = MaterialTheme.typography.titleSmall)
+                    Text(tr("产物 (${snapshot.artifacts.size})"), style = MaterialTheme.typography.titleSmall)
                     snapshot.artifacts.forEach { a ->
                         Text(
                             a.path,
@@ -176,7 +176,7 @@ fun WorkflowRunDetailDialog(
                 }
                 if (events.isNotEmpty()) {
                     Spacer(Modifier.padding(4.dp))
-                    Text("事件", style = MaterialTheme.typography.titleSmall)
+                    Text(tr("事件"), style = MaterialTheme.typography.titleSmall)
                     events.takeLast(30).forEach { e ->
                         Text(
                             "${e.type} ${e.nodeId ?: e.phase ?: ""} ${e.message.orEmpty()}",
@@ -196,20 +196,20 @@ fun WorkflowRunDetailDialog(
                     snapshot.status == WorkflowRunStatus.cancelled
                 ) {
                     TextButton(onClick = { onResume(snapshot.runId) }) {
-                        Text("恢复运行")
+                        Text(tr("恢复运行"))
                     }
                 }
                 if (snapshot.status == WorkflowRunStatus.running ||
                     snapshot.status == WorkflowRunStatus.paused
                 ) {
                     TextButton(onClick = { onCancel(snapshot.runId) }) {
-                        Text("取消运行", color = MaterialTheme.colorScheme.error)
+                        Text(tr("取消运行"), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("返回") }
+            TextButton(onClick = onDismiss) { Text(tr("返回")) }
         },
     )
 }

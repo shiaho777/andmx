@@ -1,5 +1,7 @@
 package com.andmx.ui2.markdown
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -310,16 +312,15 @@ private fun MermaidBlock(code: String) {
             .padding(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Mermaid 图表",
+            Text(tr("Mermaid 图表"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { showDiagram = true }) { Text("查看图") }
+            TextButton(onClick = { showDiagram = true }) { Text(tr("查看图")) }
             TextButton(onClick = {
                 clipboard.setText(androidx.compose.ui.text.AnnotatedString(code))
-            }) { Text("复制") }
+            }) { Text(tr("复制")) }
         }
         if (showDiagram) {
             MermaidDiagramDialog(code = code, onDismiss = { showDiagram = false })
@@ -341,12 +342,11 @@ private fun MermaidDiagramDialog(code: String, onDismiss: () -> Unit) {
     var renderError by remember { mutableStateOf<String?>(null) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Mermaid 图表") },
+        title = { Text(tr("Mermaid 图表")) },
         text = {
             if (renderError != null) {
                 Column {
-                    Text(
-                        "渲染失败：$renderError",
+                    Text(tr("渲染失败：$renderError"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -392,7 +392,7 @@ private fun MermaidDiagramDialog(code: String, onDismiss: () -> Unit) {
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(tr("关闭")) } },
     )
 }
 

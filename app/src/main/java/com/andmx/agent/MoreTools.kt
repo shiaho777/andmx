@@ -110,6 +110,7 @@ class WebSearchTool(
             connectTimeout = 15_000
             readTimeout = 20_000
             setRequestProperty("User-Agent", "Mozilla/5.0 (Android) AndMX")
+            WebFetchPolicy.apply(this)
         }
         return conn.inputStream.bufferedReader().use(BufferedReader::readText).also { conn.disconnect() }
     }

@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -123,8 +125,7 @@ fun IndexPage(onBack: () -> Unit) {
                                 fontFamily = FontFamily.Monospace,
                             )
                         } else {
-                            Text(
-                                "在对话页或文件页打开一个本地项目后，可在此建立索引。",
+                            Text(tr("在对话页或文件页打开一个本地项目后，可在此建立索引。"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -138,8 +139,7 @@ fun IndexPage(onBack: () -> Unit) {
                             WorkspaceIndexPhase.SKIPPED -> "已跳过"
                             WorkspaceIndexPhase.ERROR -> "失败"
                         }
-                        Text(
-                            "状态：$phaseLabel",
+                        Text(tr("状态：$phaseLabel"),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -153,8 +153,7 @@ fun IndexPage(onBack: () -> Unit) {
                         if (status.builtAt > 0L) {
                             val time = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
                                 .format(Date(status.builtAt))
-                            Text(
-                                "更新于 $time",
+                            Text(tr("更新于 $time"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -175,7 +174,7 @@ fun IndexPage(onBack: () -> Unit) {
                                     status.phase != WorkspaceIndexPhase.COUNTING &&
                                     ((s.indexNewFolders && s.indexNewFoldersUserConfigured) || s.instantGrep),
                             ) {
-                                Text("立即索引")
+                                Text(tr("立即索引"))
                             }
                             OutlinedButton(
                                 onClick = { index.clearCurrent() },
@@ -183,14 +182,14 @@ fun IndexPage(onBack: () -> Unit) {
                                     status.phase != WorkspaceIndexPhase.BUILDING &&
                                     status.phase != WorkspaceIndexPhase.COUNTING,
                             ) {
-                                Text("清除索引")
+                                Text(tr("清除索引"))
                             }
                             TextButton(
                                 onClick = {
                                     scope.launch { index.refreshStatus(hostPath) }
                                 },
                             ) {
-                                Text("刷新")
+                                Text(tr("刷新"))
                             }
                         }
                     }

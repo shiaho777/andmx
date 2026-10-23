@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -114,7 +116,7 @@ fun CommandEditPage(
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
-                        placeholder = { Text("在命令选择器中显示的简短描述") },
+                        placeholder = { Text(tr("在命令选择器中显示的简短描述")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -123,7 +125,7 @@ fun CommandEditPage(
                     OutlinedTextField(
                         value = argumentHint,
                         onValueChange = { argumentHint = it },
-                        placeholder = { Text("例如 <file-path>") },
+                        placeholder = { Text(tr("例如 <file-path>")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -134,7 +136,7 @@ fun CommandEditPage(
                 OutlinedTextField(
                     value = prompt,
                     onValueChange = { prompt = it },
-                    placeholder = { Text("填写调用该命令时发送的提示词...") },
+                    placeholder = { Text(tr("填写调用该命令时发送的提示词...")) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 5,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
@@ -151,7 +153,7 @@ fun CommandEditPage(
                         .fillMaxWidth()
                         .padding(top = 24.dp)
                 ) {
-                    Text("删除命令", color = MaterialTheme.colorScheme.error)
+                    Text(tr("删除命令"), color = MaterialTheme.colorScheme.error)
                 }
             }
         }

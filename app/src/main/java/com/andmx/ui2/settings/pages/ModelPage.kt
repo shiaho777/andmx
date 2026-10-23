@@ -1,11 +1,9 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -78,16 +76,11 @@ fun ModelPage(onBack: () -> Unit) {
     var view by remember { mutableStateOf<ModelView>(ModelView.List) }
     var saveError by remember { mutableStateOf<String?>(null) }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = view,
         transitionSpec = {
-            if (targetState is ModelView.Edit) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            }
+            if (targetState is ModelView.Edit) motion.push() else motion.pop()
         },
         label = "modelView"
     ) { target ->
@@ -164,9 +157,9 @@ private fun ModelListView(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = onDismissSaveError,
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = onDismissSaveError) { Text("知道了") }
+                androidx.compose.material3.TextButton(onClick = onDismissSaveError) { Text(tr("知道了")) }
             },
-            title = { Text("凭据保存失败") },
+            title = { Text(tr("凭据保存失败")) },
             text = { Text(error) },
         )
     }
@@ -247,8 +240,10 @@ private fun ProviderCard(
     onDrag: (Float) -> Unit,
     onDragStop: () -> Unit
 ) {
+    val motion = LocalMotion.current
     val elevation by animateDpAsState(
         targetValue = if (dragging) 8.dp else 1.dp,
+        animationSpec = motion.baseDp,
         label = "providerCardElevation",
     )
     Card(
@@ -310,10 +305,10 @@ private fun ProviderCard(
                     onClick = {}, enabled = false,
                     label = { Text(kindShort(provider)) }
                 )
-                AssistChip(onClick = {}, enabled = false, label = { Text("${provider.models.size} 个模型") })
+                AssistChip(onClick = {}, enabled = false, label = { Text(tr("${provider.models.size} 个模型")) })
                 if (!isPrimary && provider.enabled) {
                     androidx.compose.material3.TextButton(onClick = onSetPrimary) {
-                        Text("设为主要")
+                        Text(tr("设为主要"))
                     }
                 }
             }

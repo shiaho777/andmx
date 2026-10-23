@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -37,11 +39,10 @@ fun RewindPickerDialog(
     if (pending == null) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("回滚到检查点") },
+            title = { Text(tr("回滚到检查点")) },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                    Text(
-                        "选择一条用户消息，回到它发送前的状态：该消息及之后的对话会被移除，" +
+                    Text(tr("选择一条用户消息，回到它发送前的状态：该消息及之后的对话会被移除，") +
                             "该时点之后 agent 做过的文件改动会一并还原（外部改动过的文件会跳过）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -72,17 +73,16 @@ fun RewindPickerDialog(
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = onDismiss) { Text(tr("取消")) }
             },
         )
     } else {
         val m = pending!!
         AlertDialog(
             onDismissRequest = { pending = null },
-            title = { Text("确认回滚") },
+            title = { Text(tr("确认回滚")) },
             text = {
-                Text(
-                    "将移除「${m.content.lineSequence().firstOrNull().orEmpty().take(40)}」及其后的全部对话，" +
+                Text(tr("将移除「${m.content.lineSequence().firstOrNull().orEmpty().take(40)}」及其后的全部对话，") +
                         "并还原该时点之后的文件改动。此操作不可撤销。",
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -91,10 +91,10 @@ fun RewindPickerDialog(
                 TextButton(onClick = {
                     pending = null
                     onPick(m.id)
-                }) { Text("回滚", color = MaterialTheme.colorScheme.error) }
+                }) { Text(tr("回滚"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pending = null }) { Text("返回") }
+                TextButton(onClick = { pending = null }) { Text(tr("返回")) }
             },
         )
     }

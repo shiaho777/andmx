@@ -23,11 +23,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 
 /**
- * Turn 过程折叠摘要行：一句「思考了一会儿 / N 步工具调用 · …」加 chevron，
- * 点击展开被隐藏的过程行（dsh web TurnProcessNodeView 对齐）。
+ * Turn 过程折叠摘要行：一句「N 步工具调用 · …」加 chevron。
+ * 点击在展开和收起之间切换，摘要行本身一直留着。
  */
 @Composable
 fun TurnProcessRow(
@@ -46,7 +47,7 @@ fun TurnProcessRow(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -67,7 +68,7 @@ fun TurnProcessRow(
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
         )
     }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = Chrome.gutter)) {
         HorizontalDivider(
             modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),

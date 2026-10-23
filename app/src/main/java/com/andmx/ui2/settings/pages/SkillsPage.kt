@@ -1,11 +1,9 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -136,16 +134,11 @@ fun SkillsPage(onBack: () -> Unit, onCloseSettings: (() -> Unit)? = null) {
         refreshing = false
     }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = view,
         transitionSpec = {
-            if (targetState is SkillView.Detail) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            }
+            if (targetState is SkillView.Detail) motion.push() else motion.pop()
         },
         label = "skillView"
     ) { target ->
@@ -258,7 +251,7 @@ private fun SkillListView(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text("技能") },
+                title = { Text(tr("技能")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
@@ -283,7 +276,7 @@ private fun SkillListView(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("新建技能") },
+                            text = { Text(tr("新建技能")) },
                             onClick = {
                                 menuOpen = false
                                 showCreate = true
@@ -291,7 +284,7 @@ private fun SkillListView(
                             leadingIcon = { Icon(Icons.Outlined.Add, null) }
                         )
                         DropdownMenuItem(
-                            text = { Text("用 Agent 创建技能") },
+                            text = { Text(tr("用 Agent 创建技能")) },
                             onClick = {
                                 menuOpen = false
                                 onCreateWithAgent()
@@ -299,7 +292,7 @@ private fun SkillListView(
                             leadingIcon = { Icon(Icons.Outlined.Bolt, null) }
                         )
                         DropdownMenuItem(
-                            text = { Text("从 Git 安装") },
+                            text = { Text(tr("从 Git 安装")) },
                             onClick = {
                                 menuOpen = false
                                 showGit = true
@@ -432,8 +425,7 @@ private fun SkillListView(
                 }
                 if (!refreshing && q.isNotEmpty() && total == 0) {
                     item {
-                        Text(
-                            "未找到匹配的技能",
+                        Text(tr("未找到匹配的技能"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 12.dp),
@@ -476,18 +468,17 @@ private fun CreateSkillDialog(
     var description by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建技能") },
+        title = { Text(tr("新建技能")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "创建本地技能目录并生成 SKILL.md。名称使用小写、数字与连字符。",
+                Text(tr("创建本地技能目录并生成 SKILL.md。名称使用小写、数字与连字符。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("名称") },
+                    label = { Text(tr("名称")) },
                     placeholder = { Text("my-skill") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
@@ -495,8 +486,8 @@ private fun CreateSkillDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("描述 / 触发场景") },
-                    placeholder = { Text("何时应使用该技能…") },
+                    label = { Text(tr("描述 / 触发场景")) },
+                    placeholder = { Text(tr("何时应使用该技能…")) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 4
@@ -508,15 +499,15 @@ private fun CreateSkillDialog(
                 TextButton(
                     onClick = { onConfirm(name.trim(), description.trim(), true) },
                     enabled = name.isNotBlank()
-                ) { Text("创建并用 Agent 完善") }
+                ) { Text(tr("创建并用 Agent 完善")) }
                 TextButton(
                     onClick = { onConfirm(name.trim(), description.trim(), false) },
                     enabled = name.isNotBlank()
-                ) { Text("创建") }
+                ) { Text(tr("创建")) }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
 }
@@ -526,11 +517,10 @@ private fun InstallDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var url by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("从 Git 安装技能") },
+        title = { Text(tr("从 Git 安装技能")) },
         text = {
             Column {
-                Text(
-                    "输入包含 SKILL.md 的 Git 仓库地址，将克隆到技能目录。",
+                Text(tr("输入包含 SKILL.md 的 Git 仓库地址，将克隆到技能目录。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -547,11 +537,11 @@ private fun InstallDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(url.trim()) }, enabled = url.isNotBlank()) {
-                Text("安装")
+                Text(tr("安装"))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
 }

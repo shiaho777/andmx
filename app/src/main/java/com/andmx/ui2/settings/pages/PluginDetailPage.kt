@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -119,8 +121,7 @@ fun PluginDetailPage(
                     m.hooks.map { it.name.ifBlank { "${it.event} → ${it.command}" } },
                 )
                 if (m.tools.isEmpty() && m.skills.isEmpty() && m.hooks.isEmpty() && m.commands.isEmpty() && m.mcpServers.isEmpty()) {
-                    Text(
-                        "该插件未声明可展示的组件。",
+                    Text(tr("该插件未声明可展示的组件。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 8.dp),
@@ -145,8 +146,7 @@ fun PluginDetailPage(
                             singleLine = true,
                         )
                     }
-                    Text(
-                        "配置会立即生效，供 android_* 工具与 preflight 使用。",
+                    Text(tr("配置会立即生效，供 android_* 工具与 preflight 使用。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
@@ -165,7 +165,7 @@ fun PluginDetailPage(
                 SettingsGroup("危险操作") {
                     TextButton(onClick = { confirmUninstall = true }) {
                         Icon(Icons.Outlined.Delete, null)
-                        Text(" 卸载插件", color = MaterialTheme.colorScheme.error)
+                        Text(tr(" 卸载插件"), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -175,18 +175,18 @@ fun PluginDetailPage(
     if (confirmUninstall && onUninstall != null) {
         AlertDialog(
             onDismissRequest = { confirmUninstall = false },
-            title = { Text("卸载 ${m.name}？") },
-            text = { Text("将删除 ${plugin.dir}，此操作不可撤销。") },
+            title = { Text(tr("卸载 ${m.name}？")) },
+            text = { Text(tr("将删除 ${plugin.dir}，此操作不可撤销。")) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmUninstall = false
                         onUninstall()
                     },
-                ) { Text("卸载") }
+                ) { Text(tr("卸载")) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmUninstall = false }) { Text("取消") }
+                TextButton(onClick = { confirmUninstall = false }) { Text(tr("取消")) }
             },
         )
     }
@@ -195,8 +195,7 @@ fun PluginDetailPage(
 @Composable
 private fun CapabilitySection(title: String, icon: ImageVector, items: List<String>) {
     if (items.isEmpty()) return
-    Text(
-        "$title · ${items.size} 项",
+    Text(tr("$title · ${items.size} 项"),
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),

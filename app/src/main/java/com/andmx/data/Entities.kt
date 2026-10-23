@@ -57,6 +57,10 @@ data class ConversationEntity(
     val groupId: String = "",
     /** 未发出的排队输入（JSON 字符串数组），进程重启后供 PendingCommandRecoveryBanner 恢复。 */
     val pendingQueueJson: String = "",
+    /** 用户尚未打开这次更新时非空。归档要求它为空。 */
+    val unreadAt: Long? = null,
+    /** idle | running | completed | failed。归档只收 completed。 */
+    val taskStatus: String = "idle",
 )
 
 @Entity(tableName = "task_groups")

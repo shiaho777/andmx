@@ -88,7 +88,7 @@ object OpenAiResponsesAdapter : WireAdapter {
             }
             val reasoning = provider.models[req.model]?.reasoning
             val effort = req.reasoningEffort
-                ?.takeIf { it.isNotBlank() && it != "off" }
+                ?.takeIf { it.isNotBlank() && it.lowercase() !in setOf("off", "disabled", "none", "enabled", "on") }
                 ?.takeIf { reasoning?.style == ReasoningStyle.EFFORT && it in reasoning.effortLevels }
             if (effort != null) {
                 putJsonObject("reasoning") {

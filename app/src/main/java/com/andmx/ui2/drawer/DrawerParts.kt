@@ -1,5 +1,7 @@
 package com.andmx.ui2.drawer
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,9 +66,9 @@ fun NewTaskButton(onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -84,8 +86,7 @@ fun NewTaskButton(onClick: () -> Unit) {
             )
         }
         Spacer(Modifier.width(12.dp))
-        Text(
-            "新建任务",
+        Text(tr("新建任务"),
             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
@@ -105,9 +106,9 @@ fun DrawerQuickAction(
         Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -181,7 +182,7 @@ private fun SegmentedChip(
             .clip(RoundedCornerShape(50))
             .background(bg)
             .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -228,8 +229,7 @@ fun TaskToolbar(
                 onClick = onToggleArchived,
             )
             Spacer(Modifier.width(4.dp))
-            Text(
-                "归档任务",
+            Text(tr("归档任务"),
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -274,14 +274,13 @@ fun TaskToolbar(
                 onClick = { sortMenu = true },
             )
             DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                Text(
-                    "排序方式",
+                Text(tr("排序方式"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 DropdownMenuItem(
-                    text = { Text("更新时间") },
+                    text = { Text(tr("更新时间")) },
                     trailingIcon = {
                         if (sortMode == SortMode.UPDATED) Text("✓")
                     },
@@ -291,7 +290,7 @@ fun TaskToolbar(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("创建时间") },
+                    text = { Text(tr("创建时间")) },
                     trailingIcon = {
                         if (sortMode == SortMode.CREATED) Text("✓")
                     },
@@ -302,7 +301,7 @@ fun TaskToolbar(
                 )
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 DropdownMenuItem(
-                    text = { Text("时间线视图") },
+                    text = { Text(tr("时间线视图")) },
                     trailingIcon = {
                         if (viewMode == ViewMode.TIMELINE) Text("✓")
                     },
@@ -313,7 +312,7 @@ fun TaskToolbar(
                 )
                 if (onNewGroup != null) {
                     DropdownMenuItem(
-                        text = { Text("新建分组") },
+                        text = { Text(tr("新建分组")) },
                         onClick = {
                             onNewGroup()
                             sortMenu = false
@@ -391,7 +390,7 @@ fun SearchField(
                 }
             }
         } else null,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = TextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
             unfocusedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
@@ -400,7 +399,7 @@ fun SearchField(
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     )
 }
 
@@ -496,8 +495,7 @@ fun DrawerFooter(onOpenSettings: () -> Unit) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(12.dp))
-            Text(
-                "设置",
+            Text(tr("设置"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -529,7 +527,7 @@ fun RenameDialog(
     var value by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名") },
+        title = { Text(tr("重命名")) },
         text = {
             OutlinedTextField(
                 value = value,
@@ -542,10 +540,10 @@ fun RenameDialog(
             TextButton(
                 onClick = { onConfirm(value.trim()) },
                 enabled = value.isNotBlank(),
-            ) { Text("保存") }
+            ) { Text(tr("保存")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }
@@ -571,11 +569,11 @@ fun DeleteDialog(
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("删除", color = MaterialTheme.colorScheme.error)
+                Text(tr("删除"), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }
@@ -589,18 +587,17 @@ fun CreateGroupDialog(
     var color by remember { mutableStateOf("blue") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建分组") },
+        title = { Text(tr("新建分组")) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    placeholder = { Text("分组名称") },
+                    placeholder = { Text(tr("分组名称")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    "分组颜色",
+                Text(tr("分组颜色"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
@@ -622,10 +619,10 @@ fun CreateGroupDialog(
             TextButton(
                 onClick = { onConfirm(name.trim(), color) },
                 enabled = name.isNotBlank(),
-            ) { Text("创建") }
+            ) { Text(tr("创建")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }
@@ -639,7 +636,7 @@ fun MoveToGroupDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("移动到分组") },
+        title = { Text(tr("移动到分组")) },
         text = {
             Column {
                 TextButton(
@@ -666,7 +663,7 @@ fun MoveToGroupDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }
@@ -679,13 +676,13 @@ fun ArchiveConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("归档任务") },
-        text = { Text("任务“$title”会移入归档列表，之后仍可恢复。") },
+        title = { Text(tr("归档任务")) },
+        text = { Text(tr("任务“$title”会移入归档列表，之后仍可恢复。")) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("归档") }
+            TextButton(onClick = onConfirm) { Text(tr("归档")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }

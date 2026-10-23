@@ -46,7 +46,7 @@ interface AndmxDao {
         "UPDATE conversations SET goalText = :text, goalPhase = :phase, " +
             "goalStartedAt = :startedAt, goalUpdatedAt = :updatedAt, goalNote = :note, " +
             "goalTokenBudget = :tokenBudget, goalTokensUsed = :tokensUsed, " +
-            "updatedAt = :updatedAt WHERE id = :id",
+            "updatedAt = CASE WHEN :updatedAt > updatedAt THEN :updatedAt ELSE updatedAt END WHERE id = :id",
     )
     suspend fun updateGoal(
         id: Long,
@@ -120,6 +120,12 @@ interface AndmxDao {
 
     @Query("UPDATE conversations SET archived = :archived WHERE id = :id")
     suspend fun setArchived(id: Long, archived: Boolean)
+
+    @Query("UPDATE conversations SET unreadAt = :at WHERE id = :id")
+    suspend fun setUnreadAt(id: Long, at: Long?)
+
+    @Query("UPDATE conversations SET taskStatus = :status WHERE id = :id")
+    suspend fun setTaskStatus(id: Long, status: String)
 
     @Query("SELECT * FROM conversations WHERE archived = :archived ORDER BY updatedAt DESC")
     suspend fun conversationsByArchived(archived: Boolean): List<ConversationEntity>

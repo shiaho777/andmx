@@ -145,6 +145,7 @@ class BrowseTool(
                 readTimeout = 20_000
                 instanceFollowRedirects = false
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Android) AndMX")
+                WebFetchPolicy.apply(this)
             }
             when (conn.responseCode) {
                 in 300..399 -> {

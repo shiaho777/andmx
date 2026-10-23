@@ -1,11 +1,9 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,16 +53,11 @@ fun CommandPage(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var view by remember { mutableStateOf<CmdView>(CmdView.List) }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = view,
         transitionSpec = {
-            if (targetState is CmdView.Edit) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            }
+            if (targetState is CmdView.Edit) motion.push() else motion.pop()
         },
         label = "cmdView"
     ) { target ->
@@ -128,7 +121,7 @@ private fun CommandListView(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("搜索命令...") },
+                    placeholder = { Text(tr("搜索命令...")) },
                     leadingIcon = { Icon(Icons.Outlined.Search, null) },
                     modifier = Modifier
                         .fillMaxWidth()

@@ -77,6 +77,8 @@ object SystemReminder {
             Descriptor(Source.HOOK_CONTEXT, Channel.CURRENT_TURN, Lifecycle.PER_CURRENT_TURN),
         Source.RUNTIME_MODE to
             Descriptor(Source.RUNTIME_MODE, Channel.CURRENT_TURN, Lifecycle.PER_CURRENT_TURN),
+        Source.OUTPUT_STYLE to
+            Descriptor(Source.OUTPUT_STYLE, Channel.CURRENT_TURN, Lifecycle.PER_CURRENT_TURN),
         Source.PLAN_MODE_EXIT to
             Descriptor(Source.PLAN_MODE_EXIT, Channel.CURRENT_TURN, Lifecycle.RUNTIME_LOCAL),
         Source.OUTPUT_STYLE to

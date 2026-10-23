@@ -3,27 +3,63 @@ package com.andmx.ui2.drawer
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
+fun activityTimestamp(createdAt: Long, updatedAt: Long, preferCreated: Boolean): Long {
+    val primary = if (preferCreated) createdAt else updatedAt
+    val fallback = if (preferCreated) updatedAt else createdAt
+    return when {
+        primary > 0L -> primary
+        fallback > 0L -> fallback
+        else -> 0L
+    }
+}
+
+fun historySentLabel(sentAt: Long, now: Long = System.currentTimeMillis()): String {
+    if (sentAt <= 0L) return ""
+    val sent = Calendar.getInstance().apply { timeInMillis = sentAt }
+    val clock = String.format("%02d:%02d", sent.get(Calendar.HOUR_OF_DAY), sent.get(Calendar.MINUTE))
+    val today = Calendar.getInstance().apply { timeInMillis = now }
+    if (sent.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+        sent.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+    ) {
+        return clock
+    }
+    val yesterday = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
+    if (sent.get(Calendar.YEAR) == yesterday.get(Calendar.YEAR) &&
+        sent.get(Calendar.DAY_OF_YEAR) == yesterday.get(Calendar.DAY_OF_YEAR)
+    ) {
+        return com.andmx.ui2.settings.tr("昨天 $clock")
+    }
+    return if (sent.get(Calendar.YEAR) == today.get(Calendar.YEAR)) {
+        com.andmx.ui2.settings.tr("${sent.get(Calendar.MONTH) + 1}月${sent.get(Calendar.DAY_OF_MONTH)}日 $clock")
+    } else {
+        com.andmx.ui2.settings.tr("${sent.get(Calendar.YEAR)}年${sent.get(Calendar.MONTH) + 1}月${sent.get(Calendar.DAY_OF_MONTH)}日 $clock")
+    }
+}
+
 fun relativeTaskTime(ts: Long): String {
+    if (ts <= 0L) return ""
     val now = System.currentTimeMillis()
     val delta = (now - ts).coerceAtLeast(0L)
     val minutes = TimeUnit.MILLISECONDS.toMinutes(delta)
     val hours = TimeUnit.MILLISECONDS.toHours(delta)
     val days = TimeUnit.MILLISECONDS.toDays(delta)
     return when {
-        minutes < 1 -> "刚刚"
-        minutes < 60 -> "${minutes}分"
-        hours < 24 -> "${hours}小时"
-        else -> "${days}天"
+        minutes < 1 -> com.andmx.ui2.settings.tr("刚刚")
+        minutes < 60 -> com.andmx.ui2.settings.tr("${minutes}分")
+        hours < 24 -> com.andmx.ui2.settings.tr("${hours}小时")
+        else -> com.andmx.ui2.settings.tr("${days}天")
     }
 }
 
-enum class TimelineBucket(val label: String) {
+enum class TimelineBucket(private val zh: String) {
     TODAY("今天"),
     YESTERDAY("昨天"),
     THIS_WEEK("本周"),
     LAST_WEEK("上周"),
     THIS_MONTH("本月"),
     OLDER("更早"),
+    ;
+    val label: String get() = com.andmx.ui2.settings.tr(zh)
 }
 
 fun timelineBucket(ts: Long): TimelineBucket {

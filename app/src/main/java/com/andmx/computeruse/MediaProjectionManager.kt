@@ -38,10 +38,10 @@ object MediaProjectionManagerHolder {
 
     /** Called by the Activity layer once the system consent dialog returns. */
     fun provideGrant(resultCode: Int, data: Intent?) {
-        if (data != null) {
+        if (data != null && resultCode == android.app.Activity.RESULT_OK) {
             grant = ProjectionGrant(resultCode, data)
-            pending.complete(true)
-        } else {
+            if (!pending.isCompleted) pending.complete(true)
+        } else if (!pending.isCompleted) {
             pending.complete(false)
         }
     }

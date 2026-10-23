@@ -2,6 +2,8 @@ package com.andmx.computeruse
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.Path
 import android.os.Build
 import android.util.Log
@@ -70,21 +72,74 @@ class AndmxAccessibilityService : AccessibilityService() {
         return dispatchGestureAwait(gesture)
     }
 
-    /** Type text into the currently-focused editable node. Falls back to no-op. */
     fun typeText(text: String): Boolean {
-        val focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
-        val args = android.os.Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        val node = editableNode() ?: return false
+        try {
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            val args = android.os.Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        } finally {
+            node.recycle()
         }
-        val ok = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        focused.recycle()
-        return ok
+        if (text.isEmpty() || editableText()?.contains(text) == true) return true
+        val again = editableNode() ?: return false
+        try {
+            val clip = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            clip.setPrimaryClip(ClipData.newPlainText("andmx", text))
+            again.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            again.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        } finally {
+            again.recycle()
+        }
+        return text.isEmpty() || editableText()?.contains(text) == true
+    }
+
+    private fun editableText(): String? = editableNode()?.let { node ->
+        try {
+            node.text?.toString()
+        } finally {
+            node.recycle()
+        }
+    }
+
+    private fun editableNode(): AccessibilityNodeInfo? {
+        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { focused ->
+            if (focused.isEditable) return focused
+            focused.recycle()
+        }
+        val root = rootInActiveWindow ?: return null
+        val found = findEditable(root)
+        root.recycle()
+        return found
+    }
+
+    private fun findEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (node.isEditable) return AccessibilityNodeInfo.obtain(node)
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val hit = findEditable(child)
+            child.recycle()
+            if (hit != null) return hit
+        }
+        return null
     }
 
     /**
      * Send a limited key set via the global action API. Full keyboard combos
      * require root/IME; we support the navigation set (back/home/recents).
      */
+    fun foregroundPackage(): String? {
+        val root = rootInActiveWindow ?: return null
+        return try {
+            root.packageName?.toString()
+        } finally {
+            root.recycle()
+        }
+    }
+
     fun sendKey(key: String): Boolean = when (key.lowercase()) {
         "back", "返回" -> performGlobalAction(GLOBAL_ACTION_BACK)
         "home", "主页" -> performGlobalAction(GLOBAL_ACTION_HOME)

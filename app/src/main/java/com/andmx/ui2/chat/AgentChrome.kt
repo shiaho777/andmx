@@ -1,11 +1,13 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import com.andmx.ui2.theme.Chrome
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,8 +60,8 @@ fun ApprovalBanner(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(14.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.tertiaryContainer,
         tonalElevation = 2.dp,
     ) {
@@ -73,8 +75,7 @@ fun ApprovalBanner(
                     tint = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "等待确认 · ${request.toolName} · ${request.modeLabel}",
+                Text(tr("等待确认 · ${request.toolName} · ${request.modeLabel}"),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -115,8 +116,7 @@ fun ApprovalBanner(
                 modifier = Modifier.padding(top = 6.dp),
             )
             if (request.rulePreview.isNotBlank()) {
-                Text(
-                    "长期授权规则：${request.rulePreview}",
+                Text(tr("长期授权规则：${request.rulePreview}"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
                     modifier = Modifier.padding(top = 6.dp),
@@ -131,19 +131,19 @@ fun ApprovalBanner(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_ALLOW) }) {
-                    Text("允许本会话")
+                    Text(tr("允许本会话"))
                 }
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ALLOW) }) {
-                    Text("允许本项目")
+                    Text(tr("允许本项目"))
                 }
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ASK) }) {
-                    Text("每次询问")
+                    Text(tr("每次询问"))
                 }
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_DENY) }) {
-                    Text("始终拒绝")
+                    Text(tr("始终拒绝"))
                 }
                 OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_DENY) }) {
-                    Text("拒绝本项目")
+                    Text(tr("拒绝本项目"))
                 }
             }
             Row(
@@ -156,11 +156,11 @@ fun ApprovalBanner(
                 OutlinedButton(onClick = {
                     haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                     onDeny()
-                }) { Text("拒绝") }
+                }) { Text(tr("拒绝")) }
                 Button(onClick = {
                     haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                     onAllow()
-                }) { Text("允许") }
+                }) { Text(tr("允许")) }
             }
         }
     }
@@ -175,13 +175,12 @@ fun PlanStrip(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .padding(horizontal = Chrome.gutter, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Text(
-            "任务计划",
+        Text(tr("任务计划"),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -232,13 +231,12 @@ fun SubAgentStrip(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .padding(horizontal = Chrome.gutter, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Text(
-            "子代理 · ${agents.size}",
+        Text(tr("子代理 · ${agents.size}"),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -295,8 +293,8 @@ fun ApprovalTimelineCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp),
-        shape = RoundedCornerShape(14.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 3.dp),
+        shape = RoundedCornerShape(12.dp),
         color = when (item.status) {
             "allowed" -> MaterialTheme.colorScheme.primaryContainer
             "denied" -> MaterialTheme.colorScheme.errorContainer
@@ -336,8 +334,8 @@ fun ApprovalTimelineCard(
                         .padding(top = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
-                    OutlinedButton(onClick = onDeny) { Text("拒绝") }
-                    Button(onClick = onAllow) { Text("允许") }
+                    OutlinedButton(onClick = onDeny) { Text(tr("拒绝")) }
+                    Button(onClick = onAllow) { Text(tr("允许")) }
                 }
             }
         }
@@ -349,6 +347,7 @@ fun SubAgentTimelineCard(
     item: SubAgentItem,
     modifier: Modifier = Modifier,
 ) {
+    val motion = LocalMotion.current
     val running = item.state.equals("RUNNING", ignoreCase = true) ||
         item.state.equals("running", ignoreCase = true)
     val failed = item.state.equals("FAILED", ignoreCase = true) ||
@@ -372,7 +371,7 @@ fun SubAgentTimelineCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .padding(horizontal = Chrome.gutter, vertical = 3.dp)
             .clickable {
                 userToggled = true
                 expanded = !expanded
@@ -403,8 +402,7 @@ fun SubAgentTimelineCard(
                     },
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "子代理 · ${item.state.lowercase()}",
+                Text(tr("子代理 · ${item.state.lowercase()}"),
                     style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -426,8 +424,8 @@ fun SubAgentTimelineCard(
             )
             AnimatedVisibility(
                 visible = expanded && item.activities.isNotEmpty(),
-                enter = expandVertically(),
-                exit = shrinkVertically(),
+                enter = motion.riseIn(),
+                exit = motion.riseOut(),
             ) {
                 Column(Modifier.padding(top = 6.dp)) {
                     item.activities.forEach { act ->
@@ -446,8 +444,8 @@ fun SubAgentTimelineCard(
             }
             AnimatedVisibility(
                 visible = expanded && item.result.isNotBlank(),
-                enter = expandVertically(),
-                exit = shrinkVertically(),
+                enter = motion.riseIn(),
+                exit = motion.riseOut(),
             ) {
                 Text(
                     item.result.take(4000),
@@ -473,7 +471,7 @@ fun McpStatusStrip(
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .padding(horizontal = Chrome.gutter, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .horizontalScroll(rememberScrollState())
@@ -522,7 +520,7 @@ fun ContextUsageBar(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 2.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -562,13 +560,12 @@ fun GoalStrip(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .padding(horizontal = Chrome.gutter, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Text(
-            "目标 · ${goal.status.label}",
+        Text(tr("目标 · ${goal.status.label}"),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -582,8 +579,7 @@ fun GoalStrip(
             modifier = Modifier.padding(top = 4.dp),
         )
         if (goal.tokenBudget > 0) {
-            Text(
-                "预算 ${goal.tokensUsed}/${goal.tokenBudget}",
+            Text(tr("预算 ${goal.tokensUsed}/${goal.tokenBudget}"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
                 modifier = Modifier.padding(top = 4.dp),

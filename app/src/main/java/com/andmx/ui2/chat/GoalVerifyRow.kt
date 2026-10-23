@@ -2,10 +2,6 @@ package com.andmx.ui2.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
@@ -34,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 
 /**
@@ -64,7 +61,7 @@ fun GoalVerifyRow(item: GoalVerifyItem) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 1.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 1.dp),
     ) {
         Row(
             Modifier
@@ -105,8 +102,8 @@ fun GoalVerifyRow(item: GoalVerifyItem) {
         }
         AnimatedVisibility(
             visible = expanded && (item.reason.isNotBlank() || item.nextAction.isNotBlank()),
-            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
-            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             Column(
                 Modifier

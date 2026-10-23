@@ -1,5 +1,7 @@
 package com.andmx.ui2.files
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -121,7 +123,7 @@ fun FileBrowser(
             OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                placeholder = { Text("搜索文件...") },
+                placeholder = { Text(tr("搜索文件...")) },
                 leadingIcon = { Icon(Icons.Outlined.Search, null) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
@@ -263,12 +265,12 @@ private fun FileRow(
         )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             if (!file.isDirectory) {
-                DropdownMenuItem(text = { Text("添加到聊天") }, onClick = { menu = false; onAddToChat() })
+                DropdownMenuItem(text = { Text(tr("添加到聊天")) }, onClick = { menu = false; onAddToChat() })
             }
-            DropdownMenuItem(text = { Text("复制路径") }, onClick = { menu = false; onCopyPath() })
-            DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; onRename() })
+            DropdownMenuItem(text = { Text(tr("复制路径")) }, onClick = { menu = false; onCopyPath() })
+            DropdownMenuItem(text = { Text(tr("重命名")) }, onClick = { menu = false; onRename() })
             DropdownMenuItem(
-                text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                text = { Text(tr("删除"), color = MaterialTheme.colorScheme.error) },
                 onClick = { menu = false; onDelete() }
             )
         }

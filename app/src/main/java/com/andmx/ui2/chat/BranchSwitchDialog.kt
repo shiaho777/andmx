@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -229,12 +231,11 @@ private fun ListBranchesDialog(
 ) {
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("切换 Git 分支") },
+        title = { Text(tr("切换 Git 分支")) },
         text = {
             Column {
                 if (dirtyFileCount > 0) {
-                    Text(
-                        "未提交的更改：$dirtyFileCount 个文件",
+                    Text(tr("未提交的更改：$dirtyFileCount 个文件"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(bottom = 8.dp),
@@ -243,7 +244,7 @@ private fun ListBranchesDialog(
                 OutlinedTextField(
                     value = query,
                     onValueChange = onQueryChange,
-                    placeholder = { Text("搜索分支") },
+                    placeholder = { Text(tr("搜索分支")) },
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Outlined.Search, null) },
                     modifier = Modifier
@@ -262,15 +263,13 @@ private fun ListBranchesDialog(
                         val filtered = branches.filter {
                             query.isBlank() || it.name.contains(query, ignoreCase = true)
                         }
-                        Text(
-                            "分支",
+                        Text(tr("分支"),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 4.dp),
                         )
                         if (filtered.isEmpty()) {
-                            Text(
-                                "未找到匹配分支",
+                            Text(tr("未找到匹配分支"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 12.dp),
@@ -318,12 +317,11 @@ private fun ListBranchesDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Outlined.CreateNewFolder, null, Modifier.size(18.dp))
-                    Text("创建并检出新分支...", Modifier.padding(start = 8.dp))
+                    Text(tr("创建并检出新分支..."), Modifier.padding(start = 8.dp))
                 }
 
                 if (currentBranch.isNotBlank()) {
-                    Text(
-                        "当前：$currentBranch",
+                    Text(tr("当前：$currentBranch"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp),
@@ -347,7 +345,7 @@ private fun ListBranchesDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") }
+            TextButton(enabled = !busy, onClick = onDismiss) { Text(tr("关闭")) }
         },
     )
 }
@@ -363,11 +361,10 @@ private fun CreateBranchDialog(
 ) {
     AlertDialog(
         onDismissRequest = { if (!busy) onBack() },
-        title = { Text("创建并检出新分支") },
+        title = { Text(tr("创建并检出新分支")) },
         text = {
             Column {
-                Text(
-                    "基于当前 HEAD 创建一个新的本地分支，并在创建成功后立即切换过去。",
+                Text(tr("基于当前 HEAD 创建一个新的本地分支，并在创建成功后立即切换过去。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 12.dp),
@@ -375,13 +372,13 @@ private fun CreateBranchDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
-                    label = { Text("分支名") },
-                    placeholder = { Text("例如 feature/git-branch-switcher") },
+                    label = { Text(tr("分支名")) },
+                    placeholder = { Text(tr("例如 feature/git-branch-switcher")) },
                     singleLine = true,
                     enabled = !busy,
                     leadingIcon = { Icon(Icons.Outlined.CreateNewFolder, null) },
                     modifier = Modifier.fillMaxWidth(),
-                    supportingText = { Text("首版只支持基于当前 HEAD 创建并切换。") },
+                    supportingText = { Text(tr("首版只支持基于当前 HEAD 创建并切换。")) },
                 )
                 message?.let {
                     Text(
@@ -403,10 +400,10 @@ private fun CreateBranchDialog(
             TextButton(
                 enabled = !busy && name.isNotBlank(),
                 onClick = onConfirm,
-            ) { Text("创建并切换") }
+            ) { Text(tr("创建并切换")) }
         },
         dismissButton = {
-            TextButton(enabled = !busy, onClick = onBack) { Text("返回") }
+            TextButton(enabled = !busy, onClick = onBack) { Text(tr("返回")) }
         },
     )
 }
@@ -433,7 +430,7 @@ private fun BlockedDialog(
                 tint = MaterialTheme.colorScheme.error,
             )
         },
-        title = { Text("提交更改以切换分支") },
+        title = { Text(tr("提交更改以切换分支")) },
         text = {
             Column {
                 Text(
@@ -445,21 +442,18 @@ private fun BlockedDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                Text(
-                    "请先提交当前更改，再继续切换到 $targetBranch。",
+                Text(tr("请先提交当前更改，再继续切换到 $targetBranch。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 if (currentBranch.isNotBlank()) {
-                    Text(
-                        "当前分支：$currentBranch",
+                    Text(tr("当前分支：$currentBranch"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    "受影响文件",
+                Text(tr("受影响文件"),
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
                 )
@@ -476,8 +470,7 @@ private fun BlockedDialog(
                     }
                 }
                 if (files.size > 30) {
-                    Text(
-                        "以及其他 ${files.size - 30} 个文件",
+                    Text(tr("以及其他 ${files.size - 30} 个文件"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -486,11 +479,11 @@ private fun BlockedDialog(
         },
         confirmButton = {
             TextButton(enabled = !busy, onClick = onCommitAndSwitch) {
-                Text("提交并切换分支...")
+                Text(tr("提交并切换分支..."))
             }
         },
         dismissButton = {
-            TextButton(enabled = !busy, onClick = onCancel) { Text("取消") }
+            TextButton(enabled = !busy, onClick = onCancel) { Text(tr("取消")) }
         },
     )
 }
@@ -511,28 +504,24 @@ private fun CommitAndSwitchDialog(
 ) {
     AlertDialog(
         onDismissRequest = { if (!busy) onCancel() },
-        title = { Text("提交更改") },
+        title = { Text(tr("提交更改")) },
         text = {
             Column {
-                Text(
-                    "提交完成后，将自动继续切换到 $targetBranch。",
+                Text(tr("提交完成后，将自动继续切换到 $targetBranch。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 10.dp),
                 )
-                Text(
-                    "当前分支：$currentBranch",
+                Text(tr("当前分支：$currentBranch"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "目标分支：$targetBranch",
+                Text(tr("目标分支：$targetBranch"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                Text(
-                    "更改 · ${dirtyFiles.size} 个文件",
+                Text(tr("更改 · ${dirtyFiles.size} 个文件"),
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
@@ -548,8 +537,7 @@ private fun CommitAndSwitchDialog(
                     }
                 }
                 if (!hasIdentity) {
-                    Text(
-                        "当前没有可用的 Git 提交身份，请先配置 user.name 和 user.email。",
+                    Text(tr("当前没有可用的 Git 提交身份，请先配置 user.name 和 user.email。"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
@@ -558,14 +546,14 @@ private fun CommitAndSwitchDialog(
                 OutlinedTextField(
                     value = commitMessage,
                     onValueChange = onMessageChange,
-                    label = { Text("提交消息") },
-                    placeholder = { Text("留空以自动生成提交消息") },
+                    label = { Text(tr("提交消息")) },
+                    placeholder = { Text(tr("留空以自动生成提交消息")) },
                     enabled = !busy,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp),
                     supportingText = {
-                        Text("这次会默认提交当前 workspace 内的全部未提交更改。")
+                        Text(tr("这次会默认提交当前 workspace 内的全部未提交更改。"))
                     },
                 )
                 TextButton(
@@ -593,11 +581,11 @@ private fun CommitAndSwitchDialog(
         },
         confirmButton = {
             TextButton(enabled = !busy && hasIdentity, onClick = onConfirm) {
-                Text("提交并切换分支")
+                Text(tr("提交并切换分支"))
             }
         },
         dismissButton = {
-            TextButton(enabled = !busy, onClick = onCancel) { Text("返回") }
+            TextButton(enabled = !busy, onClick = onCancel) { Text(tr("返回")) }
         },
     )
 }

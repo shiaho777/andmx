@@ -1,5 +1,7 @@
 package com.andmx.ui2.files
 
+import com.andmx.ui2.settings.tr
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -62,13 +64,11 @@ fun StoragePermissionGate(onGranted: @Composable () -> Unit) {
             Modifier.size(48.dp),
             tint = MaterialTheme.colorScheme.outline
         )
-        Text(
-            "需要文件访问权限",
+        Text(tr("需要文件访问权限"),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 16.dp)
         )
-        Text(
-            "AndMX 需要「所有文件访问」权限才能浏览和编辑设备上的项目文件。授权后返回即可。",
+        Text(tr("AndMX 需要「所有文件访问」权限才能浏览和编辑设备上的项目文件。授权后返回即可。"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -87,7 +87,7 @@ fun StoragePermissionGate(onGranted: @Composable () -> Unit) {
             },
             modifier = Modifier.padding(top = 24.dp)
         ) {
-            Text("前往授权")
+            Text(tr("前往授权"))
         }
     }
 }

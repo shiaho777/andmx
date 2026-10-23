@@ -1,11 +1,10 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -72,6 +71,9 @@ fun StatusCapsule(
     breakdown: List<ChatController.ContextBreakdownItem> = emptyList(),
     onCompress: () -> Unit,
     displayMode: String = "auto",
+    turnMetrics: TurnMetrics.Reading? = null,
+    compactRunning: Boolean = false,
+    compactResult: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val hasSteps = planSteps.isNotEmpty()
@@ -79,8 +81,15 @@ fun StatusCapsule(
     val doneAgents = subAgents.count { it.state.equals("completed", true) || it.state.equals("done", true) }
     val contextPct = if (contextWindow > 0) (contextTokens.toFloat() / contextWindow).coerceIn(0f, 1f) else 0f
 
+    val ttftLabel = turnMetrics?.ttftMs?.let { "首字 ${TurnMetrics.formatMs(it)}" }
+    val contextLabel = if (contextWindow > 0 && contextTokens > 0) {
+        "${formatTokens(contextTokens)} / ${formatTokens(contextWindow)}"
+    } else {
+        null
+    }
+    val summary = listOfNotNull(contextLabel, ttftLabel).joinToString(" · ")
     val anythingToShow = goal.hasGoal || hasSteps || subAgents.isNotEmpty() ||
-        (gitInfo?.branch?.isNotBlank() == true) || contextPct > 0.001f
+        (gitInfo?.branch?.isNotBlank() == true) || contextPct > 0.001f || summary.isNotEmpty()
     if (!anythingToShow) return
 
     // ZCode summaryPanel.displayMode 对齐：auto 默认收起（用户可手动展开），
@@ -96,7 +105,7 @@ fun StatusCapsule(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 4.dp),
     ) {
         Row(
             Modifier
@@ -124,8 +133,7 @@ fun StatusCapsule(
             }
             if (runningAgents > 0) {
                 StatusDot(Icons.Outlined.AccountTree, MaterialTheme.colorScheme.secondary)
-                Text(
-                    "$runningAgents 代理",
+                Text(tr("$runningAgents 代理"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -158,7 +166,18 @@ fun StatusCapsule(
                     )
                 }
             }
-            Spacer(Modifier.weight(1f))
+            if (summary.isNotEmpty()) {
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
             if (contextPct > 0.001f) {
                 Text(
                     "${(contextPct * 100).toInt()}%",
@@ -177,8 +196,8 @@ fun StatusCapsule(
 
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
-            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             Column(
                 Modifier
@@ -195,7 +214,15 @@ fun StatusCapsule(
                 if (hasSteps) ProgressSection(planSteps)
                 if (subAgents.isNotEmpty()) AgentsSection(runningAgents, doneAgents, subAgents)
                 if (gitInfo?.branch?.isNotBlank() == true) GitSection(gitInfo)
-                ContextSection(contextTokens, contextWindow, contextPct, breakdown, onCompress)
+                ContextSection(
+                    contextTokens,
+                    contextWindow,
+                    contextPct,
+                    breakdown,
+                    onCompress,
+                    compactRunning,
+                    compactResult,
+                )
             }
         }
     }
@@ -235,14 +262,12 @@ private fun GoalSection(goal: ConversationGoal) {
         )
         if (goal.goalIteration > 0) {
             Spacer(Modifier.height(3.dp))
-            Text(
-                "已验证 ${goal.goalIteration} 轮 · ${goal.status.label}",
+            Text(tr("已验证 ${goal.goalIteration} 轮 · ${goal.status.label}"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             if (goal.nextAction.isNotBlank() && goal.status == GoalStatus.ACTIVE) {
-                Text(
-                    "下一步：${goal.nextAction}",
+                Text(tr("下一步：${goal.nextAction}"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                     maxLines = 2,
@@ -330,8 +355,7 @@ private fun AgentsSection(running: Int, done: Int, agents: List<SubAgentItem>) {
             }
         }
         if (agents.size > 6) {
-            Text(
-                "… 另有 ${agents.size - 6} 个",
+            Text(tr("… 另有 ${agents.size - 6} 个"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
@@ -354,13 +378,12 @@ private fun GitSection(info: GitBaseline.GitInfo) {
             )
             Spacer(Modifier.weight(1f))
             if (info.dirtyFileCount > 0) {
-                Text(
-                    "${info.dirtyFileCount} 改动",
+                Text(tr("${info.dirtyFileCount} 改动"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
                 )
             } else {
-                Text("干净", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f))
+                Text(tr("干净"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f))
             }
         }
         if (info.ahead > 0 || info.behind > 0) {
@@ -384,6 +407,8 @@ private fun ContextSection(
     pct: Float,
     breakdown: List<ChatController.ContextBreakdownItem>,
     onCompress: () -> Unit,
+    compactRunning: Boolean,
+    compactResult: String?,
 ) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -408,8 +433,7 @@ private fun ContextSection(
         )
         if (breakdown.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Text(
-                "上下文来源",
+            Text(tr("上下文来源"),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
@@ -444,11 +468,56 @@ private fun ContextSection(
             }
         }
         Spacer(Modifier.height(6.dp))
+        if (!compactRunning && !compactResult.isNullOrBlank()) {
+            Text(
+                compactResult,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
         AssistChip(
             onClick = onCompress,
-            label = { Text("压缩上下文", style = MaterialTheme.typography.labelSmall) },
+            enabled = !compactRunning,
+            label = {
+                Text(
+                    if (compactRunning) "正在压缩上下文" else "压缩上下文",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            },
             leadingIcon = { Icon(Icons.Outlined.Timer, null, Modifier.size(14.dp)) },
             colors = AssistChipDefaults.assistChipColors(),
+        )
+    }
+}
+
+@Composable
+fun CompactMarkerRow(text: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Chrome.gutter, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 10.dp).widthIn(max = 280.dp),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
         )
     }
 }

@@ -198,9 +198,13 @@ class SubAgentOrchestrator(
         val baseTools = toolsFactory()
         val tools = SubagentCatalog.filterTools(baseTools, agentDef) +
             RespondToCoordinatorTool(agentId, coordinatorMessageSink)
-        val maxSteps = (spec.maxTurns ?: 25).coerceIn(1, 80)
-
-        val (runClient, turn) = resolveRun(spec.model)
+        val (runClient, baseTurn) = resolveRun(spec.model)
+        val thought = spec.thoughtLevel.trim()
+        val turn = if (thought.isBlank() || thought.equals("inherit", ignoreCase = true)) {
+            baseTurn
+        } else {
+            baseTurn.copy(reasoningOverride = thought)
+        }
         val agentsMd = if (spec.injectAgentsMd) {
             runCatching { agentsMdProvider() }.getOrDefault("").trim()
         } else {
@@ -210,7 +214,6 @@ class SubAgentOrchestrator(
             tools = tools,
             client = runClient,
             systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef, agentsMd),
-            maxSteps = maxSteps,
         )
 
         agentLock.withLock {

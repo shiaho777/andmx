@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -135,7 +137,7 @@ private fun WorkspacePill(
             TextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("搜索工作区") },
+                placeholder = { Text(tr("搜索工作区")) },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(18.dp)) },
                 colors = TextFieldDefaults.colors(
@@ -165,8 +167,7 @@ private fun WorkspacePill(
                     .verticalScroll(rememberScrollState())
             ) {
                 if (filtered.isEmpty()) {
-                    Text(
-                        "没有匹配的工作区",
+                    Text(tr("没有匹配的工作区"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -214,7 +215,7 @@ private fun WorkspacePill(
 
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("打开文件夹") },
+                text = { Text(tr("打开文件夹")) },
                 leadingIcon = { Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp)) },
                 onClick = {
                     expanded = false
@@ -222,7 +223,7 @@ private fun WorkspacePill(
                 },
             )
             DropdownMenuItem(
-                text = { Text("远程连接") },
+                text = { Text(tr("远程连接")) },
                 leadingIcon = { Icon(Icons.Outlined.Dns, null, Modifier.size(18.dp)) },
                 onClick = {
                     expanded = false

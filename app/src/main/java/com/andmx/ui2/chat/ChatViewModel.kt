@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import com.andmx.agent.SlashCommands
 import com.andmx.agent.SlashResult
 import com.andmx.agent.ApprovalMode
@@ -41,7 +43,7 @@ class ChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
-    private val controller = ChatController(context)
+    private val controller = ChatController.get(context)
     private val settingsStore = SettingsStore(context)
     private val providerStore = ProviderStore(context)
     private val repo = ConversationRepository(context)
@@ -80,6 +82,13 @@ class ChatViewModel @Inject constructor(
     /** 上下文来源分解（ZCode chat.contextUsage.breakdown 对齐）。 */
     val contextBreakdown: StateFlow<List<ChatController.ContextBreakdownItem>> = controller.contextBreakdown
 
+    data class CompactNotice(val running: Boolean, val text: String)
+
+    private val _compactNotice = MutableStateFlow<CompactNotice?>(null)
+    val compactNotice: StateFlow<CompactNotice?> = _compactNotice.asStateFlow()
+    private var compactJob: Job? = null
+    val runningConversationIds: StateFlow<Set<Long>> = controller.runningIds
+
     private val _subAgentItems = MutableStateFlow<List<SubAgentItem>>(emptyList())
     val subAgentItems: StateFlow<List<SubAgentItem>> = _subAgentItems.asStateFlow()
 
@@ -94,6 +103,7 @@ class ChatViewModel @Inject constructor(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private var followupMode: String = "queue"
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
@@ -184,7 +194,6 @@ class ChatViewModel @Inject constructor(
             }
 
         val execMode: ExecMode get() = ExecMode.from(settings.approvalMode)
-            .let { if (it == ExecMode.PLAN) ExecMode.CONFIRM else it }
     }
 
     val planOverlayActive: StateFlow<Boolean> = controller.planOverlayActive
@@ -210,25 +219,24 @@ class ChatViewModel @Inject constructor(
     private var pendingEditMessageId: Long? = null
     private val _editingMessageId = MutableStateFlow<Long?>(null)
     val editingMessageId: StateFlow<Long?> = _editingMessageId.asStateFlow()
-    private var turnJob: Job? = null
-
     // Turn 指标采集（dsh StatsLine 对齐）：每个 turn 的起点/首 token/终点。
     private val _lastTurnMetrics = MutableStateFlow<TurnMetrics.Reading?>(null)
     val lastTurnMetrics: StateFlow<TurnMetrics.Reading?> = _lastTurnMetrics.asStateFlow()
     private var turnStartedAtMs = 0L
     private var turnFirstTokenAtMs = 0L
+    private var turnUsageBaselineOutput = 0
+    private var turnUsageBaselineTotal = 0
     private var turnEndedAtMs = 0L
     private var turnStepCount = 0
 
     /** 切换到指定会话：更新当前 id + 加载历史消息到 messages。 */
     fun switchToConversation(id: Long) {
         if (id == _currentConversationId.value) return
-        turnJob?.cancel()
-        turnJob = null
-        controller.resolveApproval(false)
+        _compactNotice.value = null
         _currentConversationId.value = id
+        _isLoading.value = controller.isTurnRunning(id)
+        viewModelScope.launch { runCatching { repo.setUnreadAt(id, null) } }
         currentAssistantText = ""
-        _isLoading.value = false
         pendingEditMessageId = null
         _editingMessageId.value = null
         _toolCalls.value = emptyList()
@@ -298,6 +306,14 @@ class ChatViewModel @Inject constructor(
                         isStreaming = false,
                         sortKey = msg.createdAt,
                     )
+                    "compact" -> msgs += ChatMessage(
+                        id = msg.id,
+                        role = "compact",
+                        content = msg.content,
+                        sortKey = msg.createdAt,
+                        createdAt = msg.createdAt,
+                        completedAt = msg.createdAt,
+                    )
                 }
             }
             val annotated = annotateProcessMessages(msgs, tools)
@@ -337,6 +353,20 @@ class ChatViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch {
+            var previous = emptySet<Long>()
+            controller.runningIds.collect { ids ->
+                val current = _currentConversationId.value
+                val wasRunning = current in previous
+                val running = current in ids
+                previous = ids
+                _isLoading.value = running
+                if (wasRunning && !running && _queuePaused.value == QueuePause.NONE) drainQueue()
+            }
+        }
+        viewModelScope.launch {
+            settingsStore.settings.collect { followupMode = it.interactionBehavior }
+        }
         viewModelScope.launch {
             controller.pendingApproval.collect { req ->
                 if (req == null) return@collect
@@ -750,9 +780,18 @@ class ChatViewModel @Inject constructor(
             }
         }
         val images = attachments.mapNotNull { resolveImageDataUrl(it) }
-        if (_isLoading.value) {
+        if (compactJob?.isActive == true) {
             _queue.value = _queue.value + withContext
             persistQueue()
+            return
+        }
+        if (_isLoading.value || controller.isTurnRunning(_currentConversationId.value)) {
+            if (followupMode == "guide") {
+                admitGuide(withContext)
+            } else {
+                _queue.value = _queue.value + withContext
+                persistQueue()
+            }
             return
         }
         _contextChips.value = emptyList()
@@ -762,6 +801,7 @@ class ChatViewModel @Inject constructor(
         if (_steeringMessage.value != null && _queue.value.isNotEmpty()) {
             _steeringMessage.value = null
         }
+        _isLoading.value = true
         runTurn(withContext, images, editMessageId = editId)
     }
 
@@ -773,7 +813,10 @@ class ChatViewModel @Inject constructor(
             sendMessage(trimmed)
             return
         }
-        val withContext = buildMessageWithContext(trimmed)
+        admitGuide(buildMessageWithContext(trimmed))
+    }
+
+    private fun admitGuide(withContext: String) {
         _contextChips.value = emptyList()
         _steeringMessage.value = withContext
         viewModelScope.launch {
@@ -821,12 +864,7 @@ class ChatViewModel @Inject constructor(
                 return true
             }
             is SlashResult.Compact -> {
-                viewModelScope.launch {
-                    val id = ensureConversationReady()
-                    val msg = controller.compactConversation(id, cmd.args)
-                    appendLocalAssistant(msg)
-                    refreshContextUsage()
-                }
+                compressContext(cmd.args)
                 return true
             }
             SlashResult.Checkpoint -> {
@@ -863,16 +901,12 @@ class ChatViewModel @Inject constructor(
                 return true
             }
             SlashResult.Help -> {
-                val body = SlashCommands.list.joinToString("\n") { "${it.name} — ${it.desc}" }
+                val body = SlashCommands.list.joinToString("\n") { "${it.name} — ${com.andmx.ui2.settings.tr(it.desc)}" }
                 appendLocalAssistant("可用命令：\n" + body)
                 return true
             }
             is SlashResult.Mode -> {
-                val mode = when (cmd.mode) {
-                    ApprovalMode.FULL -> ExecMode.FULL
-                    ApprovalMode.ASK -> ExecMode.CONFIRM
-                    ApprovalMode.READ_ONLY -> ExecMode.PLAN
-                }
+                val mode = cmd.mode
                 setExecMode(mode)
                 appendLocalAssistant("已切换执行模式：${mode.label}")
                 return true
@@ -1077,14 +1111,14 @@ class ChatViewModel @Inject constructor(
                             "\n用法 `/mode <id>`",
                     )
                 } else {
-                    val target = ExecMode.entries.firstOrNull {
-                        it.id.equals(cmd.args, true) || it.name.equals(cmd.args, true)
-                    } ?: when (cmd.args.lowercase()) {
-                        // 上游 TUI 模式名别名：build/edit/yolo → confirm/auto_edit/full
-                        "build" -> ExecMode.CONFIRM
-                        "edit" -> ExecMode.AUTO_EDIT
-                        "yolo" -> ExecMode.FULL
-                        else -> null
+                    val target = ExecMode.from(cmd.args).takeIf {
+                        cmd.args.equals(it.id, true) ||
+                            cmd.args.equals(it.name, true) ||
+                            cmd.args.lowercase() in setOf(
+                                "confirm", "ask", "autoedit", "auto_edit", "full", "full_access",
+                                "readonly", "read_only", "read", "yolo", "build", "edit", "plan",
+                                "guarded", "auto",
+                            )
                     }
                     if (target == null) {
                         appendLocalAssistant(
@@ -1252,7 +1286,7 @@ class ChatViewModel @Inject constructor(
                 file.parentFile?.mkdirs()
                 file.writeText(md)
             }.onFailure {
-                sharePlainText("AndMX 对话", md)
+                sharePlainText(tr("AndMX 对话"), md)
                 return@launch
             }
             val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -1289,12 +1323,14 @@ class ChatViewModel @Inject constructor(
 
     private fun appendLocalAssistant(text: String) {
         if (text.isBlank()) return
+        val shown = text.lineSequence().joinToString("\n") { com.andmx.ui2.settings.tr(it) }
+        if (shown.isBlank()) return
         val key = nextProcessSortKey()
         val now = System.currentTimeMillis()
         _messages.value = _messages.value + ChatMessage(
             id = key,
             role = "assistant",
-            content = text,
+            content = shown,
             sortKey = key,
             isProcess = false,
             createdAt = now,
@@ -1442,19 +1478,11 @@ class ChatViewModel @Inject constructor(
         currentAssistantText = ""
         streamingMessageId = 0L
         lastStreamUiAt = 0L
-        turnJob = viewModelScope.launch {
-            _isLoading.value = true
+        viewModelScope.launch {
             _error.value = null
-            try {
-                val conversationId = ensureConversationReady()
-                controller.regenerateTurn(conversationId).collect { event ->
-                    handleEvent(event)
-                }
-            } finally {
-                finalizeReasoning()
-                _isLoading.value = false
-                drainQueue()
-            }
+            val conversationId = ensureConversationReady()
+            _isLoading.value = true
+            controller.launchRegenerate(conversationId)
         }
     }
 
@@ -1577,33 +1605,29 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun runTurn(text: String, images: List<String> = emptyList(), editMessageId: Long? = null) {
-        turnJob = viewModelScope.launch {
-            _isLoading.value = true
+        viewModelScope.launch {
             _error.value = null
-            try {
-                val conversationId = ensureConversationReady()
-                if (editMessageId != null) {
-                    truncateFromUserMessage(conversationId, editMessageId)
-                }
-                controller.sendMessage(conversationId, text, images = images).collect { event ->
-                    handleEvent(event)
-                }
-            } finally {
-                _isLoading.value = false
-                // 上游 CommandInbox 语义：stop/error 触发的队列暂停要先于 drain；
-                // 否则取消路径会把已暂停的队列继续排空。
-                if (_queuePaused.value == QueuePause.NONE) drainQueue()
+            turnStartedAtMs = 0L
+            turnFirstTokenAtMs = 0L
+            turnEndedAtMs = 0L
+            turnUsageBaselineOutput = 0
+            turnUsageBaselineTotal = 0
+            val conversationId = ensureConversationReady()
+            runCatching { repo.setTaskStatus(conversationId, "running") }
+            runCatching { repo.setUnreadAt(conversationId, null) }
+            if (editMessageId != null) {
+                truncateFromUserMessage(conversationId, editMessageId)
             }
+            _isLoading.value = true
+            controller.launchTurn(conversationId, text, images)
         }
     }
 
     fun stop() {
         pauseQueue(QueuePause.STOPPED)
-        turnJob?.cancel()
-        turnJob = null
         finalizeReasoning()
         val id = _currentConversationId.value
-        if (id > 0L) controller.stopTurn(id)
+        if (id > 0L) controller.cancelTurn(id)
         else controller.resolveApproval(false)
         _isLoading.value = false
         val running = _toolCalls.value.map {
@@ -1644,15 +1668,61 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Manually compress the current conversation's context. */
-    fun compressContext() {
-        if (_isLoading.value) return
-        viewModelScope.launch {
-            val id = ensureConversationReady()
-            val msg = controller.compactConversation(id)
-            appendLocalAssistant(msg)
-            refreshContextUsage()
+    /** ZCode `/compact`：对话里出分隔状态，不把结果伪装成一条助手回复。 */
+    fun compressContext(instructions: String = "") {
+        if (compactJob?.isActive == true) {
+            _compactNotice.value = CompactNotice(running = false, text = "已有压缩任务正在运行或排队。")
+            return
         }
+        if (_isLoading.value || controller.isTurnRunning(_currentConversationId.value)) {
+            _compactNotice.value = CompactNotice(running = false, text = "运行中不能压缩上下文，请等待当前任务结束。")
+            return
+        }
+        compactJob = viewModelScope.launch {
+            _compactNotice.value = CompactNotice(running = true, text = "正在压缩上下文")
+            try {
+                val id = ensureConversationReady()
+                val raw = controller.compactConversation(id, instructions)
+                val label = compactOutcome(raw)
+                _compactNotice.value = CompactNotice(running = false, text = label)
+                appendCompactMarker(id, label)
+                refreshContextUsage()
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                _compactNotice.value = CompactNotice(running = false, text = "上下文压缩已中断")
+                throw c
+            } catch (_: Throwable) {
+                val label = "上下文压缩失败"
+                _compactNotice.value = CompactNotice(running = false, text = label)
+                val id = _currentConversationId.value
+                if (id > 0L) appendCompactMarker(id, label)
+            }
+        }
+    }
+
+    private fun compactOutcome(raw: String): String = when {
+        raw.startsWith("已压缩") -> {
+            val detail = raw.removePrefix("已压缩：").trim()
+            if (detail.isEmpty()) "上下文已压缩" else "上下文已压缩 · $detail"
+        }
+        raw == "上下文较短，无需压缩" -> "上下文已是最新，无需压缩"
+        else -> "上下文压缩失败"
+    }
+
+    private fun appendCompactMarker(conversationId: Long, label: String) {
+        viewModelScope.launch {
+            runCatching { repo.addMessage(conversationId, "compact", label) }
+        }
+        if (_currentConversationId.value != conversationId) return
+        val key = nextProcessSortKey()
+        val now = System.currentTimeMillis()
+        _messages.value = _messages.value + ChatMessage(
+            id = key,
+            role = "compact",
+            content = label,
+            sortKey = key,
+            createdAt = now,
+            completedAt = now,
+        )
     }
 
     val fileChanges: StateFlow<List<com.andmx.workspace.FileChange>> = com.andmx.workspace.ChangeTracker.changes
@@ -1893,6 +1963,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val files = runCatching { controller.revertFileChanges(sinceMs = cut.createdAt) }
                 .getOrNull()
+            runCatching { controller.noteConversationRewind(conversationId, cut.content) }
             truncateFromUserMessage(conversationId, messageId)
             runCatching {
                 controller.injectPersistedReminder(
@@ -2129,6 +2200,16 @@ class ChatViewModel @Inject constructor(
         runTurn(item)
     }
 
+    fun moveQueued(index: Int, delta: Int) {
+        val list = _queue.value.toMutableList()
+        val target = index + delta
+        if (index !in list.indices || target !in list.indices) return
+        val item = list.removeAt(index)
+        list.add(target, item)
+        _queue.value = list
+        persistQueue()
+    }
+
     private fun decodeImageUrls(json: String): List<String>? {
         if (json.isBlank()) return null
         return runCatching {
@@ -2249,6 +2330,38 @@ class ChatViewModel @Inject constructor(
         appendLocalAssistant("已设置推理强度：$target")
     }
 
+    fun cycleConversation(delta: Int) {
+        viewModelScope.launch {
+            val list = repo.conversationsByArchived(false)
+                .sortedByDescending { maxOf(it.updatedAt, it.createdAt) }
+            if (list.isEmpty()) return@launch
+            val cur = _currentConversationId.value
+            val idx = list.indexOfFirst { it.id == cur }.let { if (it < 0) 0 else it }
+            val next = list[Math.floorMod(idx + delta, list.size)]
+            if (next.id != cur) switchToConversation(next.id)
+        }
+    }
+
+    fun adjustUiFont(delta: Int?) {
+        viewModelScope.launch {
+            val cur = settingsStore.settings.firstOrNull() ?: return@launch
+            val size = if (delta == null) 14 else (cur.uiFontSizePx + delta).coerceIn(12, 20)
+            if (size != cur.uiFontSizePx) settingsStore.update(cur.copy(uiFontSizePx = size))
+        }
+    }
+
+    fun cycleTheme() {
+        viewModelScope.launch {
+            val cur = settingsStore.settings.firstOrNull() ?: return@launch
+            val next = when (cur.themeMode) {
+                "light" -> "dark"
+                "dark" -> "system"
+                else -> "light"
+            }
+            settingsStore.update(cur.copy(themeMode = next))
+        }
+    }
+
     fun setExecMode(mode: ExecMode) {
         val id = _currentConversationId.value
         if (id > 0L) {
@@ -2265,9 +2378,7 @@ class ChatViewModel @Inject constructor(
     fun exitPlanMode() {
         val id = _currentConversationId.value
         if (id <= 0L) return
-        val baseline = ExecMode.from(composerConfig.value.settings.approvalMode)
-            .let { if (it == ExecMode.PLAN) ExecMode.CONFIRM else it }
-        controller.applyExecMode(baseline, id)
+        controller.exitPlan(id)
     }
 
     // ── 上下文 chips ───────────────────────────────────────────────────────
@@ -2392,23 +2503,7 @@ class ChatViewModel @Inject constructor(
         messages: List<ChatMessage>,
         tools: List<ToolCall>,
     ): List<ChatMessage> {
-        if (messages.isEmpty()) return messages
-        val toolKeys = tools.map { it.sortKey }.sorted()
-        if (toolKeys.isEmpty()) return messages.map { if (it.role == "assistant") it.copy(isProcess = false) else it }
-        val lastTool = toolKeys.last()
-        return messages.map { m ->
-            if (m.role != "assistant") m
-            else {
-                val followedByTool = toolKeys.any { it > m.sortKey }
-                m.copy(isProcess = followedByTool || m.sortKey < lastTool)
-            }
-        }.let { list ->
-            // last assistant after last tool is final
-            val lastA = list.indexOfLast { it.role == "assistant" }
-            if (lastA >= 0 && list[lastA].sortKey >= lastTool) {
-                list.toMutableList().also { it[lastA] = it[lastA].copy(isProcess = false) }
-            } else list
-        }
+        return TurnProcessFolding.markProcessMessages(messages, tools.map { it.sortKey })
     }
 
     private fun finalizeReasoning() {
@@ -2441,7 +2536,12 @@ class ChatViewModel @Inject constructor(
     private fun handleEvent(event: ChatEvent) {
         when (event) {
             is ChatEvent.StepStarted -> {
-                if (turnStartedAtMs == 0L) turnStartedAtMs = event.startedAtMs
+                if (turnStartedAtMs == 0L) {
+                    turnStartedAtMs = event.startedAtMs
+                    val usage = controller.tokenUsage.value
+                    turnUsageBaselineOutput = usage.output
+                    turnUsageBaselineTotal = usage.total
+                }
                 turnStepCount += 1
             }
             is ChatEvent.FirstToken -> {
@@ -2450,6 +2550,7 @@ class ChatViewModel @Inject constructor(
             is ChatEvent.UserMessage -> {
                 val key = nextProcessSortKey()
                 _messages.value += ChatMessage(
+                    id = key,
                     role = "user",
                     content = event.text,
                     sortKey = key,
@@ -2701,22 +2802,34 @@ class ChatViewModel @Inject constructor(
                 _retryStatus.value = null
                 _error.value = event.message
                 pauseQueue(QueuePause.ERROR)
+                val failedId = _currentConversationId.value
+                if (failedId > 0L) {
+                    viewModelScope.launch { runCatching { repo.setTaskStatus(failedId, "failed") } }
+                }
             }
             is ChatEvent.Done -> {
                 _retryStatus.value = null
+                val doneId = _currentConversationId.value
+                if (doneId > 0L) {
+                    viewModelScope.launch { runCatching { repo.setTaskStatus(doneId, "completed") } }
+                }
                 finalizeReasoning()
                 // Turn 指标收口（诚实规则：时间戳不完整则不产出）。
                 turnEndedAtMs = System.currentTimeMillis()
+                val usage = controller.tokenUsage.value
                 val reading = TurnMetrics.reading(
                     turnStartMs = turnStartedAtMs,
                     firstTokenMs = turnFirstTokenAtMs,
                     turnEndMs = turnEndedAtMs,
-                    outputTokens = controller.tokenUsage.value.lastTotal.takeIf { it > 0 },
+                    outputTokens = (usage.output - turnUsageBaselineOutput).coerceAtLeast(0),
+                    totalTokens = (usage.total - turnUsageBaselineTotal).coerceAtLeast(0),
                 )
                 _lastTurnMetrics.value = reading.takeIf { it.ttftMs != null }
                 turnStartedAtMs = 0L
                 turnFirstTokenAtMs = 0L
                 turnEndedAtMs = 0L
+                turnUsageBaselineOutput = 0
+                turnUsageBaselineTotal = 0
                 // Last assistant item without trailing tools becomes final answer (non-process).
                 val msgs = _messages.value.toMutableList()
                 val tools = _toolCalls.value

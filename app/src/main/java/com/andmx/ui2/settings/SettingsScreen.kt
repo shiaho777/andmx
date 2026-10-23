@@ -2,12 +2,7 @@ package com.andmx.ui2.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -24,6 +19,12 @@ import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.Anchor
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.automirrored.outlined.ManageSearch
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,6 +56,12 @@ import com.andmx.ui2.settings.pages.ModelTrajectoryPage
 import com.andmx.ui2.settings.pages.PluginPage
 import com.andmx.ui2.settings.pages.SkillsPage
 import com.andmx.ui2.settings.pages.SubAgentPage
+import com.andmx.ui2.settings.pages.AutomationsPage
+import com.andmx.ui2.settings.pages.BrowserSettingsPage
+import com.andmx.ui2.settings.pages.ComputerUsePage
+import com.andmx.ui2.settings.pages.HooksPage
+import com.andmx.ui2.settings.pages.ShortcutsPage
+import com.andmx.ui2.settings.pages.WorkspaceIgnorePage
 import com.andmx.ui2.settings.pages.UsagePage
 
 enum class SettingsPage(val title: String, val icon: ImageVector) {
@@ -65,12 +72,18 @@ enum class SettingsPage(val title: String, val icon: ImageVector) {
     SKILLS("技能", Icons.Outlined.Bolt),
     SUBAGENT("子智能体", Icons.Outlined.SmartToy),
     MCP("MCP 服务器", Icons.Outlined.Storage),
-    PLUGIN("插件管理", Icons.Outlined.Extension),
+    PLUGIN("插件", Icons.Outlined.Extension),
     COMMAND("命令", Icons.Outlined.Terminal),
+    AUTOMATIONS("自动化", Icons.Outlined.Alarm),
+    HOOKS("Hooks", Icons.Outlined.Anchor),
+    BROWSER("浏览器控制", Icons.Outlined.Language),
+    COMPUTER("Android Use", Icons.Outlined.PhoneAndroid),
+    SHORTCUTS("键盘快捷键", Icons.Outlined.Keyboard),
+    WORKSPACE_SEARCH("工作区搜索", Icons.Outlined.Search),
     INDEX("索引库", Icons.AutoMirrored.Outlined.ManageSearch),
     USAGE("使用统计", Icons.Outlined.QueryStats),
     MODEL_TRAJECTORY("模型调用轨迹", Icons.Outlined.QueryStats),
-    MEMORY("工作区记忆", Icons.Outlined.Storage)
+    MEMORY("记忆", Icons.Outlined.Storage)
 }
 
 @Composable
@@ -88,16 +101,11 @@ fun SettingsScreen(
         if (page != SettingsPage.HOME) backToHome() else onClose()
     }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = page,
         transitionSpec = {
-            if (targetState == SettingsPage.HOME) {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            } else {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            }
+            if (targetState == SettingsPage.HOME) motion.pop() else motion.push()
         },
         label = "settingsPage",
         modifier = modifier.fillMaxSize(),
@@ -112,6 +120,12 @@ fun SettingsScreen(
             SettingsPage.MCP -> McpPage(backToHome)
             SettingsPage.PLUGIN -> PluginPage(backToHome)
             SettingsPage.COMMAND -> CommandPage(backToHome)
+            SettingsPage.AUTOMATIONS -> AutomationsPage(backToHome)
+            SettingsPage.HOOKS -> HooksPage(backToHome)
+            SettingsPage.BROWSER -> BrowserSettingsPage(backToHome)
+            SettingsPage.COMPUTER -> ComputerUsePage(backToHome)
+            SettingsPage.SHORTCUTS -> ShortcutsPage(backToHome)
+            SettingsPage.WORKSPACE_SEARCH -> WorkspaceIgnorePage(backToHome)
             SettingsPage.INDEX -> IndexPage(backToHome)
             SettingsPage.USAGE -> UsagePage(backToHome)
             SettingsPage.MODEL_TRAJECTORY -> ModelTrajectoryPage(backToHome)
@@ -131,7 +145,7 @@ private fun SettingsHome(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text("设置") },
+                title = { Text(tr("设置")) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
@@ -147,33 +161,56 @@ private fun SettingsHome(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            val items = listOf(
-                SettingsPage.GENERAL, SettingsPage.CODE_PREVIEW, SettingsPage.MODEL,
-                SettingsPage.SKILLS, SettingsPage.SUBAGENT, SettingsPage.MCP,
-                SettingsPage.PLUGIN, SettingsPage.COMMAND, SettingsPage.INDEX,
-                SettingsPage.USAGE, SettingsPage.MODEL_TRAJECTORY, SettingsPage.MEMORY,
+            val groups = listOf(
+                "基础设置" to listOf(
+                    SettingsPage.GENERAL, SettingsPage.CODE_PREVIEW, SettingsPage.MODEL,
+                    SettingsPage.BROWSER, SettingsPage.COMPUTER, SettingsPage.SHORTCUTS,
+                    SettingsPage.WORKSPACE_SEARCH,
+                ),
+                "Agent 能力" to listOf(
+                    SettingsPage.MEMORY, SettingsPage.SUBAGENT, SettingsPage.PLUGIN,
+                    SettingsPage.MCP, SettingsPage.SKILLS, SettingsPage.COMMAND,
+                    SettingsPage.AUTOMATIONS, SettingsPage.HOOKS,
+                ),
+                "数据与统计" to listOf(
+                    SettingsPage.INDEX, SettingsPage.USAGE, SettingsPage.MODEL_TRAJECTORY,
+                ),
             )
             val descriptions = mapOf(
-                SettingsPage.GENERAL to "主题、语言与当前窗口体验",
-                SettingsPage.CODE_PREVIEW to "代码高亮、字号与换行",
+                SettingsPage.GENERAL to "语言与当前窗口体验",
+                SettingsPage.CODE_PREVIEW to "设置代码内容的主题、字号和显示方式，不受界面字号影响。",
                 SettingsPage.MODEL to "模型供应商与默认模型",
-                SettingsPage.SKILLS to "已安装技能管理",
-                SettingsPage.SUBAGENT to "子智能体配置",
-                SettingsPage.MCP to "MCP 服务器连接",
-                SettingsPage.PLUGIN to "插件安装与管理",
-                SettingsPage.COMMAND to "斜杠命令",
+                SettingsPage.SKILLS to "管理项目级与用户级技能。启用后可在聊天里通过 \$skill-name 使用。",
+                SettingsPage.SUBAGENT to "管理 ZCode Agent 运行时消费的用户级子智能体 Markdown 文件。",
+                SettingsPage.MCP to "管理 ZCode Agent 使用的 MCP 服务器配置。",
+                SettingsPage.PLUGIN to "启用或停用已安装的插件。插件可打包技能、命令、Hooks 和 MCP 服务器。",
+                SettingsPage.COMMAND to "管理 ZCode Agent 的 .md 命令文件。命令可通过 /command-name 在聊天中调用。",
+                SettingsPage.AUTOMATIONS to "查看、开关和删除已保存的定时任务。",
+                SettingsPage.HOOKS to "查看已启用插件声明的钩子。",
+                SettingsPage.BROWSER to "开关网页抓取，以及证书校验和抓取缓存。",
+                SettingsPage.COMPUTER to "查看无障碍和屏幕录制是否已打开，并前往系统设置。",
+                SettingsPage.SHORTCUTS to "外接键盘在输入框里实际生效的快捷键。",
+                SettingsPage.WORKSPACE_SEARCH to "编辑当前工作区的 .zcodeignore。",
                 SettingsPage.INDEX to "工作区索引与搜索",
-                SettingsPage.USAGE to "会话与模型用量统计",
+                SettingsPage.USAGE to "查看会话活跃度与模型用量的粗略统计。",
                 SettingsPage.MODEL_TRAJECTORY to "逐次模型调用的来源、Token 与输入输出",
-                SettingsPage.MEMORY to "查看工作区长期记忆文件",
+                SettingsPage.MEMORY to "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",
             )
-            items.forEach { item ->
-                SettingsItem(
-                    icon = item.icon,
-                    title = item.title,
-                    subtitle = descriptions[item],
-                    onClick = { onOpen(item) },
+            groups.forEach { (title, items) ->
+                Text(
+                    tr(title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
+                items.forEach { item ->
+                    SettingsItem(
+                        icon = item.icon,
+                        title = item.title,
+                        subtitle = descriptions[item],
+                        onClick = { onOpen(item) },
+                    )
+                }
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
         }
