@@ -8,6 +8,7 @@ import com.andmx.agent.zcode.TodoState
 import com.andmx.agent.zcode.buildZCodeToolSurface
 import com.andmx.exec.policy.NetworkPolicy
 import com.andmx.workspace.WorkspaceAccess
+import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -157,6 +158,12 @@ class GrepGlobToolTest {
                 put("path", dir)
             })
             assertEquals("No files found", emptyGlob.output)
+            val blankGlob = glob.execute(buildJsonObject {
+                put("pattern", "   ")
+                put("path", dir)
+            })
+            assertTrue(blankGlob.isError)
+            assertEquals("Glob pattern must not be empty", blankGlob.output)
         } finally {
             access.hostFile(dir)?.deleteRecursively()
         }
@@ -280,6 +287,35 @@ class GrepGlobToolTest {
                 lines.last(),
             )
         } finally {
+            access.hostFile(dir)?.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun symlinksAreNotFollowed() = runTest {
+        val dir = "/root/grep-link-${System.nanoTime()}"
+        val access = WorkspaceAccess(context)
+        val grep = surface().single { it.name == "Grep" }
+        val glob = surface().single { it.name == "Glob" }
+        try {
+            access.writeText("$dir/real/hit.txt", "NEEDLE\n")
+            val realDir = access.hostFile("$dir/real")!!.toPath()
+            val realFile = access.hostFile("$dir/real/hit.txt")!!.toPath()
+            Files.createSymbolicLink(access.hostFile("$dir/link")!!.toPath(), realDir)
+            Files.createSymbolicLink(access.hostFile("$dir/alias.txt")!!.toPath(), realFile)
+            val listed = glob.execute(buildJsonObject {
+                put("pattern", "**/*.txt")
+                put("path", dir)
+            })
+            assertEquals(display(dir, "real/hit.txt"), listed.output)
+            val found = grep.execute(buildJsonObject {
+                put("pattern", "NEEDLE")
+                put("path", dir)
+            })
+            assertEquals("Found 1 file\n${display(dir, "real/hit.txt")}", found.output)
+        } finally {
+            access.hostFile("$dir/link")?.delete()
+            access.hostFile("$dir/alias.txt")?.delete()
             access.hostFile(dir)?.deleteRecursively()
         }
     }

@@ -18,6 +18,8 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
 
 private const val TOOL_JSON_SCHEMA = "https://json-schema.org/draft/2020-12/schema"
 private const val DEFAULT_GREP_HEAD_LIMIT = 250
@@ -287,7 +289,7 @@ class GrepTool(
         }
         val globRoot = if (rootFile.isDirectory) searchPath else searchPath.substringBeforeLast('/').ifBlank { "/" }
         val walked = mutableListOf<Walked>()
-        walkFiles(searchPath, rootFile, walked, mutableSetOf())
+        walkFiles(searchPath, rootFile, walked, mutableSetOf(), followRoot = true)
         walked.sortBy { it.guestPath }
         val hits = mutableListOf<FileHit>()
         for (item in walked) {
@@ -335,7 +337,11 @@ class GlobTool(
     override val parameters: JsonObject = GLOB_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult = withContext(Dispatchers.IO) {
-        val pattern = args.text("pattern") ?: return@withContext ToolResult("pattern is required", isError = true)
+        val rawPattern = args.text("pattern") ?: return@withContext ToolResult("pattern is required", isError = true)
+        val pattern = rawPattern.trim()
+        if (pattern.isEmpty()) {
+            return@withContext ToolResult("Glob pattern must not be empty", isError = true)
+        }
         val matcher = try {
             globMatcher(pattern)
         } catch (_: IllegalArgumentException) {
@@ -359,7 +365,7 @@ class GlobTool(
             return@withContext ToolResult("Glob search path must be a directory: $searchPath", isError = true)
         }
         val walked = mutableListOf<Walked>()
-        walkFiles(searchPath, rootFile, walked, mutableSetOf())
+        walkFiles(searchPath, rootFile, walked, mutableSetOf(), followRoot = true)
         val matches = walked.mapNotNull { item ->
             currentCoroutineContext().ensureActive()
             val relative = relativeTo(searchPath, item.guestPath)
@@ -606,23 +612,44 @@ private fun readSearchText(file: File): String? {
     return text
 }
 
-private fun walkFiles(guestPath: String, file: File, into: MutableList<Walked>, seen: MutableSet<String>) {
+private fun walkFiles(
+    guestPath: String,
+    file: File,
+    into: MutableList<Walked>,
+    seen: MutableSet<String>,
+    followRoot: Boolean,
+) {
+    if (!followRoot && isSymlink(file)) return
     val key = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
     if (!seen.add(key)) return
-    if (file.isDirectory) {
+    if (isDirectoryNoFollow(file, followRoot)) {
         val children = file.listFiles() ?: return
         for (child in children) {
-            if (child.isDirectory) {
+            if (isSymlink(child)) continue
+            if (isDirectoryNoFollow(child, followRoot = false)) {
                 if (child.name in VCS_DIRECTORIES) continue
-                walkFiles(joinGuest(guestPath, child.name), child, into, seen)
-            } else if (child.isFile) {
+                walkFiles(joinGuest(guestPath, child.name), child, into, seen, followRoot = false)
+            } else if (isRegularFileNoFollow(child)) {
                 into += Walked(joinGuest(guestPath, child.name), child)
             }
         }
         return
     }
-    if (file.isFile) into += Walked(guestPath, file)
+    if ((followRoot && file.isFile) || isRegularFileNoFollow(file)) {
+        into += Walked(guestPath, file)
+    }
 }
+
+private fun isSymlink(file: File): Boolean =
+    runCatching { Files.isSymbolicLink(file.toPath()) }.getOrDefault(false)
+
+private fun isDirectoryNoFollow(file: File, followRoot: Boolean): Boolean {
+    if (followRoot) return file.isDirectory
+    return runCatching { Files.isDirectory(file.toPath(), LinkOption.NOFOLLOW_LINKS) }.getOrDefault(false)
+}
+
+private fun isRegularFileNoFollow(file: File): Boolean =
+    runCatching { Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS) }.getOrDefault(false)
 
 private fun joinGuest(dir: String, name: String): String {
     val base = if (dir == "/") "" else dir.trimEnd('/')
