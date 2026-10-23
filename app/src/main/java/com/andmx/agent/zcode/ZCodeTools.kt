@@ -776,9 +776,8 @@ class SkillTool(
             "- Do not invoke a skill that is already running\n" +
             "- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)\n" +
             "- If you see a <command-name> tag in the current conversation turn, the skill has ALREADY been loaded - follow the instructions directly instead of calling this tool again"
-    override val risk = ToolRisk.READ
+    override val risk = ToolRisk.EXECUTE
     override val concurrentSafe = true
-    override val sideEffectScope = "session"
     override val timeoutMs = 30_000L
     override val maxOutputBytes = 100_000
     override val parameters = buildJsonObject {
@@ -866,7 +865,8 @@ fun buildZCodeToolSurface(
         },
         risk = ToolRisk.NETWORK,
         concurrentSafe = true,
-        readOnly = true,
+        needsApproval = true,
+        sideEffectScope = "network",
         mapArgs = { args ->
             buildJsonObject {
                 args.forEach { (k, v) -> put(k, v) }
@@ -901,7 +901,6 @@ fun buildZCodeToolSurface(
         },
         risk = ToolRisk.NETWORK,
         concurrentSafe = true,
-        readOnly = true,
     )
 
     val zcode = mutableListOf(
