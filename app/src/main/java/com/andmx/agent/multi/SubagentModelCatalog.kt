@@ -25,11 +25,15 @@ object SubagentModelCatalog {
     fun parse(value: String?): Pair<String, String>? {
         val v = value?.trim().orEmpty()
         if (isInherit(v)) return null
-        val idx = v.indexOf(SEP)
-        if (idx <= 0 || idx >= v.length - SEP.length) {
-            return "" to v
-        }
-        return v.substring(0, idx) to v.substring(idx + SEP.length)
+        splitQualified(v, SEP)?.let { return it }
+        splitQualified(v, "/")?.let { return it }
+        return "" to v
+    }
+
+    private fun splitQualified(value: String, separator: String): Pair<String, String>? {
+        val idx = value.indexOf(separator)
+        if (idx <= 0 || idx >= value.length - separator.length) return null
+        return value.substring(0, idx) to value.substring(idx + separator.length)
     }
 
     /** Split a `provider::model$level` spec into (base spec, level?). Mirrors ZCode's `$level` suffix. */

@@ -82,6 +82,14 @@ class ListModelsToolTest {
     }
 
     @Test
+    fun parseAcceptsSlashAndColonIds() {
+        assertEquals("openai" to "gpt-5", SubagentModelCatalog.parse("openai/gpt-5"))
+        assertEquals("openai" to "gpt-5", SubagentModelCatalog.parse("openai::gpt-5"))
+        assertEquals("openai::gpt-5", SubagentModelCatalog.encode("openai", "gpt-5"))
+        assertEquals("" to "gpt-5", SubagentModelCatalog.parse("gpt-5"))
+    }
+
+    @Test
     fun splitLevelStripsSuffix() {
         assertEquals("a::b" to "high", SubagentModelCatalog.splitLevel("a::b\$high"))
         assertEquals("a::b" to null, SubagentModelCatalog.splitLevel("a::b"))
