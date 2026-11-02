@@ -3,8 +3,8 @@ package com.andmx.agent
 import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -13,17 +13,27 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
 class ModelCallTracePersistenceTest {
 
     private lateinit var context: Context
+    private lateinit var traceFile: File
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        traceFile = Files.createTempFile("model-traces", ".json").toFile().apply { delete() }
         ModelCallTrace.resetForTests(context)
+        ModelCallTrace.installFile(traceFile)
+    }
+
+    @After
+    fun tearDown() {
+        ModelCallTrace.resetInMemory()
+        traceFile.delete()
     }
 
     private fun record(model: String = "gpt-test") {
@@ -42,16 +52,15 @@ class ModelCallTracePersistenceTest {
 
     @Test
     fun recordFlushAndReloadKeepsTheRing() = runBlocking {
-        ModelCallTrace.install(context)
         repeat(3) { record("m$it") }
         ModelCallTrace.flush()
 
-        assertTrue(File(context.filesDir, "model-traces.json").isFile)
+        assertTrue(traceFile.isFile)
         assertEquals(3, ModelCallTrace.calls.value.size)
         assertEquals(3L, ModelCallTrace.calls.value.last().seq)
 
         ModelCallTrace.resetInMemory()
-        ModelCallTrace.install(context)
+        ModelCallTrace.installFile(traceFile)
 
         val restored = ModelCallTrace.calls.value
         assertEquals(3, restored.size)
@@ -64,25 +73,24 @@ class ModelCallTracePersistenceTest {
 
     @Test
     fun ringIsCappedAtFiftyAndClearEmptiesTheFile() = runBlocking {
-        ModelCallTrace.install(context)
         repeat(ModelCallTrace.MAX_CALLS + 5) { record() }
         ModelCallTrace.flush()
         assertEquals(ModelCallTrace.MAX_CALLS, ModelCallTrace.calls.value.size)
 
         ModelCallTrace.clear()
         ModelCallTrace.flush()
-        delay(20)
         assertTrue(ModelCallTrace.calls.value.isEmpty())
 
         ModelCallTrace.resetInMemory()
-        ModelCallTrace.install(context)
+        ModelCallTrace.installFile(traceFile)
         assertTrue(ModelCallTrace.calls.value.isEmpty())
     }
 
     @Test
     fun corruptTraceFileFailsClosedWithoutCrashing() = runBlocking {
-        File(context.filesDir, "model-traces.json").writeText("{not-json")
-        ModelCallTrace.install(context)
+        traceFile.writeText("{not-json")
+        ModelCallTrace.resetInMemory()
+        ModelCallTrace.installFile(traceFile)
 
         assertTrue(ModelCallTrace.calls.value.isEmpty())
         record()

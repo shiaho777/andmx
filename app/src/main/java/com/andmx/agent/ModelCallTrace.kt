@@ -75,9 +75,12 @@ object ModelCallTrace {
 
     fun install(context: Context) {
         if (traceFile != null) return
+        installFile(File(context.applicationContext.filesDir, TRACE_FILE))
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun installFile(file: File) {
         synchronized(this) {
-            if (traceFile != null) return
-            val file = File(context.applicationContext.filesDir, TRACE_FILE)
             traceFile = file
             val loaded = runCatching {
                 if (file.isFile) codec.decodeFromString<List<Call>>(file.readText()) else emptyList()
