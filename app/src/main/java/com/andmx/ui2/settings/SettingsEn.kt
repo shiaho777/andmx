@@ -1195,4 +1195,8 @@ internal val settingsEn: Map<String, String> = mapOf(
         "The system can't play this file (missing codec or damaged file).",
     "用其他应用打开" to "Open with another app",
     "没有可打开该文件的应用。" to "No app can open this file.",
+    "查看" to "View",
+    "没有可显示的差异。" to "No diff to show.",
+    "变更过大，未展开逐行 diff。可先查看文件或直接还原。" to
+        "This change is too large to expand line by line. Open the file or restore it directly.",
 )
