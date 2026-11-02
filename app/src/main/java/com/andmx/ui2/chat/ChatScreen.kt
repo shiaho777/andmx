@@ -1473,6 +1473,22 @@ LaunchedEffect(Unit) {
             CommandCenterSheet(
                 open = showCommandCenter,
                 onDismiss = { showCommandCenter = false },
+                tasks = recentConversations.map {
+                    com.andmx.ui2.drawer.CommandCenterTask(
+                        id = it.id,
+                        title = it.title,
+                        subtitle = it.subtitle,
+                    )
+                },
+                files = indexedFiles,
+                onOpenTask = { id ->
+                    showCommandCenter = false
+                    viewModel.switchToConversation(id)
+                },
+                onInsertFile = { path ->
+                    showCommandCenter = false
+                    viewModel.addFileContext(path)
+                },
                 items = defaultCommandCenterItems(
                     onNewTask = {
                         showCommandCenter = false

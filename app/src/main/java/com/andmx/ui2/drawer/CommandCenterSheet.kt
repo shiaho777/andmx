@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
@@ -58,12 +60,22 @@ data class CommandCenterItem(
     val onRun: () -> Unit,
 )
 
+data class CommandCenterTask(
+    val id: Long,
+    val title: String,
+    val subtitle: String = "",
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommandCenterSheet(
     open: Boolean,
     onDismiss: () -> Unit,
     items: List<CommandCenterItem>,
+    tasks: List<CommandCenterTask> = emptyList(),
+    files: List<String> = emptyList(),
+    onOpenTask: (Long) -> Unit = {},
+    onInsertFile: (String) -> Unit = {},
 ) {
     if (!open) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -77,6 +89,18 @@ fun CommandCenterSheet(
                 item.subtitle.contains(q, true) ||
                 item.keywords.any { it.contains(q, true) }
         }
+    }
+    val filteredTasks = remember(query, tasks) {
+        val q = query.trim()
+        val pool = if (q.isEmpty()) tasks else tasks.filter {
+            it.title.contains(q, true) || it.subtitle.contains(q, true)
+        }
+        pool.take(if (q.isEmpty()) 3 else 8)
+    }
+    val filteredFiles = remember(query, files) {
+        val q = query.trim()
+        if (q.isEmpty()) emptyList()
+        else files.filter { it.contains(q, true) }.take(8)
     }
 
     ModalBottomSheet(
@@ -116,8 +140,10 @@ fun CommandCenterSheet(
                 focusRequester.requestFocus()
             }
             Spacer(Modifier.height(12.dp))
-            if (filtered.isEmpty()) {
-                Text(tr("暂无相关结果"),
+            val hasAny = filtered.isNotEmpty() || filteredTasks.isNotEmpty() || filteredFiles.isNotEmpty()
+            if (!hasAny) {
+                Text(
+                    tr("暂无相关结果"),
                     modifier = Modifier.padding(vertical = 20.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -129,42 +155,102 @@ fun CommandCenterSheet(
                         .heightIn(max = 420.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    items(filtered, key = { it.id }) { item ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
+                    if (filtered.isNotEmpty()) {
+                        item(key = "h_commands") { CommandSectionLabel(tr("命令")) }
+                        items(filtered, key = { it.id }) { item ->
+                            CommandResultRow(
+                                icon = item.icon,
+                                title = item.title,
+                                subtitle = item.subtitle,
+                                onClick = {
                                     item.onRun()
                                     onDismiss()
-                                }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                item.icon,
-                                null,
-                                Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                },
                             )
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    item.title,
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                if (item.subtitle.isNotBlank()) {
-                                    Text(
-                                        item.subtitle,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
+                        }
+                    }
+                    if (filteredTasks.isNotEmpty()) {
+                        item(key = "h_tasks") {
+                            CommandSectionLabel(if (query.isBlank()) tr("最近任务") else tr("任务"))
+                        }
+                        items(filteredTasks, key = { "task_${it.id}" }) { task ->
+                            CommandResultRow(
+                                icon = Icons.Outlined.ChatBubbleOutline,
+                                title = task.title,
+                                subtitle = task.subtitle,
+                                onClick = {
+                                    onOpenTask(task.id)
+                                    onDismiss()
+                                },
+                            )
+                        }
+                    }
+                    if (filteredFiles.isNotEmpty()) {
+                        item(key = "h_files") { CommandSectionLabel(tr("文件")) }
+                        items(filteredFiles, key = { "file_$it" }) { path ->
+                            CommandResultRow(
+                                icon = Icons.Outlined.Description,
+                                title = path.substringAfterLast('/'),
+                                subtitle = path,
+                                onClick = {
+                                    onInsertFile(path)
+                                    onDismiss()
+                                },
+                            )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommandSectionLabel(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun CommandResultRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            null,
+            Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
         }
     }
