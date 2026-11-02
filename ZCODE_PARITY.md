@@ -415,9 +415,12 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **记忆 recall/dream**：按请求打分注入相关记忆；Dream 去重并限流原始记忆，重建 MEMORY.md 与摘要；
   记忆页可巩固、整理与删除单条。
 - **真实用量**：优先读取 rollout 的 `token_usage` 与 `turn_context.model`；旧会话回退到消息估算。
-- **变更摘要**：`DiffEngine.lineStats` 先裁公共前后缀再算 LCS，大窗口回退多重集；文件改动弹窗显示真实 +A/-D。
+- **变更摘要**：`DiffEngine.lineStats` 先裁公共前后缀再算 LCS，大窗口回退多重集；文件改动弹窗显示真实 +A/-D，
+  并支持逐行 diff 预览（超大变更有界降级）。
 - **MCP resources/prompts**：4 个只读工具接入 agent；stdio/HTTP 都支持 list/read/subscribe 与 prompts list/get；
   设置页测试连接显示工具/资源/提示数量。
+- **MCP OAuth（部分）**：HTTP 连接支持预置 access token、refresh_token 刷新与 client_credentials；
+  token 按 server name + endpoint 隔离持久化，端点变更不复用旧凭证。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
@@ -426,7 +429,7 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 
 1. **动态工作流执行引擎**：`prepare` 已能产出 lowered/askSpecs，但设备侧还缺 WebView iframe realm、
    Kotlin `WorkflowDriver`/`JournalStorePort` 和 run 启动/恢复接线。`CreateWorkflow` 目前只做静态分析。
-2. **MCP OAuth**：授权码 + PKCE 的移动端回调仍未接；当前只能保存 OAuth 配置。
+2. **MCP OAuth 浏览器授权**：授权码 + PKCE 的移动端回调仍未接；预置 token、refresh_token 与 client_credentials 已支持。
 3. **工作区索引接入 Grep/Glob**：索引目前只服务文件联想与文件搜索。
 4. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
 5. **i18n 完整覆盖**：设置与聊天主链路已覆盖，长尾页面仍有硬编码中文。
