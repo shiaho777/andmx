@@ -623,6 +623,19 @@ class ChatViewModel @Inject constructor(
         return runCatching { gitBaseline.listChangedFiles(path) }.getOrDefault(emptyList())
     }
 
+    fun fileDiff(pathInRepo: String, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            if (path == null) {
+                onDone("未选择工作区")
+                return@launch
+            }
+            val diff = runCatching { gitBaseline.fileDiff(path, pathInRepo) }
+                .getOrElse { it.message ?: "读取差异失败" }
+            onDone(diff)
+        }
+    }
+
     fun generateCommitMessage(
         targetBranch: String? = null,
         onDone: (Result<String>) -> Unit,

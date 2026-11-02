@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import com.andmx.ui2.settings.tr
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,6 +52,9 @@ fun GitActionDialog(
     onSetIdentity: (name: String, email: String, onDone: (GitBaseline.BaselineResult) -> Unit) -> Unit = { _, _, cb ->
         cb(GitBaseline.BaselineResult(false, "当前会话不支持设置 Git 身份"))
     },
+    onFileDiff: (path: String, onDone: (String) -> Unit) -> Unit = { _, cb ->
+        cb("当前会话不支持读取文件差异")
+    },
     onDismiss: () -> Unit,
 ) {
     var mode by remember { mutableStateOf(GitActionMode.MENU) }
@@ -63,6 +67,19 @@ fun GitActionDialog(
     var identityName by remember { mutableStateOf(gitInfo.userName) }
     var identityEmail by remember { mutableStateOf(gitInfo.userEmail) }
     var identityBusy by remember { mutableStateOf(false) }
+    var diffTarget by remember { mutableStateOf<String?>(null) }
+    var diffText by remember { mutableStateOf("") }
+    var diffLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(diffTarget) {
+        val target = diffTarget ?: return@LaunchedEffect
+        diffLoading = true
+        diffText = ""
+        onFileDiff(target) { text ->
+            diffText = text
+            diffLoading = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (files.isEmpty()) files = onListDirty()
@@ -211,6 +228,10 @@ fun GitActionDialog(
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { diffTarget = f.path }
+                                    .padding(vertical = 2.dp),
                             )
                         }
                     }
@@ -453,4 +474,61 @@ fun GitActionDialog(
             },
         )
     }
+
+    diffTarget?.let { path ->
+        FileDiffDialog(
+            path = path,
+            loading = diffLoading,
+            diff = diffText,
+            onDismiss = { diffTarget = null },
+        )
+    }
+}
+
+@Composable
+private fun FileDiffDialog(
+    path: String,
+    loading: Boolean,
+    diff: String,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "${tr("文件差异")} · $path",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            when {
+                loading -> Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
+                diff.isBlank() -> Text(tr("没有可显示的差异。"))
+                else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+                    items(diff.lineSequence().toList()) { line ->
+                        Text(
+                            line.ifBlank { " " },
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            ),
+                            color = when {
+                                line.startsWith("+++") || line.startsWith("---") ->
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                line.startsWith("+") -> MaterialTheme.colorScheme.primary
+                                line.startsWith("-") -> MaterialTheme.colorScheme.error
+                                line.startsWith("@@") -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(tr("关闭")) } },
+    )
 }

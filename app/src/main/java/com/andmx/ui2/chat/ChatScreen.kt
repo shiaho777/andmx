@@ -1593,6 +1593,7 @@ LaunchedEffect(Unit) {
                 onFetch = { cb -> viewModel.fetchRemote(cb) },
                 onPull = { cb -> viewModel.pullRemote(cb) },
                 onSetIdentity = { name, email, cb -> viewModel.setGitIdentity(name, email, cb) },
+                onFileDiff = { path, cb -> viewModel.fileDiff(path, cb) },
                 onDismiss = { showGitActions = false },
             )
         }

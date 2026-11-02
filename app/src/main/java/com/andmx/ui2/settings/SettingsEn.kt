@@ -1155,4 +1155,5 @@ internal val settingsEn: Map<String, String> = mapOf(
     "写入当前仓库的 user.name / user.email，不影响全局配置。" to "Set user.name / user.email for this repository only.",
     "保存身份" to "Save identity",
     "无法打开这个 PDF 文件。" to "Could not open this PDF.",
+    "文件差异" to "File diff",
 )
