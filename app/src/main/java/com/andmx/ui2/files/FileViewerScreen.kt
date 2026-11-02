@@ -2,6 +2,7 @@ package com.andmx.ui2.files
 
 import com.andmx.ui2.settings.tr
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -40,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,10 +86,25 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
     val config = LocalCodePreviewConfig.current
 
     val fullContent by produceState(initialValue = null as String?, key1 = path) {
+        if (kind == FileKind.IMAGE || kind == FileKind.BINARY) return@produceState
         value = withContext(Dispatchers.IO) {
             runCatching { if (!file.exists()) null else file.readText() }.getOrNull()
         }
         value?.let { draft = it }
+    }
+
+    val imageBitmap by produceState(initialValue = null as ImageBitmap?, key1 = path, key2 = kind) {
+        if (kind != FileKind.IMAGE) return@produceState
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(path, bounds)
+                var sample = 1
+                while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
+                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                android.graphics.BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+            }.getOrNull()
+        }
     }
 
     val totalLen = fullContent?.length ?: 0
@@ -169,8 +188,17 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                 when {
                     kind == FileKind.BINARY ->
                         CenterHint("当前文件看起来像二进制内容，暂不支持预览。")
+                    kind == FileKind.IMAGE && imageBitmap != null ->
+                        Image(
+                            bitmap = imageBitmap!!,
+                            contentDescription = file.name,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp),
+                            contentScale = ContentScale.Fit,
+                        )
                     kind == FileKind.IMAGE ->
-                        CenterHint("图片预览：${file.name}")
+                        CenterHint("无法解码这张图片（SVG 等矢量格式暂不支持预览）。")
                     fullContent == null ->
                         CenterHint("文件不存在，或当前环境无法访问该路径。")
                     fullContent!!.isEmpty() ->
