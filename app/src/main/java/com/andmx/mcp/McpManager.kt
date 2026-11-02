@@ -304,29 +304,49 @@ class McpManager(private val context: Context) {
 
     /** Subscribe to a resource update on a specific server. */
     suspend fun subscribeResource(serverName: String, uri: String): Boolean {
-        val client = clients.firstOrNull { it.serverName == serverName } ?: return false
-        if (!client.supportsCapability("resources")) return false
+        val client = clients.firstOrNull { it.serverName == serverName }
+        val http = httpTransports.firstOrNull { it.serverName == serverName }
+        if (client == null && http == null) return false
+        if (client != null && !client.supportsCapability("resources")) return false
+        if (http != null && !http.supportsCapability("resources")) return false
         runCatching {
-            // Use the client's internal request to subscribe
-            // (McpClient doesn't expose subscribe directly, but we can read the resource)
-            val content = client.readResource(uri)
+            val subscribed = when {
+                client != null -> client.subscribeResource(uri)
+                http != null -> http.subscribeResource(uri)
+                else -> false
+            }
+            if (!subscribed) return false
+            val content = readResource(serverName, uri) ?: "(无响应)"
             val sub = ResourceSubscription(serverName, uri, content)
             _subscriptions.value = _subscriptions.value.filterNot { it.serverName == serverName && it.uri == uri } + sub
         }.onFailure { return false }
         return true
     }
 
+    suspend fun unsubscribeResource(serverName: String, uri: String): Boolean {
+        val client = clients.firstOrNull { it.serverName == serverName }
+        val http = httpTransports.firstOrNull { it.serverName == serverName }
+        val ok = when {
+            client != null -> client.unsubscribeResource(uri)
+            http != null -> http.unsubscribeResource(uri)
+            else -> false
+        }
+        if (ok) {
+            _subscriptions.value = _subscriptions.value.filterNot {
+                it.serverName == serverName && it.uri == uri
+            }
+        }
+        return ok
+    }
+
     /** Refresh all subscribed resources and return which ones changed. */
     suspend fun refreshSubscriptions(): List<ResourceSubscription> {
         val changed = mutableListOf<ResourceSubscription>()
         for (sub in _subscriptions.value) {
-            val client = clients.firstOrNull { it.serverName == sub.serverName } ?: continue
-            runCatching {
-                val content = client.readResource(sub.uri)
-                if (content != sub.lastContent) {
-                    val updated = sub.copy(lastContent = content, updatedAt = System.currentTimeMillis())
-                    changed += updated
-                }
+            val content = readResource(sub.serverName, sub.uri) ?: continue
+            if (content != sub.lastContent) {
+                val updated = sub.copy(lastContent = content, updatedAt = System.currentTimeMillis())
+                changed += updated
             }
         }
         if (changed.isNotEmpty()) {
@@ -337,14 +357,51 @@ class McpManager(private val context: Context) {
         return changed
     }
 
+    suspend fun listResources(serverName: String): List<McpResource> =
+        clients.firstOrNull { it.serverName == serverName }?.listResources()
+            ?: httpTransports.firstOrNull { it.serverName == serverName }?.listResources()
+            ?: emptyList()
+
+    suspend fun readResource(serverName: String, uri: String): String? =
+        runCatching {
+            clients.firstOrNull { it.serverName == serverName }?.readResource(uri)
+                ?: httpTransports.firstOrNull { it.serverName == serverName }?.readResource(uri)
+        }.getOrNull()
+
+    suspend fun listPrompts(serverName: String): List<McpPrompt> =
+        clients.firstOrNull { it.serverName == serverName }?.listPrompts()
+            ?: httpTransports.firstOrNull { it.serverName == serverName }?.listPrompts()
+            ?: emptyList()
+
+    suspend fun getPrompt(
+        serverName: String,
+        name: String,
+        args: Map<String, String> = emptyMap(),
+    ): List<McpPromptContent> =
+        clients.firstOrNull { it.serverName == serverName }?.getPrompt(name, args)
+            ?: httpTransports.firstOrNull { it.serverName == serverName }?.getPrompt(name, args)
+            ?: emptyList()
+
     /** List all resources from all connected servers. */
     suspend fun listAllResources(): List<McpResource> {
         val all = mutableListOf<McpResource>()
-        for (client in clients) {
-            runCatching { all += client.listResources() }
+        connected.forEach { server ->
+            runCatching { all += listResources(server.name) }
         }
         return all
     }
+
+    /** Server-qualified resources, for UI and tools that need the origin. */
+    suspend fun listAllResourceItems(): List<Pair<String, McpResource>> =
+        connected.flatMap { server ->
+            runCatching { listResources(server.name).map { server.name to it } }.getOrDefault(emptyList())
+        }
+
+    /** Server-qualified prompts. */
+    suspend fun listAllPrompts(): List<Pair<String, McpPrompt>> =
+        connected.flatMap { server ->
+            runCatching { listPrompts(server.name).map { server.name to it } }.getOrDefault(emptyList())
+        }
 
     fun close() {
         clients.forEach { it.close() }

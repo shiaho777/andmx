@@ -154,6 +154,18 @@ class McpClient(
         }
     }
 
+    suspend fun subscribeResource(uri: String): Boolean =
+        runCatching {
+            request(McpProtocol.RESOURCES_SUBSCRIBE, buildJsonObject { put("uri", uri) })
+            true
+        }.getOrDefault(false)
+
+    suspend fun unsubscribeResource(uri: String): Boolean =
+        runCatching {
+            request(McpProtocol.RESOURCES_UNSUBSCRIBE, buildJsonObject { put("uri", uri) })
+            true
+        }.getOrDefault(false)
+
     // ── Prompts ────────────────────────────────────────
 
     suspend fun listPrompts(): List<McpPrompt> {

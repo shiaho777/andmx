@@ -79,7 +79,7 @@ private sealed class McpView {
 private sealed class ConnState {
     data object Idle : ConnState()
     data object Testing : ConnState()
-    data class Ok(val tools: Int) : ConnState()
+    data class Ok(val tools: Int, val resources: Int = 0, val prompts: Int = 0) : ConnState()
     data class Fail(val reason: String) : ConnState()
 }
 
@@ -256,12 +256,24 @@ private fun McpListView(
                                 scope.launch {
                                     val result = runCatching {
                                         val mgr = McpManager(context)
-                                        mgr.connectAll(entry.toLine())
-                                        mgr.connected.firstOrNull { it.name == entry.name }
+                                        try {
+                                            mgr.connectAll(entry.toLine())
+                                            val connected = mgr.connected.firstOrNull { it.name == entry.name }
+                                                ?: return@runCatching null
+                                            Triple(
+                                                connected.tools.size,
+                                                runCatching { mgr.listResources(entry.name).size }.getOrDefault(0),
+                                                runCatching { mgr.listPrompts(entry.name).size }.getOrDefault(0),
+                                            )
+                                        } finally {
+                                            mgr.close()
+                                        }
                                     }.getOrNull()
-                                    connStates[entry.name] = if (result != null)
-                                        ConnState.Ok(result.tools.size)
-                                    else ConnState.Fail("连接失败")
+                                    connStates[entry.name] = if (result != null) {
+                                        ConnState.Ok(result.first, result.second, result.third)
+                                    } else {
+                                        ConnState.Fail("连接失败")
+                                    }
                                 }
                             }
                         )
@@ -441,7 +453,13 @@ private fun McpCard(
                 StatusPill(if (entry.isRemote) "HTTP / SSE" else "STDIO")
                 when (state) {
                     is ConnState.Testing -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    is ConnState.Ok -> StatusPill("已连接 · ${state.tools} 个工具")
+                    is ConnState.Ok -> StatusPill(
+                        buildString {
+                            append("已连接 · ").append(state.tools).append(" 工具")
+                            if (state.resources > 0) append(" · ").append(state.resources).append(" 资源")
+                            if (state.prompts > 0) append(" · ").append(state.prompts).append(" 提示")
+                        },
+                    )
                     is ConnState.Fail -> StatusPill(state.reason, error = true)
                     ConnState.Idle -> TextButton(onClick = onTest) { Text(tr("测试连接")) }
                 }
