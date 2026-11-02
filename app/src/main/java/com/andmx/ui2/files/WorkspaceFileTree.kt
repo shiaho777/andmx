@@ -77,6 +77,7 @@ fun WorkspaceFileTree(
     onOpenFile: (String) -> Unit,
     modifier: Modifier = Modifier,
     conversationId: Long = 0L,
+    guestRootPath: String = "",
 ) {
     val context = LocalContext.current
     val projectManager = remember { ProjectManager(context) }
@@ -116,13 +117,19 @@ fun WorkspaceFileTree(
         target.file?.let(onOpenFile)
     }
 
-    val files = remember(currentPath, query, refresh, changedOnly, changes) {
+    val files = remember(currentPath, query, refresh, changedOnly, changes, guestRootPath) {
         (File(currentPath).listFiles()?.asList() ?: emptyList())
             .filter { !it.name.startsWith(".") }
             .filter { query.isBlank() || it.name.contains(query, true) }
             .filter { f ->
                 if (!changedOnly) true
-                else f.isDirectory || changedMap.keys.any { it.endsWith(f.name) || it == f.absolutePath }
+                else WorkspacePathMap.isChanged(
+                    hostPath = f.absolutePath,
+                    hostRoot = rootPath,
+                    guestRoot = guestRootPath,
+                    changedPaths = changedMap.keys,
+                    directory = f.isDirectory,
+                )
             }
             .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
     }
@@ -161,6 +168,13 @@ fun WorkspaceFileTree(
                             isDirectory = file.isDirectory,
                             path = file.absolutePath,
                             rootPath = rootPath,
+                            changed = WorkspacePathMap.isChanged(
+                                hostPath = file.absolutePath,
+                                hostRoot = rootPath,
+                                guestRoot = guestRootPath,
+                                changedPaths = changedMap.keys,
+                                directory = false,
+                            ),
                             onClick = {
                                 if (file.isDirectory) {
                                     currentPath = file.absolutePath
@@ -456,6 +470,7 @@ private fun FileTreeRow(
     isDirectory: Boolean,
     path: String,
     rootPath: String,
+    changed: Boolean = false,
     onClick: () -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
@@ -521,6 +536,14 @@ private fun FileTreeRow(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
+        if (changed) {
+            Text(
+                "●",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.padding(end = 6.dp),
+            )
+        }
         Icon(
             Icons.Outlined.DragHandle,
             null,

@@ -86,6 +86,7 @@ fun ConversationDrawer(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val dao = remember { AndmxDatabase.get(context).dao() }
+    val projectManager = remember { ProjectManager(context) }
     val conversations by dao.observeConversations().collectAsState(initial = emptyList())
     val archived by dao.observeArchived().collectAsState(initial = emptyList())
     val taskGroups by dao.observeTaskGroups().collectAsState(initial = emptyList())
@@ -223,6 +224,7 @@ fun ConversationDrawer(
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp),
                             conversationId = currentConversationId,
+                            guestRootPath = projectManager.guestMountPath,
                         )
                     } else {
                     Column(
