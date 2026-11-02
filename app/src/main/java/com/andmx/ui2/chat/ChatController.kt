@@ -103,6 +103,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.serialization.json.JsonObject
@@ -263,6 +265,7 @@ class ChatController private constructor(private val context: Context) {
 
 
     private val sessions = ConcurrentHashMap<Long, Session>()
+    private val approvalMutex = Mutex()
     private val sessionAccessOrder = java.util.Collections.synchronizedList(mutableListOf<Long>())
     @Volatile private var pluginTools: List<Tool> = emptyList()
     @Volatile private var mobileDevTools: List<Tool> = emptyList()
@@ -652,6 +655,14 @@ class ChatController private constructor(private val context: Context) {
             tools = tools,
             client = client,
             systemPrompt = systemPrompt,
+            approve = { tool, args ->
+                if (convId > 0L) {
+                    val mode = sessions[convId]?.approvalMode ?: ExecMode.from(settings.approvalMode)
+                    approveTool(convId, mode, tool, args)
+                } else {
+                    ApprovalOutcome.Rejected("Workflow run has no conversation to approve tools")
+                }
+            },
         )
         var finalText = ""
         var failure: String? = null
@@ -1710,6 +1721,9 @@ class ChatController private constructor(private val context: Context) {
                 )
             },
             dynamicWorkflowEnabled = dynamicWorkflowEnabled,
+            approveTool = { permissionMode, tool, args ->
+                approveSubagentTool(conversationId, permissionMode, tool, args)
+            },
         )
         orchestrators[conversationId] = orch
         engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId))
@@ -2093,8 +2107,58 @@ class ChatController private constructor(private val context: Context) {
         mode: ExecMode,
         tool: Tool,
         args: JsonObject,
+    ): ApprovalOutcome = approveToolWith(
+        conversationId = conversationId,
+        collaboration = mode.collaboration,
+        labelMode = mode,
+        tool = tool,
+        args = args,
+    )
+
+    /**
+     * 子代理/工作流 actor 的审批入口：显式 permissionMode 覆盖父会话模式，
+     * 但父会话处于 Plan 时始终强制 Plan，避免子代理绕过只读约束。
+     */
+    private suspend fun approveSubagentTool(
+        conversationId: Long,
+        permissionMode: String,
+        tool: Tool,
+        args: JsonObject,
     ): ApprovalOutcome {
-        val collaboration = mode.collaboration
+        val parentMode = sessions[conversationId]?.approvalMode ?: ExecMode.from(settingsSnapshot.approvalMode)
+        val parentPlan = parentMode.collaboration == com.andmx.agent.permission.CollaborationMode.PLAN
+        val declared = com.andmx.agent.permission.CollaborationMode.fromSubagentPermissionMode(permissionMode)
+        val collaboration = when {
+            parentPlan -> com.andmx.agent.permission.CollaborationMode.PLAN
+            declared != null -> declared
+            else -> parentMode.collaboration
+        }
+        val labelMode = when (collaboration) {
+            com.andmx.agent.permission.CollaborationMode.PLAN -> ExecMode.PLAN
+            com.andmx.agent.permission.CollaborationMode.EDIT -> ExecMode.EDIT
+            com.andmx.agent.permission.CollaborationMode.AUTO -> ExecMode.AUTO
+            com.andmx.agent.permission.CollaborationMode.YOLO -> ExecMode.YOLO
+            com.andmx.agent.permission.CollaborationMode.GUARDED -> ExecMode.GUARDED
+            com.andmx.agent.permission.CollaborationMode.BUILD -> ExecMode.BUILD
+        }
+        return approveToolWith(
+            conversationId = conversationId,
+            collaboration = collaboration,
+            labelMode = labelMode,
+            tool = tool,
+            args = args,
+            denyPrompts = permissionMode == "dontAsk" && !parentPlan,
+        )
+    }
+
+    private suspend fun approveToolWith(
+        conversationId: Long,
+        collaboration: com.andmx.agent.permission.CollaborationMode,
+        labelMode: ExecMode,
+        tool: Tool,
+        args: JsonObject,
+        denyPrompts: Boolean = false,
+    ): ApprovalOutcome {
         val planActive = collaboration == com.andmx.agent.permission.CollaborationMode.PLAN
         var capability = com.andmx.agent.permission.PermissionToolCapability(
             userApprovalRule = tool.userApprovalRule,
@@ -2139,13 +2203,14 @@ class ChatController private constructor(private val context: Context) {
             capability,
             rules,
         )
-        return when (decision.decision) {
-            "allow" -> ApprovalOutcome.AllowedOnce
-            "deny" -> ApprovalOutcome.Rejected(decision.reason)
-            else -> if (tool.name == "ExitPlanMode" && decision.ruleId == "tool.userInteraction") {
+        return when {
+            decision.decision == "allow" -> ApprovalOutcome.AllowedOnce
+            decision.decision == "deny" -> ApprovalOutcome.Rejected(decision.reason)
+            denyPrompts -> ApprovalOutcome.Rejected("Subagent permission mode dontAsk denies prompts")
+            tool.name == "ExitPlanMode" && decision.ruleId == "tool.userInteraction" ->
                 ApprovalOutcome.AllowedOnce
-            } else {
-                prompt(conversationId, tool, args, mode, decision.reason)
+            else -> approvalMutex.withLock {
+                prompt(conversationId, tool, args, labelMode, decision.reason)
             }
         }
     }
