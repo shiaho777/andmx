@@ -39,6 +39,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.andmx.agent.WebFetchCache
+import com.andmx.agent.hooks.HookTrustStore
+import com.andmx.agent.hooks.ProjectHooks
 import com.andmx.agent.plugins.PluginSystem
 import com.andmx.data.CronAutomationEntity
 import com.andmx.settings.ProviderSettings
@@ -53,6 +55,7 @@ import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.settings.backAppBar
 import com.andmx.ui2.settings.tr
 import com.andmx.workspace.ProjectManager
+import com.andmx.workspace.WorkspaceAccess
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -230,8 +233,22 @@ fun HooksPage(onBack: () -> Unit) {
     val path = "/root/.andmx/hooks.json"
     var drafts by remember { mutableStateOf(listOf<UserHookDraft>()) }
     var note by remember { mutableStateOf("") }
+    val projectManager = remember { ProjectManager(context) }
+    val access = remember { WorkspaceAccess(context) }
+    val hostPath by projectManager.hostPath.collectAsState()
+    val trustRevision by HookTrustStore.revision.collectAsState()
+    var projectRefresh by remember { mutableIntStateOf(0) }
+    var projectLoaded by remember { mutableStateOf(false) }
     val pluginHooks by produceState(emptyMap<String, List<PluginSystem.HookEntry>>()) {
         value = withContext(Dispatchers.IO) { runCatching { system.allHooks() }.getOrDefault(emptyMap()) }
+    }
+    val projectSnapshot by produceState<ProjectHooks.Snapshot?>(null, hostPath, trustRevision, projectRefresh) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                ProjectHooks.load(access, ProjectHooks.workspaceKey(projectManager))
+            }.getOrNull()
+        }
+        projectLoaded = true
     }
     androidx.compose.runtime.LaunchedEffect(path) {
         drafts = withContext(Dispatchers.IO) { readUserHooks(fs, path) }
@@ -247,6 +264,84 @@ fun HooksPage(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            HorizontalDivider(Modifier.padding(vertical = 16.dp))
+            Text(
+                tr("项目钩子 (.zcode/hooks.json)"),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                tr("项目钩子随仓库分发，默认不执行。信任绑定到当前文件内容，文件一旦修改会重新要求审查。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            val snapshot = projectSnapshot
+            when {
+                hostPath.isNullOrBlank() -> {
+                    Text(tr("未打开工作区。"), modifier = Modifier.padding(top = 8.dp))
+                }
+                !projectLoaded -> {
+                    Text(tr("正在读取项目钩子…"), modifier = Modifier.padding(top = 8.dp))
+                }
+                snapshot == null -> {
+                    Text(tr("当前项目没有 .zcode/hooks.json。"), modifier = Modifier.padding(top = 8.dp))
+                }
+                else -> {
+                    val previousHash = HookTrustStore.trustedHash(snapshot.workspaceKey)
+                    val status = when {
+                        snapshot.trusted -> tr("项目钩子已信任，将随会话加载执行。")
+                        previousHash != null -> tr("钩子文件已变更，需要重新审查后才能执行。")
+                        else -> tr("项目钩子未信任，不会执行。审查后点击信任。")
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        tr("文件指纹") + " " + snapshot.fingerprint.take(16),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (snapshot.hooks.isEmpty()) {
+                        Text(tr("文件里没有可执行的有效钩子。"), modifier = Modifier.padding(top = 8.dp))
+                    }
+                    snapshot.hooks.forEach { hook ->
+                        Text(
+                            "${hook.event} · ${hook.name}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        if (hook.matcher.isNotBlank()) {
+                            Text(tr("匹配器 ${hook.matcher}"), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            hook.command,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            enabled = !snapshot.trusted && snapshot.hooks.isNotEmpty(),
+                            onClick = {
+                                HookTrustStore.trust(snapshot.workspaceKey, snapshot.fingerprint)
+                                note = "已信任项目钩子"
+                            },
+                        ) { Text(tr("信任并启用")) }
+                        OutlinedButton(
+                            enabled = snapshot.trusted || previousHash != null,
+                            onClick = {
+                                HookTrustStore.revoke(snapshot.workspaceKey)
+                                note = "已撤销项目钩子信任"
+                            },
+                            modifier = Modifier.padding(start = 8.dp),
+                        ) { Text(tr("撤销信任")) }
+                        TextButton(onClick = { projectRefresh++ }) { Text(tr("刷新")) }
+                    }
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 16.dp))
             drafts.forEachIndexed { index, draft ->
                 OutlinedTextField(
                     value = draft.name,

@@ -35,6 +35,13 @@ class HookSystem(
     private val asyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var hooks: List<HookConfig> = hooks.toList()
 
+    /**
+     * Optional execution environment override. ChatController points this at the
+     * SSH environment for remote workspaces so project hooks run where the
+     * workspace actually lives.
+     */
+    @Volatile var executor: com.andmx.exec.ExecutionEnvironment? = null
+
     fun replaceHooks(next: List<HookConfig>) {
         hooks = next.toList()
     }
@@ -81,6 +88,8 @@ class HookSystem(
 
     enum class HookDecision { CONTINUE, BLOCK, MODIFY }
 
+    enum class HookSource { USER, PROJECT, PLUGIN }
+
     data class HookConfig(
         val event: HookEvent,
         val command: String,           // shell command to execute in the guest
@@ -88,6 +97,9 @@ class HookSystem(
         val mode: HookMode = HookMode.SYNC,
         val name: String = "",
         val matcher: String = "",
+        val source: HookSource = HookSource.USER,
+        /** Working directory; project hooks default to the workspace root. */
+        val cwd: String? = null,
     )
 
     data class HookContext(
@@ -147,11 +159,13 @@ class HookSystem(
 
     private suspend fun executeHook(hook: HookConfig, ctx: HookContext): HookResult {
         val stdin = buildContextJson(ctx)
+        val environment = executor ?: env
 
         val res = kotlinx.coroutines.withTimeoutOrNull(hook.timeoutMs) {
             runCatching {
-                env.execute(ProcessSpec(
+                environment.execute(ProcessSpec(
                     argv = listOf("/bin/sh", "-c", hook.command),
+                    workingDir = hook.cwd,
                     stdin = stdin,
                     redirectErrorStream = true,
                 ))

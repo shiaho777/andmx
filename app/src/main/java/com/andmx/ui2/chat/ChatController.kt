@@ -172,6 +172,8 @@ class ChatController private constructor(private val context: Context) {
     private val ambientSuggestions = AmbientSuggestions(context)
     @Volatile private var hooksLoaded = false
     @Volatile private var hooksFileStamp = 0L
+    @Volatile private var hooksProjectStamp = -1L
+    @Volatile private var hooksTrustRevision = -1L
     private val mcpManager = McpManager(context)
     private val rolloutWriters = ConcurrentHashMap<Long, RolloutWriter>()
     private val tokenTrackers = ConcurrentHashMap<Long, TokenUsageTracker>()
@@ -2795,39 +2797,30 @@ private fun PermissionModes.Effect.toDecision(): Decision = when (this) {
     private suspend fun ensureHooksLoaded() {
         val token = pluginSystem.currentReloadToken()
         val stamp = runCatching { guestFs.resolve("/root/.andmx/hooks.json").lastModified() }.getOrDefault(0L)
-        if (hooksLoaded && lastHooksReloadToken == token && hooksFileStamp == stamp) return
+        val projectStamp = runCatching { access.statMtime(com.andmx.agent.hooks.ProjectHooks.RELATIVE_PATH) }
+            .getOrNull() ?: 0L
+        val trustRevision = com.andmx.agent.hooks.HookTrustStore.revision.value
+        if (hooksLoaded &&
+            lastHooksReloadToken == token &&
+            hooksFileStamp == stamp &&
+            hooksProjectStamp == projectStamp &&
+            hooksTrustRevision == trustRevision
+        ) {
+            return
+        }
         hooksLoaded = true
         lastHooksReloadToken = token
         hooksFileStamp = stamp
+        hooksProjectStamp = projectStamp
+        hooksTrustRevision = trustRevision
         val configs = mutableListOf<HookSystem.HookConfig>()
         runCatching {
             val path = "/root/.andmx/hooks.json"
             if (guestFs.exists(path)) {
-                val raw = guestFs.readText(path)
-                val el = kotlinx.serialization.json.Json.parseToJsonElement(raw)
-                val arr = el as? kotlinx.serialization.json.JsonArray
-                    ?: (el as? JsonObject)?.get("hooks") as? kotlinx.serialization.json.JsonArray
-                arr?.forEach { item ->
-                    val obj = item as? JsonObject ?: return@forEach
-                    val eventRaw = (obj["event"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
-                    val command = (obj["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
-                    if (command.isBlank()) return@forEach
-                    val event = HookSystem.parseEvent(eventRaw) ?: return@forEach
-                    val timeout = (obj["timeout_ms"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull()
-                        ?: (obj["timeoutMs"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull()
-                        ?: 10_000L
-                    val name = (obj["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
-                    val matcher = (obj["matcher"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
-                    val async = (obj["async"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
-                    configs += HookSystem.HookConfig(
-                        event = event,
-                        command = command,
-                        timeoutMs = timeout,
-                        mode = if (async) HookSystem.HookMode.ASYNC else HookSystem.HookMode.SYNC,
-                        name = name.ifBlank { "config:$eventRaw" },
-                        matcher = matcher,
-                    )
-                }
+                configs += com.andmx.agent.hooks.HookConfigParser.parse(
+                    raw = guestFs.readText(path),
+                    source = HookSystem.HookSource.USER,
+                )
             }
         }
         runCatching {
@@ -2847,9 +2840,24 @@ private fun PermissionModes.Effect.toDecision(): Decision = when (this) {
                         timeoutMs = entry.timeoutMs,
                         name = entry.name.ifBlank { "${plugin.manifest.name}:${entry.event}" },
                         matcher = entry.matcher,
+                        source = HookSystem.HookSource.PLUGIN,
                     )
                 }
             }
+        }
+        runCatching {
+            val workspaceKey = com.andmx.agent.hooks.ProjectHooks.workspaceKey(projectManager)
+            val snapshot = com.andmx.agent.hooks.ProjectHooks.load(access, workspaceKey)
+            if (snapshot != null && snapshot.trusted) {
+                configs += snapshot.hooks
+            }
+        }
+        hookSystem.executor = if (projectManager.isRemote) {
+            projectManager.currentRemoteSpec()?.let {
+                com.andmx.exec.remote.RemoteSshEnvironment(context, it)
+            }
+        } else {
+            null
         }
         hookSystem.replaceHooks(configs)
     }
