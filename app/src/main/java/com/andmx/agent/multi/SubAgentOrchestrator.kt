@@ -2,6 +2,7 @@ package com.andmx.agent.multi
 
 import com.andmx.agent.AgentEngine
 import com.andmx.agent.AgentEvent
+import com.andmx.agent.ApprovalOutcome
 import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.zcode.AGENT_MODEL_BYTES
@@ -108,6 +109,11 @@ class SubAgentOrchestrator(
      * 因此这条链必须是运行时值，不能是编译期常量。
      */
     private val dynamicWorkflowEnabled: Boolean = false,
+    /**
+     * 子代理工具审批。permissionMode 是 agent profile 的声明值；
+     * null 时保持旧行为（子代理自治，全部放行）。
+     */
+    private val approveTool: (suspend (permissionMode: String, tool: Tool, args: JsonObject) -> ApprovalOutcome)? = null,
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
@@ -263,6 +269,9 @@ class SubAgentOrchestrator(
             tools = tools,
             client = runClient,
             systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef, agentsMd),
+            approve = { tool, args ->
+                approveTool?.invoke(spec.permissionMode, tool, args) ?: ApprovalOutcome.AllowedOnce
+            },
         )
 
         val outputFile = spec.outputFile.ifBlank { agentOutputFile(agentId) }

@@ -19,5 +19,20 @@ enum class CollaborationMode(val wire: String) {
                 else -> BUILD
             }
         }
+
+        /**
+         * Claude Code 风格子代理 permissionMode 映射；default/未知返回 null，
+         * 表示沿用父会话的审批策略。
+         */
+        fun fromSubagentPermissionMode(raw: String?): CollaborationMode? {
+            return when (raw?.trim()) {
+                "acceptEdits" -> EDIT
+                "auto" -> AUTO
+                "bypassPermissions" -> YOLO
+                "dontAsk" -> BUILD
+                "plan" -> PLAN
+                else -> null
+            }
+        }
     }
 }
