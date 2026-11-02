@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Commit
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -32,7 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.andmx.workspace.GitBaseline
 
-enum class GitActionMode { MENU, COMMIT, PUSH }
+enum class GitActionMode { MENU, COMMIT, PUSH, IDENTITY }
 
 @Composable
 fun GitActionDialog(
@@ -43,6 +46,11 @@ fun GitActionDialog(
     onCommit: (message: String, onDone: (GitBaseline.CommitResult) -> Unit) -> Unit,
     onPush: (onDone: (GitBaseline.PushResult) -> Unit) -> Unit,
     onCommitAndPush: (message: String, onDone: (GitBaseline.CommitResult, GitBaseline.PushResult?) -> Unit) -> Unit,
+    onFetch: (onDone: (GitBaseline.PushResult) -> Unit) -> Unit = {},
+    onPull: (onDone: (GitBaseline.PushResult) -> Unit) -> Unit = {},
+    onSetIdentity: (name: String, email: String, onDone: (GitBaseline.BaselineResult) -> Unit) -> Unit = { _, _, cb ->
+        cb(GitBaseline.BaselineResult(false, "当前会话不支持设置 Git 身份"))
+    },
     onDismiss: () -> Unit,
 ) {
     var mode by remember { mutableStateOf(GitActionMode.MENU) }
@@ -50,6 +58,11 @@ fun GitActionDialog(
     var commitMessage by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var noticeOk by remember { mutableStateOf(true) }
+    var identityName by remember { mutableStateOf(gitInfo.userName) }
+    var identityEmail by remember { mutableStateOf(gitInfo.userEmail) }
+    var identityBusy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (files.isEmpty()) files = onListDirty()
@@ -101,6 +114,60 @@ fun GitActionDialog(
                     ) {
                         Icon(Icons.Outlined.CloudUpload, null, Modifier.size(18.dp))
                         Text(tr("推送"), Modifier.padding(start = 8.dp))
+                    }
+                    TextButton(
+                        enabled = !busy && gitInfo.isRepo,
+                        onClick = {
+                            busy = true
+                            notice = null
+                            onFetch { result ->
+                                busy = false
+                                noticeOk = result.ok
+                                notice = result.message
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.CloudDownload, null, Modifier.size(18.dp))
+                        Text(tr("获取远程更新"), Modifier.padding(start = 8.dp))
+                    }
+                    TextButton(
+                        enabled = !busy && gitInfo.hasUpstream,
+                        onClick = {
+                            busy = true
+                            notice = null
+                            onPull { result ->
+                                busy = false
+                                noticeOk = result.ok
+                                notice = result.message
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp))
+                        Text(tr("拉取（快进）"), Modifier.padding(start = 8.dp))
+                    }
+                    if (!gitInfo.hasIdentity) {
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                message = null
+                                mode = GitActionMode.IDENTITY
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Outlined.Person, null, Modifier.size(18.dp))
+                            Text(tr("设置提交身份"), Modifier.padding(start = 8.dp))
+                        }
+                    }
+                    notice?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (noticeOk) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                     }
                     message?.let {
                         Text(
@@ -321,6 +388,68 @@ fun GitActionDialog(
             },
             dismissButton = {
                 TextButton(enabled = !busy, onClick = { mode = GitActionMode.MENU }) { Text(tr("返回")) }
+            },
+        )
+
+        GitActionMode.IDENTITY -> AlertDialog(
+            onDismissRequest = { if (!identityBusy) mode = GitActionMode.MENU },
+            title = { Text(tr("设置 Git 提交身份")) },
+            text = {
+                Column {
+                    Text(
+                        tr("写入当前仓库的 user.name / user.email，不影响全局配置。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = identityName,
+                        onValueChange = { identityName = it },
+                        label = { Text(tr("user.name")) },
+                        singleLine = true,
+                        enabled = !identityBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    OutlinedTextField(
+                        value = identityEmail,
+                        onValueChange = { identityEmail = it },
+                        label = { Text(tr("user.email")) },
+                        singleLine = true,
+                        enabled = !identityBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    message?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    if (identityBusy) {
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !identityBusy && identityName.isNotBlank() && identityEmail.isNotBlank(),
+                    onClick = {
+                        identityBusy = true
+                        message = null
+                        onSetIdentity(identityName.trim(), identityEmail.trim()) { result ->
+                            identityBusy = false
+                            if (result.ok) onDismiss() else message = result.message
+                        }
+                    },
+                ) { Text(tr("保存身份")) }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !identityBusy,
+                    onClick = { mode = GitActionMode.MENU },
+                ) { Text(tr("返回")) }
             },
         )
     }

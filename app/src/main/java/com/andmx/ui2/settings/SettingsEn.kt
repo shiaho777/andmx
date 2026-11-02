@@ -1148,4 +1148,10 @@ internal val settingsEn: Map<String, String> = mapOf(
     "收起输出" to "Hide output",
     "暂无输出" to "No output yet",
     "正在读取输出…" to "Reading output…",
+    "获取远程更新" to "Fetch remote",
+    "拉取（快进）" to "Pull (fast-forward)",
+    "设置提交身份" to "Set commit identity",
+    "设置 Git 提交身份" to "Set Git commit identity",
+    "写入当前仓库的 user.name / user.email，不影响全局配置。" to "Set user.name / user.email for this repository only.",
+    "保存身份" to "Save identity",
 )

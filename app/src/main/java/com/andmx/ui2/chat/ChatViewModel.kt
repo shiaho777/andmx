@@ -678,6 +678,61 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun fetchRemote(onDone: (com.andmx.workspace.GitBaseline.PushResult) -> Unit) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            if (path == null) {
+                onDone(com.andmx.workspace.GitBaseline.PushResult(false, "未选择工作区"))
+                return@launch
+            }
+            val result = runCatching { gitBaseline.fetch(path) }
+                .getOrElse {
+                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: "获取失败")
+                }
+            result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
+            if (result.ok) refreshGitInfo()
+            onDone(result)
+        }
+    }
+
+    fun pullRemote(onDone: (com.andmx.workspace.GitBaseline.PushResult) -> Unit) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            if (path == null) {
+                onDone(com.andmx.workspace.GitBaseline.PushResult(false, "未选择工作区"))
+                return@launch
+            }
+            val result = runCatching { gitBaseline.pull(path) }
+                .getOrElse {
+                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: "拉取失败")
+                }
+            result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
+            if (result.ok) refreshGitInfo()
+            onDone(result)
+        }
+    }
+
+    fun setGitIdentity(
+        name: String,
+        email: String,
+        onDone: (com.andmx.workspace.GitBaseline.BaselineResult) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            if (path == null) {
+                onDone(com.andmx.workspace.GitBaseline.BaselineResult(false, "未选择工作区"))
+                return@launch
+            }
+            val result = runCatching { gitBaseline.setIdentity(path, name, email) }
+                .getOrElse {
+                    com.andmx.workspace.GitBaseline.BaselineResult(false, it.message ?: "保存身份失败")
+                }
+            result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
+            if (result.ok) refreshGitInfo()
+            onDone(result)
+        }
+    }
+
     fun commitWorkspace(
         message: String,
         onDone: (com.andmx.workspace.GitBaseline.CommitResult) -> Unit,

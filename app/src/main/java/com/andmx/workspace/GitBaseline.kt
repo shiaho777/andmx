@@ -770,6 +770,73 @@ class GitBaseline(
         )
     }
 
+    /** `git fetch --prune`：只更新远程跟踪分支，不改工作区。 */
+    suspend fun fetch(workspacePath: String): PushResult = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val info = collectGitInfo(workspacePath)
+        if (!info.isRepo) {
+            return@withContext PushResult(false, "当前工作区不是 Git 仓库。", gitInfo = info)
+        }
+        if (info.originUrl.isBlank()) {
+            return@withContext PushResult(false, "未配置远程 origin。", gitInfo = info)
+        }
+        val script = "cd '$workspacePath' 2>/dev/null && git fetch --prune 2>&1; echo FETCH_EXIT=\$?"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr)
+        val ok = "FETCH_EXIT=0" in out
+        val next = collectGitInfo(workspacePath)
+        PushResult(
+            ok = ok,
+            message = if (ok) "已获取远程更新" else "获取失败：${out.take(400)}",
+            gitInfo = next,
+        )
+    }
+
+    /** `git pull --ff-only`：只做快进合并，分叉/本地改动时明确失败。 */
+    suspend fun pull(workspacePath: String): PushResult = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val info = collectGitInfo(workspacePath)
+        if (!info.isRepo) {
+            return@withContext PushResult(false, "当前工作区不是 Git 仓库。", gitInfo = info)
+        }
+        if (!info.hasUpstream) {
+            return@withContext PushResult(false, "当前分支没有 upstream，先推送一次或手动设置。", gitInfo = info)
+        }
+        val script = "cd '$workspacePath' 2>/dev/null && git pull --ff-only 2>&1; echo PULL_EXIT=\$?"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr)
+        val ok = "PULL_EXIT=0" in out
+        val next = collectGitInfo(workspacePath)
+        PushResult(
+            ok = ok,
+            message = if (ok) "已拉取远程更新" else "拉取失败（可能有本地改动或分支分叉）：${out.take(400)}",
+            gitInfo = next,
+        )
+    }
+
+    /** 写入仓库级 user.name/user.email，供提交使用。 */
+    suspend fun setIdentity(
+        workspacePath: String,
+        name: String,
+        email: String,
+    ): BaselineResult = withContext(Dispatchers.IO) {
+        if (name.isBlank() || email.isBlank()) {
+            return@withContext BaselineResult(false, "user.name 和 user.email 都不能为空。")
+        }
+        ensureGit(workspacePath)
+        val script = "cd '$workspacePath' 2>/dev/null && " +
+            "git config user.name ${shellEscape(name)} && " +
+            "git config user.email ${shellEscape(email)} 2>&1; echo IDENTITY_EXIT=\$?"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr)
+        val ok = "IDENTITY_EXIT=0" in out
+        BaselineResult(
+            ok = ok,
+            message = if (ok) "已保存 Git 提交身份" else "保存失败：${out.take(300)}",
+            gitInfo = collectGitInfo(workspacePath),
+        )
+    }
+
     suspend fun commitAndPush(
         workspacePath: String,
         message: String,
