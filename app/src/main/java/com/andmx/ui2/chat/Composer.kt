@@ -127,6 +127,7 @@ fun Composer(
     attachments: List<Attachment> = emptyList(),
     onRemoveAttachment: (Int) -> Unit = {},
     onAddAttachment: () -> Unit = {},
+    onAddDocument: () -> Unit = {},
     onPasteClipboardImage: (android.net.Uri) -> Unit = {},
     onInsertMention: () -> Unit = {},
     onInsertConversation: () -> Unit = {},
@@ -440,6 +441,7 @@ fun Composer(
                         ) {
                             PlusMenu(
                                 onAddAttachment = onAddAttachment,
+                                onAddDocument = onAddDocument,
                                 onPasteClipboardImage = onPasteClipboardImage,
                                 onInsertMention = onInsertMention,
                                 onInsertConversation = onInsertConversation,
@@ -573,6 +575,7 @@ private fun InputHistoryMenu(
 @Composable
 private fun PlusMenu(
     onAddAttachment: () -> Unit,
+    onAddDocument: () -> Unit,
     onPasteClipboardImage: (android.net.Uri) -> Unit,
     onInsertMention: () -> Unit,
     onInsertConversation: () -> Unit,
@@ -583,9 +586,17 @@ private fun PlusMenu(
     Box {
         CircleIcon(Icons.Outlined.Add, "添加上下文") { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            PlusMenuItem(Icons.Outlined.AttachFile, "添加附件", "上传截图、文档作为上下文") {
+            PlusMenuItem(Icons.Outlined.AttachFile, "添加图片", "从相册或文件选择图片") {
                 expanded = false
                 onAddAttachment()
+            }
+            PlusMenuItem(
+                Icons.AutoMirrored.Outlined.InsertDriveFile,
+                "添加文档",
+                "文本/代码/JSON 等可读文档会直接内联为上下文",
+            ) {
+                expanded = false
+                onAddDocument()
             }
             // 上游 app-clipboard-image 等价：剪贴板含图片时提供直接粘贴为附件。
             val clipCtx = androidx.compose.ui.platform.LocalContext.current

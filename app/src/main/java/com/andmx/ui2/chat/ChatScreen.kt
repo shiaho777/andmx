@@ -392,8 +392,14 @@ LaunchedEffect(Unit) {
         androidx.activity.result.contract.ActivityResultContracts.GetContent(),
     ) { uri ->
         if (uri != null) {
-            val name = uri.lastPathSegment?.substringAfterLast('/') ?: "图片"
-            attachments = attachments + Attachment(name = name, uri = uri.toString())
+            attachments = attachments + Attachment(name = attachmentDisplayName(context, uri), uri = uri.toString())
+        }
+    }
+    val documentPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) {
+            attachments = attachments + Attachment(name = attachmentDisplayName(context, uri), uri = uri.toString())
         }
     }
 
@@ -839,6 +845,7 @@ LaunchedEffect(Unit) {
                         attachments = attachments.filterIndexed { idx, _ -> idx != i }
                     },
                     onAddAttachment = { imagePicker.launch("image/*") },
+                    onAddDocument = { documentPicker.launch("*/*") },
                     onPasteClipboardImage = { uri ->
                         val name = uri.lastPathSegment?.substringAfterLast('/') ?: "剪贴板图片"
                         attachments = attachments + Attachment(name = name, uri = uri.toString())
@@ -1857,5 +1864,17 @@ private fun FileDragOverlay(
 private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollAnchorToTop(index: Int) {
     val viewport = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).coerceAtLeast(1)
     animateScrollToItem(index, scrollOffset = -(viewport - 12))
+}
+
+private fun attachmentDisplayName(context: android.content.Context, uri: android.net.Uri): String {
+    val fromResolver = runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    }.getOrNull()
+    return fromResolver?.takeIf { it.isNotBlank() }
+        ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        ?: "附件"
 }
 
