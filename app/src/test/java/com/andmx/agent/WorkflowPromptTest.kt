@@ -38,8 +38,8 @@ class WorkflowPromptTest {
         assertTrue(prompt.contains("`path`"))
         assertTrue(prompt.contains("run_id"))
         assertTrue(prompt.contains("script_path"))
-        assertTrue(prompt.contains("does not typecheck"))
-        assertTrue(prompt.contains("does not start a run"))
+        assertTrue(prompt.contains("may typecheck a script"))
+        assertTrue(prompt.contains("do not start a run"))
         assertTrue(prompt.contains("Do not pass `spec`"))
         assertFalse(prompt.contains("GetWorkflowRunRoster"))
         assertFalse(prompt.contains("CancelWorkflowRun"))
@@ -47,7 +47,8 @@ class WorkflowPromptTest {
         val notice = WorkflowPrompt.blankArgsNotice(toolsEnabled = true)
         assertTrue(notice.contains("script、saved 或 path"))
         assertFalse(notice.contains("用 CreateWorkflow 启动"))
-        assertTrue(notice.contains("也不会启动运行"))
+        assertTrue(notice.contains("静态类型检查"))
+        assertTrue(notice.contains("不会启动运行"))
     }
 
     @Test

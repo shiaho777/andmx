@@ -392,3 +392,27 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - `Agent` 工具名缺失对第三方插件指令的影响：若插件 prompt 里写 "use the Agent tool"，AndMX 只有 `Task` 别名可命中。
 - `multi_agent` 的上游对应物：上游似无此工具名，需确认是 AndMX 自造还是多代理并发入口的替代名。
 - `memory` 的 `recall/` 检索路径是否被 `MemorySystem.kt` 以另一种形式覆盖（当前仅按文件数判断，未逐行核对）。
+
+## 八、2026-11-02 移动端闭环进度
+
+已合入：
+
+- **入站分享/外链/通知**：`ACTION_SEND`（文本/图片）、`ACTION_VIEW`、通知 `conversationId` 都能进入 Composer 或切换会话。
+- **图片消息**：用户图片持久化到 `MessageEntity.imageUrlsJson`，并在气泡中显示。
+- **终端/Bash**：终端会话改为进程级 registry，关闭 sheet 不再销毁 PTY；`ShellTool` 增量输出进入工具卡。
+- **自定义命令/AUTO**：自定义命令进入斜杠补全并支持 `$ARGUMENTS`；AUTO 改为风险分级，不再是必拒绝占位。
+- **设置/命令中心**：设置首页搜索 + 关于页；命令中心可搜命令、最近任务、索引文件。
+- **后台任务/草稿**：后台 shell 任务面板（状态/输出/停止）；Composer 文本按 conversationId 持久化。
+- **文件预览**：图片与 PDF（前 10 页）只读预览。
+- **Git**：fetch、`pull --ff-only`、仓库级提交身份、提交前逐文件 diff。
+- **审批**：子代理与工作流 actor 接入会话审批；`permissionMode` 真正映射为权限策略，父会话 Plan 时强制只读。
+
+仍缺（按优先级）：
+
+1. **动态工作流执行引擎**：`prepare` 已能产出 lowered/askSpecs，但设备侧还缺 WebView iframe realm、
+   Kotlin `WorkflowDriver`/`JournalStorePort` 和 run 启动/恢复接线。`CreateWorkflow` 目前只做静态分析。
+2. **MCP OAuth/resources/prompts**：OAuth 仍只能保存配置；resources/prompts 无 UI/工具接线。
+3. **真实用量/遥测**：使用页仍按字符数估算；`ModelCallTrace` 只在内存保留最近 50 次。
+4. **Cron 进程死亡后的执行**：当前进程不在时只通知，不执行。
+5. **工作区索引接入 Grep/Glob**：索引目前只服务文件联想与文件搜索。
+6. **Office/PPTX 预览**、**逐文件 Git diff 之外的 merge 冲突处理**、**i18n 完整覆盖**。

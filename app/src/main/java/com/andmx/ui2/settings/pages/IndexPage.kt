@@ -104,7 +104,7 @@ fun IndexPage(onBack: () -> Unit) {
                 HorizontalDivider()
                 SwitchRow(
                     title = "索引存储库以实现即时搜索（测试版）",
-                    description = "自动对仓库进行索引，以加快 Grep 搜索速度。所有数据均存储在本地。",
+                    description = "自动对仓库进行索引，加快文件联想与文件搜索。所有数据均存储在本地。",
                     checked = s.instantGrep,
                     onCheckedChange = { save(s.copy(instantGrep = it)) },
                 )

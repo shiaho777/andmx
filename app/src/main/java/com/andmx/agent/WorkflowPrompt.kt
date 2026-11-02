@@ -12,7 +12,7 @@ object WorkflowPrompt {
 
     fun blankArgsNotice(toolsEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_DEFAULT): String =
         if (toolsEnabled) {
-            "用法：`/workflow <要完成的任务>`。先加载 dynamic-workflows。CreateWorkflow 只接受 script、saved 或 path 之一，不会类型检查，也不会启动运行。"
+            "用法：`/workflow <要完成的任务>`。先加载 dynamic-workflows。CreateWorkflow 只接受 script、saved 或 path 之一；会做静态类型检查，但不会启动运行。"
         } else {
             "用法：`/workflow <要完成的任务>`。动态工作流工具未注册，不会类型检查，也不会启动运行。"
         }
@@ -22,6 +22,6 @@ object WorkflowPrompt {
     """.trimIndent()
 
     private fun enabledBody(): String = """
-        Load the dynamic-workflows skill with the Skill tool before you call a workflow tool that submits a script. The skill is the argument contract, not a runner. CreateWorkflow takes exactly one of `script`, `saved` (an object with `name`), or `path`. Do not pass `spec`, `task`, or a bare `name` as the source. AmendWorkflow takes `run_id` and at most one of `script` or `path`. SaveWorkflow takes `name`, `description`, `scope`, and exactly one of `script` or `script_path`. EvalWorkflowSnippet takes exactly one of `code` or `path`. A call does not typecheck a script and does not start a run. If a tool name is not in the tool list, do not call it.
+        Load the dynamic-workflows skill with the Skill tool before you call a workflow tool that submits a script. The skill is the argument contract, not a runner. CreateWorkflow takes exactly one of `script`, `saved` (an object with `name`), or `path`. Do not pass `spec`, `task`, or a bare `name` as the source. AmendWorkflow takes `run_id` and at most one of `script` or `path`. SaveWorkflow takes `name`, `description`, `scope`, and exactly one of `script` or `script_path`. EvalWorkflowSnippet takes exactly one of `code` or `path`. CreateWorkflow and the workflow tools may typecheck a script, but they do not start a run in this build. If a tool name is not in the tool list, do not call it.
     """.trimIndent()
 }
