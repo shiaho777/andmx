@@ -119,6 +119,7 @@ class ChatViewModel @Inject constructor(
     val projectName: StateFlow<String> =
         projectManager.hostPath.map { projectManager.projectName }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), projectManager.projectName)
+
     val hostPath: StateFlow<String?> = projectManager.hostPath
     val workspaceKind: StateFlow<com.andmx.workspace.WorkspaceKind> = projectManager.workspaceKind
     val isRemoteWorkspace: Boolean get() = projectManager.isRemote
@@ -220,6 +221,12 @@ class ChatViewModel @Inject constructor(
     val currentConversationId: StateFlow<Long> = _currentConversationId.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    val conversationTitle: StateFlow<String> = _currentConversationId.flatMapLatest { id ->
+        if (id > 0L) repo.observeConversation(id).map { it?.title.orEmpty() }
+        else kotlinx.coroutines.flow.flowOf("")
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     val backgroundTasks: StateFlow<List<com.andmx.agent.BackgroundTasks.Snapshot>> =
         _currentConversationId.flatMapLatest { id ->
             if (id > 0L) controller.backgroundTasks(id)
@@ -257,8 +264,14 @@ class ChatViewModel @Inject constructor(
     /** 切换到指定会话：更新当前 id + 加载历史消息到 messages。 */
     fun switchToConversation(id: Long) {
         if (id == _currentConversationId.value) return
+        // 队列属于当前 task；切走前落盘，切回时再从该 task 读取。
+        persistQueue()
+        _queue.value = emptyList()
+        _steeringMessage.value = null
+        _queuePaused.value = QueuePause.NONE
         _compactNotice.value = null
         _currentConversationId.value = id
+        com.andmx.workspace.ChangeTracker.load(id)
         _isLoading.value = controller.isTurnRunning(id)
         viewModelScope.launch { runCatching { repo.setUnreadAt(id, null) } }
         currentAssistantText = ""
@@ -273,7 +286,7 @@ class ChatViewModel @Inject constructor(
         _goalVerifications.value = emptyList()
         _error.value = null
         viewModelScope.launch {
-            loadRecoverableQueue(id)
+            loadQueueFor(id)
             val history = runCatching { repo.messages(id) }.getOrDefault(emptyList())
             val msgs = mutableListOf<ChatMessage>()
             val tools = mutableListOf<ToolCall>()
@@ -1600,6 +1613,28 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Retry from any assistant turn: find its preceding user message, truncate
+     * that turn and resend the original user text. This is the mobile equivalent
+     * of upstream retryTurn for older turns; the last turn still uses the
+     * cheaper [regenerate] path.
+     */
+    fun retryFromAssistant(assistantMessageId: Long) {
+        if (_isLoading.value) return
+        val msgs = _messages.value
+        val index = msgs.indexOfFirst { it.id == assistantMessageId && it.role == "assistant" }
+        if (index < 0) return
+        val user = msgs.take(index).lastOrNull { it.role == "user" } ?: return
+        val text = user.content
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            val conversationId = ensureConversationReady()
+            truncateFromUserMessage(conversationId, user.id)
+            _isLoading.value = true
+            runTurn(text)
+        }
+    }
+
     private fun buildMessageWithContext(text: String, attachments: List<Attachment> = emptyList()): String {
         val chips = _contextChips.value
         if (chips.isEmpty() && attachments.isEmpty()) return text
@@ -1673,6 +1708,13 @@ class ChatViewModel @Inject constructor(
         if (idx < 0) return
         val cut = msgs[idx]
         val cutKey = cut.sortKey
+
+        // rewind/edit 之后旧分支的排队消息和引导消息必须丢弃，不能送进截断后的会话。
+        _queue.value = emptyList()
+        _steeringMessage.value = null
+        _queuePaused.value = QueuePause.NONE
+        _recoverableQueue.value = emptyList()
+        runCatching { repo.setPendingQueue(conversationId, "") }
 
         _messages.value = msgs.take(idx)
         _toolCalls.value = _toolCalls.value.filter { it.sortKey < cutKey }
@@ -1839,15 +1881,22 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    val fileChanges: StateFlow<List<com.andmx.workspace.FileChange>> = com.andmx.workspace.ChangeTracker.changes
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val fileChanges: StateFlow<List<com.andmx.workspace.FileChange>> =
+        _currentConversationId.flatMapLatest { id ->
+            if (id > 0L) com.andmx.workspace.ChangeTracker.changesFor(id)
+            else kotlinx.coroutines.flow.flowOf(emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _rewindResult = MutableStateFlow<com.andmx.ui2.chat.ChatController.RewindResult?>(null)
     val rewindResult: StateFlow<com.andmx.ui2.chat.ChatController.RewindResult?> = _rewindResult.asStateFlow()
 
     fun rewindFiles() {
         if (_isLoading.value) return
+        val id = _currentConversationId.value
+        if (id <= 0L) return
         viewModelScope.launch {
-            val res = controller.revertFileChanges()
+            val res = controller.revertFileChanges(id)
             _rewindResult.value = res
             refreshGitInfo()
         }
@@ -1866,8 +1915,10 @@ class ChatViewModel @Inject constructor(
     fun dismissFileRewind() { _fileRewindOpen.value = false }
 
     fun revertSingleFile(path: String) {
+        val id = _currentConversationId.value
+        if (id <= 0L) return
         viewModelScope.launch {
-            val res = controller.revertFileChange(path)
+            val res = controller.revertFileChange(id, path)
             _rewindResult.value = res
             refreshGitInfo()
             if (fileChanges.value.isEmpty()) _fileRewindOpen.value = false
@@ -2044,6 +2095,7 @@ class ChatViewModel @Inject constructor(
                 _error.value = "分叉失败"
                 return@launch
             }
+            runCatching { com.andmx.workspace.ChangeTracker.copy(id, newId) }
             runCatching { repo.recordSpawnEdge(id, newId, "completed") }
             runCatching {
                 repo.addMessage(
@@ -2075,7 +2127,7 @@ class ChatViewModel @Inject constructor(
         val cut = _messages.value.firstOrNull { it.id == messageId && it.role == "user" }
             ?: return
         viewModelScope.launch {
-            val files = runCatching { controller.revertFileChanges(sinceMs = cut.createdAt) }
+            val files = runCatching { controller.revertFileChanges(conversationId, sinceMs = cut.createdAt) }
                 .getOrNull()
             runCatching { controller.noteConversationRewind(conversationId, cut.content) }
             truncateFromUserMessage(conversationId, messageId)
@@ -2350,10 +2402,16 @@ class ChatViewModel @Inject constructor(
     private val _recoverableQueue = MutableStateFlow<List<String>>(emptyList())
     val recoverableQueue: StateFlow<List<String>> = _recoverableQueue.asStateFlow()
 
-    private suspend fun loadRecoverableQueue(conversationId: Long) {
+    private suspend fun loadQueueFor(conversationId: Long) {
+        _queue.value = readQueue(conversationId)
+        _recoverableQueue.value = emptyList()
+    }
+
+    private suspend fun readQueue(conversationId: Long): List<String> {
         val raw = runCatching { repo.conversation(conversationId)?.pendingQueueJson.orEmpty() }
             .getOrDefault("")
-        _recoverableQueue.value = if (raw.isBlank()) emptyList() else runCatching {
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
             (kotlinx.serialization.json.Json.parseToJsonElement(raw)
                 as? kotlinx.serialization.json.JsonArray)
                 ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }

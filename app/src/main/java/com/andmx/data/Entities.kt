@@ -276,6 +276,33 @@ data class WorkflowEventEntity(
  * [isPrimary] = true is the active provider. Complex fields (httpHeaders,
  * models) are stored as JSON columns.
  */
+/**
+ * Per-conversation file changes recorded before the agent overwrites a file.
+ * The originals are persisted so rewind works after process death and never
+ * crosses conversation boundaries.
+ */
+@Entity(
+    tableName = "workspace_changes",
+    primaryKeys = ["conversationId", "path"],
+    foreignKeys = [
+        ForeignKey(
+            entity = ConversationEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("conversationId")],
+)
+data class WorkspaceChangeEntity(
+    val conversationId: Long,
+    val path: String,
+    val oldContent: String,
+    val newContent: String,
+    val existedBefore: Boolean,
+    val timestamp: Long,
+)
+
 @Entity(tableName = "providers", indices = [Index("isPrimary")])
 data class ProviderEntity(
     /** Stable id: "openai" for presets, a UUID for user-created providers. */

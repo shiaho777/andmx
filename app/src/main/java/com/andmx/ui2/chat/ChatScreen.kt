@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Commit
 import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -92,6 +93,7 @@ import com.andmx.ui2.terminal.TerminalScreen
 import com.andmx.ui2.terminal.rememberTerminalColors
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -122,6 +124,7 @@ fun ChatScreen(
     val editingMessageId by viewModel.editingMessageId.collectAsState()
     val context = LocalContext.current
     val draftStore = remember { DraftStore(context) }
+    val scrollMemory = remember { ChatScrollMemory(context) }
     val motion = LocalMotion.current
     // 移动端惯例：冷启动不弹权限；首个任务发出（可能后台跑完）时才请求通知权限。
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -185,14 +188,6 @@ fun ChatScreen(
         TurnProcessFolding.visibleTimeline(timeline, turnFolds, manuallyExpandedFolds)
     }
     val timelineReversed = remember(visibleTimeline) { visibleTimeline.asReversed() }
-    val lastAssistantStableId = remember(timeline) {
-        timeline.lastOrNull {
-            it is TimelineItem.Message &&
-                it.message.role == "assistant" &&
-                !it.message.isStreaming &&
-                !it.message.isProcess
-        }?.stableId
-    }
     val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val queuePaused by viewModel.queuePaused.collectAsState()
@@ -221,6 +216,7 @@ fun ChatScreen(
 
     // ZCode 对齐：对话为唯一主屏，终端/文件/设置均为浮层
     val projectName by viewModel.projectName.collectAsState()
+    val conversationTitle by viewModel.conversationTitle.collectAsState()
     val gitInfo by viewModel.gitInfo.collectAsState()
     val hostPath by viewModel.hostPath.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
@@ -925,12 +921,23 @@ LaunchedEffect(Unit) {
 
             TopAppBar(
                 title = {
-                    Text(
-                        if (timeline.isEmpty()) "新任务"
-                        else projectName.ifBlank { "AndMX" },
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
+                    Column {
+                        Text(
+                            if (timeline.isEmpty()) "新任务"
+                            else conversationTitle.ifBlank { projectName.ifBlank { "AndMX" } },
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        if (timeline.isNotEmpty() && projectName.isNotBlank()) {
+                            Text(
+                                projectName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = { drawerOpen = !drawerOpen }) {
@@ -958,6 +965,15 @@ LaunchedEffect(Unit) {
                     }
                     IconButton(onClick = { viewModel.shareConversation() }) {
                         Icon(Icons.Outlined.Share, "分享对话")
+                    }
+                    if (gitInfo?.isRepo == true) {
+                        IconButton(onClick = {
+                            dirtyFilesCache = emptyList()
+                            viewModel.refreshGitInfo()
+                            showGitActions = true
+                        }) {
+                            Icon(Icons.Outlined.Commit, "Git 操作")
+                        }
                     }
                     IconButton(onClick = { showTerminal = !showTerminal }) {
                         Icon(
@@ -1019,6 +1035,25 @@ LaunchedEffect(Unit) {
                 }
             } else {
                 val listState = rememberLazyListState()
+                var scrollRestoredFor by remember { mutableStateOf(0L) }
+                LaunchedEffect(currentConversationId, timeline.size) {
+                    if (scrollRestoredFor == currentConversationId) return@LaunchedEffect
+                    if (timeline.isEmpty() && currentConversationId > 0L) return@LaunchedEffect
+                    val saved = scrollMemory.load(currentConversationId)
+                    runCatching {
+                        if (saved != null) listState.scrollToItem(saved.index, saved.offset)
+                        else listState.scrollToItem(0)
+                    }
+                    scrollRestoredFor = currentConversationId
+                }
+                LaunchedEffect(currentConversationId, listState) {
+                    snapshotFlow {
+                        listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+                    }.collectLatest { (index, offset) ->
+                        delay(400)
+                        scrollMemory.save(currentConversationId, index, offset)
+                    }
+                }
                 LaunchedEffect(pendingHistoryJump, timelineReversed) {
                     val id = pendingHistoryJump ?: return@LaunchedEffect
                     val index = timelineReversed.indexOfFirst {
@@ -1079,9 +1114,6 @@ LaunchedEffect(Unit) {
                                         CompactMarkerRow(item.message.content)
                                         return@Box
                                     }
-                                    val isLastAssistant = item.message.role == "assistant" &&
-                                        !item.message.isStreaming &&
-                                        item.stableId == lastAssistantStableId
                                     MessageBubble(
                                         message = item.message,
                                         onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
@@ -1101,8 +1133,13 @@ LaunchedEffect(Unit) {
                                         ) {
                                             { viewModel.branchFromMessage(item.message.id) }
                                         } else null,
-                                        onRegenerate = if (isLastAssistant && !isLoading) {
-                                            { viewModel.regenerate() }
+                                        onRegenerate = if (
+                                            item.message.role == "assistant" &&
+                                            !item.message.isStreaming &&
+                                            !item.message.isProcess &&
+                                            !isLoading
+                                        ) {
+                                            { viewModel.retryFromAssistant(item.message.id) }
                                         } else null,
                                         onEdit = if (
                                             item.message.role == "user" &&
@@ -1457,6 +1494,7 @@ LaunchedEffect(Unit) {
                 FilesScreen(
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                     initialPath = filesInitialPath,
+                    conversationId = currentConversationId,
                 )
             }
             if (showSettings) {
@@ -1594,6 +1632,7 @@ LaunchedEffect(Unit) {
                 onPull = { cb -> viewModel.pullRemote(cb) },
                 onSetIdentity = { name, email, cb -> viewModel.setGitIdentity(name, email, cb) },
                 onFileDiff = { path, cb -> viewModel.fileDiff(path, cb) },
+                onPickBranch = { showBranchDialog = true },
                 onDismiss = { showGitActions = false },
             )
         }

@@ -76,6 +76,7 @@ fun WorkspaceFileTree(
     onBackToTasks: () -> Unit,
     onOpenFile: (String) -> Unit,
     modifier: Modifier = Modifier,
+    conversationId: Long = 0L,
 ) {
     val context = LocalContext.current
     val projectManager = remember { ProjectManager(context) }
@@ -106,7 +107,7 @@ fun WorkspaceFileTree(
     var query by remember { mutableStateOf("") }
     var refresh by remember { mutableIntStateOf(0) }
     var changedOnly by remember { mutableStateOf(false) }
-    val changes by ChangeTracker.changes.collectAsState()
+    val changes by ChangeTracker.changesFor(conversationId).collectAsState()
     val changedMap = remember(changes) { changes.associateBy { it.path } }
 
     LaunchedEffect(initialPath, rootPath, hostPath) {

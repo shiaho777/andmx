@@ -133,6 +133,8 @@ class AgentEngine(
     private val goalState: GoalToolState? = null,
     /** Safety cap on verifier-driven continuations for a single runTurn call. */
     private val maxGoalIterations: Int = 20,
+    /** Hard cap on model steps in one runTurn (subagent profile maxTurns). */
+    private val maxSteps: Int? = null,
     /** Local date source for the date_change reminder edge (test hook). */
     private val dateProvider: () -> String = { java.time.LocalDate.now().toString() },
     private val hiddenTools: () -> Set<String> = { emptySet() },
@@ -797,6 +799,15 @@ class AgentEngine(
             var sawReasoning = false
             var firstTokenSent = false
             step += 1
+            if (maxSteps != null && maxSteps > 0 && step > maxSteps) {
+                failTurn(
+                    machine,
+                    "error_max_turns",
+                    "Agent reached maxTurns=$maxSteps without finishing.",
+                    "error_max_budget",
+                )
+                return
+            }
             machine.beginModelRequest(turn.model)
             sessionEvents?.invoke(
                 com.andmx.data.session.SessionEventType.MODEL_REQUEST,

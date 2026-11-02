@@ -1156,4 +1156,6 @@ internal val settingsEn: Map<String, String> = mapOf(
     "保存身份" to "Save identity",
     "无法打开这个 PDF 文件。" to "Could not open this PDF.",
     "文件差异" to "File diff",
+    "Git 操作" to "Git actions",
+    "切换分支" to "Switch branch",
 )

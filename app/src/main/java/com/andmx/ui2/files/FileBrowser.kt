@@ -59,9 +59,10 @@ fun FileBrowser(
     onEnterDir: (String) -> Unit,
     onUp: () -> Unit,
     onOpenFile: (String) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    conversationId: Long = 0L,
 ) {
-    val changes by ChangeTracker.changes.collectAsState()
+    val changes by ChangeTracker.changesFor(conversationId).collectAsState()
     val changedMap = remember(changes) {
         changes.associate { it.path to it }
     }

@@ -20,8 +20,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowDefinitionEntity::class,
         WorkflowRunEntity::class,
         WorkflowEventEntity::class,
+        WorkspaceChangeEntity::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -50,6 +51,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_15_16,
                     MIGRATION_16_17,
                     MIGRATION_17_18,
+                    MIGRATION_18_19,
                 )
                 .build()
                 .also { instance = it }
@@ -342,6 +344,25 @@ abstract class AndmxDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE conversations ADD COLUMN unreadAt INTEGER")
                 db.execSQL("ALTER TABLE conversations ADD COLUMN taskStatus TEXT NOT NULL DEFAULT 'idle'")
+            }
+        }
+
+        /** v18 → v19: per-conversation file change snapshots for durable rewind. */
+        private val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS workspace_changes (
+                        conversationId INTEGER NOT NULL,
+                        path TEXT NOT NULL,
+                        oldContent TEXT NOT NULL,
+                        newContent TEXT NOT NULL,
+                        existedBefore INTEGER NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        PRIMARY KEY(conversationId, path),
+                        FOREIGN KEY(conversationId) REFERENCES conversations(id) ON DELETE CASCADE
+                    )""",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_workspace_changes_conversationId ON workspace_changes(conversationId)")
             }
         }
 
