@@ -32,6 +32,8 @@ data class McpOAuthConfig(
     val scopes: List<String> = emptyList(),
     val expiresAtMs: Long = 0L,
     val tokenType: String = "Bearer",
+    val authorizationUrl: String = "",
+    val redirectUri: String = "",
 ) {
     fun isExpired(now: Long = System.currentTimeMillis()): Boolean =
         accessToken.isNotBlank() && expiresAtMs > 0L && now >= expiresAtMs - 60_000L
@@ -45,6 +47,8 @@ data class McpOAuthConfig(
         if (scopes.isNotEmpty()) put("scopes", JsonArray(scopes.map { JsonPrimitive(it) }))
         if (expiresAtMs > 0L) put("expiresAtMs", expiresAtMs)
         if (tokenType.isNotBlank()) put("tokenType", tokenType)
+        if (authorizationUrl.isNotBlank()) put("authorizationUrl", authorizationUrl)
+        if (redirectUri.isNotBlank()) put("redirectUri", redirectUri)
     }.toString()
 
     companion object {
@@ -70,9 +74,14 @@ data class McpOAuthConfig(
                 scopes = body.scopes(),
                 expiresAtMs = expiresAt,
                 tokenType = body.string("tokenType", "token_type").ifBlank { "Bearer" },
+                authorizationUrl = body.string(
+                    "authorizationUrl", "authorization_url", "authorizationEndpoint", "authorization_endpoint",
+                ),
+                redirectUri = body.string("redirectUri", "redirect_uri"),
             )
             return config.takeIf {
-                it.accessToken.isNotBlank() || it.refreshToken.isNotBlank() || it.tokenUrl.isNotBlank()
+                it.accessToken.isNotBlank() || it.refreshToken.isNotBlank() ||
+                    it.tokenUrl.isNotBlank() || it.authorizationUrl.isNotBlank()
             }
         }
 
@@ -160,6 +169,54 @@ class McpOAuth(context: Context) {
 
     fun clear(server: McpServerConfig) {
         store.clear(McpOAuthKeys.of(server))
+    }
+
+    fun authorizationUrl(
+        server: McpServerConfig,
+        state: String,
+        codeChallenge: String,
+        redirectUri: String,
+    ): String? {
+        val config = McpOAuthConfig.parse(server.oauthJson) ?: return null
+        val authorizationUrl = config.authorizationUrl.takeIf { it.isNotBlank() } ?: return null
+        val params = buildList {
+            add("response_type" to "code")
+            if (config.clientId.isNotBlank()) add("client_id" to config.clientId)
+            add("redirect_uri" to redirectUri)
+            add("state" to state)
+            add("code_challenge" to codeChallenge)
+            add("code_challenge_method" to "S256")
+            if (config.scopes.isNotEmpty()) add("scope" to config.scopes.joinToString(" "))
+        }
+        val encoded = params.joinToString("&") { (key, value) ->
+            "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+        }
+        return authorizationUrl + if (authorizationUrl.contains('?')) "&$encoded" else "?$encoded"
+    }
+
+    suspend fun exchangeCode(
+        server: McpServerConfig,
+        code: String,
+        codeVerifier: String,
+        redirectUri: String,
+    ): String? = withContext(Dispatchers.IO) {
+        val config = McpOAuthConfig.parse(server.oauthJson) ?: return@withContext null
+        val tokenUrl = config.tokenUrl.takeIf { it.isNotBlank() } ?: return@withContext null
+        val form = buildList {
+            add("grant_type" to "authorization_code")
+            add("code" to code)
+            add("redirect_uri" to redirectUri)
+            add("code_verifier" to codeVerifier)
+            if (config.clientId.isNotBlank()) add("client_id" to config.clientId)
+            if (config.clientSecret.isNotBlank()) add("client_secret" to config.clientSecret)
+        }.joinToString("&") { (key, value) ->
+            "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+        }
+        val body = runCatching { (poster ?: ::defaultPost)(tokenUrl, form) }.getOrNull()
+            ?: return@withContext null
+        val token = parseTokenResponse(body, config) ?: return@withContext null
+        store.save(McpOAuthKeys.of(server), token)
+        token.accessToken.takeIf { it.isNotBlank() }
     }
 
     private fun merge(configured: McpOAuthConfig, stored: McpOAuthConfig?): McpOAuthConfig {

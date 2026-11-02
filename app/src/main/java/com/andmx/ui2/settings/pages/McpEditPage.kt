@@ -20,13 +20,16 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.andmx.mcp.McpOAuthFlow
 import com.andmx.mcp.McpProtocol
 import com.andmx.mcp.McpServerConfig
 import com.andmx.mcp.McpTransport
@@ -171,6 +174,16 @@ fun McpEditPage(
     var editorMode by remember { mutableStateOf("form") }
     var jsonDraft by remember { mutableStateOf(initial?.toDraft().orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    var authNote by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        McpOAuthFlow.lastResult.collect { result ->
+            if (result != null) {
+                authNote = (if (result.ok) "✓ " else "✗ ") + result.message
+            }
+        }
+    }
 
     fun currentEntry(): McpEntry = McpEntry(
         name = name.trim(),
@@ -407,11 +420,44 @@ fun McpEditPage(
                         }
                     }
                 }
-                if (oauthText.isNotBlank()) {
-                    SettingsGroup("OAuth") {
-                        Text(tr("这段授权配置会原样保存。手机上还不能走完浏览器授权，保存时不会把它丢掉。"),
+                SettingsGroup("OAuth") {
+                    Text(
+                        tr("可选。填写 authorizationUrl / tokenUrl / clientId / scopes 后可走浏览器授权；也可直接填 accessToken 或 refreshToken。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = oauthText,
+                        onValueChange = { oauthText = it },
+                        placeholder = {
+                            Text("""{"authorizationUrl":"https://…/authorize","tokenUrl":"https://…/token","clientId":"…","scopes":["read"]}""")
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        minLines = 5,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val result = runCatching {
+                                McpOAuthFlow.start(context, currentEntry().toConfig())
+                            }.getOrElse {
+                                McpOAuthFlow.Result(false, it.message ?: "授权启动失败")
+                            }
+                            authNote = (if (result.ok) "✓ " else "✗ ") + result.message
+                        },
+                        enabled = oauthText.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text(tr("浏览器授权")) }
+                    authNote?.let {
+                        Text(
+                            it,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (it.startsWith("✓")) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                 }

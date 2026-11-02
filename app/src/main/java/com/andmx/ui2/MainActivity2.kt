@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.lifecycle.lifecycleScope
+import com.andmx.mcp.McpOAuthFlow
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.SettingsStore
 import com.andmx.ui2.chat.ChatScreen
@@ -29,6 +31,7 @@ import com.andmx.ui2.theme.AndMX2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity2 : ComponentActivity() {
@@ -125,6 +128,23 @@ class MainActivity2 : ComponentActivity() {
      */
     private fun handleInboundIntent(intent: Intent?) {
         if (intent == null) return
+        val oauthUri = intent.data
+        if (intent.action == Intent.ACTION_VIEW &&
+            oauthUri?.scheme == McpOAuthFlow.SCHEME &&
+            oauthUri.host == McpOAuthFlow.HOST
+        ) {
+            intent.data = null
+            intent.action = null
+            lifecycleScope.launch {
+                val result = McpOAuthFlow.complete(applicationContext, oauthUri)
+                android.widget.Toast.makeText(
+                    this@MainActivity2,
+                    result.message,
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+            return
+        }
         intent.getLongExtra(EXTRA_CONVERSATION_ID, 0L).takeIf { it > 0L }?.let {
             InboundBus.openConversation(it)
             intent.removeExtra(EXTRA_CONVERSATION_ID)
