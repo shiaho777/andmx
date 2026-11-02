@@ -1180,4 +1180,6 @@ internal val settingsEn: Map<String, String> = mapOf(
     "最近原始记忆" to "Recent raw memories",
     "删除" to "Delete",
     "已删除一条原始记忆" to "Deleted one raw memory",
+    "优先使用会话 rollout 中的真实 token 用量；没有记录的旧会话按消息长度估算。" to
+        "Real token usage from session rollouts is preferred; older sessions without a rollout fall back to message-length estimates.",
 )
