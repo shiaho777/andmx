@@ -2,6 +2,7 @@ package com.andmx.ui2.usage
 
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.MessageEntity
+import com.andmx.data.rollout.RolloutUsageReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -90,13 +91,47 @@ object UsageCalculator {
             }.getOrDefault(emptyList())
             val now = System.currentTimeMillis()
             val cutoff = dayStart(now) - (range.days - 1L) * 86_400_000L
+            val dayKeys = (0 until range.days).map { cutoff + it * 86_400_000L }
 
-            val allMessages = mutableListOf<Pair<MessageEntity, String>>()
+            val perDayTokens = LinkedHashMap<Long, Long>().also { m -> dayKeys.forEach { m[it] = 0L } }
+            val perDayTurns = LinkedHashMap<Long, Int>().also { m -> dayKeys.forEach { m[it] = 0 } }
+            val perDayModel = LinkedHashMap<Long, HashMap<String, Long>>().also { m ->
+                dayKeys.forEach { m[it] = HashMap() }
+            }
+            val perHour = LongArray(24)
+            val perModel = HashMap<String, Long>()
             val toolCounts = HashMap<String, Int>()
-            var sessionCount = 0
-            var longestSessionMs = 0L
             val lifetimeDayTokens = HashMap<String, Long>()
             var lifetimeTotalTokens = 0L
+            var totalTokens = 0L
+            var messageCount = 0
+            var sessionCount = 0
+            var longestSessionMs = 0L
+
+            fun addLifetime(atMs: Long, tokens: Long) {
+                lifetimeTotalTokens += tokens
+                val key = UsageChartLogic.utcDayKey(atMs)
+                lifetimeDayTokens[key] = (lifetimeDayTokens[key] ?: 0L) + tokens
+            }
+
+            fun addInRange(atMs: Long, tokens: Long, model: String, turn: Boolean) {
+                if (atMs < cutoff) return
+                totalTokens += tokens
+                val d = dayStart(atMs)
+                if (d in perDayTokens) {
+                    perDayTokens[d] = (perDayTokens[d] ?: 0L) + tokens
+                    if (turn) perDayTurns[d] = (perDayTurns[d] ?: 0) + 1
+                    if (model.isNotBlank()) {
+                        val mm = perDayModel.getOrPut(d) { HashMap() }
+                        mm[model] = (mm[model] ?: 0L) + tokens
+                    }
+                }
+                perHour[hourOf(atMs)] += tokens
+                if (model.isNotBlank()) {
+                    perModel[model] = (perModel[model] ?: 0L) + tokens
+                }
+            }
+
             conversations.forEach { conv ->
                 val raw = runCatching { dao.messagesFor(conv.id) }.getOrDefault(emptyList())
                 raw.filter { it.role == "tool" && it.createdAt >= cutoff }.forEach { msg ->
@@ -108,19 +143,30 @@ object UsageCalculator {
                 val hasUser = msgs.any { it.role == "user" }
                 if (!hasUser) return@forEach
                 val model = conv.model.trim()
-                if (msgs.any { it.createdAt >= cutoff && it.content.isNotBlank() }) sessionCount++
+                val inRange = msgs.filter { it.createdAt >= cutoff }
+                messageCount += inRange.size
+                if (inRange.any { it.content.isNotBlank() }) sessionCount++
                 longestSessionMs = maxOf(
                     longestSessionMs,
                     (msgs.maxOf { it.createdAt } - msgs.minOf { it.createdAt }).coerceAtLeast(0L),
                 )
-                val inRange = msgs.filter { it.createdAt >= cutoff }
-                inRange.forEach { allMessages.add(it to model) }
-                msgs.forEach { msg ->
-                    val tok = estimateTokens(msg.content)
-                    if (tok > 0L) {
-                        lifetimeTotalTokens += tok
-                        val key = UsageChartLogic.utcDayKey(msg.createdAt)
-                        lifetimeDayTokens[key] = (lifetimeDayTokens[key] ?: 0L) + tok
+
+                val real = runCatching {
+                    RolloutUsageReader.read(java.io.File(conv.rolloutPath))
+                }.getOrDefault(emptyList())
+                if (real.isNotEmpty()) {
+                    real.forEach { event ->
+                        addLifetime(event.atMs, event.tokens)
+                        addInRange(event.atMs, event.tokens, event.model, turn = true)
+                    }
+                } else {
+                    msgs.forEach { msg ->
+                        val tok = estimateTokens(msg.content)
+                        if (tok > 0L) addLifetime(msg.createdAt, tok)
+                    }
+                    inRange.forEach { msg ->
+                        val tok = estimateTokens(msg.content)
+                        if (tok > 0L) addInRange(msg.createdAt, tok, model, turn = true)
                     }
                 }
             }
@@ -129,7 +175,7 @@ object UsageCalculator {
                 .sortedByDescending { it.value }
                 .take(8)
                 .map { ToolCallUsage(it.key, it.value) }
-            if (allMessages.isEmpty()) {
+            if (messageCount == 0 && totalTokens == 0L) {
                 return@withContext UsageStats(
                     loaded = true,
                     rangeDays = range.days,
@@ -139,35 +185,6 @@ object UsageCalculator {
                     heatmapDayTokens = lifetimeDayTokens,
                     toolCalls = toolCalls,
                 )
-            }
-
-            val dayKeys = (0 until range.days).map { cutoff + it * 86_400_000L }
-            val perDayTokens = LinkedHashMap<Long, Long>().also { m -> dayKeys.forEach { m[it] = 0L } }
-            val perDayTurns = LinkedHashMap<Long, Int>().also { m -> dayKeys.forEach { m[it] = 0 } }
-            val perDayModel = LinkedHashMap<Long, HashMap<String, Long>>().also { m ->
-                dayKeys.forEach { m[it] = HashMap() }
-            }
-            val perHour = LongArray(24)
-            val perModel = HashMap<String, Long>()
-            var totalTokens = 0L
-
-            allMessages.forEach { (msg, model) ->
-                val tok = estimateTokens(msg.content)
-                if (tok <= 0L) return@forEach
-                totalTokens += tok
-                val d = dayStart(msg.createdAt)
-                if (d in perDayTokens) {
-                    perDayTokens[d] = (perDayTokens[d] ?: 0L) + tok
-                    perDayTurns[d] = (perDayTurns[d] ?: 0) + 1
-                    if (model.isNotBlank()) {
-                        val mm = perDayModel.getOrPut(d) { HashMap() }
-                        mm[model] = (mm[model] ?: 0L) + tok
-                    }
-                }
-                perHour[hourOf(msg.createdAt)] += tok
-                if (model.isNotBlank()) {
-                    perModel[model] = (perModel[model] ?: 0L) + tok
-                }
             }
 
             val daily = dayKeys.map { d ->
@@ -210,7 +227,7 @@ object UsageCalculator {
             UsageStats(
                 totalTokens = totalTokens,
                 sessions = sessionCount,
-                messages = allMessages.size,
+                messages = messageCount,
                 activeDays = activeDates.size,
                 favoriteModel = models.firstOrNull { it.model.isNotBlank() && it.model != "其他模型" }?.model.orEmpty(),
                 favoriteShare = models.firstOrNull { it.model.isNotBlank() && it.model != "其他模型" }?.share ?: 0f,

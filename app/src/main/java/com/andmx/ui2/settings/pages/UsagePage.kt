@@ -138,6 +138,11 @@ fun UsagePage(onBack: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(4.dp))
+            Text(
+                tr("优先使用会话 rollout 中的真实 token 用量；没有记录的旧会话按消息长度估算。"),
+                style = MaterialTheme.typography.labelSmall,
+                color = muted,
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("应用用量"), color = onSurface, style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.width(8.dp))
