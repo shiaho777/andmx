@@ -1,12 +1,17 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import com.andmx.ui2.theme.Chrome
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -47,13 +52,16 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -82,6 +90,7 @@ import com.andmx.ui2.files.FilesScreen
 import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
 import com.andmx.ui2.terminal.rememberTerminalColors
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -105,10 +114,12 @@ fun ChatScreen(
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val goal by viewModel.goal.collectAsState()
     val lastTurnMetrics by viewModel.lastTurnMetrics.collectAsState()
+    val compactNotice by viewModel.compactNotice.collectAsState()
     val error by viewModel.error.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val editingMessageId by viewModel.editingMessageId.collectAsState()
     val context = LocalContext.current
+    val motion = LocalMotion.current
     // 移动端惯例：冷启动不弹权限；首个任务发出（可能后台跑完）时才请求通知权限。
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
@@ -126,8 +137,9 @@ fun ChatScreen(
     }
     val settingsStore = remember { SettingsStore(context) }
     val appSettings by settingsStore.settings.collectAsState(initial = ProviderSettings())
-    val visibleReasonings = remember(reasonings, appSettings.showReasoning) {
-        if (appSettings.showReasoning) reasonings else emptyList()
+    val visibleReasonings = remember(messages, reasonings, appSettings.showReasoning) {
+        if (appSettings.showReasoning) reasonings
+        else firstReasoningPerTurn(messages, reasonings)
     }
     val visibleTools = remember(toolCalls, appSettings.showTodos) {
         if (appSettings.showTodos) toolCalls
@@ -137,7 +149,11 @@ fun ChatScreen(
         }
     }
     val pendingApproval by viewModel.pendingApproval.collectAsState()
-    val timeline = remember(messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications, isLoading, pendingApproval) {
+    val timeline = remember(
+        messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications,
+        isLoading, pendingApproval, appSettings.toolGroupingExplore, appSettings.toolGroupingTerminal,
+        appSettings.toolGroupingChanges,
+    ) {
         val hasLiveStream = messages.any { it.isStreaming } || visibleReasonings.any { it.isStreaming }
         val hasRunningTool = visibleTools.any { it.isRunning }
         val hasVerifying = goalVerifications.any { it.passed == null }
@@ -152,36 +168,18 @@ fun ChatScreen(
             goalVerifications = goalVerifications,
             showWorking = isLoading && !hasLiveStream && !hasRunningTool && !hasVerifying &&
                 !hasPendingInteraction && visibleReasonings.none { it.isStreaming },
+            groupExplore = appSettings.toolGroupingExplore,
+            groupTerminal = appSettings.toolGroupingTerminal,
+            groupChanges = appSettings.toolGroupingChanges,
         )
     }
     // Turn 过程折叠（dsh web turn-process 对齐）：已关闭 Turn 的过程行默认
     // 收起为摘要行，手动展开的 Turn 记录在本会话状态里。
     val turnFolds = remember(timeline) { TurnProcessFolding.folds(timeline) }
-    var manuallyExpandedFolds by remember { mutableStateOf(setOf<Long>()) }
-    val activeFolds = remember(turnFolds, manuallyExpandedFolds) {
-        turnFolds.filterNot { it.sortKey in manuallyExpandedFolds }
-    }
-    val hiddenTimelineIds = remember(timeline, activeFolds) {
-        TurnProcessFolding.hiddenIds(timeline, activeFolds)
-    }
-    val visibleTimeline = remember(timeline, hiddenTimelineIds, activeFolds) {
-        if (hiddenTimelineIds.isEmpty() && activeFolds.isEmpty()) {
-            timeline
-        } else {
-            val out = ArrayList<TimelineItem>(timeline.size)
-            var pendingFoldIdx = 0
-            for (item in timeline) {
-                while (pendingFoldIdx < activeFolds.size && activeFolds[pendingFoldIdx].sortKey <= item.sortKey) {
-                    out += TimelineItem.TurnProcess(activeFolds[pendingFoldIdx])
-                    pendingFoldIdx += 1
-                }
-                if (item.stableId !in hiddenTimelineIds) out += item
-            }
-            if (pendingFoldIdx < activeFolds.size) {
-                out += TimelineItem.TurnProcess(activeFolds[pendingFoldIdx])
-            }
-            out
-        }
+    val foldConversationId by viewModel.currentConversationId.collectAsState()
+    var manuallyExpandedFolds by remember(foldConversationId) { mutableStateOf(setOf<Long>()) }
+    val visibleTimeline = remember(timeline, turnFolds, manuallyExpandedFolds) {
+        TurnProcessFolding.visibleTimeline(timeline, turnFolds, manuallyExpandedFolds)
     }
     val timelineReversed = remember(visibleTimeline) { visibleTimeline.asReversed() }
     val lastAssistantStableId = remember(timeline) {
@@ -237,6 +235,11 @@ fun ChatScreen(
     var fileTreeRequestPath by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showCommandCenter by remember { mutableStateOf(false) }
+    var findOpen by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
+    var findTick by remember { mutableIntStateOf(0) }
+    var turnDelta by remember { mutableIntStateOf(0) }
+    var modelMenuToken by remember { mutableIntStateOf(0) }
     var settingsInitialPage by remember { mutableStateOf(SettingsPage.HOME) }
     var showBranchDialog by remember { mutableStateOf(false) }
     var showWorkspacePicker by remember { mutableStateOf(false) }
@@ -404,13 +407,7 @@ LaunchedEffect(Unit) {
             val q = m.groupValues[2].lowercase()
             val all: List<ArgSuggestion> = when (cmd) {
                 "mode" -> ExecMode.entries.map {
-                    val alias = when (it) {
-                        ExecMode.CONFIRM -> "build"
-                        ExecMode.AUTO_EDIT -> "edit"
-                        ExecMode.FULL -> "yolo"
-                        ExecMode.PLAN -> "plan"
-                    }
-                    ArgSuggestion(it.id, "${it.id} · ${it.label}", "${it.description}（别名 $alias）")
+                    ArgSuggestion(it.id, "${it.id} · ${it.label}", it.description)
                 }
                 "model" -> {
                     val p = config.primary
@@ -432,9 +429,14 @@ LaunchedEffect(Unit) {
                             listOf("low", "medium", "high")
                         else -> emptyList()
                     }
-                    (listOf("off") + levels).distinct().map { lv ->
-                        val cur = config.settings.reasoningEffort.ifBlank { "off" }
-                        ArgSuggestion(lv, lv, if (lv == cur) "current" else "")
+                    val options = thoughtOptionsFor(cfg).ifEmpty {
+                        (listOf("off") + levels).distinct().map { ThoughtOption(it, effortLabel(it)) }
+                    }
+                    val cur = config.settings.reasoningEffort.ifBlank { "off" }
+                    options.map { opt ->
+                        val current = opt.wireValue.equals(cur, ignoreCase = true) ||
+                            (isThoughtOff(opt.wireValue) && isThoughtOff(cur))
+                        ArgSuggestion(opt.wireValue, opt.label, if (current) "current" else "")
                     }
                 }
                 "locale", "language" -> listOf(
@@ -588,9 +590,8 @@ LaunchedEffect(Unit) {
         }
     }
 
-    val streamingConversationIds = remember(isLoading, currentConversationId) {
-        if (isLoading && currentConversationId > 0L) setOf(currentConversationId) else emptySet()
-    }
+    val runningConversationIds by viewModel.runningConversationIds.collectAsState()
+    val streamingConversationIds = runningConversationIds
 
     ConversationDrawer(
         open = drawerOpen,
@@ -631,6 +632,97 @@ LaunchedEffect(Unit) {
             modifier = modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
+                .onPreviewKeyEvent { event ->
+                    SessionShortcuts.applyStored(config.settings.shortcutBindings)
+                    when (SessionShortcuts.screenAction(event)) {
+                        SessionShortcuts.NEW_TASK -> {
+                            viewModel.createConversation()
+                            true
+                        }
+                        SessionShortcuts.TOGGLE_SIDEBAR -> {
+                            drawerOpen = !drawerOpen
+                            true
+                        }
+                        SessionShortcuts.OPEN_SETTINGS -> {
+                            settingsInitialPage = com.andmx.ui2.settings.SettingsPage.HOME
+                            showSettings = true
+                            true
+                        }
+                        SessionShortcuts.OPEN_COMMAND_CENTER -> {
+                            showCommandCenter = true
+                            true
+                        }
+                        SessionShortcuts.TOGGLE_TERMINAL -> {
+                            showTerminal = !showTerminal
+                            true
+                        }
+                        SessionShortcuts.SWITCH_THEME -> {
+                            viewModel.cycleTheme()
+                            true
+                        }
+                        SessionShortcuts.OPEN_FILES -> {
+                            showFiles = true
+                            true
+                        }
+                        SessionShortcuts.FIND_IN_TASK -> {
+                            findOpen = true
+                            findTick++
+                            true
+                        }
+                        SessionShortcuts.PREVIOUS_CONVERSATION -> {
+                            viewModel.cycleConversation(1)
+                            true
+                        }
+                        SessionShortcuts.NEXT_CONVERSATION -> {
+                            viewModel.cycleConversation(-1)
+                            true
+                        }
+                        SessionShortcuts.NAVIGATE_BACK -> {
+                            turnDelta = 1
+                            true
+                        }
+                        SessionShortcuts.NAVIGATE_FORWARD -> {
+                            turnDelta = -1
+                            true
+                        }
+                        SessionShortcuts.OPEN_MODEL_MENU -> {
+                            modelMenuToken++
+                            true
+                        }
+                        SessionShortcuts.ZOOM_IN -> {
+                            viewModel.adjustUiFont(1)
+                            true
+                        }
+                        SessionShortcuts.ZOOM_OUT -> {
+                            viewModel.adjustUiFont(-1)
+                            true
+                        }
+                        SessionShortcuts.ZOOM_RESET -> {
+                            viewModel.adjustUiFont(null)
+                            true
+                        }
+                        SessionShortcuts.CYCLE_MODE -> {
+                            val order = listOf("confirm", "auto_edit", "plan", "full", "auto")
+                            val cur = config.settings.approvalMode.ifBlank { "confirm" }
+                            val idx = order.indexOf(cur).let { if (it < 0) 0 else it }
+                            viewModel.setExecMode(ExecMode.from(order[(idx + 1) % order.size]))
+                            true
+                        }
+                        SessionShortcuts.CYCLE_THOUGHT -> {
+                            val options = thoughtOptionsFor(config.reasoning)
+                            if (options.isEmpty()) return@onPreviewKeyEvent false
+                            val cur = config.settings.reasoningEffort.ifBlank { "off" }
+                            val idx = options.indexOfFirst {
+                                it.wireValue.equals(cur, ignoreCase = true) ||
+                                    (isThoughtOff(it.wireValue) && isThoughtOff(cur))
+                            }
+                            val next = options[(if (idx < 0) 0 else idx + 1) % options.size]
+                            viewModel.setReasoningEffort(next.wireValue)
+                            true
+                        }
+                        else -> false
+                    }
+                }
         ) {
             Column(
                 Modifier
@@ -643,18 +735,24 @@ LaunchedEffect(Unit) {
             val composerBoundsModifier = Modifier.onGloballyPositioned { coords ->
                 composerBounds = coords.boundsInRoot()
             }
+            var pendingHistoryJump by remember { mutableStateOf<Long?>(null) }
             val inputHistory = remember(messages) {
-                messages.filter { it.role == "user" }
-                    .map { it.content.trim() }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .takeLast(20)
+                messages.filter { it.role == "user" && it.content.isNotBlank() }
+                    .takeLast(50)
                     .asReversed()
+                    .map {
+                        InputHistoryEntry(
+                            messageId = it.id,
+                            text = it.content.trim(),
+                            sentAt = it.createdAt.takeIf { at -> at > 0L } ?: it.sortKey,
+                        )
+                    }
             }
             @Composable
             fun ComposerBlock(flat: Boolean = false, extraModifier: Modifier = Modifier) {
                 val outerModifier = if (flat) composerBoundsModifier else extraModifier
                 Composer(
+                    modelMenuToken = modelMenuToken,
                     value = inputText,
                     onValueChange = { newValue ->
                         // ZCode 对齐：粘贴长文本转附件 chip，不进输入框。
@@ -751,10 +849,12 @@ LaunchedEffect(Unit) {
                     // ZCode 对齐：placeholder 随状态变化——运行中提示排队。
                     placeholder = when {
                         flat -> DEFAULT_PLACEHOLDER
-                        isLoading -> "继续输入，将在本轮结束后排队发送"
+                        isLoading && appSettings.interactionBehavior == "guide" ->
+                            "继续输入，发送后引导当前这一轮"
+                        isLoading -> "继续输入，发送后加入队列，本轮结束后再跑"
                         else -> "继续这个任务，@ 提及文件，/ 使用命令，\$ 使用技能"
                     },
-                    onPickHistory = { inputText = it },
+                    onPickHistory = { pendingHistoryJump = it.messageId },
                     mentionSuggestions = mentionSuggestions,
                     onPickMention = { m ->
                         inputText = Regex("""(?:^|\s)@[^\s@]*$""").replace(inputText) { mr ->
@@ -777,7 +877,7 @@ LaunchedEffect(Unit) {
                     flat = flat,
                     modifier = outerModifier
                         .fillMaxWidth()
-                        .then(if (flat) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 8.dp)),
+                        .then(if (flat) Modifier else Modifier.padding(horizontal = Chrome.gutter, vertical = 8.dp)),
                 )
             }
 
@@ -796,6 +896,13 @@ LaunchedEffect(Unit) {
                     }
                 },
                 // ZCode：终端从对话头部右上角唤起（再点收起）
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground,
+                ),
                 actions = {
                     IconButton(onClick = { showCommandCenter = true }) {
                         Icon(Icons.Outlined.Search, "搜索")
@@ -870,12 +977,49 @@ LaunchedEffect(Unit) {
                 }
             } else {
                 val listState = rememberLazyListState()
+                LaunchedEffect(pendingHistoryJump, timelineReversed) {
+                    val id = pendingHistoryJump ?: return@LaunchedEffect
+                    val index = timelineReversed.indexOfFirst {
+                        it is TimelineItem.Message && it.message.role == "user" && it.message.id == id
+                    }
+                    if (index >= 0) listState.scrollAnchorToTop(index)
+                    pendingHistoryJump = null
+                }
                 val userAnchorIndices = remember(timelineReversed) {
                     timelineReversed.mapIndexedNotNull { i, it ->
                         if (it is TimelineItem.Message && it.message.role == "user") i else null
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (findOpen) {
+                    Row(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = findQuery,
+                            onValueChange = { findQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { findTick++ }) { Text(tr("下一个")) }
+                        TextButton(onClick = { findOpen = false; findQuery = "" }) { Text(tr("关闭")) }
+                    }
+                }
+                LaunchedEffect(findTick) {
+                    if (!findOpen || findQuery.isBlank()) return@LaunchedEffect
+                    val q = findQuery.trim()
+                    val index = timelineReversed.indexOfFirst {
+                        it is TimelineItem.Message && it.message.content.contains(q, ignoreCase = true)
+                    }
+                    if (index >= 0) listState.scrollAnchorToTop(index)
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -889,6 +1033,10 @@ LaunchedEffect(Unit) {
                         Box(Modifier.animateItem()) {
                             when (item) {
                                 is TimelineItem.Message -> {
+                                    if (item.message.role == "compact") {
+                                        CompactMarkerRow(item.message.content)
+                                        return@Box
+                                    }
                                     val isLastAssistant = item.message.role == "assistant" &&
                                         !item.message.isStreaming &&
                                         item.stableId == lastAssistantStableId
@@ -991,25 +1139,49 @@ LaunchedEffect(Unit) {
                 }
                 val timelineScope = rememberCoroutineScope()
                 if (userAnchorIndices.size > 1) {
-                    val rank = userAnchorIndices
-                        .indexOfFirst { it >= listState.firstVisibleItemIndex }
-                        .let { if (it < 0) userAnchorIndices.lastIndex else it }
+                    var rank by remember(userAnchorIndices) { mutableIntStateOf(0) }
+                    var jumping by remember(userAnchorIndices) { mutableStateOf(false) }
+                    LaunchedEffect(listState, userAnchorIndices) {
+                        snapshotFlow {
+                            val visible = listState.layoutInfo.visibleItemsInfo
+                            navigatorRank(
+                                anchors = userAnchorIndices,
+                                topVisibleIndex = visible.maxOfOrNull { it.index } ?: 0,
+                                atBottom = listState.firstVisibleItemIndex == 0 &&
+                                    listState.firstVisibleItemScrollOffset == 0,
+                            )
+                        }.collect { derived ->
+                            if (!jumping) rank = derived
+                        }
+                    }
+                    fun jumpTo(next: Int) {
+                        val clamped = next.coerceIn(0, userAnchorIndices.lastIndex)
+                        if (clamped == rank && clamped != 0) return
+                        rank = clamped
+                        jumping = true
+                        timelineScope.launch {
+                            try {
+                                if (clamped == 0) {
+                                    listState.animateScrollToItem(0)
+                                } else {
+                                    listState.scrollAnchorToTop(userAnchorIndices[clamped])
+                                }
+                            } finally {
+                                jumping = false
+                            }
+                        }
+                    }
+                    LaunchedEffect(turnDelta) {
+                        if (turnDelta == 0) return@LaunchedEffect
+                        val dir = turnDelta
+                        turnDelta = 0
+                        jumpTo(rank + dir)
+                    }
                     TurnNavigator(
                         turn = userAnchorIndices.size - rank,
                         total = userAnchorIndices.size,
-                        onPrev = {
-                            timelineScope.launch {
-                                userAnchorIndices.getOrNull(rank + 1)
-                                    ?.let { listState.animateScrollToItem(it) }
-                            }
-                        },
-                        onNext = {
-                            timelineScope.launch {
-                                if (rank <= 0) listState.animateScrollToItem(0)
-                                else userAnchorIndices.getOrNull(rank - 1)
-                                    ?.let { listState.animateScrollToItem(it) }
-                            }
-                        },
+                        onPrev = { jumpTo(rank + 1) },
+                        onNext = { jumpTo(rank - 1) },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(end = 14.dp, bottom = 6.dp),
@@ -1029,8 +1201,8 @@ LaunchedEffect(Unit) {
                 ) {
                 AnimatedVisibility(
                     visible = showBackToBottom,
-                    enter = fadeIn() + slideInVertically { it / 3 },
-                    exit = fadeOut() + slideOutVertically { it / 3 },
+                    enter = fadeIn(motion.enter) + slideInVertically(motion.enterOffset) { it / 3 },
+                    exit = fadeOut(motion.enter) + slideOutVertically(motion.enterOffset) { it / 3 },
                 ) {
                     Row(
                         Modifier
@@ -1055,8 +1227,7 @@ LaunchedEffect(Unit) {
                             Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                         )
-                        Text(
-                            "回到底部",
+                        Text(tr("回到底部"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 2.dp),
@@ -1069,6 +1240,8 @@ LaunchedEffect(Unit) {
                 AnimatedVisibility(
                     visible = error != null,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
+                    enter = fadeIn(motion.enter),
+                    exit = fadeOut(motion.enter),
                 ) {
                     error?.let {
                         Snackbar(
@@ -1077,7 +1250,7 @@ LaunchedEffect(Unit) {
                                 androidx.compose.material3.TextButton(
                                     onClick = { viewModel.clearError() },
                                 ) {
-                                    Text("关闭")
+                                    Text(tr("关闭"))
                                 }
                             },
                         ) {
@@ -1089,6 +1262,8 @@ LaunchedEffect(Unit) {
                 AnimatedVisibility(
                     visible = selectionError != null,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
+                    enter = fadeIn(motion.enter),
+                    exit = fadeOut(motion.enter),
                 ) {
                     selectionError?.let {
                         Snackbar(
@@ -1097,7 +1272,7 @@ LaunchedEffect(Unit) {
                                 androidx.compose.material3.TextButton(
                                     onClick = { selectionError = null },
                                 ) {
-                                    Text("知道了")
+                                    Text(tr("知道了"))
                                 }
                             },
                         ) {
@@ -1106,6 +1281,9 @@ LaunchedEffect(Unit) {
                     }
                 }
 
+                if (compactNotice?.running == true) {
+                    CompactMarkerRow(compactNotice?.text ?: "正在压缩上下文")
+                }
                 StatusCapsule(
                     goal = goal,
                     planSteps = planSteps,
@@ -1116,8 +1294,10 @@ LaunchedEffect(Unit) {
                     breakdown = contextBreakdown,
                     displayMode = appSettings.summaryPanelDisplayMode,
                     onCompress = { viewModel.compressContext() },
+                    turnMetrics = lastTurnMetrics,
+                    compactRunning = compactNotice?.running == true,
+                    compactResult = compactNotice?.takeIf { !it.running }?.text,
                 )
-                TurnMetricsLine(metrics = lastTurnMetrics)
                 PendingCommandRecoveryBanner(
                     items = recoverableQueue,
                     onRecover = { viewModel.recoverPendingQueue() },
@@ -1132,7 +1312,7 @@ LaunchedEffect(Unit) {
                 sideChatExcerpt?.let { excerpt ->
                     SideChatDialog(
                         excerpt = excerpt,
-                        onShare = { viewModel.sharePlainText("AndMX 选段", it) },
+                        onShare = { viewModel.sharePlainText(tr("AndMX 选段"), it) },
                         onSubmit = { q ->
                             sideChatExcerpt = null
                             viewModel.startSideChat(excerpt, q)
@@ -1218,6 +1398,7 @@ LaunchedEffect(Unit) {
                         onEdit = { i ->
                             viewModel.takeQueuedForEdit(i)?.let { inputText = it }
                         },
+                        onMove = { index, delta -> viewModel.moveQueued(index, delta) },
                         canSendNow = !isLoading,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1293,7 +1474,7 @@ LaunchedEffect(Unit) {
                 containerColor = terminalColors.background,
                 contentColor = terminalColors.foreground,
                 dragHandle = null,
-                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                shape = Chrome.sheet,
             ) {
                 TerminalScreen(
                     modifier = Modifier
@@ -1389,7 +1570,7 @@ private fun EmptyConversationState(
         modifier = modifier
             .fillMaxSize()
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = Chrome.gutter),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -1416,8 +1597,7 @@ private fun EmptyConversationState(
                     modifier = Modifier.padding(bottom = 20.dp),
                 )
             } else {
-                Text(
-                    "选择一个工作区后开始新任务",
+                Text(tr("选择一个工作区后开始新任务"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 20.dp),
@@ -1558,5 +1738,10 @@ private fun FileDragOverlay(
             )
         }
     }
+}
+
+private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollAnchorToTop(index: Int) {
+    val viewport = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).coerceAtLeast(1)
+    animateScrollToItem(index, scrollOffset = -(viewport - 12))
 }
 

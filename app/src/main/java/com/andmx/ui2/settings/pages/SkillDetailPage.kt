@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,10 +23,13 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.andmx.agent.plugins.SkillInstaller
+import com.andmx.agent.plugins.SkillValidator
 import com.andmx.exec.files.GuestFs
 import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.markdown.MarkdownView
@@ -47,6 +52,16 @@ fun SkillDetailPage(
             runCatching { fs.readText("${skill.path}/SKILL.md") }.getOrDefault("")
         } else ""
     }
+    val frontmatter = remember(skillMd) { skillFrontmatter(skillMd) }
+    val diagnostics by produceState<SkillValidator.ValidationResult?>(null, skill.path, skill.hasSkillMd) {
+        value = if (!skill.hasSkillMd) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { SkillValidator(fs).validateSkillMd("${skill.path}/SKILL.md") }.getOrNull()
+            }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -61,8 +76,15 @@ fun SkillDetailPage(
         ) {
             SettingsGroup("状态") {
                 InfoLineSkill("触发方式", "\$${skill.name}")
+                InfoLineSkill("版本", frontmatter["version"].orEmpty().ifBlank { "未声明" })
+                InfoLineSkill("说明", skill.description.ifBlank { frontmatter["description"].orEmpty().ifBlank { "未声明" } })
                 InfoLineSkill("SKILL.md", if (skill.hasSkillMd) "已包含" else "缺失")
                 InfoLineSkill("路径", skill.path)
+                diagnostics?.let { result ->
+                    InfoLineSkill("检查", if (result.valid) "通过" else "有问题")
+                    result.errors.forEach { InfoLineSkill("错误", it) }
+                    result.warnings.forEach { InfoLineSkill("提醒", it) }
+                }
             }
 
             if (skillMd.isNotBlank()) {
@@ -71,8 +93,7 @@ fun SkillDetailPage(
                 }
             } else if (!skill.hasSkillMd) {
                 SettingsGroup("说明") {
-                    Text(
-                        "该技能目录缺少 SKILL.md，可能无法被正确加载。",
+                    Text(tr("该技能目录缺少 SKILL.md，可能无法被正确加载。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -85,7 +106,7 @@ fun SkillDetailPage(
                     .fillMaxWidth()
                     .padding(top = 24.dp)
             ) {
-                Text("删除技能", color = MaterialTheme.colorScheme.error)
+                Text(tr("删除技能"), color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -93,19 +114,36 @@ fun SkillDetailPage(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("删除技能") },
-            text = { Text("确定删除「${skill.name}」？将从磁盘移除该技能目录，且无法撤销。") },
+            title = { Text(tr("删除技能")) },
+            text = { Text(tr("确定删除「${skill.name}」？将从磁盘移除该技能目录，且无法撤销。")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
                     onDelete()
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(tr("删除"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+                TextButton(onClick = { confirmDelete = false }) { Text(tr("取消")) }
             }
         )
     }
+}
+
+private fun skillFrontmatter(content: String): Map<String, String> {
+    if (!content.startsWith("---")) return emptyMap()
+    val end = content.indexOf("\n---", 3)
+    if (end < 0) return emptyMap()
+    val map = linkedMapOf<String, String>()
+    content.substring(3, end).lineSequence().forEach { line ->
+        val idx = line.indexOf(':')
+        if (idx <= 0) return@forEach
+        var value = line.substring(idx + 1).trim()
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+            value = value.substring(1, value.length - 1)
+        }
+        map[line.substring(0, idx).trim()] = value
+    }
+    return map
 }
 
 @Composable

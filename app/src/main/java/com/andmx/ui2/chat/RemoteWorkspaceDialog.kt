@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -87,22 +89,19 @@ fun RemoteWorkspaceDialog(
     when (step) {
         0 -> AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("连接远程环境") },
+            title = { Text(tr("连接远程环境")) },
             text = {
                 Column {
-                    Text(
-                        "通过 SSH 连接远程工作区，并在当前窗口中继续选择目录。",
+                    Text(tr("通过 SSH 连接远程工作区，并在当前窗口中继续选择目录。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        "连接方式：SSH",
+                    Text(tr("连接方式：SSH"),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
                     )
                     if (profiles.isEmpty()) {
-                        Text(
-                            "还没有保存的远程连接。",
+                        Text(tr("还没有保存的远程连接。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 8.dp),
@@ -137,8 +136,7 @@ fun RemoteWorkspaceDialog(
                                         )
                                     }
                                     if (profile.id == activeRemoteId) {
-                                        Text(
-                                            "当前",
+                                        Text(tr("当前"),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary,
                                         )
@@ -160,26 +158,25 @@ fun RemoteWorkspaceDialog(
                         authMethod = SshAuthMethod.PRIVATE_KEY.name,
                     )
                     step = 1
-                }) { Text("新建 SSH 连接") }
+                }) { Text(tr("新建 SSH 连接")) }
             },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(tr("取消")) } },
         )
 
         1 -> AlertDialog(
             onDismissRequest = { if (!busy) onDismiss() },
-            title = { Text("SSH 远程连接") },
+            title = { Text(tr("SSH 远程连接")) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
-                        "远程主机",
+                    Text(tr("远程主机"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedTextField(
                         value = editing.host,
                         onValueChange = { editing = editing.copy(host = it) },
-                        label = { Text("主机") },
-                        placeholder = { Text("输入主机地址或 IP，例如 192.168.1.100") },
+                        label = { Text(tr("主机")) },
+                        placeholder = { Text(tr("输入主机地址或 IP，例如 192.168.1.100")) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
@@ -188,27 +185,26 @@ fun RemoteWorkspaceDialog(
                         onValueChange = { v ->
                             editing = editing.copy(port = v.toIntOrNull() ?: editing.port)
                         },
-                        label = { Text("端口") },
+                        label = { Text(tr("端口")) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
                     OutlinedTextField(
                         value = editing.username,
                         onValueChange = { editing = editing.copy(username = it) },
-                        label = { Text("用户名") },
-                        placeholder = { Text("输入用户名，例如 root") },
+                        label = { Text(tr("用户名")) },
+                        placeholder = { Text(tr("输入用户名，例如 root")) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
                     OutlinedTextField(
                         value = editing.label,
                         onValueChange = { editing = editing.copy(label = it) },
-                        label = { Text("显示名称（可选）") },
+                        label = { Text(tr("显示名称（可选）")) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
-                    Text(
-                        "认证方式",
+                    Text(tr("认证方式"),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
                     )
@@ -218,29 +214,29 @@ fun RemoteWorkspaceDialog(
                             onClick = {
                                 editing = editing.copy(authMethod = SshAuthMethod.PRIVATE_KEY.name)
                             },
-                            label = { Text("私钥") },
+                            label = { Text(tr("私钥")) },
                         )
                         FilterChip(
                             selected = editing.authMethod == SshAuthMethod.PASSWORD.name,
                             onClick = {
                                 editing = editing.copy(authMethod = SshAuthMethod.PASSWORD.name)
                             },
-                            label = { Text("密码") },
+                            label = { Text(tr("密码")) },
                         )
                     }
                     if (editing.authMethod == SshAuthMethod.PRIVATE_KEY.name) {
                         OutlinedTextField(
                             value = editing.privateKeyPath,
                             onValueChange = { editing = editing.copy(privateKeyPath = it) },
-                            label = { Text("私钥") },
-                            placeholder = { Text("选择或输入私钥文件路径") },
+                            label = { Text(tr("私钥")) },
+                            placeholder = { Text(tr("选择或输入私钥文件路径")) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         )
                         OutlinedTextField(
                             value = editing.passphrase,
                             onValueChange = { editing = editing.copy(passphrase = it) },
-                            label = { Text("私钥口令（可选）") },
+                            label = { Text(tr("私钥口令（可选）")) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         )
@@ -248,8 +244,8 @@ fun RemoteWorkspaceDialog(
                         OutlinedTextField(
                             value = editing.password,
                             onValueChange = { editing = editing.copy(password = it) },
-                            label = { Text("密码") },
-                            placeholder = { Text("输入 SSH 密码") },
+                            label = { Text(tr("密码")) },
+                            placeholder = { Text(tr("输入 SSH 密码")) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         )
@@ -257,7 +253,7 @@ fun RemoteWorkspaceDialog(
                     OutlinedTextField(
                         value = editing.remotePath,
                         onValueChange = { editing = editing.copy(remotePath = it) },
-                        label = { Text("初始远程目录（可选）") },
+                        label = { Text(tr("初始远程目录（可选）")) },
                         placeholder = { Text("/home/user/project") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
@@ -307,10 +303,10 @@ fun RemoteWorkspaceDialog(
                             }
                         }
                     },
-                ) { Text("开始连接") }
+                ) { Text(tr("开始连接")) }
             },
             dismissButton = {
-                TextButton(enabled = !busy, onClick = { step = 0 }) { Text("返回") }
+                TextButton(enabled = !busy, onClick = { step = 0 }) { Text(tr("返回")) }
             },
         )
 
@@ -334,17 +330,15 @@ fun RemoteWorkspaceDialog(
                         ) {
                             CircularProgressIndicator(Modifier.size(28.dp))
                         }
-                        Text("正在通过 SSH 建立连接。")
+                        Text(tr("正在通过 SSH 建立连接。"))
                     }
                     val logs = result?.logs.orEmpty()
-                    Text(
-                        "连接日志",
+                    Text(tr("连接日志"),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                     )
                     if (logs.isEmpty()) {
-                        Text(
-                            "等待连接日志输出...",
+                        Text(tr("等待连接日志输出..."),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -377,14 +371,14 @@ fun RemoteWorkspaceDialog(
                         val start = spec.remotePath.ifBlank { result?.homePath.orEmpty() }.ifBlank { "~" }
                         step = 3
                         loadDir(spec, start)
-                    }) { Text("选择目录") }
+                    }) { Text(tr("选择目录")) }
                 } else if (!busy) {
-                    TextButton(onClick = onDismiss) { Text("关闭") }
+                    TextButton(onClick = onDismiss) { Text(tr("关闭")) }
                 }
             },
             dismissButton = {
                 if (!busy && result?.ok != true) {
-                    TextButton(onClick = { step = 1 }) { Text("返回配置") }
+                    TextButton(onClick = { step = 1 }) { Text(tr("返回配置")) }
                 }
             },
         )
@@ -393,11 +387,10 @@ fun RemoteWorkspaceDialog(
             val spec = connectedSpec
             AlertDialog(
                 onDismissRequest = { if (!busy) onDismiss() },
-                title = { Text("选择远程目录") },
+                title = { Text(tr("选择远程目录")) },
                 text = {
                     Column {
-                        Text(
-                            "远程连接就绪后，选择要在当前窗口中打开的目录。",
+                        Text(tr("远程连接就绪后，选择要在当前窗口中打开的目录。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -502,10 +495,10 @@ fun RemoteWorkspaceDialog(
                                 else error = r.message
                             }
                         },
-                    ) { Text("打开此目录") }
+                    ) { Text(tr("打开此目录")) }
                 },
                 dismissButton = {
-                    TextButton(enabled = !busy, onClick = { step = 1 }) { Text("返回连接配置") }
+                    TextButton(enabled = !busy, onClick = { step = 1 }) { Text(tr("返回连接配置")) }
                 },
             )
         }

@@ -1,5 +1,7 @@
 package com.andmx.ui2.drawer
 
+import com.andmx.ui2.settings.tr
+
 import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -39,7 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import kotlin.math.min
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.ConversationEntity
 import com.andmx.data.TaskGroupEntity
@@ -49,6 +54,12 @@ import com.andmx.workspace.ProjectManager
 import kotlinx.coroutines.launch
 
 private const val VISIBLE_LIMIT = 20
+
+@Composable
+private fun drawerWidth(): androidx.compose.ui.unit.Dp {
+    val screen = LocalConfiguration.current.screenWidthDp
+    return min(screen * 0.88f, 360f).dp
+}
 private const val DRAWER_PREFS = "andmx_drawer"
 private const val KEY_VIEW_MODE = "view_mode"
 private const val KEY_SORT_MODE = "sort_mode"
@@ -189,7 +200,7 @@ fun ConversationDrawer(
                 drawerContainerColor = MaterialTheme.colorScheme.surface,
                 drawerShape = RectangleShape,
                 windowInsets = WindowInsets(0, 0, 0, 0),
-                modifier = Modifier.fillMaxWidth(0.5f),
+                modifier = Modifier.width(drawerWidth()),
             ) {
                 Column(
                     Modifier
@@ -209,13 +220,13 @@ fun ConversationDrawer(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
+                                .padding(horizontal = 8.dp),
                         )
                     } else {
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp)
+                            .padding(horizontal = 8.dp)
                             .padding(top = 12.dp, bottom = 6.dp),
                     ) {
                         if (!showArchived) {
@@ -313,7 +324,7 @@ fun ConversationDrawer(
                             Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
+                                .padding(horizontal = 8.dp),
                         ) {
                             items(visible, key = { it.id }) { conv ->
                                 ConversationRow(
@@ -506,7 +517,7 @@ private fun TaskList(
     LazyColumn(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp)
+            .padding(horizontal = 8.dp)
             .padding(top = 2.dp, bottom = 8.dp),
     ) {
         if (pinned.isNotEmpty()) {
@@ -545,7 +556,11 @@ private fun TaskList(
                     .sortedWith(conversationComparator(sortMode))
                     .groupBy {
                         timelineBucket(
-                            if (sortMode == SortMode.CREATED) it.createdAt else it.updatedAt,
+                            activityTimestamp(
+                                createdAt = it.createdAt,
+                                updatedAt = it.updatedAt,
+                                preferCreated = sortMode == SortMode.CREATED,
+                            ),
                         )
                     }
                     .toList()
@@ -693,8 +708,7 @@ private fun TaskList(
                     }
                     if (items.isEmpty()) {
                         item(key = "empty_$key") {
-                            Text(
-                                "暂无任务，长按会话可移入此分组",
+                            Text(tr("暂无任务，长按会话可移入此分组"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 modifier = Modifier.padding(start = 56.dp, top = 2.dp, bottom = 8.dp),
@@ -733,7 +747,7 @@ private fun TaskList(
                         onClick = onCreateGroup,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                     ) {
-                        Text("＋ 新建分组", color = MaterialTheme.colorScheme.primary)
+                        Text(tr("＋ 新建分组"), color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -743,10 +757,12 @@ private fun TaskList(
 
 private fun conversationComparator(sortMode: SortMode): Comparator<ConversationEntity> =
     when (sortMode) {
-        SortMode.UPDATED -> compareByDescending<ConversationEntity> { it.updatedAt }
-            .thenByDescending { it.createdAt }
-        SortMode.CREATED -> compareByDescending<ConversationEntity> { it.createdAt }
-            .thenByDescending { it.updatedAt }
+        SortMode.UPDATED -> compareByDescending<ConversationEntity> {
+            activityTimestamp(it.createdAt, it.updatedAt, preferCreated = false)
+        }
+        SortMode.CREATED -> compareByDescending<ConversationEntity> {
+            activityTimestamp(it.createdAt, it.updatedAt, preferCreated = true)
+        }
     }
 
 private fun buildGroupKeys(

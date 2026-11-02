@@ -1,5 +1,8 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -96,13 +99,13 @@ private fun UserProcessBubble(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
         horizontalAlignment = Alignment.End,
     ) {
         Column(
             modifier = Modifier
                 .widthIn(max = maxBubble)
-                .clip(RoundedCornerShape(18.dp))
+                .clip(Chrome.bubble)
                 .then(
                     if (onCopy != null) {
                         Modifier.pointerInput(message.id) {
@@ -215,8 +218,8 @@ private fun AssistantProcessBlock(
         modifier = modifier
             .fillMaxWidth()
             .padding(
-                start = 14.dp,
-                end = 14.dp,
+                start = Chrome.gutter,
+                end = Chrome.gutter,
                 top = if (process) 3.dp else 7.dp,
                 bottom = if (process) 2.dp else 5.dp,
             ),
@@ -242,8 +245,7 @@ private fun AssistantProcessBlock(
                     Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
-                Text(
-                    "查看完整消息（${previewPlan.fullBytes / 1000}k 字符）",
+                Text(tr("查看完整消息（${previewPlan.fullBytes / 1000}k 字符）"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

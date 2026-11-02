@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,28 +58,24 @@ fun GitActionDialog(
     when (mode) {
         GitActionMode.MENU -> AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("提交或推送") },
+            title = { Text(tr("提交或推送")) },
             text = {
                 Column {
-                    Text(
-                        "分支：${gitInfo.branch.ifBlank { "—" }}",
+                    Text(tr("分支：${gitInfo.branch.ifBlank { "—" }}"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     if (gitInfo.trackingBranch.isNotBlank()) {
-                        Text(
-                            "上游：${gitInfo.trackingBranch}（领先 ${gitInfo.ahead} / 落后 ${gitInfo.behind}）",
+                        Text(tr("上游：${gitInfo.trackingBranch}（领先 ${gitInfo.ahead} / 落后 ${gitInfo.behind}）"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else if (gitInfo.isRepo) {
-                        Text(
-                            "尚未设置上游分支，首次推送会自动建立。",
+                        Text(tr("尚未设置上游分支，首次推送会自动建立。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
-                        "未提交更改：${gitInfo.dirtyFileCount} 个文件",
+                    Text(tr("未提交更改：${gitInfo.dirtyFileCount} 个文件"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
@@ -91,7 +89,7 @@ fun GitActionDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Outlined.Commit, null, Modifier.size(18.dp))
-                        Text("提交更改", Modifier.padding(start = 8.dp))
+                        Text(tr("提交更改"), Modifier.padding(start = 8.dp))
                     }
                     TextButton(
                         enabled = gitInfo.needsPush || gitInfo.ahead > 0 || !gitInfo.hasUpstream,
@@ -102,7 +100,7 @@ fun GitActionDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Outlined.CloudUpload, null, Modifier.size(18.dp))
-                        Text("推送", Modifier.padding(start = 8.dp))
+                        Text(tr("推送"), Modifier.padding(start = 8.dp))
                     }
                     message?.let {
                         Text(
@@ -115,29 +113,26 @@ fun GitActionDialog(
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(tr("关闭")) } },
         )
 
         GitActionMode.COMMIT -> AlertDialog(
             onDismissRequest = { if (!busy) mode = GitActionMode.MENU },
-            title = { Text("提交更改") },
+            title = { Text(tr("提交更改")) },
             text = {
                 Column {
-                    Text(
-                        "将当前 workspace 内的未提交更改保存为一次提交。",
+                    Text(tr("将当前 workspace 内的未提交更改保存为一次提交。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (!gitInfo.hasIdentity) {
-                        Text(
-                            "当前没有可用的 Git 提交身份，请先配置 user.name 和 user.email。",
+                        Text(tr("当前没有可用的 Git 提交身份，请先配置 user.name 和 user.email。"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
-                    Text(
-                        "更改 · ${files.size.coerceAtLeast(gitInfo.dirtyFileCount)} 个文件",
+                    Text(tr("更改 · ${files.size.coerceAtLeast(gitInfo.dirtyFileCount)} 个文件"),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                     )
@@ -155,11 +150,11 @@ fun GitActionDialog(
                     OutlinedTextField(
                         value = commitMessage,
                         onValueChange = { commitMessage = it },
-                        label = { Text("提交消息") },
-                        placeholder = { Text("提交信息（留空将自动生成）") },
+                        label = { Text(tr("提交消息")) },
+                        placeholder = { Text(tr("提交信息（留空将自动生成）")) },
                         enabled = !busy,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        supportingText = { Text("生成会先填充提交消息，再由你确认提交。") },
+                        supportingText = { Text(tr("生成会先填充提交消息，再由你确认提交。")) },
                     )
                     TextButton(
                         enabled = !busy && gitInfo.hasIdentity,
@@ -221,7 +216,7 @@ fun GitActionDialog(
                                 }
                             }
                         },
-                    ) { Text("提交") }
+                    ) { Text(tr("提交")) }
                     TextButton(
                         enabled = !busy && gitInfo.hasIdentity && gitInfo.hasChanges,
                         onClick = {
@@ -254,17 +249,17 @@ fun GitActionDialog(
                                 }
                             }
                         },
-                    ) { Text("提交并推送") }
+                    ) { Text(tr("提交并推送")) }
                 }
             },
             dismissButton = {
-                TextButton(enabled = !busy, onClick = { mode = GitActionMode.MENU }) { Text("返回") }
+                TextButton(enabled = !busy, onClick = { mode = GitActionMode.MENU }) { Text(tr("返回")) }
             },
         )
 
         GitActionMode.PUSH -> AlertDialog(
             onDismissRequest = { if (!busy) mode = GitActionMode.MENU },
-            title = { Text("推送更改") },
+            title = { Text(tr("推送更改")) },
             text = {
                 Column {
                     Text(
@@ -276,24 +271,20 @@ fun GitActionDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        "分支：${gitInfo.branch}",
+                    Text(tr("分支：${gitInfo.branch}"),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 8.dp),
                     )
-                    Text(
-                        "同步状态：领先 ${gitInfo.ahead} / 落后 ${gitInfo.behind}",
+                    Text(tr("同步状态：领先 ${gitInfo.ahead} / 落后 ${gitInfo.behind}"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        "远程分支：${gitInfo.trackingBranch.ifBlank { "首次推送将自动创建" }}",
+                    Text(tr("远程分支：${gitInfo.trackingBranch.ifBlank { "首次推送将自动创建" }}"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (gitInfo.hasUpstream && gitInfo.ahead == 0) {
-                        Text(
-                            "当前分支没有需要推送的提交。",
+                        Text(tr("当前分支没有需要推送的提交。"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 8.dp),
@@ -326,10 +317,10 @@ fun GitActionDialog(
                             if (result.ok) onDismiss()
                         }
                     },
-                ) { Text("推送") }
+                ) { Text(tr("推送")) }
             },
             dismissButton = {
-                TextButton(enabled = !busy, onClick = { mode = GitActionMode.MENU }) { Text("返回") }
+                TextButton(enabled = !busy, onClick = { mode = GitActionMode.MENU }) { Text(tr("返回")) }
             },
         )
     }

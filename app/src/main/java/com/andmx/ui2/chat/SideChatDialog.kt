@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,7 +33,7 @@ fun SideChatDialog(
     var question by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("侧聊这段回复") },
+        title = { Text(tr("侧聊这段回复")) },
         text = {
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 Text(
@@ -46,11 +48,11 @@ fun SideChatDialog(
                     value = question,
                     onValueChange = { question = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("针对这段内容提问…") },
+                    placeholder = { Text(tr("针对这段内容提问…")) },
                     minLines = 2,
                 )
                 if (onShare != null) {
-                    TextButton(onClick = { onShare(excerpt) }) { Text("分享选段") }
+                    TextButton(onClick = { onShare(excerpt) }) { Text(tr("分享选段")) }
                 }
             }
         },
@@ -58,10 +60,10 @@ fun SideChatDialog(
             TextButton(
                 onClick = { if (question.isNotBlank()) onSubmit(question.trim()) },
                 enabled = question.isNotBlank(),
-            ) { Text("开始侧聊") }
+            ) { Text(tr("开始侧聊")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }

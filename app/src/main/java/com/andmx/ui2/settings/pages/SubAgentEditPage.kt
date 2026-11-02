@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,6 +79,8 @@ fun SubAgentEditPage(
                 .ifEmpty { SubagentCatalog.CATALOG_TOOLS }
         )
     }
+    var thoughtLevel by remember { mutableStateOf(initial?.thoughtLevel.orEmpty()) }
+    var injectAgentsMd by remember { mutableStateOf(initial?.injectAgentsMd ?: !builtIn || initial?.name != "Explore") }
     var maxTurnsText by remember {
         mutableStateOf(initial?.maxTurns?.toString().orEmpty())
     }
@@ -130,10 +134,12 @@ fun SubAgentEditPage(
                                     description = if (builtIn) initial?.description.orEmpty() else description.trim(),
                                     systemPrompt = if (builtIn) initial?.systemPrompt.orEmpty() else systemPrompt.trim(),
                                     model = model,
+                                    thoughtLevel = thoughtLevel.trim(),
                                     permissionMode = if (builtIn) initial?.permissionMode ?: "default" else permissionMode,
                                     color = if (builtIn) initial?.color ?: "blue" else color,
                                     background = if (builtIn) initial?.background ?: false else background,
                                     enabled = enabled,
+                                    injectAgentsMd = if (builtIn) initial?.injectAgentsMd ?: (initial?.name != "Explore") else injectAgentsMd,
                                     tools = if (builtIn) initial?.tools ?: listOf("*") else tools,
                                     disallowedTools = initial?.disallowedTools.orEmpty(),
                                     skills = initial?.skills.orEmpty(),
@@ -203,6 +209,12 @@ fun SubAgentEditPage(
                             onSelect = { model = it },
                         )
                     }
+                    StackedSettingRow(
+                        title = "思考等级",
+                        description = "留空则跟随当前会话。",
+                    ) {
+                        ThoughtLevelField(value = thoughtLevel, onSelect = { thoughtLevel = it })
+                    }
                 }
             } else {
                 SettingsGroup("基本信息") {
@@ -223,7 +235,7 @@ fun SubAgentEditPage(
                         OutlinedTextField(
                             value = description,
                             onValueChange = { description = it },
-                            placeholder = { Text("例如：专注代码审查的子智能体") },
+                            placeholder = { Text(tr("例如：专注代码审查的子智能体")) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             isError = description.isEmpty()
@@ -273,6 +285,12 @@ fun SubAgentEditPage(
                             onSelect = { permissionMode = it },
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                    StackedSettingRow(
+                        title = "思考等级",
+                        description = "留空则跟随当前会话。",
+                    ) {
+                        ThoughtLevelField(value = thoughtLevel, onSelect = { thoughtLevel = it })
                     }
                     StackedSettingRow(title = "最大轮次", description = "留空使用默认") {
                         OutlinedTextField(
@@ -350,13 +368,19 @@ fun SubAgentEditPage(
                         checked = background,
                         onCheckedChange = { background = it }
                     )
+                    SwitchRow(
+                        title = "注入 AGENTS.md",
+                        description = "启动时把工作区说明写进这个子智能体的上下文。",
+                        checked = injectAgentsMd,
+                        onCheckedChange = { injectAgentsMd = it }
+                    )
                 }
 
                 SettingsGroup("系统提示词") {
                     OutlinedTextField(
                         value = systemPrompt,
                         onValueChange = { systemPrompt = it },
-                        placeholder = { Text("描述这个子智能体的角色、边界和规则...") },
+                        placeholder = { Text(tr("描述这个子智能体的角色、边界和规则...")) },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 5,
                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
@@ -372,10 +396,28 @@ fun SubAgentEditPage(
                         .fillMaxWidth()
                         .padding(top = 24.dp)
                 ) {
-                    Text("删除子智能体", color = MaterialTheme.colorScheme.error)
+                    Text(tr("删除子智能体"), color = MaterialTheme.colorScheme.error)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ThoughtLevelField(value: String, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SegmentedRow(
+            options = listOf("" to "继承", "off" to "关闭", "low" to "低"),
+            selected = value,
+            onSelect = onSelect,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SegmentedRow(
+            options = listOf("medium" to "中", "high" to "高", "max" to "最高"),
+            selected = value,
+            onSelect = onSelect,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

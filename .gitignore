@@ -17,3 +17,6 @@
 .trae/
 .zcode/
 /ZCode-main/
+
+# 本地依赖（含 workspace 共享的 node_modules 符号链接）
+node_modules

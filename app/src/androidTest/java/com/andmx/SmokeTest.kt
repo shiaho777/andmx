@@ -9,7 +9,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.andmx.settings.SettingsStore
 import com.andmx.ui2.MainActivity2
+import com.andmx.ui2.settings.UiLang
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +23,20 @@ import org.junit.runner.RunWith
 class SmokeTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity2>()
+
+    /**
+     * 断言文案是中文；CI 模拟器默认 en_US，若不固定语言，Drawer 的
+     * tr("设置") 会变成 "Settings" 而让测试与语言设置耦合。
+     */
+    @Before
+    fun forceChineseLocale() {
+        val store = SettingsStore(compose.activity)
+        runBlocking {
+            val current = store.settings.first()
+            if (current.locale != "zh") store.update(current.copy(locale = "zh"))
+        }
+        compose.waitUntil(5_000) { UiLang.tag == "zh" }
+    }
 
     @Test
     fun coldLaunchDrawerSearchAndSettingsStayLocal() {
@@ -37,12 +56,12 @@ class SmokeTest {
             .assertIsDisplayed()
             .performTextInput("settings")
         compose.onNodeWithText("打开应用设置").assertIsDisplayed().performClick()
-        compose.onNodeWithText("主题、语言与当前窗口体验").assertIsDisplayed()
-        compose.onNodeWithText("代码高亮、字号与换行").assertIsDisplayed()
+        compose.onNodeWithText("常规").assertIsDisplayed()
+        compose.onNodeWithText("代码预览").assertIsDisplayed()
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithContentDescription("切换侧边栏").assertIsDisplayed().performClick()
         compose.onNodeWithText("设置").performClick()
-        compose.onNodeWithText("主题、语言与当前窗口体验").assertIsDisplayed()
+        compose.onNodeWithText("常规").assertIsDisplayed()
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithContentDescription("切换侧边栏").assertIsDisplayed()
     }

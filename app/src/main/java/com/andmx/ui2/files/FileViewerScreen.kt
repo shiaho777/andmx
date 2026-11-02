@@ -1,5 +1,7 @@
 package com.andmx.ui2.files
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -147,11 +149,11 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                     SegmentedButton(
                         selected = !mdSource, onClick = { mdSource = false },
                         shape = SegmentedButtonDefaults.itemShape(0, 2)
-                    ) { Text("预览") }
+                    ) { Text(tr("预览")) }
                     SegmentedButton(
                         selected = mdSource, onClick = { mdSource = true },
                         shape = SegmentedButtonDefaults.itemShape(1, 2)
-                    ) { Text("源码") }
+                    ) { Text(tr("源码")) }
                 }
             }
 
@@ -205,8 +207,7 @@ private fun ChunkBar(
         IconButton(onClick = onPrev, enabled = hasPrev) {
             Text("‹", style = MaterialTheme.typography.titleLarge)
         }
-        Text(
-            "已显示 $shownStart - $shownEnd / $total 行",
+        Text(tr("已显示 $shownStart - $shownEnd / $total 行"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f)

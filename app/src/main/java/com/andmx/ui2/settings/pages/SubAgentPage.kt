@@ -1,11 +1,9 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -156,8 +154,8 @@ fun SubAgentPage(onBack: () -> Unit) {
         val target = deleteTarget!!
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("删除子智能体") },
-            text = { Text("确定要删除子智能体「${target.name}」吗？此操作无法撤销。") },
+            title = { Text(tr("删除子智能体")) },
+            text = { Text(tr("确定要删除子智能体「${target.name}」吗？此操作无法撤销。")) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -173,10 +171,10 @@ fun SubAgentPage(onBack: () -> Unit) {
                             deleteTarget = null
                         }
                     }
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text(tr("删除"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                TextButton(onClick = { deleteTarget = null }) { Text(tr("取消")) }
             }
         )
     }
@@ -187,8 +185,7 @@ fun SubAgentPage(onBack: () -> Unit) {
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
-                Text(
-                    "用户子智能体目录",
+                Text(tr("用户子智能体目录"),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
@@ -202,7 +199,7 @@ fun SubAgentPage(onBack: () -> Unit) {
                         onClick = {
                             SubagentStorage.openAgentsFolder(context)
                         }
-                    ) { Text("选择打开方式") }
+                    ) { Text(tr("选择打开方式")) }
                     TextButton(
                         onClick = {
                             val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
@@ -212,11 +209,10 @@ fun SubAgentPage(onBack: () -> Unit) {
                             )
                             android.widget.Toast.makeText(context, "路径已复制", android.widget.Toast.LENGTH_SHORT).show()
                         }
-                    ) { Text("复制路径") }
+                    ) { Text(tr("复制路径")) }
                 }
                 if (folderFiles.isEmpty()) {
-                    Text(
-                        "目录为空",
+                    Text(tr("目录为空"),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         modifier = Modifier.padding(top = 12.dp),
                     )
@@ -243,17 +239,11 @@ fun SubAgentPage(onBack: () -> Unit) {
         }
     }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = view,
-
         transitionSpec = {
-            if (targetState is AgentView.Edit) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            }
+            if (targetState is AgentView.Edit) motion.push() else motion.pop()
         },
         label = "agentView"
     ) { target ->
@@ -323,11 +313,19 @@ fun SubAgentPage(onBack: () -> Unit) {
                     scope.launch {
                         if (target.builtIn) {
                             val cur = store.subagentState.firstOrNull() ?: SubagentStateFile()
-                            val overrides = cur.builtInModelOverrides.toMutableMap()
-                            val model = agent.model.trim()
-                            if (model.isBlank() || model == "inherit") overrides.remove(agent.name)
-                            else overrides[agent.name] = model
-                            store.saveSubagentState(cur.copy(builtInModelOverrides = overrides))
+                        val overrides = cur.builtInModelOverrides.toMutableMap()
+                        val model = agent.model.trim()
+                        if (model.isBlank() || model == "inherit") overrides.remove(agent.name)
+                        else overrides[agent.name] = model
+                        val thoughts = cur.builtInThoughtLevelOverrides.toMutableMap()
+                        val thought = agent.thoughtLevel.trim()
+                        if (thought.isBlank()) thoughts.remove(agent.name) else thoughts[agent.name] = thought
+                        store.saveSubagentState(
+                            cur.copy(
+                                builtInModelOverrides = overrides,
+                                builtInThoughtLevelOverrides = thoughts,
+                            )
+                        )
                         } else {
                             val users = store.customSubAgents.firstOrNull().orEmpty()
                                 .filter { it.scope != "built-in" && it.source != "built-in" }
@@ -408,7 +406,7 @@ private fun AgentListView(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text("子智能体") },
+                title = { Text(tr("子智能体")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
@@ -463,8 +461,7 @@ private fun AgentListView(
             if (filtered.isEmpty()) {
                 item {
                     ResourceCardGroup {
-                        Text(
-                            "没有找到子智能体",
+                        Text(tr("没有找到子智能体"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),

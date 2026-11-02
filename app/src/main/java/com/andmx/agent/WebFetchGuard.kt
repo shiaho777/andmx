@@ -205,7 +205,44 @@ object WebFetchCache {
     }
 
     @Synchronized
-    fun clear() {
-        map.clear(); totalBytes = 0
+    fun count(): Int = map.size + WebFetchContentCache.shared.count()
+
+    @Synchronized
+    fun clear(): Int {
+        val removed = map.size
+        map.clear()
+        totalBytes = 0
+        return removed + WebFetchContentCache.shared.clear()
+    }
+}
+
+object AndroidUsePolicy {
+    const val TOOL = "computer"
+
+    @Volatile var enabled: Boolean = true
+}
+
+object WebFetchPolicy {
+    val toolNames = setOf("WebFetch", "browse", "WebSearch", "web_search")
+
+    @Volatile var browserEnabled: Boolean = true
+    @Volatile var allowInsecureCertificates: Boolean = false
+
+    fun apply(conn: java.net.HttpURLConnection) {
+        if (!allowInsecureCertificates) return
+        val https = conn as? javax.net.ssl.HttpsURLConnection ?: return
+        https.sslSocketFactory = insecureContext.socketFactory
+        https.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
+    }
+
+    private val insecureContext by lazy {
+        val trust = arrayOf<javax.net.ssl.TrustManager>(object : javax.net.ssl.X509TrustManager {
+            override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
+            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
+        })
+        javax.net.ssl.SSLContext.getInstance("TLS").apply {
+            init(null, trust, java.security.SecureRandom())
+        }
     }
 }

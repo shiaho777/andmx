@@ -4,7 +4,10 @@ import android.content.Context
 import com.andmx.exec.ProcessSpec
 import com.andmx.exec.proot.LocalProotEnvironment
 import com.andmx.exec.proot.ProotRuntime
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -29,6 +32,7 @@ class HookSystem(
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
     private val runtime = ProotRuntime(context)
     private val env = LocalProotEnvironment(context, runtime)
+    private val asyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var hooks: List<HookConfig> = hooks.toList()
 
     fun replaceHooks(next: List<HookConfig>) {
@@ -42,7 +46,10 @@ class HookSystem(
 
     companion object {
         fun parseEvent(raw: String): HookEvent? {
-            val key = raw.trim().lowercase().replace('-', '_')
+            val key = raw.trim()
+                .replace(Regex("([a-z0-9])([A-Z])"), "$1_$2")
+                .lowercase()
+                .replace('-', '_')
             return when (key) {
                 "session_start" -> HookEvent.SESSION_START
                 "user_prompt_submit", "user_prompt" -> HookEvent.USER_PROMPT_SUBMIT
@@ -80,6 +87,7 @@ class HookSystem(
         val timeoutMs: Long = 10_000,
         val mode: HookMode = HookMode.SYNC,
         val name: String = "",
+        val matcher: String = "",
     )
 
     data class HookContext(
@@ -99,13 +107,25 @@ class HookSystem(
     )
 
     /** Run all hooks for a given event. Returns the combined result. */
+    private fun hookMatches(matcher: String, toolName: String?): Boolean {
+        if (matcher.isBlank()) return true
+        val name = toolName.orEmpty()
+        return runCatching { Regex(matcher).containsMatchIn(name) }.getOrDefault(false)
+    }
+
     suspend fun runEvent(event: HookEvent, ctx: HookContext = HookContext()): HookResult =
         withContext(Dispatchers.IO) {
-            val matching = hooks.filter { it.event == event }
+            val matching = hooks.filter { hook ->
+                hook.event == event && hookMatches(hook.matcher, ctx.toolName)
+            }
             if (matching.isEmpty()) return@withContext HookResult(HookDecision.CONTINUE)
 
             var combinedResult = HookResult(HookDecision.CONTINUE)
             for (hook in matching) {
+                if (hook.mode == HookMode.ASYNC) {
+                    asyncScope.launch { executeHook(hook, ctx) }
+                    continue
+                }
                 val result = executeHook(hook, ctx)
                 when (result.decision) {
                     HookDecision.BLOCK -> return@withContext result

@@ -37,7 +37,7 @@ class ToolPresentationTest {
 
     @Test
     fun groupingRules() {
-        // ZCode changes/execute/read 三分组：只读扇出、写改、命令各自成组。
+        // 分组种类：只读扇出、写改、命令。时间线是否成组由设置开关决定。
         for (name in listOf("Read", "ListDir", "Grep", "Glob", "get_goal", "TodoRead")) {
             assertEquals(name, ToolPresentation.GroupKind.READ, ToolPresentation.groupKind(name))
         }

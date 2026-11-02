@@ -1,11 +1,9 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -128,16 +126,11 @@ fun PluginPage(onBack: () -> Unit) {
         plugins.map { it.manifest.name.lowercase() }.toSet()
     }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = view,
         transitionSpec = {
-            if (targetState is PluginView.List) {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { it } + fadeOut())
-            } else {
-                (slideInHorizontally { it } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut())
-            }
+            if (targetState is PluginView.List) motion.pop() else motion.push()
         },
         label = "pluginView",
     ) { target ->
@@ -314,7 +307,7 @@ private fun PluginHubView(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("插件") },
+                title = { Text(tr("插件")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
@@ -346,8 +339,8 @@ private fun PluginHubView(
     ) { padding ->
         Column(Modifier.padding(padding)) {
             TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { onTabChange(0) }, text = { Text("已安装") })
-                Tab(selected = tab == 1, onClick = { onTabChange(1) }, text = { Text("市场") })
+                Tab(selected = tab == 0, onClick = { onTabChange(0) }, text = { Text(tr("已安装")) })
+                Tab(selected = tab == 1, onClick = { onTabChange(1) }, text = { Text(tr("市场")) })
             }
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 ResourcePageDescription(
@@ -402,6 +395,9 @@ private fun PluginHubView(
                                         if (index > 0) ResourceRowDivider()
                                         InstalledPluginRow(
                                             plugin = p,
+                                            latestVersion = market.catalog.plugins
+                                                .firstOrNull { it.name.equals(p.manifest.name, ignoreCase = true) }
+                                                ?.version,
                                             onOpen = { onOpenInstalled(p) },
                                             onToggle = { onToggle(p, it) },
                                         )
@@ -460,10 +456,17 @@ private fun PluginHubView(
 @Composable
 private fun InstalledPluginRow(
     plugin: PluginSystem.Plugin,
+    latestVersion: String?,
     onOpen: () -> Unit,
     onToggle: (Boolean) -> Unit,
 ) {
     val m = plugin.manifest
+    val versionStatus = com.andmx.agent.plugins.PluginVersion.compare(m.version, latestVersion)
+    val versionNote = when (versionStatus) {
+        com.andmx.agent.plugins.PluginVersion.Status.UPDATE_AVAILABLE -> "有更新 $latestVersion"
+        com.andmx.agent.plugins.PluginVersion.Status.VERSION_CHANGED -> "版本不同"
+        com.andmx.agent.plugins.PluginVersion.Status.NONE -> null
+    }
     val meta = listOfNotNull(
         "${m.skills.size} 技能".takeIf { m.skills.isNotEmpty() || true },
         "${m.commands.size} 命令",
@@ -474,7 +477,11 @@ private fun InstalledPluginRow(
     ResourceListRow(
         icon = Icons.Outlined.Extension,
         title = m.name,
-        subtitle = (m.description.ifBlank { "暂无描述" } + sourceSuffix(plugin.source)).take(120),
+        subtitle = listOfNotNull(
+            m.version.takeIf { it.isNotBlank() && it != "0.0.0" },
+            versionNote,
+            (m.description.ifBlank { "暂无描述" } + sourceSuffix(plugin.source)).take(120),
+        ).joinToString(" · "),
         onClick = onOpen,
         trailing = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -514,7 +521,7 @@ private fun MarketPluginRow(
             if (installed) {
                 ResourceBadge("已安装")
             } else {
-                TextButton(onClick = onInstall) { Text("安装") }
+                TextButton(onClick = onInstall) { Text(tr("安装")) }
             }
         },
     )
@@ -545,7 +552,7 @@ private fun MarketPluginDetailPage(
                             if (installing) {
                                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                             } else {
-                                Text("安装")
+                                Text(tr("安装"))
                             }
                         }
                     }
@@ -573,7 +580,7 @@ private fun MarketPluginDetailPage(
                 Text(entry.description, style = MaterialTheme.typography.bodyMedium)
             }
             if (entry.homepage.isNotBlank()) {
-                Text("主页：${entry.homepage}", style = MaterialTheme.typography.bodySmall)
+                Text(tr("主页：${entry.homepage}"), style = MaterialTheme.typography.bodySmall)
             }
             val src = entry.source
             if (src != null) {
@@ -590,7 +597,7 @@ private fun MarketPluginDetailPage(
                 )
             }
             if (installed) {
-                AssistChip(onClick = {}, enabled = false, label = { Text("已安装") })
+                AssistChip(onClick = {}, enabled = false, label = { Text(tr("已安装")) })
             }
         }
     }
@@ -607,12 +614,12 @@ private fun InstallPluginDialog(
     var value by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (!installing) onDismiss() },
-        title = { Text("安装插件") },
+        title = { Text(tr("安装插件")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("Git") })
-                    FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text("本地路径") })
+                    FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text(tr("本地路径")) })
                 }
                 OutlinedTextField(
                     value = value,
@@ -637,7 +644,7 @@ private fun InstallPluginDialog(
                 if (installing) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text(" 安装中…", style = MaterialTheme.typography.bodySmall)
+                        Text(tr(" 安装中…"), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -650,10 +657,10 @@ private fun InstallPluginDialog(
                     if (mode == 0) onConfirmGit(v) else onConfirmLocal(v)
                 },
                 enabled = !installing && value.isNotBlank(),
-            ) { Text("安装") }
+            ) { Text(tr("安装")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !installing) { Text("取消") }
+            TextButton(onClick = onDismiss, enabled = !installing) { Text(tr("取消")) }
         },
     )
 }

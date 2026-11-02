@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,8 +70,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 .padding(bottom = 32.dp)
         ) {
             SettingsGroup("实时预览") {
-                Text(
-                    "代码块将按当前界面主题使用对应配色。",
+                Text(tr("代码块将按当前界面主题使用对应配色。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -84,7 +85,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 )
             }
 
-            SettingsGroup("深色代码主题") {
+            SettingsGroup("深色预览") {
                 ThemeRow(
                     themes = CodeThemes.darkThemes,
                     selected = s.darkCodeTheme,
@@ -92,7 +93,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 )
             }
 
-            SettingsGroup("浅色代码主题") {
+            SettingsGroup("浅色预览") {
                 ThemeRow(
                     themes = CodeThemes.lightThemes,
                     selected = s.lightCodeTheme,
@@ -103,13 +104,13 @@ fun CodePreviewPage(onBack: () -> Unit) {
             SettingsGroup("显示") {
                 SwitchRow(
                     title = "显示行号",
-                    description = "在代码预览中显示每一行的行号。",
+                    description = "在代码内容和差异视图中显示行号。",
                     checked = s.showLineNumbers,
                     onCheckedChange = { save(s.copy(showLineNumbers = it)) }
                 )
                 SwitchRow(
                     title = "长行自动换行",
-                    description = "内容过长时在预览区域内自动换行。",
+                    description = "代码内容过长时自动换行。",
                     checked = s.wrapLongLines,
                     onCheckedChange = { save(s.copy(wrapLongLines = it)) }
                 )
@@ -117,8 +118,8 @@ fun CodePreviewPage(onBack: () -> Unit) {
 
             SettingsGroup("代码字号") {
                 StackedSettingRow(
-                    title = "字号：${s.codeFontSize}sp",
-                    description = "调整代码预览的默认字号。"
+                    title = "代码字号：${s.codeFontSize}",
+                    description = "调整代码块、文件预览和差异视图的默认字号。"
                 ) {
                     Slider(
                         value = s.codeFontSize.toFloat(),

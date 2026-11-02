@@ -66,7 +66,8 @@ class RepeatCallGuardTest {
         guard.onCall("grep", "{\"pattern\":\"a\"}")
         val first = guard.onCall("grep", "{\"pattern\":\"a\"}")
         assertNotNull(first)
-        assertTrue(first!!.contains("repeating the exact same tool call"))
+        assertTrue(first!!.contains("times in a row"))
+        assertTrue(first.contains("grep"))
 
         guard.onCall("grep", "{\"pattern\":\"a\"}")
         val later = guard.onCall("grep", "{\"pattern\":\"a\"}")

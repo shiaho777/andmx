@@ -34,10 +34,10 @@ fun SettingRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(tr(title), style = MaterialTheme.typography.bodyLarge)
             if (description != null) {
                 Text(
-                    description,
+                    tr(description),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
@@ -72,10 +72,10 @@ fun StackedSettingRow(
             .fillMaxWidth()
             .padding(vertical = 12.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
+        Text(tr(title), style = MaterialTheme.typography.bodyLarge)
         if (description != null) {
             Text(
-                description,
+                tr(description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
@@ -92,16 +92,18 @@ fun SegmentedRow(
     options: List<Pair<String, String>>,
     selected: String,
     onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     SingleChoiceSegmentedButtonRow(modifier) {
         options.forEachIndexed { i, (value, label) ->
             SegmentedButton(
                 selected = selected == value,
                 onClick = { onSelect(value) },
+                enabled = enabled,
                 shape = SegmentedButtonDefaults.itemShape(i, options.size)
             ) {
-                Text(label, style = MaterialTheme.typography.labelMedium)
+                Text(tr(label), style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -114,7 +116,7 @@ fun SettingsGroup(
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {
         Text(
-            title,
+            tr(title),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 4.dp)

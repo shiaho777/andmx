@@ -2,7 +2,6 @@ package com.andmx.agent
 
 import android.content.Context
 import com.andmx.workspace.WorkspaceAccess
-import com.andmx.workspace.WorkspaceIndex
 import com.andmx.web.HtmlExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -47,7 +46,7 @@ class ListDirTool(context: Context) : Tool {
  * If a [NetworkPolicy] is provided, the search engine host is checked against
  * the policy before making a request.
  */
-class WebSearchTool(
+class LegacyWebSearchTool(
     private val networkPolicy: com.andmx.exec.policy.NetworkPolicy = com.andmx.exec.policy.NetworkPolicy.PERMISSIVE,
 ) : Tool {
     override val name = "web_search"
@@ -111,6 +110,7 @@ class WebSearchTool(
             connectTimeout = 15_000
             readTimeout = 20_000
             setRequestProperty("User-Agent", "Mozilla/5.0 (Android) AndMX")
+            WebFetchPolicy.apply(this)
         }
         return conn.inputStream.bufferedReader().use(BufferedReader::readText).also { conn.disconnect() }
     }
@@ -145,190 +145,3 @@ object WebSearch {
     }
 }
 
-class GrepTool(context: Context) : Tool {
-    private val appContext = context.applicationContext
-    private val access = WorkspaceAccess(context)
-    override val name = "grep"
-    override val description =
-        "在工作区内用正则搜索文件内容。优先于 shell 里手写 grep/find。" +
-            "返回匹配行(路径:行号:内容)。大结果会截断。"
-    override val risk = ToolRisk.READ
-    override val parameters: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("pattern") { put("type", "string"); put("description", "正则或固定字符串") }
-            putJsonObject("path") { put("type", "string"); put("description", "搜索起点，默认当前项目根") }
-            putJsonObject("glob") { put("type", "string"); put("description", "可选文件过滤，如 *.kt") }
-            putJsonObject("case_insensitive") { put("type", "boolean"); put("description", "忽略大小写"); put("default", false) }
-            putJsonObject("max_results") { put("type", "integer"); put("description", "最多返回行数"); put("default", 80) }
-        }
-        putJsonArray("required") { add("pattern") }
-    }
-
-    override suspend fun execute(args: JsonObject): ToolResult {
-        val pattern = args["pattern"]?.jsonPrimitive?.content
-            ?: return ToolResult("缺少参数 pattern", isError = true)
-        val path = args["path"]?.jsonPrimitive?.content ?: access.guestCwd()
-        val glob = args["glob"]?.jsonPrimitive?.content
-        val fileType = args["file_type"]?.jsonPrimitive?.content
-            ?: args["type"]?.jsonPrimitive?.content
-        val ignoreCase = args["case_insensitive"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true
-            || args["-i"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true
-        val multiline = args["multiline"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true
-        val outputMode = args["output_mode"]?.jsonPrimitive?.content ?: "content"
-        val max = (args["max_results"]?.jsonPrimitive?.content?.toIntOrNull()
-            ?: args["head_limit"]?.jsonPrimitive?.content?.toIntOrNull()
-            ?: 80).let { if (it == 0) 400 else it.coerceIn(1, 400) }
-        val offset = (args["offset"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
-        val before = args["before_context"]?.jsonPrimitive?.content?.toIntOrNull()
-            ?: args["-B"]?.jsonPrimitive?.content?.toIntOrNull()
-        val after = args["after_context"]?.jsonPrimitive?.content?.toIntOrNull()
-            ?: args["-A"]?.jsonPrimitive?.content?.toIntOrNull()
-        val context = args["context"]?.jsonPrimitive?.content?.toIntOrNull()
-            ?: args["-C"]?.jsonPrimitive?.content?.toIntOrNull()
-        val showLine = args["-n"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() != false
-        val flags = buildString {
-            if (outputMode == "content" && showLine) append("n")
-            append("H")
-            if (ignoreCase) append("i")
-            append("I")
-        }
-        val escaped = pattern.replace("'", "'\''")
-        val globFlag = buildString {
-            if (!glob.isNullOrBlank()) {
-                val g = glob.replace("'", "'\''")
-                append(" --glob '$g'")
-            }
-            if (!fileType.isNullOrBlank()) {
-                val t = fileType.replace("'", "'\''")
-                append(" --type '$t'")
-            }
-        }
-        val ctxFlag = buildString {
-            if (context != null && context > 0) append(" -C $context")
-            else {
-                if (before != null && before > 0) append(" -B $before")
-                if (after != null && after > 0) append(" -A $after")
-            }
-            if (multiline) append(" -U --multiline-dotall")
-        }
-        val modeFlag = when (outputMode) {
-            "files_with_matches" -> " -l"
-            "count" -> " -c"
-            else -> ""
-        }
-        val hostRoot = access.hostPath
-        if (!access.isRemote && !hostRoot.isNullOrBlank()) {
-            val resolvedGuest = access.resolvePath(path)
-            val guestMount = "/root/project"
-            val hostFilter = when {
-                resolvedGuest == guestMount || resolvedGuest == hostRoot -> hostRoot
-                resolvedGuest.startsWith("$guestMount/") ->
-                    hostRoot.trimEnd('/') + "/" + resolvedGuest.removePrefix("$guestMount/")
-                resolvedGuest.startsWith(hostRoot.trimEnd('/') + "/") || resolvedGuest == hostRoot ->
-                    resolvedGuest
-                else -> null
-            }
-            if (hostFilter != null) {
-                val hits = WorkspaceIndex.get(appContext).grepIndexed(
-                    root = hostRoot,
-                    pattern = pattern,
-                    pathFilter = hostFilter,
-                    glob = glob ?: fileType?.let { "*.$it" },
-                    ignoreCase = ignoreCase,
-                    maxResults = max,
-                    offset = offset,
-                    outputMode = outputMode,
-                )
-                if (hits != null) {
-                    val out = hits.joinToString("\n")
-                    return if (out.isBlank()) ToolResult("(无匹配)")
-                    else ToolResult(out.take(16_000))
-                }
-            }
-        }
-
-        val target = access.resolvePath(path).replace("'", "'\''")
-        val headN = max + offset
-        val cmd = "rg -$flags$modeFlag$globFlag$ctxFlag --max-count 20 -m $headN -- '$escaped' '$target' 2>/dev/null || " +
-            "grep -R$flags --include='${glob ?: '*'}' -e '$escaped' '$target' 2>/dev/null | head -n $headN"
-        val res = access.executeShell(cmd, cwd = access.guestCwd())
-        if (res.error != null) return ToolResult("搜索失败: ${res.error}", isError = true)
-        var lines = res.stdout.trim().lines().filter { it.isNotBlank() }
-        if (offset > 0 && lines.isNotEmpty()) lines = lines.drop(offset)
-        lines = lines.take(max)
-        val out = lines.joinToString("\n")
-        return if (out.isBlank()) ToolResult("(无匹配)")
-        else ToolResult(out.take(16_000), isError = res.exitCode !in setOf(0, 1))
-    }
-}
-
-class GlobTool(context: Context) : Tool {
-    private val appContext = context.applicationContext
-    private val access = WorkspaceAccess(context)
-    override val name = "glob"
-    override val description =
-        "按 glob 模式列出工作区文件路径。例如 **/*.kt、src/**/Main*.java。"
-    override val risk = ToolRisk.READ
-    override val parameters: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("pattern") { put("type", "string"); put("description", "glob 模式") }
-            putJsonObject("path") { put("type", "string"); put("description", "搜索起点，默认当前项目根") }
-            putJsonObject("max_results") { put("type", "integer"); put("description", "最多返回路径数"); put("default", 200) }
-        }
-        putJsonArray("required") { add("pattern") }
-    }
-
-    override suspend fun execute(args: JsonObject): ToolResult {
-        val pattern = args["pattern"]?.jsonPrimitive?.content
-            ?: return ToolResult("缺少参数 pattern", isError = true)
-        val path = args["path"]?.jsonPrimitive?.content ?: access.guestCwd()
-        val max = (args["max_results"]?.jsonPrimitive?.content?.toIntOrNull() ?: 200).coerceIn(1, 1000)
-        val hostRoot = access.hostPath
-        if (!access.isRemote && !hostRoot.isNullOrBlank()) {
-            val resolvedGuest = access.resolvePath(path)
-            val guestMount = "/root/project"
-            val searchRoot = when {
-                resolvedGuest == guestMount || resolvedGuest == hostRoot -> hostRoot
-                resolvedGuest.startsWith("$guestMount/") ->
-                    hostRoot.trimEnd('/') + "/" + resolvedGuest.removePrefix("$guestMount/")
-                resolvedGuest.startsWith(hostRoot.trimEnd('/') + "/") || resolvedGuest == hostRoot ->
-                    resolvedGuest
-                else -> null
-            }
-            if (searchRoot != null) {
-                val hits = WorkspaceIndex.get(appContext).globIndexed(
-                    root = hostRoot,
-                    pattern = if (searchRoot == hostRoot) pattern else {
-                        val rel = searchRoot.removePrefix(hostRoot.trimEnd('/') + "/").trim('/')
-                        if (rel.isEmpty()) pattern else {
-                            val p = pattern.trimStart('/')
-                            if (p.startsWith("**/") || p.startsWith("*")) p else "$rel/**/$p"
-                        }
-                    },
-                    max = max,
-                )
-                if (hits != null) {
-                    val filtered = if (searchRoot == hostRoot) hits else {
-                        val relRoot = searchRoot.removePrefix(hostRoot.trimEnd('/') + "/").trim('/')
-                        hits.filter { it == relRoot || it.startsWith("$relRoot/") }
-                    }
-                    val out = filtered.take(max).joinToString("\n")
-                    return if (out.isBlank()) ToolResult("(无匹配文件)")
-                    else ToolResult(out.take(16_000))
-                }
-            }
-        }
-
-        val root = access.resolvePath(path).replace("'", "'\''")
-        val pat = pattern.replace("'", "'\''")
-        val cmd = "rg --files -g '$pat' '$root' 2>/dev/null | head -n $max || " +
-            "find '$root' -type f -name '$pat' 2>/dev/null | head -n $max"
-        val res = access.executeShell(cmd, cwd = access.guestCwd())
-        if (res.error != null) return ToolResult("glob 失败: ${res.error}", isError = true)
-        val out = res.stdout.trim()
-        return if (out.isBlank()) ToolResult("(无匹配文件)")
-        else ToolResult(out.take(16_000))
-    }
-}

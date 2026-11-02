@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ResourcePageDescription(text: String, modifier: Modifier = Modifier) {
     Text(
-        text,
+        tr(text),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.fillMaxWidth(),
@@ -82,7 +82,7 @@ fun ResourceSearchField(
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (value.isEmpty()) {
                 Text(
-                    placeholder,
+                    tr(placeholder),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
@@ -123,7 +123,7 @@ fun ResourceFilterDropdown(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(selected.ifBlank { label }, style = MaterialTheme.typography.bodyMedium)
+                Text(tr(selected.ifBlank { label }), style = MaterialTheme.typography.bodyMedium)
                 Icon(
                     Icons.Outlined.KeyboardArrowDown,
                     null,
@@ -137,7 +137,7 @@ fun ResourceFilterDropdown(
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { opt ->
                 DropdownMenuItem(
-                    text = { Text(opt) },
+                    text = { Text(tr(opt)) },
                     onClick = {
                         onSelect(opt)
                         open = false
@@ -159,20 +159,20 @@ fun ResourceSectionHeader(
     Column(modifier.fillMaxWidth().padding(top = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                title,
+                tr(title),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                "$count $countSuffix",
+                "$count ${tr(countSuffix)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (!hint.isNullOrBlank()) {
             Text(
-                hint,
+                tr(hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
@@ -232,7 +232,7 @@ fun ResourceBadge(
     modifier: Modifier = Modifier,
 ) {
     Text(
-        text,
+        tr(text),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
@@ -268,7 +268,7 @@ fun ResourceListRow(
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                title,
+                tr(title),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -276,7 +276,7 @@ fun ResourceListRow(
             )
             if (subtitle.isNotBlank()) {
                 Text(
-                    subtitle,
+                    tr(subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -315,7 +315,7 @@ fun ResourceSecondaryText(
     maxWidth: androidx.compose.ui.unit.Dp = 96.dp,
 ) {
     Text(
-        text,
+        tr(text),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
@@ -327,7 +327,7 @@ fun ResourceSecondaryText(
 @Composable
 fun ResourceFooterCount(text: String, modifier: Modifier = Modifier) {
     Text(
-        text,
+        tr(text),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.outline,
         modifier = modifier.padding(top = 4.dp),
@@ -344,7 +344,7 @@ fun ResourceStatusBanner(message: String, onDismiss: () -> Unit, modifier: Modif
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
     ) {
         Text(
-            message,
+            tr(message),
             modifier = Modifier.padding(12.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,

@@ -18,7 +18,7 @@ import org.robolectric.annotation.SQLiteMode
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class AndmxMigrationTest {
     @Test
-    fun productionMigrationRegistrationPreservesVersionOneRowsThroughVersionFourteen() = runBlocking {
+    fun productionMigrationRegistrationPreservesVersionOneRows() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase("andmx.db")
         context.openOrCreateDatabase("andmx.db", Context.MODE_PRIVATE, null).use { legacy ->
@@ -41,7 +41,7 @@ class AndmxMigrationTest {
         val database = AndmxDatabase.get(context)
         try {
             val sqlite = database.openHelper.writableDatabase
-            assertEquals(17, sqlite.version)
+            assertEquals(18, sqlite.version)
             val dao = database.dao()
             val conversation = requireNotNull(dao.getConversation(41))
             assertEquals("/offline/project", conversation.project)
@@ -60,6 +60,8 @@ class AndmxMigrationTest {
             assertFalse(conversation.pinned)
             assertEquals("", conversation.groupId)
             assertEquals("", conversation.pendingQueueJson)
+            assertEquals(null, conversation.unreadAt)
+            assertEquals("idle", conversation.taskStatus)
 
             val message = dao.messagesFor(41).single()
             assertEquals(51L, message.id)

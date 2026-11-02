@@ -12,7 +12,7 @@ Android 原生的 AI 编程 agent。把「能真正改代码、跑命令、操�
 | 能力 | 说明 |
 |------|------|
 | **Agent 循环** | provider 无关的多步循环：问模型 → 执行工具 → 喂回结果 → 直到模型用纯文本回答；支持并行工具调用、上下文压缩兜底、hooks |
-| **工具系统** | Shell / File / Patch / Git / Browse / ComputerUse / Goal / MCP 等，按风险分级（READ/WRITE/EXECUTE/NETWORK）走批准策略 |
+| **工具系统** | Shell / File / Patch / Git / Browse / ComputerUse / Goal / MCP 等，按风险分级（READ/WRITE/EXECUTE/NETWORK）走批准策略；`shouldDefer` 工具经 ToolSearch 延迟加载，DeferredToolCall 按需执行 |
 | **proot 沙盒** | App 内运行 Linux guest，Alpine rootfs 自动下载，PTY 交互终端，项目目录 bind-mount 到手机真实存储 |
 | **Computer Use** | MediaProjection 截屏 + AccessibilityService 派发手势（tap/swipe/type），构成 screenshot→action→screenshot 纯视觉循环 |
 | **多 Provider** | 统一抽象 OpenAI / Anthropic / GLM(BigModel) / DeepSeek / Ollama / vLLM…，`ProviderKind` → `WireAdapter` 单点分发，reasoning 元数据驱动。已完整实现三套协议：OpenAI Chat Completions、Anthropic Messages 与 OpenAI Responses（`instructions`/`input` items、`function_call(_output)`、`response.*` 类型化 SSE 事件，`store:false` 无状态回放） |

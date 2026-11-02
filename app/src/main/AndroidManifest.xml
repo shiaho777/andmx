@@ -15,12 +15,14 @@
          and the media-projection foreground-service type (Android 14+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- On-device Android plugin: open system package installer for built APKs -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Turn-completion notifications (Android 13+ runtime permission; settings toggle in General) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".AndmxApp"
@@ -37,6 +39,7 @@
         <activity
             android:name=".ui2.MainActivity2"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode"
             android:screenOrientation="fullSensor"
             android:windowSoftInputMode="adjustNothing"
@@ -82,6 +85,20 @@
             android:name=".computeruse.ScreenCaptureService"
             android:foregroundServiceType="mediaProjection"
             android:exported="false" />
+
+        <service
+            android:name=".ui2.chat.AgentRunService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <receiver
+            android:name=".automation.AutomationAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.andmx.action.AUTOMATION_DUE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

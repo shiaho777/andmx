@@ -18,11 +18,6 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import kotlin.coroutines.resume
 
-/**
- * ZCode `js`/`node_repl` 对齐：Android 无 Node runtime，用常驻 WebView 的
- * JS 引擎做等价 REPL——每个会话一个实例，globalThis 跨调用保状态。
- * console.* 捕获进 logs；结果为 completion value JSON。
- */
 object JsReplRuntime {
     private val sessions = ConcurrentHashMap<String, WebView>()
 
@@ -74,7 +69,6 @@ object JsReplRuntime {
             val first = withTimeoutOrNull(timeoutMs) { evalJs(script) }
                 ?: return@withContext """{"error":{"name":"TimeoutError","message":"JS evaluation timed out after ${timeoutMs}ms"},"logs":[]}"""
             if (!first.contains("\"async\":true")) return@withContext first
-            // promise：轮询 __andmxAsync 至 settle 或超时（上游 node_repl await 等价）
             while (System.currentTimeMillis() < deadline) {
                 kotlinx.coroutines.delay(150)
                 val state = runCatching {
@@ -105,9 +99,11 @@ object JsReplRuntime {
 
 class JsReplTool(context: Context, private val sessionKey: String) : Tool {
     private val appContext = context.applicationContext
-    override val name = "js"
+    override val name = "webview_js"
+    override val shouldDefer = true
     override val description =
-        "Execute JavaScript in a persistent REPL session (globalThis persists across calls). " +
+        "Execute JavaScript in this conversation's WebView session (globalThis persists across calls). " +
+            "This is a WebView evaluator, not a host REPL. " +
             "Args: `code` (required), `timeout_ms` (optional, default 30000, max 120000), " +
             "`title` (short user-facing description). " +
             "Returns JSON {result, logs} or {error:{name,message,stack}, logs}."
@@ -125,7 +121,7 @@ class JsReplTool(context: Context, private val sessionKey: String) : Tool {
             }
             putJsonObject("title") {
                 put("type", "string")
-                put("description", "Required short user-facing title in the user's language describing the action, without implementation terms such as js, JavaScript, or node_repl")
+                put("description", "Required short user-facing title in the user's language describing the action, without implementation jargon")
             }
         }
         putJsonArray("required") { add("code"); add("title") }
@@ -139,7 +135,6 @@ class JsReplTool(context: Context, private val sessionKey: String) : Tool {
         val timeoutMs = (args["timeout_ms"]?.jsonPrimitive?.longOrNull ?: 30_000L)
             .coerceIn(1, 120_000)
         val out = JsReplRuntime.eval(sessionKey, appContext, code, timeoutMs)
-        // 上游 node_repl_images payload：result 是 data:image/... 时走 imageUrls 通道
         val img = DATA_IMAGE_URL.find(out)?.value
         return if (img != null && img.length <= 6 * 1024 * 1024) {
             ToolResult(out.replace(img, "[image output]"), imageUrls = listOf(img))

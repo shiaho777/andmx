@@ -1,0 +1,389 @@
+{
+  "causality": {
+    "edges": [
+      {
+        "certainty": "maybe",
+        "from": "ask#1~actor#1",
+        "kind": "control",
+        "to": "ask#2~actor#1"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#1~actor#1",
+        "kind": "control",
+        "to": "ask#2~actor#2"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#1~actor#2",
+        "kind": "control",
+        "to": "ask#2~actor#1"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#1~actor#2",
+        "kind": "control",
+        "to": "ask#2~actor#2"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#2~actor#1",
+        "kind": "carry",
+        "to": "ask#1~actor#1"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#2~actor#1",
+        "kind": "carry",
+        "to": "ask#1~actor#2"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#2~actor#2",
+        "kind": "carry",
+        "to": "ask#1~actor#1"
+      },
+      {
+        "certainty": "maybe",
+        "from": "ask#2~actor#2",
+        "kind": "carry",
+        "to": "ask#1~actor#2"
+      }
+    ],
+    "lanes": [
+      {
+        "id": "actor#1",
+        "loc": {
+          "column": 13,
+          "line": 265
+        },
+        "name": "赤霄"
+      },
+      {
+        "id": "actor#2",
+        "loc": {
+          "column": 15,
+          "line": 266
+        },
+        "name": "玄弈"
+      }
+    ],
+    "regions": [
+      {
+        "id": "seq#1",
+        "kind": "seq"
+      },
+      {
+        "id": "loop#1",
+        "kind": "loop",
+        "parent": "seq#1",
+        "loc": {
+          "column": 1,
+          "line": 277
+        }
+      },
+      {
+        "id": "branch#1",
+        "kind": "branch",
+        "parent": "loop#1",
+        "loc": {
+          "column": 28,
+          "line": 297
+        }
+      }
+    ],
+    "steps": [
+      {
+        "certainty": "maybe",
+        "id": "ask#1~actor#1",
+        "kind": "ask",
+        "label": "actor",
+        "lane": "actor#1",
+        "loc": {
+          "column": 28,
+          "line": 291
+        },
+        "region": "loop#1",
+        "lanes": [
+          "actor#1",
+          "actor#2"
+        ],
+        "repeat": "serial",
+        "source": "ask#1"
+      },
+      {
+        "certainty": "maybe",
+        "id": "ask#1~actor#2",
+        "kind": "ask",
+        "label": "actor",
+        "lane": "actor#2",
+        "loc": {
+          "column": 28,
+          "line": 291
+        },
+        "region": "loop#1",
+        "lanes": [
+          "actor#1",
+          "actor#2"
+        ],
+        "repeat": "serial",
+        "source": "ask#1"
+      },
+      {
+        "certainty": "maybe",
+        "id": "ask#2~actor#1",
+        "kind": "ask",
+        "label": "actor",
+        "lane": "actor#1",
+        "loc": {
+          "column": 30,
+          "line": 299
+        },
+        "region": "branch#1",
+        "lanes": [
+          "actor#1",
+          "actor#2"
+        ],
+        "repeat": "serial",
+        "source": "ask#2"
+      },
+      {
+        "certainty": "maybe",
+        "id": "ask#2~actor#2",
+        "kind": "ask",
+        "label": "actor",
+        "lane": "actor#2",
+        "loc": {
+          "column": 30,
+          "line": 299
+        },
+        "region": "branch#1",
+        "lanes": [
+          "actor#1",
+          "actor#2"
+        ],
+        "repeat": "serial",
+        "source": "ask#2"
+      }
+    ],
+    "sink": {
+      "fedBy": [
+        "ask#2~actor#1",
+        "ask#2~actor#2"
+      ]
+    }
+  },
+  "declaredArtifacts": [],
+  "diagnostics": [],
+  "flow": {
+    "edges": [
+      {
+        "from": "entry",
+        "kind": "next",
+        "to": "ask#1@1"
+      },
+      {
+        "from": "entry",
+        "kind": "jump",
+        "to": "sink",
+        "via": "return"
+      },
+      {
+        "from": "ask#1@1",
+        "kind": "loop",
+        "to": "ask#1@1"
+      },
+      {
+        "from": "ask#1@1",
+        "kind": "branch",
+        "to": "ask#2@1"
+      },
+      {
+        "from": "ask#1@1",
+        "kind": "may-throw",
+        "to": "ask#2@1"
+      },
+      {
+        "from": "ask#1@1",
+        "kind": "jump",
+        "to": "sink",
+        "via": "return"
+      },
+      {
+        "from": "ask#2@1",
+        "kind": "loop",
+        "to": "ask#1@1"
+      },
+      {
+        "from": "ask#2@1",
+        "kind": "jump",
+        "to": "sink",
+        "via": "return"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "ask#1@1",
+        "kind": "issue",
+        "site": "ask#1",
+        "phase": "unphased"
+      },
+      {
+        "id": "ask#2@1",
+        "kind": "issue",
+        "site": "ask#2",
+        "phase": "unphased"
+      }
+    ]
+  },
+  "graph": {
+    "actors": [
+      {
+        "id": "actor#1",
+        "loc": {
+          "column": 13,
+          "line": 265
+        },
+        "name": "赤霄"
+      },
+      {
+        "id": "actor#2",
+        "loc": {
+          "column": 15,
+          "line": 266
+        },
+        "name": "玄弈"
+      }
+    ],
+    "edges": [
+      {
+        "exact": true,
+        "from": "ask#1",
+        "kind": "data",
+        "to": "ask#1",
+        "type": "MoveDecision"
+      },
+      {
+        "exact": true,
+        "from": "ask#2",
+        "kind": "data",
+        "to": "ask#1",
+        "type": "MoveDecision"
+      },
+      {
+        "exact": true,
+        "from": "ask#1",
+        "kind": "data",
+        "to": "ask#2",
+        "type": "MoveDecision"
+      },
+      {
+        "exact": true,
+        "from": "ask#2",
+        "kind": "data",
+        "to": "ask#2",
+        "type": "MoveDecision"
+      },
+      {
+        "exact": true,
+        "from": "ask#1",
+        "kind": "data",
+        "to": "sink",
+        "type": "MoveDecision"
+      },
+      {
+        "exact": true,
+        "from": "ask#2",
+        "kind": "data",
+        "to": "sink",
+        "type": "MoveDecision"
+      },
+      {
+        "exact": false,
+        "from": "ask#1",
+        "kind": "context",
+        "to": "ask#2"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "source",
+        "kind": "source",
+        "label": "source"
+      },
+      {
+        "id": "ask#1",
+        "kind": "ask",
+        "label": "actor",
+        "loc": {
+          "column": 28,
+          "line": 291
+        },
+        "actors": [
+          "actor#1",
+          "actor#2"
+        ],
+        "artifactType": "MoveDecision"
+      },
+      {
+        "id": "ask#2",
+        "kind": "ask",
+        "label": "actor",
+        "loc": {
+          "column": 30,
+          "line": 299
+        },
+        "actors": [
+          "actor#1",
+          "actor#2"
+        ],
+        "artifactType": "MoveDecision"
+      },
+      {
+        "id": "sink",
+        "kind": "sink",
+        "label": "sink"
+      }
+    ]
+  },
+  "handoff": {
+    "handoffs": [
+      {
+        "from": "unphased:actor#1",
+        "to": "unphased:actor#2",
+        "types": [
+          "MoveDecision"
+        ]
+      },
+      {
+        "from": "unphased:actor#2",
+        "to": "unphased:actor#1",
+        "types": [
+          "MoveDecision"
+        ]
+      }
+    ],
+    "participants": [
+      {
+        "id": "unphased:actor#1",
+        "lane": "actor#1",
+        "phase": "unphased",
+        "steps": [
+          "ask#1~actor#1",
+          "ask#2~actor#1"
+        ]
+      },
+      {
+        "id": "unphased:actor#2",
+        "lane": "actor#2",
+        "phase": "unphased",
+        "steps": [
+          "ask#1~actor#2",
+          "ask#2~actor#2"
+        ]
+      }
+    ]
+  },
+  "modelReferences": [],
+  "ok": true
+}

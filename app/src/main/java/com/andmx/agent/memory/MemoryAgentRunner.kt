@@ -32,7 +32,6 @@ class MemoryAgentRunner(
     private val fs: GuestFs,
     private val workspaceReadTools: () -> List<Tool>,
     private val memoryRoot: String = MemorySystem.MEMORY_DIR,
-    private val maxSteps: Int = 8,
 ) {
     enum class Outcome { SUCCESS, NO_OP, ERROR }
 
@@ -79,7 +78,6 @@ class MemoryAgentRunner(
             tools = tools,
             client = TracedLlm(snap.client, ModelCallTrace.Source.MEMORY),
             systemPrompt = prompt,
-            maxSteps = maxSteps,
         )
         val userInput = snap.transcript.joinToString("\n")
         var finalText = ""

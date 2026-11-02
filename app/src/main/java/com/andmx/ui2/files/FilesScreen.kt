@@ -1,11 +1,9 @@
 package com.andmx.ui2.files
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -92,14 +90,11 @@ fun FilesScreen(
         openFile = target.file
     }
 
+    val motion = LocalMotion.current
     AnimatedContent(
         targetState = openFile,
         transitionSpec = {
-            if (targetState != null) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it / 4 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
-            }
+            if (targetState != null) motion.push() else motion.pop()
         },
         label = "filesView",
         modifier = modifier,
@@ -204,7 +199,7 @@ private fun RemoteFilesScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("远程工作区", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        Text(tr("远程工作区"), style = MaterialTheme.typography.titleMedium, maxLines = 1)
                         Text(
                             currentPath,
                             style = MaterialTheme.typography.labelSmall,

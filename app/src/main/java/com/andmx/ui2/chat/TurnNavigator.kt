@@ -18,6 +18,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 
+/**
+ * 0 是最新一条用户消息。贴在底部时固定为 0；离开底部后，取视口顶部那条用户消息。
+ * 反向列表里索引越大越靠上。
+ */
+internal fun navigatorRank(
+    anchors: List<Int>,
+    topVisibleIndex: Int,
+    atBottom: Boolean,
+): Int {
+    if (anchors.isEmpty() || atBottom) return 0
+    val rank = anchors.indexOfLast { it <= topVisibleIndex }
+    return if (rank < 0) 0 else rank
+}
+
 /** ZCode TurnNavigator 对齐：在回合锚点（用户消息）之间跳转。 */
 @Composable
 fun TurnNavigator(

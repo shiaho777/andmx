@@ -1,15 +1,16 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
@@ -54,9 +56,11 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +71,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
@@ -137,12 +142,14 @@ fun Composer(
     onPickSkill: (SkillSuggestion) -> Unit = {},
     mentionSuggestions: List<MentionSuggestion> = emptyList(),
     onPickMention: (MentionSuggestion) -> Unit = {},
-    inputHistory: List<String> = emptyList(),
-    onPickHistory: (String) -> Unit = {},
+    inputHistory: List<InputHistoryEntry> = emptyList(),
+    onPickHistory: (InputHistoryEntry) -> Unit = {},
     placeholder: String = DEFAULT_PLACEHOLDER,
     flat: Boolean = false,
+    modelMenuToken: Int = 0,
     modifier: Modifier = Modifier,
 ) {
+    val motion = LocalMotion.current
     val canSend = value.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()
     val shape = RoundedCornerShape(20.dp)
     val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
@@ -160,17 +167,37 @@ fun Composer(
     Column(
         modifier
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    event.key == Key.Tab && event.isShiftPressed
+                when (
+                    SessionShortcuts.composerAction(
+                        event,
+                        isLoading = isLoading,
+                        inputEmpty = value.isBlank(),
+                        suggestionsEmpty = slashSuggestions.isEmpty() &&
+                            mentionSuggestions.isEmpty() &&
+                            skillSuggestions.isEmpty(),
+                    )
                 ) {
-                    cycleExecMode()
-                    true
-                } else {
-                    false
+                    SessionShortcuts.CYCLE_MODE -> {
+                        cycleExecMode()
+                        true
+                    }
+                    SessionShortcuts.STOP -> {
+                        onStop()
+                        true
+                    }
+                    SessionShortcuts.SEND -> {
+                        if (canSend) onSend()
+                        true
+                    }
+                    SessionShortcuts.NEWLINE -> {
+                        onValueChange(value + "\n")
+                        true
+                    }
+                    else -> false
                 }
             },
     ) {
-        AnimatedVisibility(visible = slashSuggestions.isNotEmpty()) {
+        AnimatedVisibility(visible = slashSuggestions.isNotEmpty(), enter = motion.riseIn(), exit = motion.riseOut()) {
             SuggestionPanel {
                 slashSuggestions.forEach { spec ->
                     SuggestionRow(
@@ -188,7 +215,11 @@ fun Composer(
                 }
             }
         }
-        AnimatedVisibility(visible = argSuggestions.isNotEmpty() && slashSuggestions.isEmpty()) {
+        AnimatedVisibility(
+            visible = argSuggestions.isNotEmpty() && slashSuggestions.isEmpty(),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
+        ) {
             SuggestionPanel {
                 argSuggestions.forEach { sug ->
                     SuggestionRow(
@@ -207,7 +238,11 @@ fun Composer(
                 }
             }
         }
-        AnimatedVisibility(visible = conversationSuggestions.isNotEmpty() && slashSuggestions.isEmpty() && argSuggestions.isEmpty()) {
+        AnimatedVisibility(
+            visible = conversationSuggestions.isNotEmpty() && slashSuggestions.isEmpty() && argSuggestions.isEmpty(),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
+        ) {
             SuggestionPanel {
                 conversationSuggestions.forEach { pick ->
                     SuggestionRow(
@@ -236,6 +271,8 @@ fun Composer(
         AnimatedVisibility(
             visible = mentionSuggestions.isNotEmpty() && slashSuggestions.isEmpty() &&
                 conversationSuggestions.isEmpty() && skillSuggestions.isEmpty(),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             SuggestionPanel {
                 mentionSuggestions.forEach { m ->
@@ -275,6 +312,8 @@ fun Composer(
         }
         AnimatedVisibility(
             visible = skillSuggestions.isNotEmpty() && slashSuggestions.isEmpty() && conversationSuggestions.isEmpty(),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             SuggestionPanel {
                 skillSuggestions.forEach { skill ->
@@ -382,54 +421,61 @@ fun Composer(
 
                 Spacer(Modifier.size(8.dp))
 
-                if (isLoading && onSteer != null) {
+                if (isLoading && steeringPending) {
                     SteerBar(
-                        pending = steeringPending,
+                        pending = true,
                         onCancel = onCancelSteer,
-                        onGuide = { onSteer(value) },
+                        onGuide = {},
                     )
                     Spacer(Modifier.size(6.dp))
                 }
 
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    PlusMenu(
-                        onAddAttachment = onAddAttachment,
-                        onPasteClipboardImage = onPasteClipboardImage,
-                        onInsertMention = onInsertMention,
-                        onInsertConversation = onInsertConversation,
-                        onInsertCommand = onInsertCommand,
-                        onInsertSkill = onInsertSkill,
-                    )
-                    if (inputHistory.isNotEmpty()) {
-                        InputHistoryMenu(history = inputHistory, onPick = onPickHistory)
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val showThoughtLabel = maxWidth >= 480.dp
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            PlusMenu(
+                                onAddAttachment = onAddAttachment,
+                                onPasteClipboardImage = onPasteClipboardImage,
+                                onInsertMention = onInsertMention,
+                                onInsertConversation = onInsertConversation,
+                                onInsertCommand = onInsertCommand,
+                                onInsertSkill = onInsertSkill,
+                            )
+                            if (inputHistory.isNotEmpty()) {
+                                InputHistoryMenu(history = inputHistory, onPick = onPickHistory)
+                            }
+                            ExecModePill(mode = execMode, onSelect = onExecModeSelected)
+                            if (planOverlayActive) {
+                                PlanOverlayChip(onExit = onExitPlanMode)
+                            }
+                            ModelPill(
+                                modelLabel = modelLabel,
+                                selectedModel = selectedModel,
+                                activeProviderId = activeProviderId,
+                                providers = providers,
+                                onSwitchModel = onSwitchModel,
+                                modelMenuToken = modelMenuToken,
+                                modifier = Modifier.weight(1f),
+                            )
+                            ThoughtPill(
+                                effort = reasoningEffort,
+                                reasoning = reasoning,
+                                onSelect = onReasoningSelected,
+                                showLabel = showThoughtLabel,
+                            )
+                            SendStopButton(
+                                isLoading = isLoading,
+                                canSend = canSend,
+                                onSend = onSend,
+                                onStop = onStop,
+                            )
+                        }
                     }
-                    ExecModePill(mode = execMode, onSelect = onExecModeSelected)
-                    if (planOverlayActive) {
-                        PlanOverlayChip(onExit = onExitPlanMode)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    ModelPill(
-                        modelLabel = modelLabel,
-                        selectedModel = selectedModel,
-                        activeProviderId = activeProviderId,
-                        providers = providers,
-                        onSwitchModel = onSwitchModel,
-                    )
-                    ThoughtPill(
-                        effort = reasoningEffort,
-                        reasoning = reasoning,
-                        onSelect = onReasoningSelected,
-                    )
-                    SendStopButton(
-                        isLoading = isLoading,
-                        canSend = canSend,
-                        onSend = onSend,
-                        onStop = onStop,
-                    )
                 }
             }
         }
@@ -465,11 +511,11 @@ private fun SteerBar(
         )
         if (pending) {
             androidx.compose.material3.TextButton(onClick = onCancel) {
-                Text("取消", style = MaterialTheme.typography.labelMedium)
+                Text(tr("取消"), style = MaterialTheme.typography.labelMedium)
             }
         } else {
             androidx.compose.material3.TextButton(onClick = onGuide) {
-                Text("引导", style = MaterialTheme.typography.labelMedium)
+                Text(tr("引导"), style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -477,24 +523,40 @@ private fun SteerBar(
 
 // ── 输入历史 ─────────────────────────────────────────────────────────────
 
+data class InputHistoryEntry(
+    val messageId: Long,
+    val text: String,
+    val sentAt: Long,
+)
+
 @Composable
 private fun InputHistoryMenu(
-    history: List<String>,
-    onPick: (String) -> Unit,
+    history: List<InputHistoryEntry>,
+    onPick: (InputHistoryEntry) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        CircleIcon(Icons.Outlined.History, "输入历史") { expanded = true }
+        CircleIcon(Icons.Outlined.History, "历史提示词") { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            history.take(20).forEach { entry ->
+            history.take(50).forEach { entry ->
+                val whenSent = com.andmx.ui2.drawer.historySentLabel(entry.sentAt)
                 DropdownMenuItem(
                     text = {
-                        Text(
-                            entry.replace('\n', ' ').take(80),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Column(Modifier.widthIn(min = 220.dp, max = 280.dp)) {
+                            if (whenSent.isNotBlank()) {
+                                Text(
+                                    whenSent,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Text(
+                                entry.text.replace('\n', ' ').take(80),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     },
                     onClick = {
                         expanded = false
@@ -619,6 +681,8 @@ private fun ExecModePill(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.tertiary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 72.dp),
             )
             Icon(
                 Icons.Outlined.KeyboardArrowDown,
@@ -691,10 +755,11 @@ private fun PlanOverlayChip(onExit: () -> Unit) {
             modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.width(4.dp))
-        Text(
-            "退出计划",
+        Text(tr("退出计划"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onTertiaryContainer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -708,25 +773,32 @@ private fun ModelPill(
     activeProviderId: String,
     providers: List<ProviderDefinition>,
     onSwitchModel: (providerId: String, modelId: String) -> Unit,
+    modelMenuToken: Int = 0,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(modelMenuToken) {
+        if (modelMenuToken > 0) expanded = true
+    }
     var focusProviderId by remember(activeProviderId, providers) {
         mutableStateOf(activeProviderId.ifBlank { providers.firstOrNull()?.id.orEmpty() })
     }
     var query by remember { mutableStateOf("") }
     val panelShape = RoundedCornerShape(16.dp)
 
-    Box {
+    Box(modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .clickable {
                     expanded = true
                     focusProviderId = activeProviderId.ifBlank { providers.firstOrNull()?.id.orEmpty() }
                     query = ""
                 }
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
         ) {
             Text(
                 modelLabel.ifBlank { "选择模型" },
@@ -738,7 +810,8 @@ private fun ModelPill(
                 },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 120.dp),
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
             )
             Icon(
                 Icons.Outlined.KeyboardArrowDown,
@@ -769,8 +842,7 @@ private fun ModelPill(
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                         ) {
                             if (query.isEmpty()) {
-                                Text(
-                                    "搜索模型…",
+                                Text(tr("搜索模型…"),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -795,8 +867,7 @@ private fun ModelPill(
                                     .background(MaterialTheme.colorScheme.surfaceContainerLow),
                             ) {
                                 if (providers.isEmpty()) {
-                                    Text(
-                                        "暂无供应商",
+                                    Text(tr("暂无供应商"),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(12.dp),
@@ -915,6 +986,7 @@ private fun ThoughtPill(
     effort: String,
     reasoning: ReasoningConfig?,
     onSelect: (String) -> Unit,
+    showLabel: Boolean,
 ) {
     val options = remember(reasoning) { thoughtOptionsFor(reasoning) }
     if (options.isEmpty()) return
@@ -932,21 +1004,25 @@ private fun ThoughtPill(
         ) {
             Icon(
                 Icons.Outlined.Psychology,
-                contentDescription = "思考级别",
+                contentDescription = "思考级别 $label",
                 tint = if (effort.equals("off", true) || effort.isBlank()) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.primary
                 },
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(18.dp),
             )
-            Spacer(Modifier.width(2.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            if (showLabel) {
+                Spacer(Modifier.width(2.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 52.dp),
+                )
+            }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { opt ->
@@ -985,18 +1061,19 @@ private fun SendStopButton(
     onStop: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
+    val motion = LocalMotion.current
     AnimatedContent(
-        targetState = isLoading,
-        transitionSpec = { fadeIn() togetherWith fadeOut() },
+        targetState = isLoading && !canSend,
+        transitionSpec = { motion.crossfade() },
         label = "sendStop",
     ) { busy ->
-        if (busy) {
+        if (busy && !canSend) {
             FilledIconButton(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onStop()
                 },
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(36.dp),
             ) {
                 Icon(Icons.Outlined.Stop, contentDescription = "停止生成", modifier = Modifier.size(20.dp))
             }
@@ -1009,7 +1086,7 @@ private fun SendStopButton(
                     }
                 },
                 enabled = canSend,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(36.dp),
             ) {
                 Icon(Icons.Outlined.ArrowUpward, contentDescription = "发送", modifier = Modifier.size(20.dp))
             }
@@ -1021,7 +1098,7 @@ private fun SendStopButton(
 
 @Composable
 private fun CircleIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         Icon(
             icon,
             contentDescription = desc,
@@ -1226,10 +1303,12 @@ private fun ContextChipKind.icon(): ImageVector = when (this) {
  * - 完全访问：火箭（全速放行）
  */
 private fun ExecMode.icon(): ImageVector = when (this) {
-    ExecMode.CONFIRM -> Icons.Outlined.PanTool
-    ExecMode.AUTO_EDIT -> Icons.Outlined.Security
+    ExecMode.BUILD -> Icons.Outlined.PanTool
+    ExecMode.EDIT -> Icons.Outlined.Security
+    ExecMode.AUTO -> Icons.Outlined.AutoAwesome
     ExecMode.PLAN -> Icons.Outlined.ListAlt
-    ExecMode.FULL -> Icons.Outlined.RocketLaunch
+    ExecMode.YOLO -> Icons.Outlined.RocketLaunch
+    ExecMode.GUARDED -> Icons.Outlined.Shield
 }
 
 /** 斜杠命令参数联想项（上游 mode/model/effort suggestion panel 对齐）。 */

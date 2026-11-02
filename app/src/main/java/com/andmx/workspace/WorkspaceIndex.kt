@@ -307,6 +307,7 @@ class WorkspaceIndex private constructor(context: Context) {
         var totalSeen = 0
         val stack = ArrayDeque<File>()
         stack.add(File(root))
+        val ignore = WorkspaceIgnore.load(File(root))
         var skippedTooLarge = false
         while (stack.isNotEmpty()) {
             val dir = stack.removeLast()
@@ -314,13 +315,14 @@ class WorkspaceIndex private constructor(context: Context) {
             for (child in children) {
                 val name = child.name
                 if (name.startsWith(".")) continue
+                val rel = relPath(root, child.absolutePath) ?: continue
+                if (ignore.ignores(rel, child.isDirectory)) continue
                 if (child.isDirectory) {
                     if (name in IGNORED_DIRS) continue
                     stack.add(child)
                 } else if (child.isFile) {
                     totalSeen++
                     if (collected.size < limit) {
-                        val rel = relPath(root, child.absolutePath) ?: continue
                         collected.add(
                             FileEntry(
                                 path = rel,

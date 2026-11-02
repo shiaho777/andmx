@@ -165,7 +165,7 @@ class AgentEngineToolGuardTest {
         engine.runTurn(settings, turn, "find it").toList()
 
         fun requestMentionsRepeat(index: Int) = llm.requests.getOrNull(index)
-            ?.messages?.any { it.role == "system" && it.content?.contains("repeating the exact same tool call") == true }
+            ?.messages?.any { it.role == "system" && it.content?.contains("times in a row") == true }
             ?: false
 
         assertFalse("第一次调用不该提醒", requestMentionsRepeat(1))
@@ -193,7 +193,7 @@ class AgentEngineToolGuardTest {
         engine.runTurn(settings, turn, "do it").toList()
 
         val reminded = llm.requests.any { req ->
-            req.messages.any { it.role == "system" && it.content?.contains("repeating the exact same tool call") == true }
+            req.messages.any { it.role == "system" && it.content?.contains("times in a row") == true }
         }
         assertTrue("反复撞墙的调用也应被识别为循环", reminded)
     }
@@ -219,7 +219,7 @@ class AgentEngineToolGuardTest {
         engine.runTurn(settings, turn, "find it").toList()
 
         val reminded = llm.requests.any { req ->
-            req.messages.any { it.role == "system" && it.content?.contains("repeating the exact same tool call") == true }
+            req.messages.any { it.role == "system" && it.content?.contains("times in a row") == true }
         }
         assertFalse("参数变化后计数应归零", reminded)
     }

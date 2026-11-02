@@ -1,5 +1,7 @@
 package com.andmx.ui2.drawer
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import com.andmx.ui2.theme.Chrome
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -80,7 +83,7 @@ fun CommandCenterSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+        shape = Chrome.sheet,
     ) {
         Column(
             Modifier
@@ -88,8 +91,7 @@ fun CommandCenterSheet(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 24.dp),
         ) {
-            Text(
-                "搜索",
+            Text(tr("搜索"),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -103,7 +105,7 @@ fun CommandCenterSheet(
                     .fillMaxWidth()
                     .focusRequester(focusRequester),
                 singleLine = true,
-                placeholder = { Text("搜索命令、设置与入口…") },
+                placeholder = { Text(tr("搜索命令、设置与入口…")) },
                 leadingIcon = {
                     Icon(Icons.Outlined.Search, null, Modifier.size(18.dp))
                 },
@@ -114,8 +116,7 @@ fun CommandCenterSheet(
             }
             Spacer(Modifier.height(12.dp))
             if (filtered.isEmpty()) {
-                Text(
-                    "暂无相关结果",
+                Text(tr("暂无相关结果"),
                     modifier = Modifier.padding(vertical = 20.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

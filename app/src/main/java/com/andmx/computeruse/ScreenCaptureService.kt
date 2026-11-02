@@ -46,6 +46,7 @@ class ScreenCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "Screen capture foreground service started")
         startAsForeground()
+        ScreenCaptor.get(this).ensureStarted()
         return START_STICKY
     }
 
@@ -53,14 +54,14 @@ class ScreenCaptureService : Service() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(CHANNEL_ID) == null) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "屏幕捕获", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "AndMX agent 屏幕操作所需的持续通知"
+                NotificationChannel(CHANNEL_ID, "Android Use", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "AndMX 使用 Android Use 时的持续通知"
                 },
             )
         }
         val notification: Notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AndMX 正在操作屏幕")
-            .setContentText("agent 的 Computer Use 功能已启用")
+            .setContentTitle("Android Use")
+            .setContentText("AndMX 正在操作这台设备的屏幕")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .build()

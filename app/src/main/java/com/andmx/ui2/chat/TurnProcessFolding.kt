@@ -21,11 +21,11 @@ object TurnProcessFolding {
         /** 摘要计数：回复性过程说明（非最终答案的 assistant 消息）。 */
         val narrations: Int,
     ) {
-        /** 三个计数全为零时显示「思考了一会儿」；否则拼计数。 */
+        /** 没有工具、说明或子代理时，不另起一条「思考了一会儿」。思考卡片自己会写持续了几秒。 */
         val hasCounts: Boolean get() = toolCalls > 0 || subagents > 0 || narrations > 0
 
         fun label(): String {
-            if (!hasCounts) return "思考了一会儿"
+            if (!hasCounts) return ""
             val parts = mutableListOf<String>()
             if (toolCalls > 0) parts += "$toolCalls 步工具调用"
             if (narrations > 0) parts += "$narrations 段说明"
@@ -48,7 +48,8 @@ object TurnProcessFolding {
         var firstProcessKey = -1L
 
         fun closeTurn(finalKey: Long) {
-            if (turnOpen && firstProcessKey in 1 until finalKey) {
+            val hasWork = toolCalls > 0 || subagents > 0 || narrations > 0
+            if (turnOpen && hasWork && firstProcessKey in 1 until finalKey) {
                 out += Fold(
                     sortKey = firstProcessKey,
                     toolCalls = toolCalls,
@@ -111,6 +112,60 @@ object TurnProcessFolding {
             }
         }
         // 流尾：没有最终答案收尾的 Turn 保持展开（Turn 未关闭），不产出折叠。
+        return out
+    }
+
+    /**
+     * 一条助手消息只有在「同一轮、下一条用户消息之前」还有工具时，才算过程说明。
+     * 后面轮次的工具不能把更早的直接回复收成「N 段说明」。
+     */
+    fun markProcessMessages(
+        messages: List<ChatMessage>,
+        toolSortKeys: List<Long>,
+    ): List<ChatMessage> {
+        if (messages.isEmpty() || toolSortKeys.isEmpty()) {
+            return messages.map { if (it.role == "assistant") it.copy(isProcess = false) else it }
+        }
+        val tools = toolSortKeys.sorted()
+        return messages.mapIndexed { index, message ->
+            if (message.role != "assistant") message
+            else {
+                val nextUserKey = messages.subList(index + 1, messages.size)
+                    .firstOrNull { it.role == "user" }
+                    ?.sortKey
+                val hasToolInTurn = tools.any { key ->
+                    key > message.sortKey && (nextUserKey == null || key < nextUserKey)
+                }
+                message.copy(isProcess = hasToolInTurn)
+            }
+        }
+    }
+
+    /**
+     * 摘要行始终留在时间线上，展开只是把过程行显示出来，收起再藏回去。
+     * [expandedKeys] 里的折叠不隐藏过程行，但摘要行仍然在。
+     */
+    fun visibleTimeline(
+        timeline: List<TimelineItem>,
+        folds: List<Fold>,
+        expandedKeys: Set<Long>,
+    ): List<TimelineItem> {
+        val collapsed = folds.filterNot { it.sortKey in expandedKeys }
+        val hidden = hiddenIds(timeline, collapsed)
+        if (hidden.isEmpty() && folds.isEmpty()) return timeline
+        val out = ArrayList<TimelineItem>(timeline.size + folds.size)
+        var pending = 0
+        for (item in timeline) {
+            while (pending < folds.size && folds[pending].sortKey <= item.sortKey) {
+                out += TimelineItem.TurnProcess(folds[pending])
+                pending += 1
+            }
+            if (item.stableId !in hidden) out += item
+        }
+        while (pending < folds.size) {
+            out += TimelineItem.TurnProcess(folds[pending])
+            pending += 1
+        }
         return out
     }
 

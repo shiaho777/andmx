@@ -28,7 +28,7 @@ sealed interface SlashResult {
     data class Init(val args: String) : SlashResult
     data class Effort(val args: String) : SlashResult
     data object OpenModel : SlashResult
-    data class Mode(val mode: ApprovalMode) : SlashResult
+    data class Mode(val mode: com.andmx.ui2.chat.ExecMode) : SlashResult
     data class Goal(val action: GoalAction, val text: String = "") : SlashResult
     data class Unknown(val name: String) : SlashResult
     data class PluginSlash(val name: String, val args: String) : SlashResult
@@ -124,9 +124,12 @@ object SlashCommands {
             "/checkpoint", "/handoff-checkpoint" -> SlashResult.Checkpoint
             "/regen", "/retry", "/regenerate" -> SlashResult.Regenerate
             "/stop", "/cancel" -> SlashResult.Stop
-            "/full" -> SlashResult.Mode(ApprovalMode.FULL)
-            "/ask" -> SlashResult.Mode(ApprovalMode.ASK)
-            "/readonly", "/read" -> SlashResult.Mode(ApprovalMode.READ_ONLY)
+            "/build", "/ask" -> SlashResult.Mode(com.andmx.ui2.chat.ExecMode.BUILD)
+            "/edit" -> SlashResult.Mode(com.andmx.ui2.chat.ExecMode.EDIT)
+            "/plan", "/readonly", "/read" -> SlashResult.Mode(com.andmx.ui2.chat.ExecMode.PLAN)
+            "/yolo", "/full" -> SlashResult.Mode(com.andmx.ui2.chat.ExecMode.YOLO)
+            "/guarded" -> SlashResult.Mode(com.andmx.ui2.chat.ExecMode.GUARDED)
+            "/auto" -> SlashResult.Mode(com.andmx.ui2.chat.ExecMode.AUTO)
             "/model" -> SlashResult.ModelSwitch(
                 t.substringAfter(' ', missingDelimiterValue = "").trim(),
             )

@@ -7,6 +7,7 @@ import com.andmx.llm.provider.ReasoningConfig
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -59,9 +60,10 @@ class ListModelsToolTest {
         val tool = ListModelsTool({ providers }, { "openai" to "gpt-5" })
         val out = tool.execute(buildJsonObject {}).output
         assertTrue(out.contains("<models count=\"3\">"))
-        assertTrue(out.contains("openai::gpt-5 — OpenAI; levels: minimal,low,medium,high (default medium); ctx: 200000 [current]"))
-        assertTrue(out.contains("openai::gpt-4o — OpenAI; ctx: 128000"))
-        assertTrue(out.contains("local::qwen — Local [disabled: missing api key]"))
+        assertTrue(out.contains("openai/gpt-5 — OpenAI; levels: minimal,low,medium,high (default medium) [current]"))
+        assertTrue(out.contains("openai/gpt-4o — OpenAI"))
+        assertTrue(out.contains("local/qwen — Local [disabled: missing api key]"))
+        assertFalse(out.contains("::"))
     }
 
     @Test
@@ -77,6 +79,14 @@ class ListModelsToolTest {
         val out = ListModelsTool({ providers }, { "" to "" }).execute(buildJsonObject {}).output
         assertTrue(out.contains("[disabled: provider disabled]"))
         assertTrue(!out.contains("[current]"))
+    }
+
+    @Test
+    fun parseAcceptsSlashAndColonIds() {
+        assertEquals("openai" to "gpt-5", SubagentModelCatalog.parse("openai/gpt-5"))
+        assertEquals("openai" to "gpt-5", SubagentModelCatalog.parse("openai::gpt-5"))
+        assertEquals("openai::gpt-5", SubagentModelCatalog.encode("openai", "gpt-5"))
+        assertEquals("" to "gpt-5", SubagentModelCatalog.parse("gpt-5"))
     }
 
     @Test

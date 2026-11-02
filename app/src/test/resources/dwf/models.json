@@ -1,0 +1,226 @@
+{
+  "causality": {
+    "edges": [
+      {
+        "certainty": "always",
+        "from": "ask#1",
+        "kind": "data",
+        "to": "ask#2",
+        "exact": true
+      }
+    ],
+    "lanes": [
+      {
+        "id": "actor#1",
+        "loc": {
+          "column": 20,
+          "line": 5
+        },
+        "name": "研究员"
+      },
+      {
+        "id": "actor#2",
+        "loc": {
+          "column": 16,
+          "line": 6
+        },
+        "name": "写手"
+      }
+    ],
+    "regions": [
+      {
+        "id": "seq#1",
+        "kind": "seq"
+      }
+    ],
+    "steps": [
+      {
+        "certainty": "always",
+        "id": "ask#1",
+        "kind": "ask",
+        "label": "researcher",
+        "lane": "actor#1",
+        "loc": {
+          "column": 32,
+          "line": 9
+        },
+        "region": "seq#1"
+      },
+      {
+        "certainty": "always",
+        "id": "ask#2",
+        "kind": "ask",
+        "label": "writer",
+        "lane": "actor#2",
+        "loc": {
+          "column": 28,
+          "line": 10
+        },
+        "region": "seq#1"
+      }
+    ],
+    "sink": {
+      "fedBy": [
+        "ask#2"
+      ]
+    }
+  },
+  "declaredArtifacts": [],
+  "diagnostics": [],
+  "flow": {
+    "edges": [
+      {
+        "from": "entry",
+        "kind": "next",
+        "to": "ask#1@1"
+      },
+      {
+        "from": "ask#1@1",
+        "kind": "next",
+        "to": "ask#2@1"
+      },
+      {
+        "from": "ask#2@1",
+        "kind": "jump",
+        "to": "sink",
+        "via": "return"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "ask#1@1",
+        "kind": "issue",
+        "site": "ask#1",
+        "phase": "unphased"
+      },
+      {
+        "id": "ask#2@1",
+        "kind": "issue",
+        "site": "ask#2",
+        "phase": "unphased"
+      }
+    ]
+  },
+  "graph": {
+    "actors": [
+      {
+        "id": "actor#1",
+        "loc": {
+          "column": 20,
+          "line": 5
+        },
+        "name": "研究员"
+      },
+      {
+        "id": "actor#2",
+        "loc": {
+          "column": 16,
+          "line": 6
+        },
+        "name": "写手"
+      }
+    ],
+    "edges": [
+      {
+        "exact": true,
+        "from": "ask#1",
+        "kind": "data",
+        "to": "ask#2",
+        "type": "string"
+      },
+      {
+        "exact": true,
+        "from": "ask#2",
+        "kind": "data",
+        "to": "sink",
+        "type": "string"
+      },
+      {
+        "exact": true,
+        "from": "source",
+        "kind": "data",
+        "to": "ask#1"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "source",
+        "kind": "source",
+        "label": "source"
+      },
+      {
+        "id": "ask#1",
+        "kind": "ask",
+        "label": "researcher",
+        "loc": {
+          "column": 32,
+          "line": 9
+        },
+        "actors": [
+          "actor#1"
+        ],
+        "artifactType": "string"
+      },
+      {
+        "id": "ask#2",
+        "kind": "ask",
+        "label": "writer",
+        "loc": {
+          "column": 28,
+          "line": 10
+        },
+        "actors": [
+          "actor#2"
+        ],
+        "artifactType": "string"
+      },
+      {
+        "id": "sink",
+        "kind": "sink",
+        "label": "sink"
+      }
+    ]
+  },
+  "handoff": {
+    "handoffs": [
+      {
+        "from": "unphased:actor#1",
+        "to": "unphased:actor#2",
+        "types": [
+          "string"
+        ]
+      }
+    ],
+    "participants": [
+      {
+        "id": "unphased:actor#1",
+        "lane": "actor#1",
+        "phase": "unphased",
+        "steps": [
+          "ask#1"
+        ]
+      },
+      {
+        "id": "unphased:actor#2",
+        "lane": "actor#2",
+        "phase": "unphased",
+        "steps": [
+          "ask#2"
+        ]
+      }
+    ]
+  },
+  "modelReferences": [
+    {
+      "column": 20,
+      "line": 4,
+      "name": "claude-haiku-4"
+    },
+    {
+      "column": 54,
+      "line": 6,
+      "name": "claude-sonnet-4"
+    }
+  ],
+  "ok": true
+}

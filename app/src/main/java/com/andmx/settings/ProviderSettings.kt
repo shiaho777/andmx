@@ -54,6 +54,16 @@ data class ProviderSettings(
     val showReasoning: Boolean = true,
     /** 在消息流中展示 Todo 工具卡片。 */
     val showTodos: Boolean = true,
+    /** 连续读取/搜索聚成 Explore 分组。 */
+    val toolGroupingExplore: Boolean = true,
+    /** 连续非只读 Shell 聚成 Terminal 分组。 */
+    val toolGroupingTerminal: Boolean = true,
+    /** 连续 Write/Edit/ApplyPatch 聚成 Changes 分组。ZCode 默认关。 */
+    val toolGroupingChanges: Boolean = false,
+    /** 把工作区长期记忆注入新会话。 */
+    val memoryEnabled: Boolean = true,
+    /** 界面字号，12–20，默认 14。只缩放文字。 */
+    val uiFontSizePx: Int = 14,
     /** 自动归档超过保留期的已完成任务。 */
     val taskAutoArchive: Boolean = false,
     /** 归档保留时长（天）: 3 | 7 | 14 | 30 */
@@ -62,6 +72,11 @@ data class ProviderSettings(
     val summaryPanelDisplayMode: String = "auto",
     /** AskUserQuestion 无作答时 5 分钟自动以空答案继续（上游 autoResolution 对齐）。 */
     val askAutoResolve: Boolean = true,
+    /**
+     * 动态工作流工具面（CreateWorkflow 等 11 个工具）的运行时开关。
+     * 对齐 ZCode `includeDynamicWorkflow`：默认关闭，由用户在设置里打开。
+     */
+    val dynamicWorkflowToolsEnabled: Boolean = false,
 
     // ── 代码预览（对标 ZCode Code Preview）──
     /** 浅色模式下代码块主题 id。 */
@@ -81,6 +96,18 @@ data class ProviderSettings(
     val indexFileLimit: Int = 50_000,
     /** 闲时窗口起始小时（本地 0-23），OffPeak* 工具排程用。 */
     val offPeakStartHour: Int = 0,
+    /** 输出风格名称。提示为空时不注入。 */
+    val outputStyleName: String = "",
+    /** 输出风格正文，进入动态系统段。 */
+    val outputStylePrompt: String = "",
+    /** 关闭后新会话不再提供网页抓取和搜索。 */
+    val browserControlEnabled: Boolean = true,
+    /** 开启后 WebFetch / 搜索不再校验 HTTPS 证书。 */
+    val allowInsecureCertificates: Boolean = false,
+    /** 关闭后会话不再提供 computer 工具。 */
+    val androidUseEnabled: Boolean = true,
+    /** 快捷键覆盖，一行 `命令|Ctrl+K`。空着的命令用默认键。 */
+    val shortcutBindings: String = "",
 ) {
     /**
      * Whether the agent can take a turn. Provider readiness (key present etc.)
@@ -113,6 +140,11 @@ class SettingsStore(
     private val interactionKey = stringPreferencesKey("interaction_behavior")
     private val showReasoningKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_reasoning")
     private val showTodosKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_todos")
+    private val toolGroupingExploreKey = androidx.datastore.preferences.core.booleanPreferencesKey("tool_grouping_explore")
+    private val toolGroupingTerminalKey = androidx.datastore.preferences.core.booleanPreferencesKey("tool_grouping_terminal")
+    private val toolGroupingChangesKey = androidx.datastore.preferences.core.booleanPreferencesKey("tool_grouping_changes")
+    private val memoryEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("memory_enabled")
+    private val uiFontSizePxKey = androidx.datastore.preferences.core.intPreferencesKey("ui_font_size_px")
     private val autoArchiveKey = androidx.datastore.preferences.core.booleanPreferencesKey("task_auto_archive")
     private val autoArchiveDaysKey = androidx.datastore.preferences.core.intPreferencesKey("task_auto_archive_days")
     private val summaryPanelModeKey = stringPreferencesKey("summary_panel_display_mode")
@@ -127,6 +159,12 @@ class SettingsStore(
     private val instantGrepKey = androidx.datastore.preferences.core.booleanPreferencesKey("instant_grep")
     private val indexFileLimitKey = androidx.datastore.preferences.core.intPreferencesKey("index_file_limit")
     private val offPeakStartHourKey = androidx.datastore.preferences.core.intPreferencesKey("off_peak_start_hour")
+    private val outputStyleNameKey = stringPreferencesKey("output_style_name")
+    private val outputStylePromptKey = stringPreferencesKey("output_style_prompt")
+    private val browserControlKey = androidx.datastore.preferences.core.booleanPreferencesKey("browser_control_enabled")
+    private val allowInsecureCertificatesKey = androidx.datastore.preferences.core.booleanPreferencesKey("allow_insecure_certificates")
+    private val androidUseEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("android_use_enabled")
+    private val shortcutBindingsKey = stringPreferencesKey("shortcut_bindings")
 
     // Legacy keys retained only for one-time migration into the providers table.
     internal val legacyBaseUrlKey = stringPreferencesKey("base_url")
@@ -153,6 +191,11 @@ class SettingsStore(
             interactionBehavior = p[interactionKey] ?: def.interactionBehavior,
             showReasoning = p[showReasoningKey] ?: def.showReasoning,
             showTodos = p[showTodosKey] ?: def.showTodos,
+            toolGroupingExplore = p[toolGroupingExploreKey] ?: def.toolGroupingExplore,
+            toolGroupingTerminal = p[toolGroupingTerminalKey] ?: def.toolGroupingTerminal,
+            toolGroupingChanges = p[toolGroupingChangesKey] ?: def.toolGroupingChanges,
+            memoryEnabled = p[memoryEnabledKey] ?: def.memoryEnabled,
+            uiFontSizePx = (p[uiFontSizePxKey] ?: def.uiFontSizePx).coerceIn(12, 20),
             taskAutoArchive = p[autoArchiveKey] ?: def.taskAutoArchive,
             taskAutoArchiveDays = p[autoArchiveDaysKey] ?: def.taskAutoArchiveDays,
             summaryPanelDisplayMode = p[summaryPanelModeKey] ?: def.summaryPanelDisplayMode,
@@ -167,6 +210,12 @@ class SettingsStore(
             instantGrep = p[instantGrepKey] ?: def.instantGrep,
             indexFileLimit = p[indexFileLimitKey] ?: def.indexFileLimit,
             offPeakStartHour = p[offPeakStartHourKey] ?: def.offPeakStartHour,
+            outputStyleName = p[outputStyleNameKey] ?: def.outputStyleName,
+            outputStylePrompt = p[outputStylePromptKey] ?: def.outputStylePrompt,
+            browserControlEnabled = p[browserControlKey] ?: def.browserControlEnabled,
+            allowInsecureCertificates = p[allowInsecureCertificatesKey] ?: def.allowInsecureCertificates,
+            androidUseEnabled = p[androidUseEnabledKey] ?: def.androidUseEnabled,
+            shortcutBindings = p[shortcutBindingsKey] ?: def.shortcutBindings,
         )
     }
 
@@ -188,6 +237,11 @@ class SettingsStore(
             p[interactionKey] = settings.interactionBehavior
             p[showReasoningKey] = settings.showReasoning
             p[showTodosKey] = settings.showTodos
+            p[toolGroupingExploreKey] = settings.toolGroupingExplore
+            p[toolGroupingTerminalKey] = settings.toolGroupingTerminal
+            p[toolGroupingChangesKey] = settings.toolGroupingChanges
+            p[memoryEnabledKey] = settings.memoryEnabled
+            p[uiFontSizePxKey] = settings.uiFontSizePx.coerceIn(12, 20)
             p[autoArchiveKey] = settings.taskAutoArchive
             p[autoArchiveDaysKey] = settings.taskAutoArchiveDays
             p[summaryPanelModeKey] = settings.summaryPanelDisplayMode
@@ -202,6 +256,12 @@ class SettingsStore(
             p[instantGrepKey] = settings.instantGrep
             p[indexFileLimitKey] = settings.indexFileLimit
             p[offPeakStartHourKey] = settings.offPeakStartHour
+            p[outputStyleNameKey] = settings.outputStyleName
+            p[outputStylePromptKey] = settings.outputStylePrompt
+            p[browserControlKey] = settings.browserControlEnabled
+            p[allowInsecureCertificatesKey] = settings.allowInsecureCertificates
+            p[androidUseEnabledKey] = settings.androidUseEnabled
+            p[shortcutBindingsKey] = settings.shortcutBindings
         }
     }
 

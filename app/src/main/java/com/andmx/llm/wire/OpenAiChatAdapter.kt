@@ -42,9 +42,15 @@ object OpenAiChatAdapter : WireAdapter {
         // OpenAI EFFORT convention AND the requested value is one it accepts.
         // Otherwise strip it so we don't 400 on models like gpt-4o / deepseek-chat.
         val reasoning = provider.models[req.model]?.reasoning
+        val level = reasoning?.levels?.firstOrNull { it.id.equals(req.reasoningEffort, ignoreCase = true) }
+        val writesEffort = level?.rules?.any {
+            it.kind == com.andmx.llm.provider.ProviderKind.OPENAI && it.path == "reasoning_effort"
+        } == true
         val safeEffort = when {
             reasoning == null || reasoning.style != com.andmx.llm.provider.ReasoningStyle.EFFORT -> null
-            req.reasoningEffort == null || req.reasoningEffort == "off" -> null
+            req.reasoningEffort == null ||
+                req.reasoningEffort.lowercase() in setOf("off", "disabled", "none") -> null
+            level != null && !writesEffort -> null
             req.reasoningEffort in reasoning.effortLevels -> req.reasoningEffort
             else -> null
         }

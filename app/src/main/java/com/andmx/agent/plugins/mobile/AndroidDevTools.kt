@@ -717,7 +717,7 @@ private class AndroidScreenshotTool(
 ) : Tool {
     override val name = "android_screenshot"
     override val description =
-        "Capture a PNG screenshot from the selected Android device or emulator and return it as image content."
+        "Capture a PNG screenshot and attach it as image content. Optional path is written into the guest workspace. Do not look for the file with adb or screencap; the guest shell does not have those commands."
     override val risk = ToolRisk.EXECUTE
     override val parameters = buildJsonObject {
         put("type", "object")

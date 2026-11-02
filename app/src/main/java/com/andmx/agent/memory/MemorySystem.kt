@@ -188,7 +188,7 @@ class MemorySystem(
             // Look for error patterns followed by successful retries
             val errorMatch = Regex("(?i)(error|failed|not found|cannot|unable to)[:\\s]+(.{10,120})", RegexOption.IGNORE_CASE)
                 .find(output)
-            if (errorMatch != null && toolName == "run_shell") {
+            if (errorMatch != null && (toolName == "run_shell" || toolName == "Bash")) {
                 val errorText = errorMatch.groupValues[2].trim()
                 out.add(RawMemory(
                     content = "故障: $errorText (来自 $toolName)",

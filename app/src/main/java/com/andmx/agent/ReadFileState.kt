@@ -47,6 +47,24 @@ class ReadFileState {
         )
     }
 
+    /**
+     * 整文件已在上下文里且 mtime+size 未变时，Read 应返回 file_unchanged，
+     * 避免模型反复把同一份正文灌进上下文。局部视图（offset/limit）不命中。
+     */
+    @Synchronized
+    fun unchangedFullRead(path: String, currentMtimeMs: Long?, currentSizeBytes: Long?): Boolean {
+        val entry = map[normalizePath(path)] ?: return false
+        if (entry.isPartialView) return false
+        if (entry.mtimeMs != null && currentMtimeMs != null) {
+            return entry.mtimeMs == currentMtimeMs &&
+                entry.sizeBytes != null &&
+                currentSizeBytes != null &&
+                entry.sizeBytes == currentSizeBytes
+        }
+        if (entry.mtimeMs != null || currentMtimeMs != null) return false
+        return entry.sizeBytes != null && currentSizeBytes != null && entry.sizeBytes == currentSizeBytes
+    }
+
     /** 上游写前 freshness 校验：无记录=未读；mtime 前进或大小变化=stale。 */
     @Synchronized
     fun staleness(path: String, currentMtimeMs: Long?, currentSizeBytes: Long?): String? {

@@ -34,10 +34,10 @@ fun settingsTopBarColors() = TopAppBarDefaults.topAppBarColors(
 @Composable
 fun backAppBar(title: String, onBack: () -> Unit) {
     TopAppBar(
-        title = { Text(title) },
+        title = { Text(tr(title)) },
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
             }
         },
         colors = settingsTopBarColors(),
@@ -57,10 +57,10 @@ fun SettingsScaffold(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text(title) },
+                title = { Text(tr(title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 colors = settingsTopBarColors(),

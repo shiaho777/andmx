@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,10 +43,9 @@ fun FileRewindDialog(
     if (confirmAll) {
         AlertDialog(
             onDismissRequest = { confirmAll = false },
-            title = { Text("全部还原") },
+            title = { Text(tr("全部还原")) },
             text = {
-                Text(
-                    "将把 ${changes.size} 个文件的改动还原为 agent 修改前的内容" +
+                Text(tr("将把 ${changes.size} 个文件的改动还原为 agent 修改前的内容") +
                         "（外部改动过的文件会跳过）。此操作不可撤销。",
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -53,10 +54,10 @@ fun FileRewindDialog(
                 TextButton(onClick = {
                     confirmAll = false
                     onRevertAll()
-                }) { Text("全部还原", color = MaterialTheme.colorScheme.error) }
+                }) { Text(tr("全部还原"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmAll = false }) { Text("返回") }
+                TextButton(onClick = { confirmAll = false }) { Text(tr("返回")) }
             },
         )
         return
@@ -64,12 +65,11 @@ fun FileRewindDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("文件改动") },
+        title = { Text(tr("文件改动")) },
         text = {
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 if (changes.isEmpty()) {
-                    Text(
-                        "当前没有待还原的文件改动。",
+                    Text(tr("当前没有待还原的文件改动。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -104,7 +104,7 @@ fun FileRewindDialog(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        TextButton(onClick = { onRevertOne(c.path) }) { Text("还原") }
+                        TextButton(onClick = { onRevertOne(c.path) }) { Text(tr("还原")) }
                     }
                     HorizontalDivider()
                 }
@@ -114,12 +114,12 @@ fun FileRewindDialog(
         confirmButton = {
             if (changes.isNotEmpty()) {
                 TextButton(onClick = { confirmAll = true }) {
-                    Text("全部还原", color = MaterialTheme.colorScheme.error)
+                    Text(tr("全部还原"), color = MaterialTheme.colorScheme.error)
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(tr("关闭")) }
         },
     )
 }

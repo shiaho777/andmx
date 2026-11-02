@@ -1,5 +1,9 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,7 +36,7 @@ fun PendingCommandRecoveryBanner(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .padding(horizontal = Chrome.gutter, vertical = 2.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
             .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -45,14 +49,13 @@ fun PendingCommandRecoveryBanner(
                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
             )
             Spacer(Modifier.width(8.dp))
-            Text(
-                "上次有 ${items.size} 条排队输入未发送",
+            Text(tr("上次有 ${items.size} 条排队输入未发送"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onRecover) { Text("恢复") }
-            TextButton(onClick = onDiscard) { Text("丢弃") }
+            TextButton(onClick = onRecover) { Text(tr("恢复")) }
+            TextButton(onClick = onDiscard) { Text(tr("丢弃")) }
         }
         items.take(3).forEach {
             Text(
@@ -64,8 +67,7 @@ fun PendingCommandRecoveryBanner(
             )
         }
         if (items.size > 3) {
-            Text(
-                "… 另有 ${items.size - 3} 条",
+            Text(tr("… 另有 ${items.size - 3} 条"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

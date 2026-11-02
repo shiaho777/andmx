@@ -1,5 +1,8 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,6 +73,7 @@ import com.andmx.llm.provider.ClaudeModelMapping
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
+import com.andmx.llm.provider.ZcodeModelCatalog
 import com.andmx.llm.provider.ReasoningConfig
 import com.andmx.llm.provider.ReasoningStyle
 import com.andmx.llm.provider.claudeMappingWithSlot
@@ -87,6 +91,7 @@ import com.andmx.ui2.settings.clearFocusOnScroll
 import com.andmx.ui2.settings.clearFocusOnBlankTap
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.text.KeyboardOptions
@@ -117,6 +122,7 @@ fun ProviderEditPage(
     onDelete: (() -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var kind by remember { mutableStateOf(initial?.kind ?: ProviderKind.OPENAI) }
     var baseUrl by remember { mutableStateOf(initial?.baseUrl ?: "") }
@@ -162,7 +168,7 @@ fun ProviderEditPage(
             selectedModels - id
         } else {
             if (id !in modelMeta) {
-                modelMeta = modelMeta + (id to (initial?.models?.get(id) ?: ModelDefinition(contextWindow = 128_000)))
+                modelMeta = modelMeta + (id to (initial?.models?.get(id) ?: catalogDefinition(id, kind, baseUrl, context)))
             }
             (selectedModels + id).sorted()
         }
@@ -175,7 +181,7 @@ fun ProviderEditPage(
             selectedModels = (selectedModels + id).sorted()
         }
         if (id !in modelMeta) {
-            modelMeta = modelMeta + (id to ModelDefinition(contextWindow = 128_000))
+            modelMeta = modelMeta + (id to catalogDefinition(id, kind, baseUrl, context))
         }
         manualModel = ""
     }
@@ -294,7 +300,7 @@ fun ProviderEditPage(
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        placeholder = { Text("例如 OpenAI / DeepSeek") },
+                        placeholder = { Text(tr("例如 OpenAI / DeepSeek")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         keyboardOptions = doneOptions,
@@ -337,7 +343,7 @@ fun ProviderEditPage(
                     OutlinedTextField(
                         value = apiKey,
                         onValueChange = { apiKey = it },
-                        placeholder = { Text("输入 API Key") },
+                        placeholder = { Text(tr("输入 API Key")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         keyboardOptions = doneOptions,
@@ -375,7 +381,7 @@ fun ProviderEditPage(
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text("获取中…")
+                                Text(tr("获取中…"))
                             } else {
                                 Icon(
                                     Icons.Outlined.Refresh,
@@ -387,8 +393,7 @@ fun ProviderEditPage(
                             }
                         }
                         if (catalogue.isNotEmpty()) {
-                            Text(
-                                "${catalogue.size} 个",
+                            Text(tr("${catalogue.size} 个"),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -401,8 +406,7 @@ fun ProviderEditPage(
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(top = 8.dp)
                         )
-                        is FetchState.Ready -> Text(
-                            "已加载 ${fs.models.size} 个模型，可搜索并勾选添加",
+                        is FetchState.Ready -> Text(tr("已加载 ${fs.models.size} 个模型，可搜索并勾选添加"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 8.dp)
@@ -416,7 +420,7 @@ fun ProviderEditPage(
                         OutlinedTextField(
                             value = modelQuery,
                             onValueChange = { modelQuery = it },
-                            placeholder = { Text("按模型 ID 过滤…") },
+                            placeholder = { Text(tr("按模型 ID 过滤…")) },
                             leadingIcon = {
                                 Icon(
                                     Icons.Outlined.Search,
@@ -465,14 +469,14 @@ fun ProviderEditPage(
                                         val toAdd = filteredCatalogue.filter { it !in selectedModels }
                                         if (toAdd.isNotEmpty()) {
                                             val seeded = toAdd.associateWith { mid ->
-                                                modelMeta[mid] ?: ModelDefinition(contextWindow = 128_000)
+                                                modelMeta[mid] ?: catalogDefinition(mid, kind, baseUrl, context)
                                             }
                                             modelMeta = modelMeta + seeded
                                             selectedModels = (selectedModels + toAdd).sorted()
                                         }
                                     }
                                 ) {
-                                    Text("全选当前结果")
+                                    Text(tr("全选当前结果"))
                                 }
                                 TextButton(
                                     onClick = {
@@ -481,7 +485,7 @@ fun ProviderEditPage(
                                         modelMeta = modelMeta.filterKeys { it !in drop }
                                     }
                                 ) {
-                                    Text("取消当前结果")
+                                    Text(tr("取消当前结果"))
                                 }
                             }
                         }
@@ -530,7 +534,7 @@ fun ProviderEditPage(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("添加模型")
+                        Text(tr("添加模型"))
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -541,7 +545,7 @@ fun ProviderEditPage(
                         OutlinedTextField(
                             value = manualModel,
                             onValueChange = { manualModel = it },
-                            placeholder = { Text("手动输入模型 ID") },
+                            placeholder = { Text(tr("手动输入模型 ID")) },
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
@@ -549,15 +553,14 @@ fun ProviderEditPage(
                             onClick = { addManualModel() },
                             enabled = manualModel.isNotBlank()
                         ) {
-                            Text("快速添加")
+                            Text(tr("快速添加"))
                         }
                     }
                 }
             }
 
             SettingsGroup("Claude 模型映射") {
-                Text(
-                    "为 Claude 的各模型槽位选择对应的模型",
+                Text(tr("为 Claude 的各模型槽位选择对应的模型"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -606,14 +609,14 @@ fun ProviderEditPage(
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("测试中…")
+                        Text(tr("测试中…"))
                     } else {
-                        Text("测试连接")
+                        Text(tr("测试连接"))
                     }
                 }
                 when (val ts = testState) {
-                    is TestState.Success -> TestResultText("连接成功！", MaterialTheme.colorScheme.primary)
-                    is TestState.Failed -> TestResultText("连接失败：${ts.reason}", MaterialTheme.colorScheme.error)
+                    is TestState.Success -> TestResultText(tr("连接成功！"), MaterialTheme.colorScheme.primary)
+                    is TestState.Failed -> TestResultText(tr("连接失败：${ts.reason}"), MaterialTheme.colorScheme.error)
                     else -> {}
                 }
             }
@@ -624,7 +627,7 @@ fun ProviderEditPage(
                     onClick = onDelete,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("删除供应商", color = MaterialTheme.colorScheme.error)
+                    Text(tr("删除供应商"), color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -633,6 +636,8 @@ fun ProviderEditPage(
     if (showAddModelDialog) {
         AddModelDialog(
             existingIds = selectedModels.toSet(),
+            kind = kind,
+            baseUrl = baseUrl,
             onDismiss = { showAddModelDialog = false },
             onConfirm = { id, def ->
                 if (id !in selectedModels) {
@@ -708,8 +713,7 @@ private fun SelectedModelsEditor(
                         )
                     }
                 }
-                Text(
-                    "显示名称",
+                Text(tr("显示名称"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
@@ -719,12 +723,11 @@ private fun SelectedModelsEditor(
                     onValueChange = { raw ->
                         onPatch(id) { it.copy(displayName = raw.ifBlank { null }) }
                     },
-                    placeholder = { Text("留空则显示模型 ID") },
+                    placeholder = { Text(tr("留空则显示模型 ID")) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
-                Text(
-                    "上下文长度",
+                Text(tr("上下文长度"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
@@ -736,7 +739,7 @@ private fun SelectedModelsEditor(
                         val value = digits.toIntOrNull() ?: 0
                         onPatch(id) { it.copy(contextWindow = value) }
                     },
-                    placeholder = { Text("默认 128000") },
+                    placeholder = { Text(tr("默认 128000")) },
                     suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -776,8 +779,7 @@ private fun SelectedModelsEditor(
                         )
                     }
                 }
-                Text(
-                    "最大输出",
+                Text(tr("最大输出"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
@@ -789,7 +791,7 @@ private fun SelectedModelsEditor(
                         val value = digits.toIntOrNull() ?: 0
                         onPatch(id) { it.copy(maxOutputTokens = value) }
                     },
-                    placeholder = { Text("可选，0 表示不限制") },
+                    placeholder = { Text(tr("可选，0 表示不限制")) },
                     suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -798,8 +800,7 @@ private fun SelectedModelsEditor(
                         imeAction = ImeAction.Done,
                     ),
                 )
-                Text(
-                    "输入类型",
+                Text(tr("输入类型"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
@@ -942,7 +943,7 @@ private fun ClaudeMappingEditor(
                     }
                     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                         DropdownMenuItem(
-                            text = { Text("未设置") },
+                            text = { Text(tr("未设置")) },
                             onClick = {
                                 onPick(slot, "")
                                 open = false
@@ -1155,8 +1156,7 @@ private fun ReasoningEditor(
         )
     }
 
-    Text(
-        "推理",
+    Text(tr("推理"),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
@@ -1178,8 +1178,7 @@ private fun ReasoningEditor(
 
         ReasoningChoice.EFFORT -> {
             Spacer(Modifier.height(8.dp))
-            Text(
-                "可用档位",
+            Text(tr("可用档位"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 4.dp),
@@ -1198,15 +1197,13 @@ private fun ReasoningEditor(
                 },
             )
             Spacer(Modifier.height(8.dp))
-            Text(
-                "默认档位",
+            Text(tr("默认档位"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 4.dp),
             )
             if (levels.isEmpty()) {
-                Text(
-                    "先选择至少一个可用档位",
+                Text(tr("先选择至少一个可用档位"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1234,11 +1231,11 @@ private fun ReasoningEditor(
                     budgetText = digits
                     if (validateThinkingBudget(digits)) push(nextBudget = digits)
                 },
-                label = { Text("默认思考预算") },
+                label = { Text(tr("默认思考预算")) },
                 placeholder = { Text(DEFAULT_THINKING_BUDGET_TEXT) },
                 suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
                 supportingText = {
-                    Text("不少于 ${AnthropicMessagesAdapter.MIN_THINKING_BUDGET}")
+                    Text(tr("不少于 ${AnthropicMessagesAdapter.MIN_THINKING_BUDGET}"))
                 },
                 isError = !budgetOk,
                 modifier = Modifier.fillMaxWidth(),
@@ -1255,16 +1252,46 @@ private fun ReasoningEditor(
 @Composable
 private fun AddModelDialog(
     existingIds: Set<String>,
+    kind: ProviderKind,
+    baseUrl: String,
     onDismiss: () -> Unit,
     onConfirm: (String, ModelDefinition) -> Unit,
 ) {
+    val context = LocalContext.current
     var modelId by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var contextWindow by remember { mutableStateOf("128000") }
     var maxOutput by remember { mutableStateOf("") }
     var inputModalities by remember { mutableStateOf(setOf("text")) }
+    var catalogNote by remember { mutableStateOf<String?>(null) }
 
     val trimmedId = modelId.trim()
+    LaunchedEffect(trimmedId, kind, baseUrl) {
+        if (trimmedId.isBlank()) {
+            catalogNote = null
+            return@LaunchedEffect
+        }
+        val match = runCatching {
+            ZcodeModelCatalog.resolve(
+                ZcodeModelCatalog.load(context),
+                trimmedId,
+                ZcodeModelCatalog.apiType(kind),
+                baseUrl,
+            )
+        }.getOrNull()
+        if (match == null || match.contextWindow <= 0) {
+            catalogNote = null
+            return@LaunchedEffect
+        }
+        contextWindow = match.contextWindow.toString()
+        maxOutput = if (match.maxOutputTokens > 0) match.maxOutputTokens.toString() else ""
+        inputModalities = match.inputModalities.toSet()
+        catalogNote = if (match.specific) {
+            "已按模型目录对齐：上下文 ${match.contextWindow}，最大输出 ${match.maxOutputTokens}"
+        } else {
+            "目录里没有更具体的规则，已填入默认上下文 ${match.contextWindow}，最大输出 ${match.maxOutputTokens}"
+        }
+    }
     val problem = validateNewModel(modelId, existingIds, contextWindow)
     val isDuplicate = problem == AddModelProblem.DUPLICATE_ID
     val contextValue = contextWindow.toIntOrNull() ?: 0
@@ -1272,7 +1299,7 @@ private fun AddModelDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加模型") },
+        title = { Text(tr("添加模型")) },
         text = {
             Column(
                 Modifier
@@ -1282,21 +1309,27 @@ private fun AddModelDialog(
                 OutlinedTextField(
                     value = modelId,
                     onValueChange = { modelId = it },
-                    label = { Text("模型 ID") },
-                    placeholder = { Text("例如 glm-4.6") },
+                    label = { Text(tr("模型 ID")) },
+                    placeholder = { Text(tr("例如 glm-4.6")) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     isError = isDuplicate,
-                    supportingText = if (isDuplicate) {
-                        { Text("该模型已在列表中", color = MaterialTheme.colorScheme.error) }
-                    } else null
+                    supportingText = when {
+                        isDuplicate -> {
+                            { Text(tr("该模型已在列表中"), color = MaterialTheme.colorScheme.error) }
+                        }
+                        catalogNote != null -> {
+                            { Text(catalogNote!!) }
+                        }
+                        else -> null
+                    }
                 )
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = displayName,
                     onValueChange = { displayName = it },
-                    label = { Text("显示名称") },
-                    placeholder = { Text("可选，留空则显示模型 ID") },
+                    label = { Text(tr("显示名称")) },
+                    placeholder = { Text(tr("可选，留空则显示模型 ID")) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
@@ -1304,13 +1337,13 @@ private fun AddModelDialog(
                 OutlinedTextField(
                     value = contextWindow,
                     onValueChange = { raw -> contextWindow = raw.filter { it.isDigit() }.take(9) },
-                    label = { Text("上下文窗口") },
+                    label = { Text(tr("上下文窗口")) },
                     suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     isError = problem == AddModelProblem.INVALID_CONTEXT,
                     supportingText = if (problem == AddModelProblem.INVALID_CONTEXT) {
-                        { Text("请输入大于 0 的整数", color = MaterialTheme.colorScheme.error) }
+                        { Text(tr("请输入大于 0 的整数"), color = MaterialTheme.colorScheme.error) }
                     } else null,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
@@ -1321,8 +1354,8 @@ private fun AddModelDialog(
                 OutlinedTextField(
                     value = maxOutput,
                     onValueChange = { raw -> maxOutput = raw.filter { it.isDigit() }.take(8) },
-                    label = { Text("最大输出 Token") },
-                    placeholder = { Text("可选，0 表示不限制") },
+                    label = { Text(tr("最大输出 Token")) },
+                    placeholder = { Text(tr("可选，0 表示不限制")) },
                     suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1332,8 +1365,7 @@ private fun AddModelDialog(
                     )
                 )
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    "输入类型",
+                Text(tr("输入类型"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1349,8 +1381,7 @@ private fun AddModelDialog(
                     }
                 )
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    "输出类型",
+                Text(tr("输出类型"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1366,6 +1397,7 @@ private fun AddModelDialog(
         confirmButton = {
             TextButton(
                 onClick = {
+                    val matched = catalogMatch(context, trimmedId, kind, baseUrl)
                     onConfirm(
                         trimmedId,
                         ModelDefinition(
@@ -1373,15 +1405,42 @@ private fun AddModelDialog(
                             contextWindow = contextValue,
                             maxOutputTokens = maxOutput.toIntOrNull() ?: 0,
                             inputModalities = newModelModalities(inputModalities),
-                            outputModalities = listOf("text")
+                            outputModalities = listOf("text"),
+                            reasoning = matched?.reasoning,
+                            supportsToolCall = matched?.supportsToolCall ?: true,
+                            supportsJsonSchemaOutput = matched?.supportsJsonSchemaOutput ?: false,
+                            supportsNativeWebSearch = matched?.supportsNativeWebSearch ?: false,
+                            supportsMidConversationSystem = matched?.supportsMidConversationSystem ?: false,
                         )
                     )
                 },
                 enabled = canSave
-            ) { Text("保存") }
+            ) { Text(tr("保存")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
 }
+
+private fun catalogDefinition(
+    id: String,
+    kind: ProviderKind,
+    baseUrl: String,
+    context: Context,
+): ModelDefinition = catalogMatch(context, id, kind, baseUrl)?.toDefinition()
+    ?: ModelDefinition(contextWindow = 128_000)
+
+private fun catalogMatch(
+    context: Context,
+    modelId: String,
+    kind: ProviderKind,
+    baseUrl: String,
+): ZcodeModelCatalog.Match? = runCatching {
+    ZcodeModelCatalog.resolve(
+        ZcodeModelCatalog.load(context),
+        modelId,
+        ZcodeModelCatalog.apiType(kind),
+        baseUrl,
+    )
+}.getOrNull()

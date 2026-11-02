@@ -39,6 +39,44 @@ import kotlinx.serialization.json.longOrNull
  * shell process alive. Falls back to fork+exec per command if the persistent
  * shell is unavailable or for commands that need a fresh environment.
  */
+private const val DEFAULT_TIMEOUT_MS = 120_000L
+private const val MAX_TIMEOUT_MS = 600_000L
+
+private val BASH_DESCRIPTION_FIELD_PROMPT = listOf(
+    "Clear, concise description of what this command does in active voice. Never use words like \"complex\" or \"risk\" in the description - just describe what it does.",
+    "",
+    "For simple commands (git, npm, standard CLI tools), keep it brief (5-10 words):",
+    "- ls → \"List files in current directory\"",
+    "- git status → \"Show working tree status\"",
+    "- npm install → \"Install package dependencies\"",
+    "",
+    "For commands that are harder to parse at a glance (piped commands, obscure flags, etc.), add enough context to clarify what it does:",
+    "- find . -name \"*.tmp\" -exec rm {} \\; → \"Find and delete all .tmp files recursively\"",
+    "- git reset --hard origin/main → \"Discard all local changes and match remote main\"",
+    "- curl -s url | jq '.data[]' → \"Fetch JSON from URL and extract data array elements\"",
+).joinToString("\n")
+
+private val BASH_PROVIDER_DESCRIPTION = listOf(
+    "Executes a bash command and returns its output.",
+    "",
+    "- Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile.",
+    "- IMPORTANT: Avoid using this tool to run `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.",
+    "- `timeout` is in milliseconds: default $DEFAULT_TIMEOUT_MS, max $MAX_TIMEOUT_MS.",
+    "- `run_in_background` runs the command detached: it keeps running across turns and re-invokes you when it exits. No `&` needed.",
+    "",
+    "# Git",
+    "- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.",
+    "- Use the `gh` CLI for GitHub operations (PRs, issues, API).",
+    "- Commit or push only when the user asks. If on the default branch, branch first.",
+).joinToString("\n")
+
+private fun positiveTimeout(args: JsonObject, key: String): Long? {
+    if (key !in args) return null
+    val prim = args[key] as? JsonPrimitive ?: return null
+    return prim.longOrNull?.takeIf { it > 0L }
+        ?: prim.content.toDoubleOrNull()?.takeIf { it > 0.0 }?.toLong()
+}
+
 class ShellTool(
     private val context: Context,
     private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
@@ -59,44 +97,46 @@ class ShellTool(
         data class Failed(val callId: String, val command: String, val message: String) : ShellEvent
     }
 
-    override val name = "run_shell"
-    override val description =
-        "在当前工作区执行一条 shell 命令并返回合并输出。" +
-            "本地工作区运行于 Linux (proot) 沙箱；远程工作区通过 SSH 在远端执行。" +
-            "默认在当前项目目录下执行。支持并行：可同时调用多个 run_shell。"
+    override val name = "Bash"
+    override val description = BASH_PROVIDER_DESCRIPTION
+    override val risk = ToolRisk.EXECUTE
+    override val destructive = false
+    override val timeoutMs: Long = DEFAULT_TIMEOUT_MS
+    override val maxOutputBytes: Int = 10_000_000
+    override val permissionName: String = "bash"
+    override val sideEffectScope: String = "system"
+
+    override fun resolveTimeoutMs(args: JsonObject): Long? {
+        val requested = positiveTimeout(args, "timeout") ?: positiveTimeout(args, "timeout_ms")
+        return (requested ?: timeoutMs).coerceAtMost(MAX_TIMEOUT_MS)
+    }
 
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
+        put("additionalProperties", false)
         putJsonObject("properties") {
             putJsonObject("command") {
                 put("type", "string")
-                put("description", "要执行的 shell 命令,例如 'ls -la /root' 或 'python3 -c \"print(1+1)\"'")
+                put("description", "The command to execute")
+            }
+            putJsonObject("timeout") {
+                put("type", "number")
+                put("description", "Optional timeout in milliseconds (max $MAX_TIMEOUT_MS)")
             }
             putJsonObject("description") {
                 put("type", "string")
-                put("description", "一句话描述命令意图（如 'List files in workspace'），用于审批与转写展示")
-            }
-            putJsonObject("timeout_ms") {
-                put("type", "integer")
-                put("minimum", 1)
-                put("maximum", 600_000)
-            }
-            putJsonObject("max_output_chars") {
-                put("type", "integer")
-                put("minimum", 1)
-                put("maximum", 16_000)
-            }
-            putJsonObject("strict_cwd") {
-                put("type", "boolean")
-                put("description", "Fail if the workspace directory is unavailable; do not fall back to home.")
-            }
-            putJsonObject("dangerouslyDisableSandbox") {
-                put("type", "boolean")
-                put("description", "Set true to run this command directly on the Android host shell instead of the proot Linux guest (still subject to approval mode).")
+                put("description", BASH_DESCRIPTION_FIELD_PROMPT)
             }
             putJsonObject("run_in_background") {
                 put("type", "boolean")
-                put("description", "Run without blocking; returns a task_id and output file path. Use TaskOutput/TaskStop to manage.")
+                put("description", "Set to true to run this command in the background.")
+            }
+            putJsonObject("dangerouslyDisableSandbox") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "Set this to true to dangerously override sandbox mode and run commands without sandboxing.",
+                )
             }
         }
         putJsonArray("required") { add("command") }
@@ -106,12 +146,13 @@ class ShellTool(
 
     override suspend fun execute(callId: String, args: JsonObject): ToolResult {
         val command = args["command"]?.jsonPrimitive?.content
-            ?: return ToolResult("缺少参数 command", isError = true)
-        val bounded = listOf("timeout_ms", "max_output_chars", "strict_cwd").any { it in args }
-        val timeoutMs = if ("timeout_ms" in args) {
-            (args["timeout_ms"] as? JsonPrimitive)?.longOrNull?.takeIf { it in 1..600_000 }
-                ?: return ToolResult("timeout_ms must be between 1 and 600000", isError = true)
-        } else 600_000L
+            ?: return ToolResult("command is required", isError = true)
+        val requestedTimeout = positiveTimeout(args, "timeout") ?: positiveTimeout(args, "timeout_ms")
+        if (("timeout" in args || "timeout_ms" in args) && requestedTimeout == null) {
+            return ToolResult("timeout must be a positive number of milliseconds", isError = true)
+        }
+        val bounded = requestedTimeout != null || "max_output_chars" in args || "strict_cwd" in args
+        val timeoutMs = (requestedTimeout ?: 600_000L).coerceAtMost(MAX_TIMEOUT_MS)
         val maxOutputChars = if ("max_output_chars" in args) {
             (args["max_output_chars"] as? JsonPrimitive)?.intOrNull?.takeIf { it in 1..16_000 }
                 ?: return ToolResult("max_output_chars must be between 1 and 16000", isError = true)

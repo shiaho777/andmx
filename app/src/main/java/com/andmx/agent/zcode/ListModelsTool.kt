@@ -4,65 +4,58 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
 import com.andmx.llm.provider.ProviderDefinition
-import com.andmx.agent.multi.SubagentModelCatalog
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 
-/**
- * ZCode `ListModels` 对齐：列出本机已配置的模型目录，供主代理给子代理挑模型。
- * 不是选模开关——改不了会话自身模型。id 用 AndMX 规范形 `provider::model`
- * （上游是 `providerId/modelId`），可直接填进 Agent/spawn_agent 的 `model` 字段。
- */
 class ListModelsTool(
     private val providers: suspend () -> List<ProviderDefinition>,
     private val current: suspend () -> Pair<String, String>,
 ) : Tool {
     override val name = "ListModels"
-    override val description =
-        "Lists the models this host has configured, so spawned sub-agents can be pointed at one.\n\n" +
-            "- Each row's `id` (`provider::model`) pastes verbatim into the `model` field of Agent / spawn_agent. Append `$<level>` to pick a reasoning level from that row's `levels`.\n" +
-            "- This tool does NOT change the model you are running on. The session model is the user's choice and only the user changes it; `model` only moves the spawned sub-agents.\n" +
-            "- The model the session is on right now is marked `[current]` — setting sub-agents to that one is the same as omitting the field.\n" +
-            "- A row marked `disabled` cannot be used (no API key, disabled by policy). Resolve that with the user rather than picking around it silently."
+    override val shouldDefer = true
+    override val description = LIST_MODELS_DESCRIPTION
     override val risk = ToolRisk.READ
-    override val timeoutMs = 10_000L
-
-    override val parameters: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {}
-    }
+    override val readOnly = true
+    override val destructive = false
+    override val concurrentSafe = true
+    override val needsApproval = false
+    override val timeoutMs = LIST_MODELS_TIMEOUT_MS
+    override val maxOutputBytes = LIST_MODELS_MODEL_BYTES
+    override val sideEffectScope = "none"
+    override val riskLevel = "low"
+    override val permissionName = "listModels"
+    override val parameters: JsonObject = LIST_MODELS_PARAMETERS
 
     override suspend fun execute(args: JsonObject): ToolResult {
-        val (curProvider, curModel) = current()
-        val rows = providers().flatMap { p ->
+        val catalog = runCatching { providers() }.getOrElse {
+            return ToolResult(LIST_MODELS_UNAVAILABLE, isError = true)
+        }
+        val (curProvider, curModel) = runCatching { current() }.getOrDefault("" to "")
+        val rows = catalog.flatMap { p ->
             p.models.keys.filter { it.isNotBlank() }.map { modelId -> p to modelId }
         }
         if (rows.isEmpty()) {
             return ToolResult(
                 "<models count=\"0\">\n" +
-                    "No models are configured on this host. Omit `model`: sub-agents run on the session model.\n" +
+                    "No models are configured on this host. Omit `subagent_model`: the workflow's subagents run on the session model.\n" +
                     "</models>",
             )
         }
         val lines = rows.map { (p, modelId) ->
             val def = p.models[modelId]
-            val id = SubagentModelCatalog.encode(p.id, modelId)
+            val id = "${p.id}/$modelId"
             buildString {
                 append(id)
-                val label = p.name.trim().ifBlank { p.id }
-                if (label.isNotBlank()) append(" — $label")
+                val label = p.name.trim().ifBlank { null }
+                if (label != null) append(" — $label")
                 val reasoning = def?.reasoning
                 val levels = reasoning?.levels?.map { it.id }?.takeIf { it.isNotEmpty() }
                     ?: reasoning?.effortLevels.orEmpty()
                 if (levels.isNotEmpty()) {
                     val fallback = reasoning?.defaultLevel?.ifBlank { null }
-                        ?: reasoning?.defaultEffort
+                        ?: reasoning?.defaultEffort?.takeIf { reasoning.effortLevels.isNotEmpty() }
                     append("; levels: ${levels.joinToString(",")}")
                     if (!fallback.isNullOrBlank()) append(" (default $fallback)")
                 }
-                if (def != null && def.contextWindow > 0) append("; ctx: ${def.contextWindow}")
                 if (p.id == curProvider && modelId == curModel) append(" [current]")
                 val disabledReason = when {
                     !p.enabled -> "provider disabled"

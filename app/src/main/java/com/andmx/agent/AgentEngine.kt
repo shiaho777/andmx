@@ -8,13 +8,17 @@ import com.andmx.llm.LlmApi
 import com.andmx.llm.LlmStreamEvent
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
+import com.andmx.llm.provider.ProviderKind
 import com.andmx.settings.ProviderSettings
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -49,7 +53,12 @@ sealed interface AgentEvent {
         /** 工具执行耗时（上游 CommandExecutionTelemetry.runMs 对齐）。 */
         val durationMs: Long = 0,
     ) : AgentEvent
-    data class Failed(val message: String) : AgentEvent
+    data class Failed(
+        val message: String,
+        val errorType: String = "error_during_execution",
+        val recoverable: Boolean = false,
+        val resultType: String = "error_during_execution",
+    ) : AgentEvent
     /** 模型请求即将重试（上游 network-events attempt 显示对齐）。 */
     data class Retrying(val attempt: Int, val maxAttempts: Int, val delayMs: Long) : AgentEvent
     /** 目标完成度验证开始（ZCode goalVerifier 对齐）。 */
@@ -101,9 +110,6 @@ class AgentEngine(
      */
     private var systemPromptBlocks: List<String> = emptyList(),
     private val historyToolOutputLimit: Int = 8_000,
-    private val maxSteps: Int = 50,
-    /** Steps granted after maxSteps to let the model wrap up; if it still hasn't converged, we fail. */
-    private val graceSteps: Int = 3,
     /** Optional hook system; PRE/POST_TOOL_USE hooks run around each tool call. */
     private val hooks: com.andmx.agent.hooks.HookSystem? = null,
     /** Gate consulted before running each tool. Only [ApprovalOutcome.AllowedOnce] runs it. */
@@ -129,6 +135,13 @@ class AgentEngine(
     private val maxGoalIterations: Int = 20,
     /** Local date source for the date_change reminder edge (test hook). */
     private val dateProvider: () -> String = { java.time.LocalDate.now().toString() },
+    private val hiddenTools: () -> Set<String> = { emptySet() },
+    private val sessionEvents: ((type: String, payload: kotlinx.serialization.json.JsonObject) -> Unit)? = null,
+    /**
+     * ZCode ToolSearch/DeferredToolCall 的运行时目录。null = 保持旧行为：
+     * 所有工具定义一次性注入。非 null 时 `shouldDefer` 的工具改为按需加载。
+     */
+    private val toolSearch: ToolSearchRegistry? = null,
 ) {
     private val history = mutableListOf<ApiMessage>().also { h ->
         baseSystemBlocks().forEach { h += ApiMessage(role = "system", content = it) }
@@ -143,6 +156,9 @@ class AgentEngine(
     private var todoItemsProvider: (() -> String?)? = null
     private var lastAssistantCompletedAtMs: Long? = null
     private var turnCount: Int = 0
+    private var activeMachine: com.andmx.agent.turn.TurnMachine? = null
+    private val anomalyState = ModelAnomalyState()
+    private var lastModelError: String? = null
     /** Live read of plan-mode state; reminder injection keys off this. */
     private var planModeProvider: (() -> Boolean)? = null
     private var planReminderCount = 0
@@ -225,7 +241,7 @@ class AgentEngine(
         rewriteSystemPrefix()
     }
 
-    /** Source of truth for plan-mode reminders (PlanModeState.active). */
+    /** Whether collaboration mode is plan. Plan reminders read this. */
     fun setPlanModeProvider(provider: (() -> Boolean)?) {
         planModeProvider = provider
     }
@@ -321,10 +337,52 @@ class AgentEngine(
     fun injectUserMessage(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
+        synchronized(pendingInputLock) {
+            if (turnLoopActive) {
+                val machine = activeMachine
+                if (machine != null) machine.queuePendingInput(trimmed) else pendingInputs.addLast(trimmed)
+                sessionEvents?.invoke(
+                    com.andmx.data.session.SessionEventType.TURN_STEER_QUEUED,
+                    buildJsonObject { put("text", trimmed) },
+                )
+            } else {
+                appendIncomingUser(trimmed)
+            }
+        }
+    }
+
+    private fun appendIncomingUser(text: String) {
         history += ApiMessage(
             role = "user",
-            content = SystemReminder.wrap(SystemReminder.Source.INCOMING_MESSAGE, trimmed).trimEnd(),
+            content = SystemReminder.wrap(SystemReminder.Source.INCOMING_MESSAGE, text).trimEnd(),
         )
+    }
+
+    private fun drainPendingInputs(): Boolean {
+        val batch = synchronized(pendingInputLock) {
+            val queued = pendingInputs.toList().also { pendingInputs.clear() }
+            val drained = activeMachine?.drainPendingInputs().orEmpty()
+            queued + drained
+        }
+        if (batch.isNotEmpty()) {
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.TURN_STEER_DRAINED,
+                buildJsonObject { put("count", batch.size) },
+            )
+        }
+        val reminders = synchronized(pendingInputLock) {
+            if (pendingReminders.isEmpty()) {
+                emptyList()
+            } else {
+                pendingReminders.toList().also { pendingReminders.clear() }
+            }
+        }
+        if (batch.isEmpty() && reminders.isEmpty()) return false
+        batch.forEach(::appendIncomingUser)
+        reminders.forEach { (source, body) ->
+            history += ApiMessage(role = "system", content = SystemReminder.wrap(source, body))
+        }
+        return true
     }
 
     suspend fun compactNow(
@@ -333,36 +391,80 @@ class AgentEngine(
         instructions: String = "",
     ): String? {
         hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
-        val result = compactor.compact(history, settings, turn, instructions) ?: return null
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.COMPACT_STARTED,
+            buildJsonObject { put("reason", "manual") },
+        )
+        val result = compactor.compact(
+            OutputTokenContinuation.withoutContinuationMessages(history),
+            settings,
+            turn,
+            instructions,
+        ) ?: run {
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.COMPACT_FAILED,
+                buildJsonObject { put("reason", "compact_failed") },
+            )
+            return null
+        }
         history.clear()
         history += result.compacted
         hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_COMPACT)
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.COMPACT_BOUNDARY,
+            buildJsonObject {
+                put("removed", result.removedCount)
+                put("summary", result.summary)
+            },
+        )
         return "已压缩：移除 ${result.removedCount} 条历史 · ${result.tokensBefore}→${result.tokensAfter} tokens"
     }
 
     suspend fun checkpointNow(settings: ProviderSettings, turn: TurnContext, goal: String = ""): String? {
         val result = compactor.createCheckpoint(history, turn, goal) ?: return null
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.CHECKPOINT_CREATED,
+            buildJsonObject { put("summary", result.summary) },
+        )
         history.clear()
         history += result.compacted
         return result.summary
     }
 
     fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
-        val isFirstUserTurn = history.none { it.role == "user" }
-        val effectiveInput = if (isFirstUserTurn && metaUserContext.isNotBlank()) {
-            SystemReminder.wrap(SystemReminder.Source.CONTEXT_PREFIX, metaUserContext)
-                .trimEnd() + "\n\n$userInput"
-        } else {
-            userInput
+        if (!acquireTurnLoop()) return@flow
+        toolSearch?.attach({ allTools }, hiddenTools)
+        try {
+            val isFirstUserTurn = history.none { it.role == "user" }
+            val effectiveInput = if (isFirstUserTurn && metaUserContext.isNotBlank()) {
+                SystemReminder.wrap(SystemReminder.Source.CONTEXT_PREFIX, metaUserContext)
+                    .trimEnd() + "\n\n$userInput"
+            } else {
+                userInput
+            }
+            history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null })
+            turnCount += 1
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.USER_MESSAGE,
+                buildJsonObject { put("text", userInput) },
+            )
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.TURN_INPUT_RECEIVED,
+                buildJsonObject { put("text", userInput) },
+            )
+            humanTurnsSincePlanReminder += 1
+            injectDateChangeReminder()
+            injectPlanModeReminder()
+            injectGoalStateChangeReminder()
+            injectShellEnvironmentReminder()
+            loopBody(settings, turn)
+        } catch (cancel: kotlinx.coroutines.CancellationException) {
+            emitCancelledTurn()
+            throw cancel
+        } finally {
+            activeMachine = null
+            releaseTurnLoop()
         }
-        history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null })
-        turnCount += 1
-        humanTurnsSincePlanReminder += 1
-        injectDateChangeReminder()
-        injectPlanModeReminder()
-        injectGoalStateChangeReminder()
-        injectShellEnvironmentReminder()
-        loop(settings, turn)
     }
 
     private var lastGoalSig: String? = null
@@ -458,7 +560,10 @@ class AgentEngine(
      */
     fun injectSystemReminder(source: SystemReminder.Source, body: String) {
         if (body.isBlank()) return
-        history += ApiMessage(role = "system", content = SystemReminder.wrap(source, body))
+        synchronized(pendingInputLock) {
+            if (turnLoopActive) pendingReminders.addLast(source to body)
+            else history += ApiMessage(role = "system", content = SystemReminder.wrap(source, body))
+        }
     }
 
     /**
@@ -471,30 +576,110 @@ class AgentEngine(
         loop(settings, turn)
     }
 
+    private val pendingInputLock = Any()
+    private val pendingInputs = ArrayDeque<String>()
+    private val pendingReminders = ArrayDeque<Pair<SystemReminder.Source, String>>()
+    private var turnLoopActive = false
+
+    private fun emitCancelledTurn() {
+        val machine = activeMachine
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.CANCEL,
+            buildJsonObject { put("errorType", "turn_cancelled") },
+        )
+        if (machine != null) {
+            runCatching {
+                if (com.andmx.agent.turn.canTransitionTo(machine.state.phase, com.andmx.agent.turn.TurnPhase.COMPLETING)) {
+                    machine.complete("", "cancelled")
+                } else {
+                    machine.fail("turn_cancelled", "Turn was cancelled.", "cancelled")
+                }
+            }
+        }
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.TURN_COMPLETE,
+            buildJsonObject { put("resultType", "cancelled") },
+        )
+    }
+
+    private fun acquireTurnLoop(): Boolean = synchronized(pendingInputLock) {
+        if (turnLoopActive) false else {
+            turnLoopActive = true
+            true
+        }
+    }
+
+    private fun releaseTurnLoop() {
+        synchronized(pendingInputLock) { turnLoopActive = false }
+    }
+
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.loop(settings: ProviderSettings, turn: TurnContext) {
+        if (!acquireTurnLoop()) {
+            emit(AgentEvent.Failed("已有进行中的回合", errorType = "turn_in_progress"))
+            emit(AgentEvent.Done)
+            return
+        }
+        try {
+            loopBody(settings, turn)
+        } catch (cancel: kotlinx.coroutines.CancellationException) {
+            emitCancelledTurn()
+            throw cancel
+        } finally {
+            activeMachine = null
+            releaseTurnLoop()
+        }
+    }
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.loopBody(settings: ProviderSettings, turn: TurnContext) {
         // Repair history damaged by an interrupted turn: if the tail is an
         // assistant message with tool_calls but no matching tool results,
         // synthesize "interrupted" results so the model isn't confused.
         cleanupOrphanToolCalls()
+        if (settings.outputStylePrompt.isNotBlank()) {
+            injectSystemReminder(
+                SystemReminder.Source.OUTPUT_STYLE,
+                "${settings.outputStyleName.ifBlank { "custom" }} output style is active. " +
+                    "Remember to follow the specific guidelines for this style.",
+            )
+        }
 
         val contextWindow = turn.modelMeta?.contextWindow?.takeIf { it > 0 }
             ?: ContextCompactor.DEFAULT_CONTEXT_WINDOW
         val maxOutputTokens = turn.modelMeta?.maxOutputTokens ?: 0
-        val hardLimit = maxSteps + graceSteps
+        val machine = com.andmx.agent.turn.TurnMachine.create(
+            sessionId = "session",
+            turnNumber = turnCount,
+            input = "",
+            traceId = "trace-$turnCount",
+            turnId = "turn-$turnCount",
+        )
+        activeMachine = machine
+        anomalyState.reset()
+        lastModelError = null
+        machine.start()
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.TURN_STARTED,
+            kotlinx.serialization.json.buildJsonObject {
+                put("turn", turnCount)
+            },
+        )
 
         // ZCode goal loop: while an ACTIVE goal exists, every final answer is
         // audited by the completion verifier; a failing verdict injects a
         // continuation message and a fresh step budget instead of ending.
         var continuations = 0
         var outputTokenContinuations = 0
+        var compactTrackingActive = false
+        var consecutiveRapidRefills = 0
+        var toolTurnsSinceCompact = 0
         goalLoop@ while (true) {
         // A fresh user turn (or goal continuation) starts a fresh repeat
         // chain: an instruction that legitimately re-runs the previous
         // command is not a stuck loop.
         repeatGuard.reset()
-        var convergenceHinted = false
         var step = 0
-        while (step++ < hardLimit) {
+        while (true) {
+            drainPendingInputs()
             // ── Context management: local microcompact → soft compact → hard-limit fallback ──
             Microcompact.maybeMicrocompact(
                 messages = history,
@@ -513,10 +698,30 @@ class AgentEngine(
             val overHardLimit = compactor.isContextWindowExceeded(history, contextWindow, maxOutputTokens)
             val compactDecision = compactor.autoCompactDecision(history, contextWindow, maxOutputTokens)
             if (overHardLimit || compactDecision.shouldCompact) {
+                val refill = RapidRefill.evaluate(
+                    trackingActive = compactTrackingActive,
+                    consecutiveRapidRefills = consecutiveRapidRefills,
+                    toolTurnsSinceCompact = toolTurnsSinceCompact,
+                )
+                if (refill.shouldBlock) {
+                    failTurn(machine, "context_overflow", RapidRefill.blockedMessage(), "error_max_budget")
+                    return
+                }
                 hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_COMPACT)
-                val result = compactor.compact(history, settings, turn)
+                sessionEvents?.invoke(
+                    com.andmx.data.session.SessionEventType.COMPACT_STARTED,
+                    buildJsonObject { put("reason", if (overHardLimit) "hard_limit" else "auto") },
+                )
+                val result = compactor.compact(
+                    OutputTokenContinuation.withoutContinuationMessages(history),
+                    settings,
+                    turn,
+                )
                 if (result != null) {
                     compactor.noteAutoCompactOutcome(success = true)
+                    compactTrackingActive = true
+                    consecutiveRapidRefills = refill.consecutiveRapidRefills
+                    toolTurnsSinceCompact = 0
                     val preservedReadPaths = ReadFileState.collectReadPaths(result.compacted, json)
                     val readReminders = readFileState?.postCompactReminders(preservedReadPaths).orEmpty()
                     val planReminder = planFileReminderProvider?.invoke()?.let {
@@ -527,31 +732,34 @@ class AgentEngine(
                     history += result.compacted
                     readReminders.forEach { history += ApiMessage(role = "user", content = it) }
                     planReminder?.let { history += ApiMessage(role = "user", content = it) }
+                    if (outputTokenContinuations > 0) {
+                        history += ApiMessage(role = "user", content = OUTPUT_TOKEN_CONTINUE_PROMPT)
+                    }
                     hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_COMPACT)
+                    sessionEvents?.invoke(
+                        com.andmx.data.session.SessionEventType.COMPACT_COMPLETED,
+                        buildJsonObject {
+                            put("removed", result.removedCount)
+                            put("summary", result.summary)
+                        },
+                    )
+                    sessionEvents?.invoke(
+                        com.andmx.data.session.SessionEventType.COMPACT_BOUNDARY,
+                        buildJsonObject {
+                            put("removed", result.removedCount)
+                            put("summary", result.summary)
+                        },
+                    )
                     emit(AgentEvent.AssistantDelta("\n_(上下文已自动压缩: 移除 ${result.removedCount} 条历史消息)_\n"))
                 } else {
                     compactor.noteAutoCompactOutcome(success = false)
-                    if (overHardLimit) {
-                        // Compaction failed while over the hard limit — fall back to
-                        // dropping the oldest messages instead of looping forever.
-                        val dropped = dropOldestNonSystem(keepRecent = 8)
-                        if (dropped > 0) {
-                            emit(AgentEvent.AssistantDelta("\n_(压缩失败,已丢弃 $dropped 条旧消息以释放上下文)_\n"))
-                        }
-                    }
+                    sessionEvents?.invoke(
+                        com.andmx.data.session.SessionEventType.COMPACT_FAILED,
+                        buildJsonObject { put("reason", "compact_failed") },
+                    )
+                    failTurn(machine, "model_context_exceeded", "上下文压缩失败", "error_max_budget")
+                    return
                 }
-            }
-
-            // ── Step budget: nudge the model to converge as it runs out ──
-            if (step == maxSteps && !convergenceHinted) {
-                convergenceHinted = true
-                history += ApiMessage(
-                    role = "system",
-                    content = SystemReminder.wrap(
-                        SystemReminder.Source.MODEL_ANOMALY,
-                        "步数即将用尽。请立即总结当前进度,完成收尾,不要再发起新的工具调用。",
-                    ),
-                )
             }
 
             if (TodoReminder.shouldRemind(history)) {
@@ -564,10 +772,23 @@ class AgentEngine(
                 )
             }
 
+            val hidden = hiddenTools()
+            val supportsToolCall = turn.modelMeta?.supportsToolCall != false
+            val exposedTools = toolSearch?.exposed(allTools, hidden)
+                ?: allTools.filter { it.name !in hidden }
+            val toolsForRequest = if (supportsToolCall) exposedTools.map { it.toApiTool() } else null
+            val requestMessages = history.toMutableList()
+            if (supportsToolCall) {
+                toolSearch?.announcement(allTools, hidden)?.let { note ->
+                    val insertAt = requestMessages.indexOfFirst { it.role != "system" }
+                        .let { if (it < 0) requestMessages.size else it }
+                    requestMessages.add(insertAt, ApiMessage(role = "system", content = note))
+                }
+            }
             val request = ChatRequest(
                 model = turn.model,
-                messages = history.toList(),
-                tools = allTools.map { it.toApiTool() },
+                messages = requestMessages,
+                tools = toolsForRequest,
                 reasoningEffort = reasoningFor(settings, turn),
             )
 
@@ -575,51 +796,92 @@ class AgentEngine(
             // kill the whole turn. Retry up to 2 times with backoff.
             var sawReasoning = false
             var firstTokenSent = false
+            step += 1
+            machine.beginModelRequest(turn.model)
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.MODEL_REQUEST,
+                kotlinx.serialization.json.buildJsonObject { put("model", turn.model); put("step", step) },
+            )
             emit(AgentEvent.StepStarted(turnCount, step, System.currentTimeMillis()))
             val toolArgBuf = sortedMapOf<Int, StringBuilder>()
             val toolMeta = sortedMapOf<Int, Pair<String?, String?>>()
-            // 上游 cancelled-stream-persistence：stop 时已到达的文本落盘，
-            // 否则取消会丢掉整段部分回复。
+            val streamedResults = mutableMapOf<String, Deferred<Pair<ToolResult, Long>>>()
+            val streamedStarted = mutableSetOf<String>()
             val stepText = StringBuilder()
             val msg = try {
-                streamWithRetry(
-                request,
-                onContent = {
-                    if (!firstTokenSent) {
-                        firstTokenSent = true
-                        emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
+                coroutineScope {
+                    var openToolIndex: Int? = null
+                    suspend fun closeStreamingTool(index: Int) {
+                        val meta = toolMeta[index] ?: return
+                        val id = meta.first ?: return
+                        val name = meta.second ?: return
+                        if (id in streamedResults) return
+                        val tool = toolsByName[name] ?: return
+                        if (!tool.executesDuringStream()) return
+                        val args = toolArgBuf[index]?.toString().orEmpty()
+                        val call = com.andmx.llm.ApiToolCall(
+                            id = id,
+                            function = com.andmx.llm.ApiFunctionCall(name, args),
+                        )
+                        emit(AgentEvent.ToolStarted(id, name, args))
+                        sessionEvents?.invoke(
+                            com.andmx.data.session.SessionEventType.TOOL_CALL_STARTED,
+                            buildJsonObject { put("id", id); put("name", name) },
+                        )
+                        streamedStarted += id
+                        streamedResults[id] = async { timedExecuteToolCall(call) }
                     }
-                    stepText.append(it)
-                    emit(AgentEvent.AssistantDelta(it))
-                },
-                onReasoning = {
-                    sawReasoning = true
-                    if (!firstTokenSent) {
-                        firstTokenSent = true
-                        emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
-                    }
-                    emit(AgentEvent.ReasoningDelta(it))
-                },
-                onToolCall = { index, id, name, argDelta ->
-                    val meta = toolMeta[index]
-                    val nextId = id ?: meta?.first
-                    val nextName = name ?: meta?.second
-                    toolMeta[index] = nextId to nextName
-                    if (argDelta.isNotEmpty()) {
-                        toolArgBuf.getOrPut(index) { StringBuilder() }.append(argDelta)
-                    } else {
-                        toolArgBuf.getOrPut(index) { StringBuilder() }
-                    }
-                    emit(
-                        AgentEvent.ToolCallArgsDelta(
-                            index = index,
-                            id = nextId,
-                            name = nextName,
-                            argumentsSoFar = toolArgBuf[index].toString(),
-                        ),
+                    val produced = streamWithRetry(
+                        request,
+                        onContent = {
+                            if (!firstTokenSent) {
+                                firstTokenSent = true
+                                machine.receiveModelResponse(it)
+                                emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
+                            } else {
+                                machine.receiveModelResponse(it)
+                            }
+                            sessionEvents?.invoke(
+                                com.andmx.data.session.SessionEventType.MODEL_STREAMING,
+                                buildJsonObject { put("text", it) },
+                            )
+                            stepText.append(it)
+                            emit(AgentEvent.AssistantDelta(it))
+                        },
+                        onReasoning = {
+                            sawReasoning = true
+                            if (!firstTokenSent) {
+                                firstTokenSent = true
+                                emit(AgentEvent.FirstToken(turnCount, step, System.currentTimeMillis()))
+                            }
+                            emit(AgentEvent.ReasoningDelta(it))
+                        },
+                        onToolCall = { index, id, name, argDelta ->
+                            val previous = openToolIndex
+                            val meta = toolMeta[index]
+                            val nextId = id ?: meta?.first
+                            val nextName = name ?: meta?.second
+                            toolMeta[index] = nextId to nextName
+                            if (argDelta.isNotEmpty()) {
+                                toolArgBuf.getOrPut(index) { StringBuilder() }.append(argDelta)
+                            } else {
+                                toolArgBuf.getOrPut(index) { StringBuilder() }
+                            }
+                            emit(
+                                AgentEvent.ToolCallArgsDelta(
+                                    index = index,
+                                    id = nextId,
+                                    name = nextName,
+                                    argumentsSoFar = toolArgBuf[index].toString(),
+                                ),
+                            )
+                            if (previous != null && previous != index) closeStreamingTool(previous)
+                            openToolIndex = index
+                        },
                     )
-                },
-            )
+                    openToolIndex?.let { closeStreamingTool(it) }
+                    produced
+                }
             } catch (cancel: kotlinx.coroutines.CancellationException) {
                 val partial = stepText.toString().trim()
                 if (partial.isNotEmpty()) {
@@ -630,42 +892,61 @@ class AgentEngine(
             }
             if (sawReasoning) emit(AgentEvent.ReasoningDone)
             if (msg == null) {
-                emit(AgentEvent.Failed("多次重试后仍无响应"))
-                emit(AgentEvent.Done)
+                val detail = lastModelError ?: "多次重试后仍无响应"
+                sessionEvents?.invoke(
+                    com.andmx.data.session.SessionEventType.MODEL_ERROR,
+                    buildJsonObject { put("errorType", "model_error"); put("message", detail) },
+                )
+                failTurn(machine, "model_error", detail, "error_during_execution")
                 return
             }
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.MODEL_COMPLETE,
+                buildJsonObject { put("model", turn.model) },
+            )
             lastAssistantCompletedAtMs = System.currentTimeMillis()
             history += msg
 
             val calls = msg.toolCalls
             if (calls.isNullOrEmpty()) {
-                // Output-token truncation (ZCode turn-output-token-continuation):
-                // a reply cut at max tokens resumes in-place with a fixed
-                // nudge, up to 3 times per turn; replies carrying tool calls
-                // proceed normally since the calls are the continuation.
-                if (msg.finishReason == "length") {
-                    if (outputTokenContinuations < MAX_OUTPUT_TOKEN_CONTINUATIONS) {
+                val continuation = OutputTokenContinuation.classify(
+                    finishReason = msg.finishReason,
+                    rawFinishReason = msg.finishReason,
+                    toolCallCount = 0,
+                    continuationCount = outputTokenContinuations,
+                )
+                when (continuation) {
+                    OutputTokenContinuation.Decision.CONTINUE -> {
                         outputTokenContinuations += 1
                         msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
                         history += ApiMessage(role = "user", content = OUTPUT_TOKEN_CONTINUE_PROMPT)
                         continue
                     }
-                    msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
-                    emit(AgentEvent.Failed("模型回复超出输出 token 上限"))
-                    emit(AgentEvent.Done)
-                    return
+                    OutputTokenContinuation.Decision.EXHAUSTED -> {
+                        msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
+                        stripContinuationPrompts()
+                        if (drainPendingInputs()) {
+                            outputTokenContinuations = 0
+                            continue
+                        }
+                        failTurn(machine, "error_max_budget", "模型回复超出输出 token 上限", "error_max_budget")
+                        return
+                    }
+                    OutputTokenContinuation.Decision.NONE -> {
+                        outputTokenContinuations = 0
+                        stripContinuationPrompts()
+                        msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
+                        if (drainPendingInputs()) continue
+                        if (verifyGoalAndMaybeContinue(settings, turn, continuations)) {
+                            continuations += 1
+                            continue@goalLoop
+                        }
+                        if (drainPendingInputs()) continue
+                        flushGoalTokens()
+                        finishTurn(machine, msg.content.orEmpty())
+                        return
+                    }
                 }
-                outputTokenContinuations = 0
-                // Final answer — commit the text, then let an active goal's
-                // completion verifier decide whether the turn may end.
-                msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
-                if (verifyGoalAndMaybeContinue(settings, turn, continuations)) {
-                    continuations += 1
-                    continue@goalLoop
-                }
-                flushGoalTokens()
-                emit(AgentEvent.Done)
-                return
             }
 
             // Tool call ahead — commit any intermediate text so it's not lost
@@ -673,69 +954,178 @@ class AgentEngine(
             // tool calls, narrating the work process.
             msg.content?.takeIf { it.isNotBlank() }?.let { emit(AgentEvent.Assistant(it)) }
 
-            // Run each requested tool. Multiple calls execute concurrently, but
-            // emissions must stay on the flow's owner coroutine (FlowCollector
-            // is not thread-safe), so we emit ToolStarted up front, run the
-            // tools in parallel without emitting, then emit ToolFinished in order.
-            if (calls.size <= 1) {
-                for (call in calls) {
+            machine.scheduleTools(calls.map { it.id to it.function.name })
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.TOOL_CALL_SCHEDULED,
+                buildJsonObject { put("count", calls.size) },
+            )
+            calls.forEach { call ->
+                if (call.id !in streamedStarted) {
                     emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
-                    val (result, durMs) = timedExecuteToolCall(call)
-                    emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, durMs))
-                    history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
-                    noteRepeat(call)
-                }
-            } else {
-                // Emit all ToolStarted first (serial, on the flow coroutine).
-                calls.forEach { call ->
-                    emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
-                }
-                // ZCode tool scheduler: only concurrency-safe calls share a
-                // wave; state-mutating/destructive calls form serial barriers
-                // that preserve the model's requested order.
-                val groups = mutableListOf<List<ApiToolCall>>()
-                var pending = mutableListOf<ApiToolCall>()
-                for (call in calls) {
-                    if (toolsByName[call.function.name]?.concurrentSafe == true) {
-                        pending += call
-                    } else {
-                        if (pending.isNotEmpty()) {
-                            groups += pending
-                            pending = mutableListOf()
-                        }
-                        groups += listOf(call)
-                    }
-                }
-                if (pending.isNotEmpty()) groups += pending
-                // Execute — NO emit inside async.
-                val results = mutableListOf<Pair<ApiToolCall, Pair<ToolResult, Long>>>()
-                for (group in groups) {
-                    if (group.size == 1) {
-                        results += group[0] to timedExecuteToolCall(group[0])
-                    } else {
-                        for (wave in group.chunked(MAX_PARALLEL_TOOL_CALLS)) {
-                            coroutineScope {
-                                results += wave.map { call ->
-                                    async { call to timedExecuteToolCall(call) }
-                                }.map { it.await() }
-                            }
-                        }
-                    }
-                }
-                // Emit ToolFinished in order (serial, on the flow coroutine).
-                for ((call, timed) in results) {
-                    val result = timed.first
-                    emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, timed.second))
-                    history += ApiMessage(role = "tool", content = trimToolOutput(result.output), toolCallId = call.id, name = call.function.name, imageUrls = result.imageUrls)
-                    noteRepeat(call)
+                    sessionEvents?.invoke(
+                        com.andmx.data.session.SessionEventType.TOOL_CALL_STARTED,
+                        buildJsonObject { put("id", call.id); put("name", call.function.name) },
+                    )
+                    streamedStarted += call.id
                 }
             }
+            val callById = calls.associateBy { it.id }
+            val schedule = ToolScheduler(maxConcurrency = MAX_PARALLEL_TOOL_CALLS).schedule(
+                calls.map { call ->
+                    toolScheduleDependency(call.id, call.function.name, toolsByName[call.function.name])
+                },
+            )
+            val results = mutableListOf<Pair<ApiToolCall, Pair<ToolResult, Long>>>()
+            var stopTurn = false
+            for (ids in schedule.parallelGroups) {
+                val group = ids.mapNotNull { callById[it] }
+                if (group.isEmpty()) continue
+                if (stopTurn) {
+                    for (call in group) {
+                        results += call to (
+                            ToolResult(ToolScheduler.TOOL_CANCELLED_AFTER_TURN_STOP, isError = true) to 0L
+                        )
+                    }
+                    continue
+                }
+                val wave = if (group.size == 1) {
+                    val call = group[0]
+                    val ready = streamedResults[call.id]
+                    listOf(call to (ready?.await() ?: timedExecuteToolCall(call)))
+                } else {
+                    coroutineScope {
+                        group.map { call ->
+                            async {
+                                val ready = streamedResults[call.id]
+                                call to (ready?.await() ?: timedExecuteToolCall(call))
+                            }
+                        }.map { it.await() }
+                    }
+                }
+                results += wave
+                if (wave.any { it.second.first.stopTurn }) stopTurn = true
+            }
+            val relayImagesToUser = turn.provider.kind == ProviderKind.OPENAI
+            for ((call, timed) in results) {
+                val result = timed.first
+                machine.completeTool(call.id, success = !result.isError)
+                sessionEvents?.invoke(
+                    if (result.isError) {
+                        com.andmx.data.session.SessionEventType.TOOL_CALL_ERROR
+                    } else {
+                        com.andmx.data.session.SessionEventType.TOOL_CALL_RESULT
+                    },
+                    buildJsonObject {
+                        put("id", call.id)
+                        put("name", call.function.name)
+                        put("output", result.output)
+                        if (result.isError) put("errorType", toolErrorType(result.output))
+                    },
+                )
+                detectRepeatedToolCallWarnings(call.function.name, call.function.arguments, anomalyState)?.let { warning ->
+                    if (warning.warningInjected) {
+                        sessionEvents?.invoke(
+                            com.andmx.data.session.SessionEventType.MODEL_ANOMALY_WARNING,
+                            buildJsonObject {
+                                put("name", warning.toolName)
+                                put("observedCount", warning.observedCount)
+                            },
+                        )
+                        history += ApiMessage(
+                            role = "system",
+                            content = repeatedToolCallReminder(warning.toolName, warning.observedCount),
+                        )
+                    }
+                }
+                emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, timed.second))
+                history += ApiMessage(
+                    role = "tool",
+                    content = trimToolOutput(resolvedToolName(call), result.output),
+                    toolCallId = call.id,
+                    name = call.function.name,
+                    imageUrls = if (relayImagesToUser) null else result.imageUrls,
+                )
+                noteRepeat(call)
+            }
+            if (relayImagesToUser) {
+                val shots = results.flatMap { it.second.first.imageUrls.orEmpty() }
+                if (shots.isNotEmpty()) {
+                    history += ApiMessage(
+                        role = "user",
+                        content = "以下是刚才工具返回的屏幕截图，请直接看画面。坐标按截图像素。不要到 shell 里找 png，guest 里没有 adb、screencap、input。",
+                        imageUrls = shots,
+                    )
+                }
+            }
+            if (stopTurn) {
+                flushGoalTokens()
+                finishTurn(machine, msg.content.orEmpty())
+                return
+            }
+            runCatching {
+                val phase = machine.state.phase
+                if (phase == com.andmx.agent.turn.TurnPhase.SCHEDULING_TOOLS) {
+                    machine.startToolExecution()
+                }
+                if (com.andmx.agent.turn.canTransitionTo(machine.state.phase, com.andmx.agent.turn.TurnPhase.AGGREGATING_RESULTS)) {
+                    machine.aggregateResults()
+                }
+            }
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.TOOL_BATCH_COMPLETE,
+                buildJsonObject { put("count", results.size) },
+            )
+            if (compactTrackingActive) toolTurnsSinceCompact += 1
         }
-        flushGoalTokens()
-        emit(AgentEvent.Failed("已达最大步数 ($maxSteps) + 收敛宽限 ($graceSteps),任务未能完成"))
+        }
+    }
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.finishTurn(
+        machine: com.andmx.agent.turn.TurnMachine,
+        response: String,
+    ) {
+        runCatching {
+            val phase = machine.state.phase
+            if (
+                phase == com.andmx.agent.turn.TurnPhase.EXECUTING_TOOLS &&
+                com.andmx.agent.turn.canTransitionTo(phase, com.andmx.agent.turn.TurnPhase.AGGREGATING_RESULTS)
+            ) {
+                machine.aggregateResults()
+            }
+            if (com.andmx.agent.turn.canTransitionTo(machine.state.phase, com.andmx.agent.turn.TurnPhase.COMPLETING)) {
+                machine.complete(response)
+            }
+        }
+        if (response.isNotBlank()) {
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.ASSISTANT_MESSAGE,
+                buildJsonObject { put("text", response) },
+            )
+        }
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.TURN_COMPLETE,
+            buildJsonObject { put("resultType", machine.state.resultType) },
+        )
         emit(AgentEvent.Done)
-        return
-        }
+    }
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.failTurn(
+        machine: com.andmx.agent.turn.TurnMachine,
+        errorType: String,
+        message: String,
+        resultType: String,
+    ) {
+        runCatching { machine.fail(errorType, message, resultType) }
+        sessionEvents?.invoke(
+            com.andmx.data.session.SessionEventType.TURN_ERROR,
+            buildJsonObject {
+                put("errorType", errorType)
+                put("message", message)
+                put("resultType", resultType)
+            },
+        )
+        emit(AgentEvent.Failed(message, errorType = errorType, resultType = resultType))
+        emit(AgentEvent.Done)
     }
 
     /**
@@ -760,7 +1150,7 @@ class AgentEngine(
         } catch (c: kotlinx.coroutines.CancellationException) {
             throw c
         } catch (t: Throwable) {
-            emit(AgentEvent.Failed("目标验证调用失败: ${t.message ?: "未知错误"}"))
+            emit(AgentEvent.Failed("目标验证调用失败: ${t.message ?: "未知错误"}", errorType = "model_error"))
             return false
         }
         pendingGoalTokens += result.tokensUsed
@@ -839,7 +1229,7 @@ class AgentEngine(
         for ((index, command) in goal.validationCommands.withIndex()) {
             val call = com.andmx.llm.ApiToolCall(
                 id = "goal-validation-${java.util.UUID.randomUUID()}",
-                function = com.andmx.llm.ApiFunctionCall("run_shell", buildJsonObject {
+                function = com.andmx.llm.ApiFunctionCall("Bash", buildJsonObject {
                     put("command", command)
                     put("timeout_ms", 120_000)
                     put("max_output_chars", 8_000)
@@ -909,9 +1299,11 @@ class AgentEngine(
                 throw c
             } catch (t: Throwable) {
                 lastError = t.message ?: "请求失败"
+                lastModelError = lastError
                 false
             }
             if (gotContent && message != null) {
+                lastModelError = null
                 return streamUsage?.let { u -> message!!.copy(tokenUsage = u) } ?: message
             }
             // Empty reply on first attempt: retry once (possibly a lost first chunk).
@@ -922,7 +1314,7 @@ class AgentEngine(
                 kotlinx.coroutines.delay(delayMs)
             }
         }
-        lastError?.let { emit(AgentEvent.Failed(it)) }
+        if (lastError != null) lastModelError = lastError
         return null
     }
 
@@ -945,15 +1337,34 @@ class AgentEngine(
      * Cap a tool output fed back into history, keeping head and tail around an
      * elision marker when it exceeds [historyToolOutputLimit].
      */
-    private fun trimToolOutput(output: String): String {
-        if (output.length <= historyToolOutputLimit) return output
-        val trimmed = TextTrimming.elide(output, historyToolOutputLimit) { omitted ->
-            "\n…[截断 " + omitted + " 字符]…\n"
+    private fun trimToolOutput(toolName: String, output: String): String {
+        if (output.isEmpty()) return ResultBudget.emptyOutput(toolName)
+        val declared = toolsByName[toolName]?.maxOutputBytes?.takeIf { it > 0 }
+        // ToolSearch 的返回值就是被加载的 schema 本身；按普通历史输出截到 8k
+        // 会让「已加载」变成假话，模型拿到的仍是残页。
+        val cap = if (toolName == ToolSearchRegistry.TOOL_SEARCH_NAME) {
+            declared ?: ResultBudget.DEFAULT_MAX_MODEL_BYTES
+        } else {
+            minOf(historyToolOutputLimit, declared ?: ResultBudget.DEFAULT_MAX_MODEL_BYTES)
         }
-        return trimmed + SystemReminder.wrap(
-            SystemReminder.Source.TOOL_RESULT_WARNING,
-            "Tool output was truncated to fit context. Re-run with narrower input or read the file with offset/limit if you need the omitted portion.",
-        ).trimEnd()
+        val originalBytes = output.toByteArray(Charsets.UTF_8).size
+        if (originalBytes <= cap) return output
+        val path = spillToolArtifact(toolName, output)
+        if (path != null) return ResultBudget.persistedEnvelope(output, originalBytes, path)
+        return ResultBudget.apply(output, cap)
+    }
+
+    private fun spillToolArtifact(toolName: String, output: String): String? = runCatching {
+        val dir = java.io.File(System.getProperty("java.io.tmpdir"), "andmx-tool-artifacts")
+        dir.mkdirs()
+        val safe = toolName.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "tool" }
+        val file = java.io.File(dir, "$safe-${System.nanoTime()}.txt")
+        file.writeText(output)
+        file.absolutePath
+    }.getOrNull()
+
+    private fun stripContinuationPrompts() {
+        history.removeAll { OutputTokenContinuation.isContinuationMessage(it.role, it.content) }
     }
 
     private fun cleanupOrphanToolCalls() {
@@ -974,9 +1385,23 @@ class AgentEngine(
         }
     }
 
+    private fun toolErrorType(output: String): String = when {
+        output.contains("timed out") -> "tool_timeout"
+        output.startsWith("已被拒绝") || output.startsWith("执行已被取消") || output.startsWith("无法获得执行授权") -> "permission_denied"
+        else -> "tool_execution_failed"
+    }
+
     private fun parseArgs(raw: String): JsonObject = runCatching {
         json.parseToJsonElement(raw).jsonObject
     }.getOrElse { JsonObject(emptyMap()) }
+
+    /** Budget/telemetry name after a DeferredToolCall is unwrapped to its target. */
+    private fun resolvedToolName(call: com.andmx.llm.ApiToolCall): String {
+        if (call.function.name != ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME) return call.function.name
+        val args = parseArgs(call.function.arguments)
+        return (args["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: call.function.name
+    }
 
     private suspend fun timedExecuteToolCall(
         call: com.andmx.llm.ApiToolCall,
@@ -987,60 +1412,159 @@ class AgentEngine(
         return r to (System.nanoTime() - t0) / 1_000_000
     }
 
+    private sealed interface CallTarget {
+        data class Resolved(
+            val tool: Tool,
+            val call: com.andmx.llm.ApiToolCall,
+            val args: JsonObject,
+        ) : CallTarget
+
+        data class Failed(val message: String) : CallTarget
+    }
+
+    /**
+     * Resolve the effective tool for one model call. A DeferredToolCall is
+     * unwrapped here so approval, hooks, deadlines and output budgets all see
+     * the target tool — the control wrapper never becomes the thing that runs.
+     */
+    private fun resolveCallTarget(call: com.andmx.llm.ApiToolCall): CallTarget {
+        val registry = toolSearch
+        if (call.function.name != ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME) {
+            val tool = toolsByName[call.function.name]
+                ?: return CallTarget.Failed("未知工具: ${call.function.name}")
+            if (registry != null && registry.isEnabled() && tool.shouldDefer) {
+                return CallTarget.Failed(
+                    "${tool.name} is deferred: its schema is not loaded. Use " +
+                        "${ToolSearchRegistry.TOOL_SEARCH_NAME} with query \"select:${tool.name}\" first, " +
+                        "then call it through ${ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME}.",
+                )
+            }
+            return CallTarget.Resolved(tool, call, parseArgs(call.function.arguments))
+        }
+        if (registry == null || !registry.isEnabled()) {
+            return CallTarget.Failed("DeferredToolCall is not enabled for this request.")
+        }
+        val wrapper = parseArgs(call.function.arguments)
+        val targetName = (wrapper["name"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        if (targetName.isEmpty()) {
+            return CallTarget.Failed(
+                "DeferredToolCall requires `name` to be the exact name of a deferred tool.",
+            )
+        }
+        val target = registry.resolveDeferred(targetName)
+        if (target == null) {
+            val known = toolsByName[targetName]
+            return CallTarget.Failed(
+                if (known != null && !known.shouldDefer) {
+                    "$targetName is a resident tool; call it directly instead of through DeferredToolCall."
+                } else {
+                    "No deferred tool named $targetName is available. Use " +
+                        "${ToolSearchRegistry.TOOL_SEARCH_NAME} to find it."
+                },
+            )
+        }
+        if (!registry.isDiscovered(targetName)) {
+            return CallTarget.Failed(
+                "The schema for $targetName is not loaded. Use ${ToolSearchRegistry.TOOL_SEARCH_NAME} " +
+                    "with query \"select:$targetName\" first.",
+            )
+        }
+        val input = when (val raw = wrapper["input"]) {
+            null -> JsonObject(emptyMap())
+            is JsonObject -> raw
+            else -> return CallTarget.Failed("DeferredToolCall `input` must be a JSON object.")
+        }
+        val targetCall = com.andmx.llm.ApiToolCall(
+            id = call.id,
+            type = call.type,
+            function = com.andmx.llm.ApiFunctionCall(target.name, input.toString()),
+        )
+        return CallTarget.Resolved(target, targetCall, input)
+    }
+
     /** Execute a single tool call: PRE_TOOL_USE hook → approval → run → POST_TOOL_USE hook. */
     private suspend fun executeToolCall(call: com.andmx.llm.ApiToolCall, validation: Boolean = false): ToolResult {
-        val tool = toolsByName[call.function.name]
-        return if (tool == null) {
-            ToolResult("未知工具: ${call.function.name}", isError = true)
-        } else {
-            // ── PRE_TOOL_USE: hooks may block or modify args ──
-            val preCtx = com.andmx.agent.hooks.HookSystem.HookContext(
-                toolName = call.function.name,
-                toolArgs = call.function.arguments,
-            )
-            val pre = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_TOOL_USE, preCtx)
-                ?: com.andmx.agent.hooks.HookSystem.HookResult(com.andmx.agent.hooks.HookSystem.HookDecision.CONTINUE)
-            if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.BLOCK) {
-                return ToolResult("被 hook 拦截: ${pre.message.orEmpty()}", isError = true)
-            }
-            val effectiveArgs = if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && pre.modifiedInput != null) {
-                parseArgs(pre.modifiedInput!!)
-            } else {
-                parseArgs(call.function.arguments)
-            }
-
-            if (validation && effectiveArgs != parseArgs(call.function.arguments)) {
-                return ToolResult("Validation command arguments were changed by a hook; verification refused.", isError = true)
-            }
-            val outcome = approve(tool, effectiveArgs)
-            if (outcome !is ApprovalOutcome.AllowedOnce) {
-                ToolResult(ApprovalOutcome.denialText(outcome), isError = true)
-            } else {
-                val raw = if (validation) {
-                    kotlinx.coroutines.withTimeoutOrNull(120_000L) { invokeTool(tool, call, effectiveArgs) }
-                        ?: ToolResult("Validation command timed out after 120000ms", isError = true)
-                } else invokeTool(tool, call, effectiveArgs)
-                // ── POST_TOOL_USE: hooks may rewrite the output ──
-                val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
-                    toolName = call.function.name,
-                    toolArgs = call.function.arguments,
-                    toolOutput = raw.output,
-                )
-                val post = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE, postCtx)
-                // 上游 PostToolUseFailure：失败结果走独立事件
-                if (raw.isError) {
-                    hooks?.runEvent(
-                        com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE_FAILURE,
-                        postCtx,
-                    )
-                }
-                if (post?.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && post.modifiedOutput != null) {
-                    raw.copy(output = post.modifiedOutput!!)
-                } else {
-                    raw
-                }
-            }
+        if (call.function.name in hiddenTools()) {
+            return ToolResult(TurnToolGate.denial(call.function.name), isError = true)
         }
+        val target = when (val resolved = resolveCallTarget(call)) {
+            is CallTarget.Failed -> return ToolResult(resolved.message, isError = true)
+            is CallTarget.Resolved -> resolved
+        }
+        val tool = target.tool
+        val dispatched = target.call
+
+        // ── PRE_TOOL_USE: hooks may block or modify args ──
+        val preCtx = com.andmx.agent.hooks.HookSystem.HookContext(
+            toolName = dispatched.function.name,
+            toolArgs = dispatched.function.arguments,
+        )
+        val pre = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_TOOL_USE, preCtx)
+            ?: com.andmx.agent.hooks.HookSystem.HookResult(com.andmx.agent.hooks.HookSystem.HookDecision.CONTINUE)
+        if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.BLOCK) {
+            return ToolResult("被 hook 拦截: ${pre.message.orEmpty()}", isError = true)
+        }
+        val effectiveArgs = if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && pre.modifiedInput != null) {
+            parseArgs(pre.modifiedInput!!)
+        } else {
+            target.args
+        }
+
+        if (validation && effectiveArgs != parseArgs(dispatched.function.arguments)) {
+            return ToolResult("Validation command arguments were changed by a hook; verification refused.", isError = true)
+        }
+        val machine = activeMachine
+        val phase = machine?.state?.phase
+        val canAsk = phase == com.andmx.agent.turn.TurnPhase.SCHEDULING_TOOLS ||
+            phase == com.andmx.agent.turn.TurnPhase.EXECUTING_TOOLS
+        if (machine != null && canAsk) {
+            machine.requestPermission(call.id)
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.PERMISSION_REQUESTED,
+                buildJsonObject { put("id", call.id); put("name", dispatched.function.name) },
+            )
+        }
+        val outcome = approve(tool, effectiveArgs)
+        val allowed = outcome is ApprovalOutcome.AllowedOnce
+        if (machine != null && machine.state.phase == com.andmx.agent.turn.TurnPhase.AWAITING_PERMISSION) {
+            machine.resolvePermission(call.id, allowed)
+            sessionEvents?.invoke(
+                if (allowed) {
+                    com.andmx.data.session.SessionEventType.PERMISSION_RESOLVED
+                } else {
+                    com.andmx.data.session.SessionEventType.PERMISSION_DENIED
+                },
+                buildJsonObject { put("id", call.id); put("name", dispatched.function.name) },
+            )
+            machine.startToolExecution()
+        }
+        if (!allowed) {
+            return ToolResult(ApprovalOutcome.denialText(outcome), isError = true)
+        }
+        val raw = if (validation) {
+            kotlinx.coroutines.withTimeoutOrNull(120_000L) { invokeTool(tool, dispatched, effectiveArgs) }
+                ?: ToolResult("Validation command timed out after 120000ms", isError = true)
+        } else invokeTool(tool, dispatched, effectiveArgs)
+        // ── POST_TOOL_USE: hooks may rewrite the output ──
+        val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
+            toolName = dispatched.function.name,
+            toolArgs = dispatched.function.arguments,
+            toolOutput = raw.output,
+        )
+        val post = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE, postCtx)
+        // 上游 PostToolUseFailure：失败结果走独立事件
+        if (raw.isError) {
+            hooks?.runEvent(
+                com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE_FAILURE,
+                postCtx,
+            )
+        }
+        val settled = if (post?.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && post.modifiedOutput != null) {
+            raw.copy(output = post.modifiedOutput!!)
+        } else {
+            raw
+        }
+        return applyStopTurn(tool, settled)
     }
 
     /**
@@ -1053,7 +1577,7 @@ class AgentEngine(
      */
     private suspend fun invokeTool(tool: Tool, call: com.andmx.llm.ApiToolCall, args: JsonObject): ToolResult =
         ToolTimeout.withDeadline(
-            timeoutMs = tool.timeoutMs,
+            timeoutMs = tool.resolveTimeoutMs(args),
             onTimeout = { ToolResult(ToolTimeout.errorText(it), isError = true) },
         ) {
             try {
@@ -1065,6 +1589,11 @@ class AgentEngine(
                 ToolResult("工具异常: ${t.message}", isError = true)
             }
         }
+
+    private fun applyStopTurn(tool: Tool, result: ToolResult): ToolResult {
+        if (result.isError || !tool.stopTurnOnSuccess) return result
+        return result.copy(stopTurn = true)
+    }
 
     /**
      * Feed one settled call to the repeat guard. Denied and failed calls reach
@@ -1082,15 +1611,9 @@ class AgentEngine(
     companion object {
         const val META_USER_REMINDER_PREFIX = "<system-reminder>"
 
-        /** Upstream tool scheduler cap on concurrent calls per wave. */
-        const val MAX_PARALLEL_TOOL_CALLS = 10
-
-        /** Upstream turn-output-token-continuation: max in-place resumes per turn. */
-        const val MAX_OUTPUT_TOKEN_CONTINUATIONS = 3
-        const val OUTPUT_TOKEN_CONTINUE_PROMPT =
-            "Output token limit hit. Resume directly — no apology, no recap of " +
-                "what you were doing. Pick up mid-thought if that is where the " +
-                "cut happened. Break remaining work into smaller pieces."
+        const val MAX_PARALLEL_TOOL_CALLS = ToolScheduler.DEFAULT_MAX_CONCURRENCY
+        const val MAX_OUTPUT_TOKEN_CONTINUATIONS = OutputTokenContinuation.MAX
+        const val OUTPUT_TOKEN_CONTINUE_PROMPT = OutputTokenContinuation.PROMPT
 
         val DEFAULT_SYSTEM_PROMPT: String =
             com.andmx.agent.zcode.ZCodePrompts.IDENTITY + "\n\n" +
@@ -1098,3 +1621,13 @@ class AgentEngine(
                 com.andmx.agent.zcode.ZCodePrompts.CRAFT
     }
 }
+
+internal fun toolScheduleDependency(callId: String, toolName: String, tool: Tool?): ToolDependency =
+    ToolDependency(
+        toolCallId = callId,
+        toolName = toolName,
+        readOnly = tool?.readOnly,
+        destructive = tool?.destructive,
+        concurrentSafe = tool?.concurrentSafe,
+        sideEffectScope = tool?.sideEffectScope,
+    )

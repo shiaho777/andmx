@@ -1,5 +1,9 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
@@ -34,6 +40,7 @@ fun QueueStrip(
     onRemove: (Int) -> Unit,
     onSendNow: (Int) -> Unit,
     onEdit: (Int) -> Unit = {},
+    onMove: (Int, Int) -> Unit = { _, _ -> },
     canSendNow: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -42,7 +49,7 @@ fun QueueStrip(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                    .padding(horizontal = Chrome.gutter, vertical = 2.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -64,7 +71,7 @@ fun QueueStrip(
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
                 )
                 androidx.compose.material3.TextButton(onClick = onResume, enabled = canSendNow) {
-                    Text("继续", style = MaterialTheme.typography.labelMedium)
+                    Text(tr("继续"), style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -77,8 +84,7 @@ fun QueueStrip(
                 Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                "待发送消息（${queue.size}）",
+            Text(tr("待发送消息（${queue.size}）"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 6.dp)
@@ -104,6 +110,8 @@ fun QueueStrip(
                     modifier = Modifier.weight(1f)
                 )
                 IconChip(Icons.Outlined.Edit, "编辑") { onEdit(i) }
+                if (i > 0) IconChip(Icons.Outlined.KeyboardArrowUp, "上移") { onMove(i, -1) }
+                if (i < queue.lastIndex) IconChip(Icons.Outlined.KeyboardArrowDown, "下移") { onMove(i, 1) }
                 if (canSendNow) {
                     IconChip(Icons.AutoMirrored.Filled.Send, "立即发送") { onSendNow(i) }
                 }

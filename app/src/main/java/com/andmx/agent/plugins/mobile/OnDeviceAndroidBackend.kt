@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.util.Base64
 import androidx.core.content.FileProvider
 import com.andmx.agent.ToolResult
 import com.andmx.computeruse.AccessibilityController
@@ -20,7 +21,7 @@ import java.util.concurrent.TimeUnit
 class OnDeviceAndroidBackend(private val context: Context) {
     private val app = context.applicationContext
     private val a11y = AccessibilityController(app)
-    private val captors = ScreenCaptor(app)
+    private val captors = ScreenCaptor.get(app)
 
     fun preferLocal(serial: String?): Boolean {
         if (!MobileHostShell.isAndroidRuntime()) return false
@@ -173,9 +174,12 @@ class OnDeviceAndroidBackend(private val context: Context) {
         }
         val url = captors.capture()
             ?: return ToolResult("screenshot capture failed", isError = true)
+        val saved = outHint?.takeIf { it.isNotBlank() }?.let { writeScreenshot(access, it, url) }
         val note = buildString {
-            append("screenshot backend=on_device media_projection size=${captors.snapshotDims()}")
-            if (!outHint.isNullOrBlank()) append(" requested_path=$outHint")
+            append("screenshot backend=on_device media_projection size=${captors.snapshotDims()} image=attached")
+            if (saved != null) append(" saved=$saved")
+            else if (!outHint.isNullOrBlank()) append(" save_failed path=$outHint")
+            append("。图像已附在结果里。guest shell 没有 adb、screencap、input，不要用它们找文件。")
         }
         return ToolResult(note, imageUrls = listOf(url))
     }
@@ -270,6 +274,19 @@ class OnDeviceAndroidBackend(private val context: Context) {
             "or install desktop Android SDK emulator when targeting nested AVDs.",
         isError = true,
     )
+
+    private fun writeScreenshot(access: WorkspaceAccess, hint: String, dataUrl: String): String? {
+        val payload = dataUrl.substringAfter("base64,", "")
+        if (payload.isBlank()) return null
+        val bytes = runCatching { Base64.decode(payload, Base64.DEFAULT) }.getOrNull() ?: return null
+        val guest = access.resolvePath(hint)
+        return runCatching {
+            val file = GuestFs(ProotRuntime(app)).resolve(guest)
+            file.parentFile?.mkdirs()
+            file.writeBytes(bytes)
+            guest
+        }.getOrNull()
+    }
 
     private fun canRequestInstall(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -1,5 +1,8 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
+import com.andmx.ui2.theme.Chrome
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,8 +75,8 @@ fun AskUserQuestionPanel(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(14.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
     ) {
@@ -91,8 +94,7 @@ fun AskUserQuestionPanel(
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "需要你的决定",
+                Text(tr("需要你的决定"),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -102,8 +104,7 @@ fun AskUserQuestionPanel(
                             (useOther[q.question] == true && otherText[q.question].orEmpty().isNotBlank())
                     }
                     Spacer(Modifier.weight(1f))
-                    Text(
-                        "已答 $answered/${questions.size}",
+                    Text(tr("已答 $answered/${questions.size}"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -138,8 +139,7 @@ fun AskUserQuestionPanel(
             }
             if (reviewMode) {
                 val (answers, annotations) = buildAnswers()
-                Text(
-                    "复核回答",
+                Text(tr("复核回答"),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 6.dp),
@@ -159,7 +159,7 @@ fun AskUserQuestionPanel(
                                 fontWeight = if (ans != null) FontWeight.Medium else FontWeight.Normal,
                             )
                             annotations[q.question]?.second?.let {
-                                Text("备注：$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(tr("备注：$it"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -168,12 +168,12 @@ fun AskUserQuestionPanel(
                     Modifier.fillMaxWidth().padding(top = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
-                    OutlinedButton(onClick = { reviewMode = false }) { Text("返回修改") }
-                    OutlinedButton(onClick = onCancel) { Text("取消") }
+                    OutlinedButton(onClick = { reviewMode = false }) { Text(tr("返回修改")) }
+                    OutlinedButton(onClick = onCancel) { Text(tr("取消")) }
                     Button(onClick = {
                         if (answers.isEmpty()) onCancel()
                         else onSubmit(AskUserQuestionParser.formatAnswersJson(questions, answers, annotations))
-                    }) { Text("确认提交") }
+                    }) { Text(tr("确认提交")) }
                 }
                 return@Column
             }
@@ -232,8 +232,7 @@ fun AskUserQuestionPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    Text(
-                        "稍后",
+                    Text(tr("稍后"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
@@ -249,13 +248,13 @@ fun AskUserQuestionPanel(
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                OutlinedButton(onClick = onCancel) { Text("取消") }
+                OutlinedButton(onClick = onCancel) { Text(tr("取消")) }
                 Button(
                     onClick = {
                         val (answers, _) = buildAnswers()
                         if (answers.isEmpty()) onCancel() else reviewMode = true
                     },
-                ) { Text("提交") }
+                ) { Text(tr("提交")) }
             }
         }
     }
@@ -345,7 +344,7 @@ private fun QuestionBlock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),
-                placeholder = { Text("自定义回答") },
+                placeholder = { Text(tr("自定义回答")) },
                 singleLine = false,
                 minLines = 1,
                 maxLines = 3,
@@ -357,7 +356,7 @@ private fun QuestionBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp),
-            placeholder = { Text("备注（可选）") },
+            placeholder = { Text(tr("备注（可选）")) },
             singleLine = true,
         )
     }
@@ -439,8 +438,8 @@ fun ExitPlanApprovalPanel(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(14.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
     ) {
@@ -449,13 +448,11 @@ fun ExitPlanApprovalPanel(
                 .padding(12.dp)
                 .heightIn(max = 360.dp),
         ) {
-            Text(
-                "审批实现计划",
+            Text(tr("审批实现计划"),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                "确认后将退出计划模式并开始实现",
+            Text(tr("确认后将退出计划模式并开始实现"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
@@ -482,8 +479,8 @@ fun ExitPlanApprovalPanel(
                     .padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                OutlinedButton(onClick = onDeny) { Text("继续修改") }
-                Button(onClick = onAllow) { Text("批准实现") }
+                OutlinedButton(onClick = onDeny) { Text(tr("继续修改")) }
+                Button(onClick = onAllow) { Text(tr("批准实现")) }
             }
         }
     }

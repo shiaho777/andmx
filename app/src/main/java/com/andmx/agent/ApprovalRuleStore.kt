@@ -59,6 +59,21 @@ class ApprovalRuleStore(context: Context) {
     fun rulesFor(projectKey: String, behavior: RuleBehavior): Set<Rule> =
         rulesFor(projectKey).filterTo(mutableSetOf()) { it.behavior == behavior }
 
+    fun ruleset(projectKey: String): com.andmx.agent.permission.PermissionRuleset {
+        val rules = rulesFor(projectKey)
+        fun bucket(behavior: RuleBehavior) = rules.filter { it.behavior == behavior }.map { rule ->
+            com.andmx.agent.permission.PermissionRuleValue(
+                toolName = wireToolName(rule.toolCanonical),
+                ruleContent = ruleContentOf(rule),
+            )
+        }
+        return com.andmx.agent.permission.PermissionRuleset(
+            allow = bucket(RuleBehavior.ALLOW),
+            ask = bucket(RuleBehavior.ASK),
+            deny = bucket(RuleBehavior.DENY),
+        )
+    }
+
     /** 旧接口兼容：allow 桶精确 key 命中。 */
     fun allows(projectKey: String, toolCanonical: String, ruleKey: String): Boolean =
         rulesFor(projectKey, RuleBehavior.ALLOW).any { it.toolCanonical == toolCanonical && it.key == ruleKey }
@@ -180,6 +195,28 @@ class ApprovalRuleStore(context: Context) {
                 content.startsWith("file:") ->
                     matchContent(subject, content.removePrefix("file:"))
                 else -> matchContent(subject, content)
+            }
+        }
+
+        fun wireToolName(canonical: String): String = when (canonical.lowercase()) {
+            "shell", "bash" -> "Bash"
+            "edit" -> "Edit"
+            "write" -> "Write"
+            "read" -> "Read"
+            "grep" -> "Grep"
+            "glob" -> "Glob"
+            "webfetch" -> "WebFetch"
+            "websearch" -> "WebSearch"
+            else -> canonical
+        }
+
+        fun ruleContentOf(rule: Rule): String? {
+            val content = rule.key.removePrefix("${rule.toolCanonical}:")
+            return when {
+                content == "any" -> null
+                content.startsWith("prefix:") -> content.removePrefix("prefix:") + ":*"
+                content.startsWith("file:") -> content.removePrefix("file:")
+                else -> content
             }
         }
 

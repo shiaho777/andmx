@@ -11,6 +11,8 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.util.Base64
 import android.util.DisplayMetrics
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.WindowManager
 import java.io.ByteArrayOutputStream
@@ -34,6 +36,15 @@ class ScreenCaptor(private val context: Context) {
         const val MAX_EDGE = 1024
         /** VirtualDisplay name (must be ≤ 18 chars on some OEMs). */
         private const val VD_NAME = "AndMXCapture"
+
+        @Volatile private var shared: ScreenCaptor? = null
+
+        fun get(context: Context): ScreenCaptor {
+            shared?.let { return it }
+            return synchronized(this) {
+                shared ?: ScreenCaptor(context.applicationContext).also { shared = it }
+            }
+        }
     }
 
     private var projection: MediaProjection? = null
@@ -63,7 +74,12 @@ class ScreenCaptor(private val context: Context) {
         }
         val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
         @Suppress("DEPRECATION")
-        projection = mgr.getMediaProjection(grant.resultCode, grant.data) ?: return false
+        projection = runCatching { mgr.getMediaProjection(grant.resultCode, grant.data) }.getOrNull() ?: return false
+        projection?.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                release()
+            }
+        }, Handler(Looper.getMainLooper()))
 
         val (w, h) = realScreenSize(context)
         screenWidth = w

@@ -7,6 +7,7 @@ import com.andmx.llm.ChatRequest
 import com.andmx.llm.LlmApi
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.settings.ProviderSettings
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -90,5 +91,59 @@ class AgentEngineSteerTest {
         llm.userTexts.forEach { users ->
             assertEquals("空白注入不应产生额外 user 消息", 1, users.size)
         }
+    }
+
+    @Test
+    fun steerDuringTextOnlyReplyContinuesTheTurn() = runTest {
+        var engine: AgentEngine? = null
+        val llm = object : LlmApi {
+            val userTexts = mutableListOf<List<String?>>()
+            var calls = 0
+            override suspend fun chat(request: ChatRequest): Result<ApiMessage> {
+                calls++
+                userTexts += request.messages.filter { it.role == "user" }.map { it.content }
+                if (calls == 1) {
+                    engine?.injectUserMessage("改成只看测试目录")
+                    return Result.success(ApiMessage(role = "assistant", content = "先这样"))
+                }
+                return Result.success(ApiMessage(role = "assistant", content = "完成"))
+            }
+        }
+        val realEngine = AgentEngine(tools = emptyList(), client = llm)
+        engine = realEngine
+        val events = realEngine.runTurn(ProviderSettings(model = "test-model"), newTurn(), "开始").toList()
+        assertTrue(events.last() is AgentEvent.Done)
+        assertEquals(2, llm.calls)
+        assertTrue(llm.userTexts[1].any { it?.contains("改成只看测试目录") == true })
+    }
+
+    @Test
+    fun overlappingRunTurnDoesNotStartASecondModelCall() = runTest {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var calls = 0
+        val llm = object : LlmApi {
+            override suspend fun chat(request: ChatRequest): Result<ApiMessage> {
+                calls += 1
+                if (calls == 1) {
+                    entered.complete(Unit)
+                    release.await()
+                }
+                return Result.success(ApiMessage(role = "assistant", content = "ok"))
+            }
+        }
+        val engine = AgentEngine(tools = emptyList(), client = llm)
+        val settings = ProviderSettings(model = "test-model")
+        val turn = newTurn()
+        val first = async { engine.runTurn(settings, turn, "第一次").toList() }
+        entered.await()
+        val secondEvents = engine.runTurn(settings, turn, "第二次").toList()
+        assertTrue(secondEvents.isEmpty())
+        assertEquals(1, calls)
+        assertTrue(engine.snapshotHistory().none { it.content?.contains("第二次") == true })
+        release.complete(Unit)
+        val firstEvents = first.await()
+        assertTrue(firstEvents.last() is AgentEvent.Done)
+        assertEquals(1, calls)
     }
 }

@@ -26,12 +26,12 @@ fun SettingsItem(
     modifier: Modifier = Modifier
 ) {
     ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = subtitle?.let { { Text(it) } },
+        headlineContent = { Text(tr(title)) },
+        supportingContent = subtitle?.let { { Text(tr(it)) } },
         leadingContent = {
             Icon(
                 icon,
-                contentDescription = title,
+                contentDescription = tr(title),
                 modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )

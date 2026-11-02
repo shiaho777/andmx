@@ -1,5 +1,7 @@
 package com.andmx.ui2.files
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,18 +25,18 @@ fun NewFileDialog(onDismiss: () -> Unit, onCreate: (String, Boolean) -> Unit) {
     var isDir by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建") },
+        title = { Text(tr("新建")) },
         text = {
             Column {
                 androidx.compose.foundation.layout.Row {
                     FilterChip(
                         selected = !isDir, onClick = { isDir = false },
-                        label = { Text("文件") },
+                        label = { Text(tr("文件")) },
                         modifier = Modifier.padding(end = 8.dp)
                     )
                     FilterChip(
                         selected = isDir, onClick = { isDir = true },
-                        label = { Text("文件夹") }
+                        label = { Text(tr("文件夹")) }
                     )
                 }
                 OutlinedTextField(
@@ -50,9 +52,9 @@ fun NewFileDialog(onDismiss: () -> Unit, onCreate: (String, Boolean) -> Unit) {
             TextButton(
                 onClick = { onCreate(name.trim(), isDir) },
                 enabled = name.isNotBlank() && !name.contains('/')
-            ) { Text("创建") }
+            ) { Text(tr("创建")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("取消")) } }
     )
 }
 
@@ -61,7 +63,7 @@ fun RenameFileDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String)
     var name by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名") },
+        title = { Text(tr("重命名")) },
         text = {
             OutlinedTextField(
                 value = name,
@@ -74,9 +76,9 @@ fun RenameFileDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String)
             TextButton(
                 onClick = { onConfirm(name.trim()) },
                 enabled = name.isNotBlank() && name != initial && !name.contains('/')
-            ) { Text("保存") }
+            ) { Text(tr("保存")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("取消")) } }
     )
 }
 
@@ -84,13 +86,13 @@ fun RenameFileDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String)
 fun DeleteFileDialog(name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("删除") },
-        text = { Text("确定删除「$name」吗？此操作会从磁盘移除，无法撤销。") },
+        title = { Text(tr("删除")) },
+        text = { Text(tr("确定删除「$name」吗？此操作会从磁盘移除，无法撤销。")) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("删除", color = MaterialTheme.colorScheme.error)
+                Text(tr("删除"), color = MaterialTheme.colorScheme.error)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("取消")) } }
     )
 }

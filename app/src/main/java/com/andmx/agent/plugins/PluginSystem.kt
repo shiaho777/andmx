@@ -59,6 +59,7 @@ class PluginSystem(
         val command: String,
         val timeoutMs: Long = 10_000,
         val name: String = "",
+        val matcher: String = "",
     )
 
     data class Plugin(
@@ -304,6 +305,7 @@ class PluginSystem(
                         ?: o.str("timeoutMs")?.toLongOrNull()
                         ?: 10_000L,
                     name = o.str("name").orEmpty(),
+                    matcher = o.str("matcher").orEmpty(),
                 )
             }
             is JsonObject -> hooksEl.forEach { (event, value) ->
@@ -313,7 +315,12 @@ class PluginSystem(
                         val command = o?.str("command") ?: o?.str("script")
                             ?: (item as? JsonPrimitive)?.contentOrNull
                             ?: return@forEach
-                        hooks += HookEntry(event = event, command = command, name = o?.str("name").orEmpty())
+                        hooks += HookEntry(
+                            event = event,
+                            command = command,
+                            name = o?.str("name").orEmpty(),
+                            matcher = o?.str("matcher").orEmpty(),
+                        )
                     }
                     is JsonPrimitive -> value.contentOrNull?.let {
                         hooks += HookEntry(event = event, command = it)
@@ -442,6 +449,86 @@ class PluginSystem(
         )
     }
 
+    private suspend fun tryGitHubArchive(url: String, destDir: String): Boolean {
+        val repo = parsePublicGitHubRepository(url) ?: return false
+        val zipUrl = "https://api.github.com/repos/${repo.first}/${repo.second}/zipball/HEAD"
+        val tmp = "/tmp/andmx-plugin-zip-${repo.second}"
+        val fetched = runCatching {
+            shellExec(
+                "rm -rf '$tmp' '$destDir' && mkdir -p '$tmp/out' && " +
+                    "curl -fsSL -A 'ZCode-Plugin-Installer' -H 'Accept: application/vnd.github+json' " +
+                    "-o '$tmp/src.zip' '$zipUrl'",
+            )
+        }.getOrDefault("curl failed")
+        val zipBytes = runCatching {
+            shellExec("wc -c < '$tmp/src.zip'").trim().toLongOrNull()
+        }.getOrNull() ?: -1L
+        val sha = runCatching {
+            shellExec("sha256sum '$tmp/src.zip'").trim().substringBefore(' ')
+        }.getOrDefault("")
+        val listing = runCatching { shellExec("unzip -l '$tmp/src.zip'") }.getOrDefault("")
+        val unsafe = listing.lineSequence().any { line ->
+            val name = line.trim().substringAfterLast(' ')
+            name.startsWith("/") || name.split('/').any { it == ".." }
+        }
+        if (fetched.contains("curl:") || fetched.contains("404") ||
+            zipBytes <= 0L || zipBytes > 200L * 1024 * 1024 || unsafe
+        ) {
+            shellExec("rm -rf '$tmp' '$destDir'")
+            return false
+        }
+        val unpacked = runCatching {
+            shellExec("unzip -q '$tmp/src.zip' -d '$tmp/out'")
+        }.getOrDefault("unzip failed")
+        val roots = runCatching {
+            shellExec("ls -1 '$tmp/out'").lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        }.getOrDefault(emptyList())
+        if (unpacked.contains("error") || roots.size != 1) {
+            shellExec("rm -rf '$tmp' '$destDir'")
+            return false
+        }
+        val root = "$tmp/out/${roots.single()}"
+        val submodules = fs.exists("$root/.gitmodules")
+        val lfs = runCatching {
+            shellExec("grep -R -l 'filter=lfs' '$root' --include '.gitattributes' 2>/dev/null || true")
+        }.getOrDefault("")
+        if (submodules || lfs.isNotBlank()) {
+            shellExec("rm -rf '$tmp' '$destDir'")
+            return false
+        }
+        val links = runCatching {
+            shellExec("find '$root' -type l -print 2>/dev/null || true")
+        }.getOrDefault("")
+        if (links.isNotBlank()) {
+            shellExec("rm -rf '$tmp' '$destDir'")
+            return false
+        }
+        val moved = runCatching {
+            shellExec("mkdir -p '$PLUGINS_DIR' && mv '$root' '$destDir' && rm -rf '$tmp'")
+        }.isSuccess && fs.exists(destDir)
+        if (moved && sha.length == 64) {
+            runCatching { fs.writeText("$destDir/.andmx-source-sha", sha) }
+        }
+        if (!moved) shellExec("rm -rf '$tmp' '$destDir'")
+        return moved
+    }
+
+    private fun parsePublicGitHubRepository(value: String): Pair<String, String>? {
+        val url = runCatching { java.net.URI(value) }.getOrNull() ?: return null
+        if (!url.scheme.equals("https", true)) return null
+        val host = url.host?.lowercase() ?: return null
+        if (host != "github.com" && host != "www.github.com") return null
+        if (!url.userInfo.isNullOrBlank() || !url.query.isNullOrBlank() || !url.fragment.isNullOrBlank()) return null
+        val segments = url.path.split('/').filter { it.isNotBlank() }
+        if (segments.size != 2) return null
+        val owner = segments[0]
+        val repo = segments[1].removeSuffix(".git")
+        val ok = Regex("^[A-Za-z0-9_.-]+$")
+        if (owner.isBlank() || repo.isBlank() || owner == "." || owner == ".." || repo == "." || repo == "..") return null
+        if (!ok.matches(owner) || !ok.matches(repo)) return null
+        return owner to repo
+    }
+
     suspend fun installFromGit(url: String, name: String? = null): InstallResult = withContext(Dispatchers.IO) {
         ensurePluginsDir()
         val pluginName = normalizeName(
@@ -455,7 +542,11 @@ class PluginSystem(
             return@withContext InstallResult(false, pluginName, destDir, listOf("插件已存在: $pluginName"))
         }
         val out = runCatching {
-            shellExec("mkdir -p '$PLUGINS_DIR' && git clone --depth 1 '$url' '$destDir' 2>&1")
+            if (!tryGitHubArchive(url, destDir)) {
+                shellExec("mkdir -p '$PLUGINS_DIR' && git clone --depth 1 '$url' '$destDir' 2>&1")
+            } else {
+                ""
+            }
         }.getOrElse {
             return@withContext InstallResult(false, pluginName, destDir, listOf("Git clone failed: ${it.message}"))
         }

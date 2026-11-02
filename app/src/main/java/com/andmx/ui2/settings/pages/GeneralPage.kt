@@ -1,7 +1,11 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -57,10 +61,29 @@ fun GeneralPage(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 40.dp),
         ) {
+            SettingsGroup("界面设置") {
+                StackedSettingRow(
+                    title = "界面字号",
+                    description = "调整应用界面的文字大小，图标和布局尺寸不受影响。",
+                ) {
+                    androidx.compose.material3.Slider(
+                        value = s.uiFontSizePx.toFloat(),
+                        onValueChange = { save(s.copy(uiFontSizePx = it.toInt().coerceIn(12, 20))) },
+                        valueRange = 12f..20f,
+                        steps = 7,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "${s.uiFontSizePx}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             SettingsGroup("外观") {
                 StackedSettingRow(
                     title = "界面主题",
-                    description = "切换应用界面使用的主题外观。",
+                    description = "选择浅色、深色或跟随系统主题。",
                 ) {
                     ThemeModeSelector(
                         selected = s.themeMode,
@@ -75,7 +98,7 @@ fun GeneralPage(onBack: () -> Unit) {
                     SegmentedRow(
                         options = listOf(
                             "system" to "系统默认",
-                            "zh-CN" to "简体中文",
+                            "zh-CN" to "中文简体",
                             "en-US" to "English",
                         ),
                         selected = localeValue,
@@ -88,7 +111,7 @@ fun GeneralPage(onBack: () -> Unit) {
             SettingsGroup("消息流") {
                 SwitchRow(
                     title = "显示思考过程",
-                    description = "在消息流中展示模型思考内容，默认只展示第一个思考过程。",
+                    description = "在消息流中展示完整的模型思考内容；关闭时每轮仍展示第一次思考。",
                     checked = s.showReasoning,
                     onCheckedChange = { save(s.copy(showReasoning = it)) },
                 )
@@ -101,15 +124,36 @@ fun GeneralPage(onBack: () -> Unit) {
                 )
                 HorizontalDivider()
                 SwitchRow(
+                    title = "分组探索工具",
+                    description = "将连续的读取和搜索工具聚合为 Explore 分组。",
+                    checked = s.toolGroupingExplore,
+                    onCheckedChange = { save(s.copy(toolGroupingExplore = it)) },
+                )
+                HorizontalDivider()
+                SwitchRow(
+                    title = "分组终端命令",
+                    description = "将连续的非只读 Shell 命令聚合为 Terminal 分组。",
+                    checked = s.toolGroupingTerminal,
+                    onCheckedChange = { save(s.copy(toolGroupingTerminal = it)) },
+                )
+                HorizontalDivider()
+                SwitchRow(
+                    title = "分组文件更改",
+                    description = "将连续的 Write、Edit 和 ApplyPatch 调用聚合为 Changes 分组。",
+                    checked = s.toolGroupingChanges,
+                    onCheckedChange = { save(s.copy(toolGroupingChanges = it)) },
+                )
+                HorizontalDivider()
+                SwitchRow(
                     title = "提问自动继续",
-                    description = "AskUserQuestion 提问 5 分钟未作答时，以空答案自动继续；关闭后无限等待。",
+                    description = "开启后，Agent 提问 5 分钟未回答会自动继续；关闭后，当前和后续提问会一直等待你的回答。",
                     checked = s.askAutoResolve,
                     onCheckedChange = { save(s.copy(askAutoResolve = it)) },
                 )
                 HorizontalDivider()
                 StackedSettingRow(
                     title = "交互行为",
-                    description = "在运行时将后续操作加入队列，或引导至下一轮工具调用后运行。",
+                    description = "在 ZCode 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。",
                 ) {
                     SegmentedRow(
                         options = listOf(
@@ -123,12 +167,12 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
                 HorizontalDivider()
                 StackedSettingRow(
-                    title = "状态面板",
+                    title = "状态面板展开策略",
                     description = "对话底部状态胶囊与面板的展开方式。",
                 ) {
                     SegmentedRow(
                         options = listOf(
-                            "auto" to "自动",
+                            "auto" to "自动展开",
                             "expanded" to "始终展开",
                             "collapsed" to "始终收起",
                         ),
@@ -142,7 +186,7 @@ fun GeneralPage(onBack: () -> Unit) {
             SettingsGroup("通知") {
                 SwitchRow(
                     title = "任务通知",
-                    description = "任务完成、失败或需要确认时发送通知。",
+                    description = "任务完成、失败或需要确认时发送系统通知。",
                     checked = s.notification,
                     onCheckedChange = { save(s.copy(notification = it)) },
                 )
@@ -159,12 +203,12 @@ fun GeneralPage(onBack: () -> Unit) {
             SettingsGroup("终端") {
                 StackedSettingRow(
                     title = "终端字体",
-                    description = "留空时自动探测系统终端配置；填写后作为终端的字体覆盖。",
+                    description = "留空时自动探测系统终端配置；填写后作为 ZCode 终端的字体覆盖。",
                 ) {
                     OutlinedTextField(
                         value = s.terminalFontFamily,
                         onValueChange = { save(s.copy(terminalFontFamily = it)) },
-                        placeholder = { Text("留空自动继承，例如 monospace") },
+                        placeholder = { Text(tr("留空自动继承，例如 MesloLGS NF, monospace")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                     )
@@ -174,7 +218,7 @@ fun GeneralPage(onBack: () -> Unit) {
             SettingsGroup("任务管理") {
                 SwitchRow(
                     title = "自动归档旧任务",
-                    description = "将已完成、无未读、未置顶且超过保留期的任务自动归档。",
+                    description = "定时扫描最近打开过的工作区，将已完成、无未读、未置顶且超过保留期的任务自动归档。",
                     checked = s.taskAutoArchive,
                     onCheckedChange = { save(s.copy(taskAutoArchive = it)) },
                 )
@@ -185,20 +229,14 @@ fun GeneralPage(onBack: () -> Unit) {
                 ) {
                     SegmentedRow(
                         options = listOf(
-                            "3" to "3天",
-                            "7" to "7天",
-                            "14" to "14天",
-                            "30" to "30天",
+                            "3" to "3 天后归档",
+                            "7" to "7 天后归档",
+                            "14" to "14 天后归档",
+                            "30" to "30 天后归档",
                         ),
                         selected = s.taskAutoArchiveDays.toString(),
-                        onSelect = {
-                            save(
-                                s.copy(
-                                    taskAutoArchive = true,
-                                    taskAutoArchiveDays = it.toInt(),
-                                ),
-                            )
-                        },
+                        enabled = s.taskAutoArchive,
+                        onSelect = { save(s.copy(taskAutoArchiveDays = it.toInt())) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -222,9 +260,31 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
+            SettingsGroup("输出风格") {
+                Text(tr("写进动态系统提示。名称为空时用 custom。正文为空则不注入。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                OutlinedTextField(
+                    value = s.outputStyleName,
+                    onValueChange = { save(s.copy(outputStyleName = it)) },
+                    placeholder = { Text(tr("风格名称")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = s.outputStylePrompt,
+                    onValueChange = { save(s.copy(outputStylePrompt = it)) },
+                    placeholder = { Text(tr("风格要求")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                )
+            }
+
             SettingsGroup("自定义指令") {
-                Text(
-                    "追加到系统提示的额外指令，会在所有新任务中生效。",
+                Text(tr("追加到系统提示的额外指令，会在所有新任务中生效。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -232,7 +292,7 @@ fun GeneralPage(onBack: () -> Unit) {
                 OutlinedTextField(
                     value = s.customInstructions,
                     onValueChange = { save(s.copy(customInstructions = it)) },
-                    placeholder = { Text("追加到系统提示的额外指令…") },
+                    placeholder = { Text(tr("追加到系统提示的额外指令…")) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                 )
@@ -262,8 +322,7 @@ private fun ApprovalRulesSection() {
     if (current.isEmpty()) return
 
     SettingsGroup("项目权限规则") {
-        Text(
-            "本项目内的持久规则：始终允许 / 每次询问 / 始终拒绝。移除后对应操作回到按模式判定。",
+        Text(tr("本项目内的持久规则：始终允许 / 每次询问 / 始终拒绝。移除后对应操作回到按模式判定。"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
@@ -282,7 +341,7 @@ private fun ApprovalRulesSection() {
                     androidx.compose.material3.TextButton(
                         onClick = { scope.launch { store.remove(projectKey, rule) } },
                     ) {
-                        Text("移除")
+                        Text(tr("移除"))
                     }
                 }
                 HorizontalDivider()
@@ -291,7 +350,7 @@ private fun ApprovalRulesSection() {
         androidx.compose.material3.TextButton(
             onClick = { scope.launch { store.clear(projectKey) } },
         ) {
-            Text("清除本项目全部规则", color = MaterialTheme.colorScheme.error)
+            Text(tr("清除本项目全部规则"), color = MaterialTheme.colorScheme.error)
         }
     }
 }

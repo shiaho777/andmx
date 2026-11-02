@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -130,15 +132,14 @@ fun UsagePage(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 28.dp),
         ) {
-            Text(
-                "使用统计",
+            Text(tr("使用统计"),
                 style = MaterialTheme.typography.titleMedium,
                 color = onSurface,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("应用用量", color = onSurface, style = MaterialTheme.typography.labelLarge)
+                Text(tr("应用用量"), color = onSurface, style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.width(8.dp))
                 Box(
                     Modifier
@@ -146,7 +147,7 @@ fun UsagePage(onBack: () -> Unit) {
                         .background(chipBg)
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 ) {
-                    Text("应用用量", color = muted, style = MaterialTheme.typography.labelSmall)
+                    Text(tr("应用用量"), color = muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
 
@@ -176,7 +177,7 @@ fun UsagePage(onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("时间范围", color = onSurface, style = MaterialTheme.typography.bodyMedium)
+                Text(tr("时间范围"), color = onSurface, style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     UsageRange.entries.forEach { r ->
                         val selected = range == r
@@ -205,9 +206,8 @@ fun UsagePage(onBack: () -> Unit) {
                 ) {
                     CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
                     Spacer(Modifier.height(12.dp))
-                    Text("正在统计中", color = onSurface, style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "正在读取本地应用会话历史，可能需要一点时间。",
+                    Text(tr("正在统计中"), color = onSurface, style = MaterialTheme.typography.titleSmall)
+                    Text(tr("正在读取本地应用会话历史，可能需要一点时间。"),
                         color = muted,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
@@ -227,9 +227,8 @@ fun UsagePage(onBack: () -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("还没有可展示的数据", color = onSurface, style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            "当前区间暂无可展示的用量数据。",
+                        Text(tr("还没有可展示的数据"), color = onSurface, style = MaterialTheme.typography.titleSmall)
+                        Text(tr("当前区间暂无可展示的用量数据。"),
                             color = muted,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(top = 6.dp),
@@ -247,6 +246,15 @@ fun UsagePage(onBack: () -> Unit) {
                 )
 
                 Spacer(Modifier.height(14.dp))
+
+                ToolCallCard(
+                    stats = stats,
+                    cardBg = cardBg,
+                    muted = muted,
+                    onSurface = onSurface,
+                )
+
+                Spacer(Modifier.height(16.dp))
 
                 ModelUsageCard(
                     stats = stats,
@@ -280,7 +288,7 @@ private fun RefreshRow(onRefresh: () -> Unit, muted: Color, onSurface: Color) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(Icons.Outlined.Refresh, contentDescription = null, tint = muted, modifier = Modifier.size(16.dp))
-            Text("刷新", color = onSurface, style = MaterialTheme.typography.labelLarge)
+            Text(tr("刷新"), color = onSurface, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -393,7 +401,7 @@ private fun HeatmapCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Token 活动", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+            Text(tr("Token 活动"), color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -482,7 +490,7 @@ private fun HeatmapCard(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("较少", color = subtle, style = MaterialTheme.typography.labelSmall)
+            Text(tr("较少"), color = subtle, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.width(6.dp))
             UsageChartLogic.heatLevelRatios.forEachIndexed { i, ratio ->
                 Box(
@@ -494,7 +502,7 @@ private fun HeatmapCard(
                 Spacer(Modifier.width(3.dp))
             }
             Spacer(Modifier.width(2.dp))
-            Text("较多", color = subtle, style = MaterialTheme.typography.labelSmall)
+            Text(tr("较多"), color = subtle, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -544,7 +552,7 @@ private fun DailyTrendCard(
             .background(cardBg)
             .padding(14.dp),
     ) {
-        Text("每日 Token 趋势图", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+        Text(tr("每日 Token 趋势图"), color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(10.dp))
 
         if (legend.isNotEmpty()) {
@@ -628,6 +636,40 @@ private fun DailyTrendCard(
 }
 
 @Composable
+private fun ToolCallCard(
+    stats: UsageStats,
+    cardBg: Color,
+    muted: Color,
+    onSurface: Color,
+) {
+    val total = stats.toolCalls.sumOf { it.count }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardBg)
+            .padding(14.dp),
+    ) {
+        Text(tr("工具调用"), color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (total == 0) "这段时间没有工具调用" else "合计 $total 次",
+            color = muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        stats.toolCalls.forEach { item ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(item.name, color = onSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text("${item.count}", color = muted, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModelUsageCard(
     stats: UsageStats,
     cardBg: Color,
@@ -642,7 +684,7 @@ private fun ModelUsageCard(
             .background(cardBg)
             .padding(14.dp),
     ) {
-        Text("模型用量", color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+        Text(tr("模型用量"), color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(14.dp))
         Row(
             Modifier

@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -9,16 +11,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -174,7 +170,7 @@ fun ToolCallCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 1.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 1.dp),
     ) {
         Row(
             Modifier
@@ -223,10 +219,7 @@ fun ToolCallCard(
                     // ZCode QueuedSummaryContent：运行中摘要变化时滚动切换。
                     AnimatedContent(
                         targetState = summary,
-                        transitionSpec = {
-                            (slideInVertically { it / 2 } + fadeIn())
-                                .togetherWith(slideOutVertically { -it / 2 } + fadeOut())
-                        },
+                        transitionSpec = { motion.rollUp() },
                         label = "summaryRoll",
                         modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
                     ) { s ->
@@ -342,8 +335,8 @@ fun ToolCallCard(
 
         AnimatedVisibility(
             visible = expanded && contentMounted,
-            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
-            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             Column(
                 Modifier
@@ -412,12 +405,22 @@ fun ToolCallCard(
                             MetaBlock(title = "错误", body = toolCall.output.take(4000), mono = true, emphasize = true)
                         }
                     }
+                } else if (canonicalName == "skill") {
+                    StructuredToolCard(toolCall, "skill", workflowStatus)
                 } else if (canonicalName == "shell" || canonicalName == "git") {
                     ExecuteToolCard(toolCall)
                 } else if (canonicalName == "ask") {
                     AskQuestionsCard(toolCall)
-                } else if (canonicalName == "workflow" || canonicalName == "cron" ||
-                    canonicalName == "webfetch" || canonicalName == "search"
+                } else if (
+                    canonicalName == "workflow" || canonicalName == "cron" ||
+                    canonicalName == "webfetch" || canonicalName == "search" ||
+                    canonicalName == "read" || canonicalName == "grep" || canonicalName == "glob" ||
+                    canonicalName == "list" || canonicalName == "agent" ||
+                    canonicalName == "enterplan" || canonicalName == "exitplan" ||
+                    canonicalName == "goal" || canonicalName == "mcp" || canonicalName == "listmodels" ||
+                    canonicalName == "offpeak" || canonicalName == "submit" ||
+                    canonicalName == "escalate" || canonicalName == "send" ||
+                    canonicalName == "taskoutput" || canonicalName == "taskstop"
                 ) {
                     StructuredToolCard(toolCall, canonicalName, workflowStatus)
                 } else {
@@ -452,15 +455,13 @@ fun ToolCallCard(
                                 )
                             }
                             toolCall.isRunning -> {
-                                Text(
-                                    "执行中…",
+                                Text(tr("执行中…"),
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                                 )
                             }
                             toolCall.isError -> {
-                                Text(
-                                    "无输出",
+                                Text(tr("无输出"),
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = MaterialTheme.colorScheme.error,
                                 )
@@ -486,7 +487,22 @@ private fun StructuredToolCard(
 ) {
     val fieldKeys = when (canonical) {
         "workflow" -> listOf("name", "spec", "runId", "run_id", "task", "phase", "nodeId")
-        "cron" -> listOf("name", "task", "schedule", "cron", "automationId", "id", "prompt")
+        "skill" -> listOf("skill", "name", "args")
+        "cron" -> listOf("name", "task", "schedule", "cron", "automationId", "id", "prompt", "title")
+        "offpeak" -> listOf("title", "prompt", "model", "runAt")
+        "submit" -> listOf("result", "summary", "status")
+        "escalate" -> listOf("question", "context", "reason")
+        "send" -> listOf("to", "message", "text")
+        "taskoutput" -> listOf("task_id", "taskId", "block")
+        "taskstop" -> listOf("task_id", "taskId")
+        "read", "list" -> listOf("file_path", "path", "offset", "limit", "pages")
+        "grep" -> listOf("pattern", "path", "glob", "output_mode")
+        "glob" -> listOf("pattern", "path")
+        "agent" -> listOf("description", "prompt", "subagent_type")
+        "enterplan", "exitplan" -> listOf("reason")
+        "goal" -> listOf("text", "status", "nextAction", "goal")
+        "mcp" -> listOf("server", "tool", "name")
+        "listmodels" -> emptyList()
         else -> listOf("url", "query", "prompt")
     }
     val rows = remember(toolCall.id, toolCall.args) {
@@ -566,8 +582,7 @@ private fun StructuredToolCard(
             val links = remember(toolCall.id, toolCall.output) { extractSourceUrls(toolCall.output) }
             if (links.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "来源",
+                Text(tr("来源"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -598,13 +613,11 @@ private fun StructuredToolCard(
                 emphasize = toolCall.isError,
                 stickToBottom = toolCall.isRunning,
             )
-            toolCall.isRunning -> Text(
-                "执行中…",
+            toolCall.isRunning -> Text(tr("执行中…"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
             )
-            toolCall.isError -> Text(
-                "无输出",
+            toolCall.isError -> Text(tr("无输出"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.error,
             )
@@ -670,13 +683,11 @@ private fun ExecuteToolCard(toolCall: ToolCall) {
                 maxHeight = 96.dp,
                 fadeColor = MaterialTheme.colorScheme.surface,
             )
-            toolCall.isRunning -> Text(
-                "执行中…",
+            toolCall.isRunning -> Text(tr("执行中…"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
             )
-            toolCall.isError -> Text(
-                "无输出",
+            toolCall.isError -> Text(tr("无输出"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.error,
             )
@@ -751,8 +762,7 @@ private fun AskQuestionsCard(toolCall: ToolCall) {
             )
         }
         if (toolCall.isError && output.isBlank()) {
-            Text(
-                "无输出",
+            Text(tr("无输出"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.error,
             )
@@ -940,7 +950,7 @@ private fun ScreenshotStrip(urls: List<String>) {
                     } else {
                         Spacer(Modifier.width(1.dp))
                     }
-                    TextButton(onClick = { zoomIndex = null }) { Text("关闭") }
+                    TextButton(onClick = { zoomIndex = null }) { Text(tr("关闭")) }
                 }
             },
             text = {
@@ -1257,8 +1267,7 @@ private fun InlineEditDiffPreview(
                 animationKey = "preview:${preview.path}:${preview.stats.added}:${preview.stats.removed}",
             )
             if (preview.path.isNotBlank()) {
-                Text(
-                    "打开",
+                Text(tr("打开"),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 10.dp),
@@ -1288,6 +1297,8 @@ private fun InlineEditDiffPreview(
 
 @Composable
 private fun DiffPreviewLine(line: DiffLine) {
+    val preview = com.andmx.ui2.markdown.LocalCodePreviewConfig.current
+    val codeSize = preview.fontSize.sp
     val add = diffAddColor()
     val del = diffDelColor()
     val (bg, fg, gutter, sign) = when (line.kind) {
@@ -1322,36 +1333,38 @@ private fun DiffPreviewLine(line: DiffLine) {
                 .height(18.dp)
                 .background(if (line.kind == DiffLine.Kind.CONTEXT) Color.Transparent else fg),
         )
-        Text(
-            text = (line.oldNo?.toString() ?: "").padStart(3),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            ),
-            color = if (line.kind == DiffLine.Kind.REMOVE) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-            textAlign = TextAlign.End,
-            modifier = Modifier
-                .width(28.dp)
-                .background(gutter)
-                .padding(end = 4.dp),
-        )
-        Text(
-            text = (line.newNo?.toString() ?: "").padStart(3),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            ),
-            color = if (line.kind == DiffLine.Kind.ADD) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-            textAlign = TextAlign.End,
-            modifier = Modifier
-                .width(28.dp)
-                .background(gutter)
-                .padding(end = 4.dp),
-        )
+        if (preview.showLineNumbers) {
+            Text(
+                text = (line.oldNo?.toString() ?: "").padStart(3),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = (codeSize.value - 1).sp,
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = if (line.kind == DiffLine.Kind.REMOVE) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                textAlign = TextAlign.End,
+                modifier = Modifier
+                    .width(28.dp)
+                    .background(gutter)
+                    .padding(end = 4.dp),
+            )
+            Text(
+                text = (line.newNo?.toString() ?: "").padStart(3),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = (codeSize.value - 1).sp,
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = if (line.kind == DiffLine.Kind.ADD) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                textAlign = TextAlign.End,
+                modifier = Modifier
+                    .width(28.dp)
+                    .background(gutter)
+                    .padding(end = 4.dp),
+            )
+        }
         Text(
             text = sign,
             style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 11.sp,
+                fontSize = codeSize,
                 fontFamily = FontFamily.Monospace,
             ),
             color = fg,
@@ -1360,17 +1373,17 @@ private fun DiffPreviewLine(line: DiffLine) {
         Text(
             text = line.text.ifEmpty { " " },
             style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 11.sp,
+                fontSize = codeSize,
                 fontFamily = FontFamily.Monospace,
-                lineHeight = 15.sp,
+                lineHeight = (codeSize.value + 4).sp,
             ),
             color = if (line.kind == DiffLine.Kind.CONTEXT) {
                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f)
             } else {
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f)
             },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = if (preview.wrapLongLines) Int.MAX_VALUE else 1,
+            overflow = if (preview.wrapLongLines) TextOverflow.Clip else TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 4.dp, end = 8.dp, top = 1.dp, bottom = 1.dp),
@@ -1409,17 +1422,16 @@ fun ToolGroupCard(tools: List<ToolCall>) {
         wasRunning = running
     }
 
-    val kind = ToolPresentation.groupKind(tools.first().name)
+    val kind = ZCodeToolGroup.classify(tools.first())
     val title = buildString {
-        // ZCode 分组语义：改动按去重文件数、执行按命令数、只读按步数。
         when (kind) {
-            ToolPresentation.GroupKind.CHANGE -> {
+            ZCodeToolGroup.Class.CHANGES -> {
                 val files = tools.mapNotNull {
                     ToolArgs.filePath(it.name, it.args).takeIf(String::isNotBlank)
                 }.distinct()
                 append(if (files.isNotEmpty()) "改动 ${files.size} 个文件" else "${tools.size} 处改动")
             }
-            ToolPresentation.GroupKind.EXECUTE -> append("执行 ${tools.size} 条命令")
+            ZCodeToolGroup.Class.EXECUTE -> append("执行 ${tools.size} 条命令")
             else -> {
                 append(tools.size)
                 append(" 步")
@@ -1440,7 +1452,7 @@ fun ToolGroupCard(tools: List<ToolCall>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 1.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 1.dp),
     ) {
         Row(
             Modifier
@@ -1490,8 +1502,8 @@ fun ToolGroupCard(tools: List<ToolCall>) {
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
-            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             Column(
                 Modifier
@@ -1571,8 +1583,8 @@ private fun CompactToolProcessRow(tool: ToolCall) {
         }
         AnimatedVisibility(
             visible = open,
-            enter = expandVertically(animationSpec = motion.defaultExpand) + fadeIn(motion.defaultEffects),
-            exit = shrinkVertically(animationSpec = motion.defaultExpand) + fadeOut(motion.defaultEffects),
+            enter = motion.riseIn(),
+            exit = motion.riseOut(),
         ) {
             Box(
                 Modifier
@@ -1619,7 +1631,7 @@ fun WorkingIndicator(status: String? = null) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1628,7 +1640,7 @@ fun WorkingIndicator(status: String? = null) {
             strokeWidth = 1.4.dp,
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
         )
-        GradientRunningLabel(status ?: "思考中…")
+        GradientRunningLabel(status ?: "响应中")
         Spacer(Modifier.weight(1f))
         Text(
             text = formatElapsed(elapsed),

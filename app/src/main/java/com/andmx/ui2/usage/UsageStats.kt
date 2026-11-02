@@ -20,6 +20,11 @@ data class ModelUsage(
     val share: Float,
 )
 
+data class ToolCallUsage(
+    val name: String,
+    val count: Int,
+)
+
 data class UsageStats(
     val totalTokens: Long = 0L,
     val sessions: Int = 0,
@@ -41,6 +46,7 @@ data class UsageStats(
     val longestSessionMs: Long = 0L,
     /** UTC yyyy-MM-dd → tokens over all history, feeding the 52-week heatmap. */
     val heatmapDayTokens: Map<String, Long> = emptyMap(),
+    val toolCalls: List<ToolCallUsage> = emptyList(),
 )
 
 enum class UsageRange(val label: String, val days: Int) {
@@ -86,13 +92,18 @@ object UsageCalculator {
             val cutoff = dayStart(now) - (range.days - 1L) * 86_400_000L
 
             val allMessages = mutableListOf<Pair<MessageEntity, String>>()
+            val toolCounts = HashMap<String, Int>()
             var sessionCount = 0
             var longestSessionMs = 0L
             val lifetimeDayTokens = HashMap<String, Long>()
             var lifetimeTotalTokens = 0L
             conversations.forEach { conv ->
-                val msgs = runCatching { dao.messagesFor(conv.id) }.getOrDefault(emptyList())
-                    .filter { isUsageMessage(it) }
+                val raw = runCatching { dao.messagesFor(conv.id) }.getOrDefault(emptyList())
+                raw.filter { it.role == "tool" && it.createdAt >= cutoff }.forEach { msg ->
+                    val name = msg.toolName?.takeIf { it.isNotBlank() } ?: "tool"
+                    toolCounts[name] = (toolCounts[name] ?: 0) + 1
+                }
+                val msgs = raw.filter { isUsageMessage(it) }
                 if (msgs.isEmpty()) return@forEach
                 val hasUser = msgs.any { it.role == "user" }
                 if (!hasUser) return@forEach
@@ -114,6 +125,10 @@ object UsageCalculator {
                 }
             }
 
+            val toolCalls = toolCounts.entries
+                .sortedByDescending { it.value }
+                .take(8)
+                .map { ToolCallUsage(it.key, it.value) }
             if (allMessages.isEmpty()) {
                 return@withContext UsageStats(
                     loaded = true,
@@ -122,6 +137,7 @@ object UsageCalculator {
                     peakDayTokens = lifetimeDayTokens.values.maxOrNull() ?: 0L,
                     longestSessionMs = longestSessionMs,
                     heatmapDayTokens = lifetimeDayTokens,
+                    toolCalls = toolCalls,
                 )
             }
 
@@ -210,6 +226,7 @@ object UsageCalculator {
                 peakDayTokens = lifetimeDayTokens.values.maxOrNull() ?: 0L,
                 longestSessionMs = longestSessionMs,
                 heatmapDayTokens = lifetimeDayTokens,
+                toolCalls = toolCalls,
             )
         }
 

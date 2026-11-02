@@ -91,6 +91,9 @@ fun buildTimeline(
     reasonings: List<ReasoningItem> = emptyList(),
     goalVerifications: List<GoalVerifyItem> = emptyList(),
     showWorking: Boolean = false,
+    groupExplore: Boolean = true,
+    groupTerminal: Boolean = true,
+    groupChanges: Boolean = false,
 ): List<TimelineItem> {
     val raw = ArrayList<TimelineItem>(messages.size + tools.size + approvals.size + subAgents.size + reasonings.size + goalVerifications.size + 1)
     messages.forEach { raw += TimelineItem.Message(it) }
@@ -111,14 +114,14 @@ fun buildTimeline(
             i++
             continue
         }
-        if (item is TimelineItem.Tool && shouldGroupTool(item.tool)) {
-            val kind = ToolPresentation.groupKind(item.tool.name)
+        val kind = if (item is TimelineItem.Tool) enabledGroupKind(item.tool, groupExplore, groupTerminal, groupChanges) else null
+        if (item is TimelineItem.Tool && kind != null) {
             val batch = mutableListOf(item.tool)
             var j = i + 1
             while (j < ordered.size) {
                 val next = ordered[j]
-                if (next is TimelineItem.Tool && shouldGroupTool(next.tool) &&
-                    ToolPresentation.groupKind(next.tool.name) == kind
+                if (next is TimelineItem.Tool &&
+                    enabledGroupKind(next.tool, groupExplore, groupTerminal, groupChanges) == kind
                 ) {
                     batch += next.tool
                     j++
@@ -141,9 +144,29 @@ fun buildTimeline(
     return grouped
 }
 
-private fun shouldGroupTool(tool: ToolCall): Boolean {
-    if (tool.isRunning || tool.isError) return false
-    return ToolPresentation.shouldGroup(tool.name)
+private fun enabledGroupKind(
+    tool: ToolCall,
+    groupExplore: Boolean,
+    groupTerminal: Boolean,
+    groupChanges: Boolean,
+): ZCodeToolGroup.Class? {
+    val kind = ZCodeToolGroup.classify(tool) ?: return null
+    return when (kind) {
+        ZCodeToolGroup.Class.EXPLORE -> kind.takeIf { groupExplore }
+        ZCodeToolGroup.Class.EXECUTE -> kind.takeIf { groupTerminal }
+        ZCodeToolGroup.Class.CHANGES -> kind.takeIf { groupChanges }
+    }
+}
+
+fun firstReasoningPerTurn(messages: List<ChatMessage>, reasonings: List<ReasoningItem>): List<ReasoningItem> {
+    if (reasonings.isEmpty()) return reasonings
+    val userKeys = messages.filter { it.role == "user" }.map { it.sortKey }.sorted()
+    val kept = LinkedHashMap<Long, ReasoningItem>()
+    for (item in reasonings.sortedBy { it.sortKey }) {
+        val turn = userKeys.lastOrNull { it <= item.sortKey } ?: Long.MIN_VALUE
+        if (turn !in kept) kept[turn] = item
+    }
+    return kept.values.toList()
 }
 
 /**

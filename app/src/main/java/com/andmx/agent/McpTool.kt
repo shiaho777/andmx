@@ -12,6 +12,7 @@ class McpTool(
     private val desc: McpToolDesc,
 ) : Tool {
     override val name = sanitize("${client.serverName}_${desc.name}")
+    override val shouldDefer = true
     override val description = desc.description
     override val risk = ToolRisk.EXECUTE
     override val parameters: JsonObject =

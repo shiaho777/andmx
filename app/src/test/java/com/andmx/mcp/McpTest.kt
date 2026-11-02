@@ -50,4 +50,29 @@ class McpTest {
         assertEquals("npx -y @modelcontextprotocol/server-filesystem /root", cfgs[0].command)
         assertEquals("git", cfgs[1].name)
     }
+
+    @Test
+    fun keepsHeadersEnvTimeoutAndPasteShape() {
+        val pasted = """
+            {"mcpServers":{"docs":{"type":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer t"},"timeoutMs":15000,"protocolVersion":"legacy"}}}
+        """.trimIndent()
+        val cfg = McpServerConfig.parseDraft(pasted)
+        assertEquals("docs", cfg.name)
+        assertEquals("https://mcp.example.com/mcp", cfg.command)
+        assertEquals("Bearer t", cfg.headers["Authorization"])
+        assertEquals(15000L, cfg.timeoutMs)
+        assertEquals("legacy", cfg.protocolVersion)
+        assertEquals("2024-11-05", cfg.wireProtocol())
+        val round = McpServerConfig.parse(cfg.toLine()).single()
+        assertEquals(cfg.headers, round.headers)
+        assertEquals(cfg.timeoutMs, round.timeoutMs)
+
+        val stdio = McpServerConfig.parseDraft(
+            """{"memory":{"command":"npx","args":["-y","server-memory"],"env":{"TOKEN":"abc"}}}""",
+        )
+        assertEquals("npx", stdio.command)
+        assertEquals(listOf("-y", "server-memory"), stdio.args)
+        assertEquals("abc", stdio.env["TOKEN"])
+        assertEquals("npx -y server-memory", stdio.shellCommand())
+    }
 }

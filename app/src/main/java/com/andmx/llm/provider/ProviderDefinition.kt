@@ -119,6 +119,10 @@ data class ModelDefinition(
     val outputModalities: List<String> = listOf("text"),
     /** How this model exposes reasoning control, or null if not adjustable. */
     val reasoning: ReasoningConfig? = null,
+    val supportsToolCall: Boolean = true,
+    val supportsJsonSchemaOutput: Boolean = false,
+    val supportsNativeWebSearch: Boolean = false,
+    val supportsMidConversationSystem: Boolean = false,
 ) {
     val supportsVision: Boolean get() = "image" in inputModalities
     /** Convenience: does this model accept any reasoning parameter at all. */

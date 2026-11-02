@@ -1,0 +1,31 @@
+{
+  "declaredArtifacts": [],
+  "diagnostics": [
+    {
+      "code": 1184,
+      "column": 1,
+      "line": 6,
+      "message": "`export` is not allowed in a workflow script: the script is compiled inside a function body. Remove `export` — the workflow's output is its final `return` value."
+    },
+    {
+      "code": 2322,
+      "column": 9,
+      "line": 7,
+      "message": "Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "code": 2345,
+      "column": 15,
+      "line": 8,
+      "message": "Argument of type '{}' is not assignable to parameter of type 'string'."
+    },
+    {
+      "code": 2304,
+      "column": 10,
+      "line": 9,
+      "message": "Cannot find name 'undeclaredThing'."
+    }
+  ],
+  "modelReferences": [],
+  "ok": false
+}

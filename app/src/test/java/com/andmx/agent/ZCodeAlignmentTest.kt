@@ -469,7 +469,7 @@ class ZCodeAlignmentTest {
         assertEquals(1 + AgentEngine.MAX_OUTPUT_TOKEN_CONTINUATIONS, calls)
         assertTrue(events.any { it is AgentEvent.Failed })
         assertEquals(
-            AgentEngine.MAX_OUTPUT_TOKEN_CONTINUATIONS,
+            0,
             engine.snapshotHistory().count {
                 it.role == "user" && it.content == AgentEngine.OUTPUT_TOKEN_CONTINUE_PROMPT
             },
@@ -538,5 +538,70 @@ class ZCodeAlignmentTest {
             0,
             engine.snapshotHistory().count { it.content == AgentEngine.OUTPUT_TOKEN_CONTINUE_PROMPT },
         )
+    }
+
+    @Test
+    fun rawOutputLimitReasonContinues() = runTest {
+        var calls = 0
+        val llm = object : com.andmx.llm.LlmApi {
+            override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> {
+                calls += 1
+                return Result.success(
+                    ApiMessage(
+                        role = "assistant",
+                        content = "part$calls",
+                        finishReason = if (calls == 1) "max_output_tokens" else null,
+                    ),
+                )
+            }
+        }
+        val events = AgentEngine(tools = emptyList(), client = llm).runTurn(
+            com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "go",
+        ).toList()
+        assertEquals(2, calls)
+        assertTrue(events.none { it is AgentEvent.Failed })
+        assertTrue(events.last() is AgentEvent.Done)
+    }
+
+    @Test
+    fun stopTurnCancelsLaterGroupsWithoutAnotherModelStep() = runTest {
+        val ran = mutableListOf<String>()
+        fun tool(toolName: String, stop: Boolean) = object : Tool {
+            override val name = toolName
+            override val description = ""
+            override val parameters = buildJsonObject { }
+            override val concurrentSafe = false
+            override val stopTurnOnSuccess = stop
+            override suspend fun execute(args: JsonObject): ToolResult {
+                ran += toolName
+                return ToolResult("ok-$toolName")
+            }
+        }
+        var calls = 0
+        val llm = object : com.andmx.llm.LlmApi {
+            override suspend fun chat(request: com.andmx.llm.ChatRequest): Result<ApiMessage> {
+                calls += 1
+                return Result.success(
+                    ApiMessage(
+                        role = "assistant",
+                        toolCalls = listOf(
+                            ApiToolCall(id = "c0", function = ApiFunctionCall("Stop", "{}")),
+                            ApiToolCall(id = "c1", function = ApiFunctionCall("Later", "{}")),
+                        ),
+                    ),
+                )
+            }
+        }
+        val events = AgentEngine(
+            tools = listOf(tool("Stop", stop = true), tool("Later", stop = false)),
+            client = llm,
+        ).runTurn(com.andmx.settings.ProviderSettings(model = "m"), fakeTurn(), "go").toList()
+        assertEquals(1, calls)
+        assertEquals(listOf("Stop"), ran)
+        assertTrue(events.none { it is AgentEvent.Failed })
+        assertTrue(events.last() is AgentEvent.Done)
+        val later = events.filterIsInstance<AgentEvent.ToolFinished>().single { it.name == "Later" }
+        assertTrue(later.isError)
+        assertEquals(ToolScheduler.TOOL_CANCELLED_AFTER_TURN_STOP, later.output)
     }
 }

@@ -1,5 +1,7 @@
 package com.andmx.ui2.files
 
+import com.andmx.ui2.settings.tr
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -320,8 +322,7 @@ private fun FileTreeShell(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(8.dp))
-            Text(
-                "返回任务",
+            Text(tr("返回任务"),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -415,8 +416,7 @@ private fun FileTreeSearchField(
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (query.isEmpty()) {
-                        Text(
-                            "搜索文件...",
+                        Text(tr("搜索文件..."),
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                             color = hint,
                         )
