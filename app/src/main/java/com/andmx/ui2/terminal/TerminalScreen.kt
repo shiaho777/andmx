@@ -38,13 +38,10 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,7 +54,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andmx.term.TerminalSession
 
 private data class SpecialKey(val label: String, val bytes: String)
 
@@ -89,35 +85,20 @@ fun TerminalScreen(
     val terminalFontFamily = remember(appSettings.terminalFontFamily) {
         resolveTerminalFontFamily(appSettings.terminalFontFamily)
     }
-    val sessions = remember { mutableStateListOf<TerminalSession>() }
-    var activeIndex by remember { mutableIntStateOf(0) }
+    val sessions = TerminalSessionRegistry.sessions
+    val activeIndex = TerminalSessionRegistry.activeIndex
 
     fun newSession() {
-        val s = TerminalSession(context)
-        sessions.add(s)
-        activeIndex = sessions.lastIndex
-        runCatching { s.start() }
+        TerminalSessionRegistry.newSession(context)
     }
 
     fun closeSession(index: Int) {
-        if (index !in sessions.indices) return
-        val wasActive = index == activeIndex
-        sessions[index].destroy()
-        sessions.removeAt(index)
-        activeIndex = when {
-            sessions.isEmpty() -> 0
-            index < activeIndex -> (activeIndex - 1).coerceAtLeast(0)
-            wasActive -> activeIndex.coerceAtMost(sessions.lastIndex)
-            else -> activeIndex.coerceAtMost(sessions.lastIndex)
-        }
-        if (sessions.isEmpty()) newSession()
+        TerminalSessionRegistry.close(index)
+        if (TerminalSessionRegistry.sessions.isEmpty()) newSession()
     }
 
     LaunchedEffect(Unit) {
-        if (sessions.isEmpty()) newSession()
-    }
-    DisposableEffect(Unit) {
-        onDispose { sessions.forEach { it.destroy() } }
+        TerminalSessionRegistry.ensureSession(context)
     }
 
     val tabCount = sessions.size
@@ -129,7 +110,13 @@ fun TerminalScreen(
     }
 
     val active = sessions.getOrNull(selectedTab)
-    val state = active?.let { it.state.collectAsState().value }
+    if (active == null) {
+        Box(Modifier.fillMaxSize().background(colors.background), contentAlignment = Alignment.Center) {
+            Text(tr("无终端会话"), color = colors.chromeMuted)
+        }
+        return
+    }
+    val state by active.state.collectAsState()
 
     Column(
         modifier = modifier
@@ -171,7 +158,7 @@ fun TerminalScreen(
                     repeat(tabCount) { i ->
                         Tab(
                             selected = i == selectedTab,
-                            onClick = { activeIndex = i },
+                            onClick = { TerminalSessionRegistry.activeIndex = i },
                             selectedContentColor = colors.chromeContent,
                             unselectedContentColor = colors.chromeMuted,
                             text = {
@@ -201,13 +188,6 @@ fun TerminalScreen(
         }
 
         HorizontalDivider(color = colors.keyBackground)
-
-        if (state == null || active == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(tr("无终端会话"), color = colors.chromeMuted)
-            }
-            return@Column
-        }
 
         TerminalView(
             screen = state.screenText,

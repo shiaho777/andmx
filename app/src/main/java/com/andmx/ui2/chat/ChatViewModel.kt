@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import com.andmx.ui2.settings.tr
 
+import com.andmx.agent.CustomCommandExpander
 import com.andmx.agent.SlashCommands
 import com.andmx.agent.SlashResult
 import com.andmx.agent.WorkflowPrompt
@@ -37,6 +38,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** 执行期增量输出的 UI 上限；Final 结果会覆盖成完整内容。 */
+private const val MAX_LIVE_TOOL_OUTPUT_CHARS = 64_000
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -163,6 +167,9 @@ class ChatViewModel @Inject constructor(
     private val _pluginSlashSpecs = MutableStateFlow<List<SlashCommands.Spec>>(emptyList())
     val pluginSlashSpecs: StateFlow<List<SlashCommands.Spec>> = _pluginSlashSpecs.asStateFlow()
 
+    private val _customSlashSpecs = MutableStateFlow<List<SlashCommands.Spec>>(emptyList())
+    val customSlashSpecs: StateFlow<List<SlashCommands.Spec>> = _customSlashSpecs.asStateFlow()
+
     /** 供 @ 联想的子代理目录（内置 + 用户自定义，含启用态）。 */
     val subAgentCatalog: StateFlow<List<com.andmx.settings.CustomSubAgent>> =
         combine(settingsStore.customSubAgents, settingsStore.subagentState) { agents, state ->
@@ -263,6 +270,7 @@ class ChatViewModel @Inject constructor(
                         content = msg.content,
                         sortKey = msg.createdAt,
                         createdAt = msg.createdAt,
+                        imageUrls = decodeImageUrls(msg.imageUrlsJson).orEmpty(),
                     )
                     "assistant" -> msgs += ChatMessage(
                         id = msg.id,
@@ -354,6 +362,17 @@ class ChatViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch {
+            settingsStore.customCommands.collect { commands ->
+                _customSlashSpecs.value = commands.map { c ->
+                    SlashCommands.Spec(
+                        name = "/" + c.name.removePrefix("/"),
+                        desc = c.description.ifBlank { "自定义命令" },
+                        keywords = listOf("custom", "command"),
+                    )
+                }
+            }
+        }
         viewModelScope.launch {
             var previous = emptySet<Long>()
             controller.runningIds.collect { ids ->
@@ -950,7 +969,16 @@ class ChatViewModel @Inject constructor(
                     viewModelScope.launch { sendMessage(prompt) }
                     return true
                 }
-                appendLocalAssistant("未知命令：${cmd.name}。输入 /help 查看可用命令。")
+                viewModelScope.launch {
+                    val custom = settingsStore.customCommands.firstOrNull()
+                        ?.firstOrNull { it.name.removePrefix("/").equals(name, ignoreCase = true) }
+                    if (custom != null) {
+                        val args = text.substringAfter(' ', missingDelimiterValue = "").trim()
+                        sendMessage(CustomCommandExpander.expand(custom.prompt, args))
+                    } else {
+                        appendLocalAssistant("未知命令：${cmd.name}。输入 /help 查看可用命令。")
+                    }
+                }
                 return true
             }
             SlashResult.Handoff -> {
@@ -2556,6 +2584,7 @@ class ChatViewModel @Inject constructor(
                     content = event.text,
                     sortKey = key,
                     createdAt = key,
+                    imageUrls = event.imageUrls,
                 )
             }
             is ChatEvent.ReasoningChunk -> {
@@ -2736,6 +2765,18 @@ class ChatViewModel @Inject constructor(
                         isRunning = true,
                         sortKey = nextProcessSortKey(),
                     )
+                }
+            }
+            is ChatEvent.ToolOutputDelta -> {
+                if (event.text.isNotEmpty()) {
+                    val current = _toolCalls.value.toMutableList()
+                    val index = current.indexOfFirst { it.id == event.id }
+                    if (index >= 0) {
+                        val merged = (current[index].output.orEmpty() + event.text)
+                            .takeLast(MAX_LIVE_TOOL_OUTPUT_CHARS)
+                        current[index] = current[index].copy(output = merged)
+                        _toolCalls.value = current
+                    }
                 }
             }
             is ChatEvent.ToolCallFinished -> {

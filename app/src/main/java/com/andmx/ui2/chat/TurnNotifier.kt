@@ -53,7 +53,7 @@ object TurnNotifier {
             val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
                 ?.apply {
                     addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    putExtra("conversationId", conversationId)
+                    putExtra(com.andmx.ui2.MainActivity2.EXTRA_CONVERSATION_ID, conversationId)
                 }
             val pi = launch?.let {
                 PendingIntent.getActivity(

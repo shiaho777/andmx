@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -122,15 +123,21 @@ private fun UserProcessBubble(
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
-            Text(
-                text = message.content,
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp),
-                color = if (isEditing) {
-                    MaterialTheme.colorScheme.onTertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                },
-            )
+            if (message.imageUrls.isNotEmpty()) {
+                ScreenshotStrip(message.imageUrls)
+                if (message.content.isNotBlank()) Spacer(Modifier.height(6.dp))
+            }
+            if (message.content.isNotBlank()) {
+                Text(
+                    text = message.content,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp),
+                    color = if (isEditing) {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    },
+                )
+            }
         }
         if (message.content.isNotBlank() && (onCopy != null || onEdit != null || onQuote != null || message.createdAt > 0L || message.sortKey > 0L)) {
             UserActionBar(

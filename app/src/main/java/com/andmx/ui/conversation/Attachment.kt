@@ -50,7 +50,8 @@ object Attachments {
     /** Read a SAF/content [uri] into an [Attachment]. */
     fun fromUri(context: Context, uri: Uri): Attachment? = runCatching {
         val name = displayName(context, uri) ?: uri.lastPathSegment ?: "file"
-        val mime = context.contentResolver.getType(uri) ?: ""
+        val mime = context.contentResolver.getType(uri)?.takeIf { it.isNotBlank() }
+            ?: mimeFromName(name)
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         if (mime.startsWith("image/") && bytes.size <= IMAGE_LIMIT) {
             val prepared = compressImageForModel(bytes, mime)
@@ -122,6 +123,12 @@ object Attachments {
         scaled.recycle()
         return PreparedImage(out.toByteArray(), "image/jpeg")
     }
+
+    /** file:// URI（例如从系统分享复制到 cache 的图片）没有 ContentResolver MIME。 */
+    private fun mimeFromName(name: String): String =
+        android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
+            .orEmpty()
 
     private fun displayName(context: Context, uri: Uri): String? = runCatching {
         context.contentResolver.query(uri, null, null, null, null)?.use { c ->

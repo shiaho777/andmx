@@ -909,7 +909,7 @@ private fun argsFieldRows(raw: String, keys: List<String>): List<Pair<String, St
 }
 
 @Composable
-private fun ScreenshotStrip(urls: List<String>) {
+internal fun ScreenshotStrip(urls: List<String>) {
     var zoomIndex by remember { mutableStateOf<Int?>(null) }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -970,7 +970,7 @@ private fun ScreenshotStrip(urls: List<String>) {
     }
 }
 
-private fun decodeDataImage(url: String): ImageBitmap? = runCatching {
+internal fun decodeDataImage(url: String): ImageBitmap? = runCatching {
     val b64 = url.substringAfter("base64,", url)
     val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()

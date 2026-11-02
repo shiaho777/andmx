@@ -1,7 +1,10 @@
 package com.andmx.ui2.chat
 
 sealed class ChatEvent {
-    data class UserMessage(val text: String) : ChatEvent()
+    data class UserMessage(
+        val text: String,
+        val imageUrls: List<String> = emptyList(),
+    ) : ChatEvent()
     data class AssistantChunk(val text: String) : ChatEvent()
     data class ReasoningChunk(val text: String) : ChatEvent()
     data object ReasoningDone : ChatEvent()
@@ -13,6 +16,8 @@ sealed class ChatEvent {
         val args: String,
     ) : ChatEvent()
     data class ToolCallStarted(val id: String, val name: String, val args: String) : ChatEvent()
+    /** Bash/PTY 等执行期增量输出；最终结果仍由 ToolCallFinished 覆盖。 */
+    data class ToolOutputDelta(val id: String, val text: String) : ChatEvent()
     data class ToolCallFinished(
         val id: String,
         val output: String,
@@ -75,6 +80,8 @@ data class ChatMessage(
     val completedAt: Long = 0L,
     /** 0 无, 1 赞, -1 踩（上游 assistant-feedback）。 */
     val feedback: Int = 0,
+    /** 用户消息附带的图片 data URL；工具截图仍走 ToolCall.imageUrls。 */
+    val imageUrls: List<String> = emptyList(),
 )
 
 data class ToolCall(
