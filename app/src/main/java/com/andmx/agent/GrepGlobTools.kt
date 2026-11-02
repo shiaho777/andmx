@@ -1,7 +1,9 @@
 package com.andmx.agent
 
 import android.content.Context
+import com.andmx.workspace.ProjectManager
 import com.andmx.workspace.WorkspaceAccess
+import com.andmx.workspace.WorkspaceIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -177,6 +179,8 @@ class GrepTool(
     private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
 ) : Tool {
     private val access = WorkspaceAccess(context)
+    private val projectManager = ProjectManager(context)
+    private val index = WorkspaceIndex.get(context)
     override val name = "Grep"
     override val description = GREP_TOOL_DESCRIPTION
     override val risk = ToolRisk.READ
@@ -284,8 +288,50 @@ class GrepTool(
         if (!rootFile.exists()) {
             return@withContext ToolResult("File not found: $searchPath", isError = true)
         }
-        if (!rootFile.isFile && !rootFile.isDirectory) {
+        if (!rootFile.isDirectory && !rootFile.isFile) {
             return@withContext ToolResult("Grep search path must be a file or directory: $searchPath", isError = true)
+        }
+        val indexedHits = runCatching {
+            if (!rootFile.isDirectory || multiline || onlyMatching || type != null) {
+                return@runCatching null
+            }
+            if (mode == "content" && (before > 0 || after > 0)) return@runCatching null
+            val hostRoot = projectManager.hostPath.value?.trim()?.trimEnd('/')
+                ?: return@runCatching null
+            val guestRoot = projectManager.guestMountPath
+            val searchHost = when {
+                searchPath == guestRoot -> hostRoot
+                searchPath.startsWith("$guestRoot/") ->
+                    File(hostRoot, searchPath.removePrefix("$guestRoot/")).absolutePath
+                else -> return@runCatching null
+            }
+            val max = when {
+                headLimit == 0 -> 2_000
+                headLimit != null -> headLimit
+                else -> DEFAULT_GREP_HEAD_LIMIT
+            }
+            index.grepIndexed(
+                root = hostRoot,
+                pattern = pattern.trim(),
+                pathFilter = searchHost,
+                glob = glob,
+                ignoreCase = ignoreCase,
+                maxResults = max,
+                offset = offset,
+                outputMode = mode,
+            )
+        }.getOrNull()
+        if (indexedHits != null) {
+            val cwd = cwdProvider().ifBlank { access.guestCwd() }
+            return@withContext formatIndexedGrep(
+                hits = indexedHits,
+                mode = mode,
+                showLineNumbers = showLineNumbers,
+                guestRoot = projectManager.guestMountPath,
+                cwd = cwd,
+                headLimit = headLimit,
+                offset = offset,
+            )
         }
         val globRoot = if (rootFile.isDirectory) searchPath else searchPath.substringBeforeLast('/').ifBlank { "/" }
         val walked = mutableListOf<Walked>()
@@ -322,6 +368,8 @@ class GlobTool(
     private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
 ) : Tool {
     private val access = WorkspaceAccess(context)
+    private val projectManager = ProjectManager(context)
+    private val index = WorkspaceIndex.get(context)
     override val name = "Glob"
     override val description = GLOB_TOOL_DESCRIPTION
     override val risk = ToolRisk.READ
@@ -363,6 +411,30 @@ class GlobTool(
         }
         if (!rootFile.isDirectory) {
             return@withContext ToolResult("Glob search path must be a directory: $searchPath", isError = true)
+        }
+        val indexedMatches = runCatching {
+            val hostRoot = projectManager.hostPath.value?.trim()?.trimEnd('/')
+                ?: return@runCatching null
+            val guestRoot = projectManager.guestMountPath
+            if (searchPath != guestRoot && !searchPath.startsWith("$guestRoot/")) {
+                return@runCatching null
+            }
+            val all = index.globIndexed(hostRoot, pattern, 2_000) ?: return@runCatching null
+            val prefix = if (searchPath == guestRoot) {
+                ""
+            } else {
+                searchPath.removePrefix("$guestRoot/").trim('/')
+            }
+            all.filter { prefix.isEmpty() || it == prefix || it.startsWith("$prefix/") }
+        }.getOrNull()
+        if (indexedMatches != null) {
+            val cwd = cwdProvider().ifBlank { access.guestCwd() }
+            val names = indexedMatches.take(MAX_GLOB_RESULTS).map {
+                toDisplayPath("${projectManager.guestMountPath}/$it", cwd)
+            }
+            return@withContext ToolResult(
+                formatGlobModelContent(names, indexedMatches.size > MAX_GLOB_RESULTS),
+            )
         }
         val walked = mutableListOf<Walked>()
         walkFiles(searchPath, rootFile, walked, mutableSetOf(), followRoot = true)
@@ -437,6 +509,81 @@ private fun formatGrep(
             numMatches = totalMatches,
             appliedLimit = limited.appliedLimit,
             appliedOffset = limited.appliedOffset,
+        ),
+    )
+}
+
+internal fun formatIndexedGrep(
+    hits: List<String>,
+    mode: String,
+    showLineNumbers: Boolean,
+    guestRoot: String,
+    cwd: String,
+    headLimit: Int?,
+    offset: Int,
+): ToolResult {
+    val root = guestRoot.trimEnd('/')
+    val toGuest = { rel: String -> "$root/$rel" }
+    val appliedOffset = offset.takeIf { it > 0 }
+    if (mode == "files_with_matches") {
+        val names = hits.map { toDisplayPath(toGuest(it), cwd) }
+        return ToolResult(
+            formatGrepModelContent(
+                mode = mode,
+                content = null,
+                filenames = names,
+                numFiles = names.size,
+                numMatches = names.size,
+                appliedLimit = headLimit,
+                appliedOffset = appliedOffset,
+            ),
+        )
+    }
+    if (mode == "count") {
+        var total = 0
+        val lines = hits.mapNotNull { raw ->
+            val idx = raw.lastIndexOf(':')
+            if (idx <= 0) return@mapNotNull null
+            val count = raw.substring(idx + 1).toIntOrNull() ?: return@mapNotNull null
+            total += count
+            val rel = raw.substring(0, idx)
+            "${toDisplayPath(toGuest(rel), cwd)}:$count"
+        }
+        return ToolResult(
+            formatGrepModelContent(
+                mode = mode,
+                content = lines.joinToString("\n"),
+                filenames = emptyList(),
+                numFiles = lines.size,
+                numMatches = total,
+                appliedLimit = headLimit,
+                appliedOffset = appliedOffset,
+            ),
+        )
+    }
+    val lines = hits.mapNotNull { raw ->
+        val first = raw.indexOf(':')
+        val second = if (first >= 0) raw.indexOf(':', first + 1) else -1
+        if (first <= 0 || second < 0) return@mapNotNull null
+        val rel = raw.substring(0, first)
+        val lineNo = raw.substring(first + 1, second)
+        val text = raw.substring(second + 1)
+        val display = toDisplayPath(toGuest(rel), cwd)
+        if (showLineNumbers) "$display:$lineNo:$text" else "$display:$text"
+    }
+    val numFiles = hits.asSequence()
+        .mapNotNull { raw -> raw.substringBefore(':').takeIf { it.isNotBlank() } }
+        .distinct()
+        .count()
+    return ToolResult(
+        formatGrepModelContent(
+            mode = mode,
+            content = lines.joinToString("\n"),
+            filenames = emptyList(),
+            numFiles = numFiles,
+            numMatches = lines.size,
+            appliedLimit = headLimit,
+            appliedOffset = appliedOffset,
         ),
     )
 }

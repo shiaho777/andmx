@@ -51,6 +51,7 @@ class WorkspaceIndex private constructor(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private val jobs = ConcurrentHashMap<String, Job>()
+    private val dirtyRoots = ConcurrentHashMap.newKeySet<String>()
     private val rootDir = File(app.filesDir, "workspace-index").also { it.mkdirs() }
 
     private val _status = MutableStateFlow(WorkspaceIndexStatus())
@@ -79,6 +80,7 @@ class WorkspaceIndex private constructor(context: Context) {
         scope.launch {
             mutex.withLock {
                 jobs.remove(root)?.cancel()
+                dirtyRoots.remove(root)
                 dirFor(root).deleteRecursively()
                 _status.value = WorkspaceIndexStatus(
                     rootPath = root,
@@ -121,12 +123,39 @@ class WorkspaceIndex private constructor(context: Context) {
         snap.files
     }
 
+    /**
+     * Mark a local workspace dirty after the agent (or an editor) changes a
+     * file, then rebuild in the background. Grep/Glob fall back to the
+     * filesystem while the rebuild runs, so a stale index never answers.
+     */
+    fun invalidatePath(hostPath: String?, root: String? = null) {
+        val workspaceRoot = root?.trim()?.trimEnd('/')
+            ?.takeIf { it.isNotBlank() && !it.startsWith("ssh://") }
+            ?: ProjectManager(app).hostPath.value?.trim()?.trimEnd('/')
+                ?.takeIf { it.isNotBlank() && !it.startsWith("ssh://") }
+            ?: return
+        val rootPath = runCatching { File(workspaceRoot).canonicalPath }.getOrDefault(workspaceRoot)
+        val target = hostPath?.let { runCatching { File(it).canonicalPath }.getOrNull() } ?: return
+        if (target != rootPath && !target.startsWith("$rootPath/")) return
+        dirtyRoots += workspaceRoot
+        scope.launch {
+            kotlinx.coroutines.delay(750)
+            ensureForRoot(workspaceRoot, force = true)
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun isDirtyForTests(root: String): Boolean =
+        root.trimEnd('/') in dirtyRoots
+
     suspend fun globIndexed(
         root: String,
         pattern: String,
         max: Int,
     ): List<String>? = withContext(Dispatchers.IO) {
-        val files = listIndexedFiles(root) ?: return@withContext null
+        val normalized = root.trimEnd('/')
+        if (normalized in dirtyRoots) return@withContext null
+        val files = listIndexedFiles(normalized) ?: return@withContext null
         val regex = globToRegex(pattern)
         files.asSequence()
             .filter { regex.matches(it) || regex.matches(it.substringAfterLast('/')) }
@@ -145,6 +174,7 @@ class WorkspaceIndex private constructor(context: Context) {
         outputMode: String = "content",
     ): List<String>? = withContext(Dispatchers.IO) {
         val normalized = root.trimEnd('/')
+        if (normalized in dirtyRoots) return@withContext null
         val settings = store.settings.first()
         if (!settings.instantGrep) return@withContext null
         val snap = readSnapshot(normalized) ?: return@withContext null
@@ -245,6 +275,7 @@ class WorkspaceIndex private constructor(context: Context) {
                 phase = WorkspaceIndexPhase.IDLE,
                 message = "索引已关闭",
             )
+            dirtyRoots.remove(root)
             return
         }
         if (!File(root).isDirectory) {
@@ -292,6 +323,7 @@ class WorkspaceIndex private constructor(context: Context) {
                 instantGrep = existing.instantGrep,
                 message = statusMessage(existing, settings) + " · 已是最新",
             )
+            dirtyRoots.remove(root)
             return
         }
 
@@ -347,6 +379,7 @@ class WorkspaceIndex private constructor(context: Context) {
                 message = "文件数超过 $limit，已跳过自动索引",
                 instantGrep = settings.instantGrep,
             )
+            dirtyRoots.remove(root)
             dirFor(root).deleteRecursively()
             return
         }
@@ -431,6 +464,7 @@ class WorkspaceIndex private constructor(context: Context) {
             instantGrep = snap.instantGrep,
             message = statusMessage(snap, settings),
         )
+        dirtyRoots.remove(root)
     }
 
     private fun statusMessage(snap: IndexSnapshot, settings: ProviderSettings): String {

@@ -25,6 +25,16 @@ private fun JsonObject.requireWirePath(): ToolResult? {
     return null
 }
 
+internal fun invalidateWorkspaceIndex(
+    context: Context,
+    access: WorkspaceAccess,
+    guestPath: String,
+) {
+    val host = runCatching { access.hostFile(guestPath) }.getOrNull() ?: return
+    com.andmx.workspace.WorkspaceIndex.get(context)
+        .invalidatePath(host.absolutePath, access.hostPath)
+}
+
 private fun JsonObject.semanticBool(key: String): Boolean {
     val prim = this[key] as? JsonPrimitive ?: return false
     prim.booleanOrNull?.let { return it }
@@ -395,6 +405,7 @@ class WriteFileTool(
     private val conversationId: Long = 0L,
 ) : Tool {
     private val access = WorkspaceAccess(context)
+    private val appContext = context.applicationContext
     override val name = "Write"
     override val description = WRITE_PROVIDER_DESCRIPTION
     override val risk = ToolRisk.WRITE
@@ -435,6 +446,7 @@ class WriteFileTool(
             val old = if (existed) access.readText(resolved) else ""
             access.writeText(resolved, content)
             ChangeTracker.record(conversationId, resolved, old, content, existedBefore = existed)
+            invalidateWorkspaceIndex(appContext, access, resolved)
             rememberWritten(resolved, content, ReadFileState.WRITE_TOOL)
             ToolResult(formatWriteModelContent(path, created = !existed))
         }.getOrElse { ToolResult("写入失败: ${it.message}", isError = true) }
@@ -453,6 +465,7 @@ class EditFileTool(
     private val conversationId: Long = 0L,
 ) : Tool {
     private val access = WorkspaceAccess(context)
+    private val appContext = context.applicationContext
     override val name = "Edit"
     override val description = EDIT_PROVIDER_DESCRIPTION
     override val risk = ToolRisk.WRITE
@@ -503,6 +516,7 @@ class EditFileTool(
                 if (oldStr.isEmpty()) {
                     access.writeText(resolved, newStr)
                     ChangeTracker.record(conversationId, resolved, "", newStr, existedBefore = false)
+                    invalidateWorkspaceIndex(appContext, access, resolved)
                     rememberWritten(resolved, newStr, "edit_file")
                     return@runCatching ToolResult(formatEditModelContent(path, replaceAll))
                 }
@@ -527,6 +541,7 @@ class EditFileTool(
                 if (blocked != null) return@runCatching blocked
                 access.writeText(resolved, newStr)
                 ChangeTracker.record(conversationId, resolved, original, newStr, existedBefore = true)
+                invalidateWorkspaceIndex(appContext, access, resolved)
                 rememberWritten(resolved, newStr, "edit_file")
                 return@runCatching ToolResult(formatEditModelContent(path, replaceAll))
             }
@@ -561,6 +576,7 @@ class EditFileTool(
             val updated = if (replaceAll) original.replace(actualOld, actualNew) else original.replaceFirst(actualOld, actualNew)
             access.writeText(resolved, updated)
             ChangeTracker.record(conversationId, resolved, original, updated, existedBefore = true)
+            invalidateWorkspaceIndex(appContext, access, resolved)
             rememberWritten(resolved, updated, "edit_file")
             ToolResult(formatEditModelContent(path, replaceAll))
         }.getOrElse { ToolResult("编辑失败: ${it.message}", isError = true) }
