@@ -385,13 +385,14 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
    下一步是把 discovered 集合写进压缩/恢复元数据，并评估子代理是否也接入同一机制。
 4. **P1｜`js` 工具语义**：决定是「Android 不提供 host REPL（保持 `webview_js` 并改文档口径）」，还是补一个受限的 JS 执行面。当前是隐性偏离，模型侧描述已自认不同。
 5. **P1｜subagent 分层**：至少补 `tool-policy`（子代理工具裁剪）与 `message-steering`（运行中插话，`AgentEngineSteerTest` 已覆盖引擎侧，需核对编排侧是否等价）。
-6. **P2｜hooks 工作区审核流**与 `memory` 的 recall/dream 分支：影响高级用法，非主链路。
+6. ~~**P2｜hooks 工作区审核流**~~（已完成，2026-11-02）：`.zcode/hooks.json` 发现、SHA-256 信任固定、HooksPage 审查/撤销、远程 SSH 执行。
+   ~~**memory recall/dream**~~（已完成，2026-11-02）：query-aware recall 与 Dream 去重/限流。
 
 ## 七、待核对项
 
 - `Agent` 工具名缺失对第三方插件指令的影响：若插件 prompt 里写 "use the Agent tool"，AndMX 只有 `Task` 别名可命中。
 - `multi_agent` 的上游对应物：上游似无此工具名，需确认是 AndMX 自造还是多代理并发入口的替代名。
-- `memory` 的 `recall/` 检索路径是否被 `MemorySystem.kt` 以另一种形式覆盖（当前仅按文件数判断，未逐行核对）。
+- ~~`memory` 的 `recall/` 检索路径是否被 `MemorySystem.kt` 以另一种形式覆盖~~（已确认并补齐：`MemoryRecall` + `recallFragment`）。
 
 ## 八、2026-11-02 移动端闭环进度
 
@@ -403,16 +404,31 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **自定义命令/AUTO**：自定义命令进入斜杠补全并支持 `$ARGUMENTS`；AUTO 改为风险分级，不再是必拒绝占位。
 - **设置/命令中心**：设置首页搜索 + 关于页；命令中心可搜命令、最近任务、索引文件。
 - **后台任务/草稿**：后台 shell 任务面板（状态/输出/停止）；Composer 文本按 conversationId 持久化。
-- **文件预览**：图片与 PDF（前 10 页）只读预览。
+- **文件预览**：图片、PDF（前 10 页）、音频/视频、docx/pptx/xlsx 文本提取；Office 另可交给系统应用打开。
 - **Git**：fetch、`pull --ff-only`、仓库级提交身份、提交前逐文件 diff。
 - **审批**：子代理与工作流 actor 接入会话审批；`permissionMode` 真正映射为权限策略，父会话 Plan 时强制只读。
+- **会话状态**：`workspace_changes`（DB v19）按会话持久化文件快照；fork 复制、rewind/edit 清空旧队列；
+  每个 task 恢复队列与滚动位置；任意 assistant 轮可重试；子代理 `maxTurns` 硬限制。
+- **审批恢复**：`permissionGrantsJson`（DB v20）持久化 SESSION_ALLOW/DENY，进程重启后仍生效。
+- **Hooks 信任**：发现 `.zcode/hooks.json`；信任绑定文件 SHA-256，改动即失效；HooksPage 可审查/信任/撤销；
+  远程工作区通过 SSH 执行。
+- **记忆 recall/dream**：按请求打分注入相关记忆；Dream 去重并限流原始记忆，重建 MEMORY.md 与摘要；
+  记忆页可巩固、整理与删除单条。
+- **真实用量**：优先读取 rollout 的 `token_usage` 与 `turn_context.model`；旧会话回退到消息估算。
+- **变更摘要**：`DiffEngine.lineStats` 先裁公共前后缀再算 LCS，大窗口回退多重集；文件改动弹窗显示真实 +A/-D。
+- **MCP resources/prompts**：4 个只读工具接入 agent；stdio/HTTP 都支持 list/read/subscribe 与 prompts list/get；
+  设置页测试连接显示工具/资源/提示数量。
+- **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
+- **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
+- **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
 
 仍缺（按优先级）：
 
 1. **动态工作流执行引擎**：`prepare` 已能产出 lowered/askSpecs，但设备侧还缺 WebView iframe realm、
    Kotlin `WorkflowDriver`/`JournalStorePort` 和 run 启动/恢复接线。`CreateWorkflow` 目前只做静态分析。
-2. **MCP OAuth/resources/prompts**：OAuth 仍只能保存配置；resources/prompts 无 UI/工具接线。
-3. **真实用量/遥测**：使用页仍按字符数估算；`ModelCallTrace` 只在内存保留最近 50 次。
-4. **Cron 进程死亡后的执行**：当前进程不在时只通知，不执行。
-5. **工作区索引接入 Grep/Glob**：索引目前只服务文件联想与文件搜索。
-6. **Office/PPTX 预览**、**逐文件 Git diff 之外的 merge 冲突处理**、**i18n 完整覆盖**。
+2. **MCP OAuth**：授权码 + PKCE 的移动端回调仍未接；当前只能保存 OAuth 配置。
+3. **工作区索引接入 Grep/Glob**：索引目前只服务文件联想与文件搜索。
+4. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
+5. **i18n 完整覆盖**：设置与聊天主链路已覆盖，长尾页面仍有硬编码中文。
+6. **遥测保留**：`ModelCallTrace` 只在内存保留最近 50 次，尚未落盘。
+
