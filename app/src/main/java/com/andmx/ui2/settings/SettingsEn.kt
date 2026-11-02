@@ -22,7 +22,7 @@ internal val settingsEn: Map<String, String> = mapOf(
     "浏览插件市场并安装。官方目录与 AndMX / Claude 市场对齐。" to "Browse and install plugins. The official catalog matches the AndMX and Claude marketplaces.",
     "这段授权配置会原样保存。手机上还不能走完浏览器授权，保存时不会把它丢掉。" to "This sign-in config is kept as-is. The phone can't finish the browser sign-in yet, and saving will not drop it.",
     "创建本地技能目录并生成 SKILL.md。名称使用小写、数字与连字符。" to "Create a local skill folder and SKILL.md. Use lowercase letters, digits, and hyphens.",
-    "自动对仓库进行索引，以加快 Grep 搜索速度。所有数据均存储在本地。" to "Index the repo so Grep is faster. Everything stays on this device.",
+    "自动对仓库进行索引，加快文件联想与文件搜索。所有数据均存储在本地。" to "Index the repo to speed up file mentions and search. Everything stays on this device.",
     "拉取供应商 /models 目录，搜索后勾选即可添加，无需手填 ID" to "Fetch the provider's /models list, then search and check the ones to add.",
     "留空时自动探测系统终端配置；填写后作为 ZCode 终端的字体覆盖。" to "Empty detects the system terminal font. A value overrides the ZCode terminal font.",
     "输入包含 SKILL.md 的 Git 仓库地址，将克隆到技能目录。" to "Git URL of a repo that contains SKILL.md. It is cloned into the skills folder.",

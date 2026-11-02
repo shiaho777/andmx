@@ -23,7 +23,7 @@ class BrowseTool(
 ) : Tool {
     override val name = "browse"
     override val description =
-        "打开一个 https 网址,返回页面的可读正文(已去除 HTML 标签),用于联网检索资料。用户会同时在内置浏览器里看到你正在浏览的页面。" +
+        "打开一个 https 网址,返回页面的可读正文(已去除 HTML 标签),用于联网检索资料。" +
             " 带 prompt 时会先用小模型按指令提炼正文;同一 URL 15 分钟内走缓存;私网/本地地址会被拦截。"
     override val risk = ToolRisk.NETWORK
     override val timeoutMs: Long = 90_000
