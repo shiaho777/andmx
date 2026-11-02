@@ -60,7 +60,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 private const val CHUNK = 256 * 1024
-private const val MAX_PDF_PAGES = 20
+private const val MAX_PDF_PAGES = 10
 
 private enum class FileKind { TEXT, MARKDOWN, IMAGE, PDF, BINARY }
 
@@ -128,7 +128,7 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                     val pages = (0 until count).mapNotNull { index ->
                         val page = renderer.openPage(index)
                         try {
-                            val targetWidth = 1080
+                            val targetWidth = 720
                             val scale = targetWidth.toFloat() / page.width.coerceAtLeast(1)
                             val width = (page.width * scale).toInt().coerceAtLeast(1)
                             val height = (page.height * scale).toInt().coerceAtLeast(1)
