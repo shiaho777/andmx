@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowEventEntity::class,
         WorkspaceChangeEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -52,6 +52,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_16_17,
                     MIGRATION_17_18,
                     MIGRATION_18_19,
+                    MIGRATION_19_20,
                 )
                 .build()
                 .also { instance = it }
@@ -344,6 +345,15 @@ abstract class AndmxDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE conversations ADD COLUMN unreadAt INTEGER")
                 db.execSQL("ALTER TABLE conversations ADD COLUMN taskStatus TEXT NOT NULL DEFAULT 'idle'")
+            }
+        }
+
+        /** v19 → v20: session-level approval grants survive process death. */
+        private val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN permissionGrantsJson TEXT NOT NULL DEFAULT ''",
+                )
             }
         }
 

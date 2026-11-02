@@ -1,5 +1,7 @@
 package com.andmx.agent.permission
 
+import kotlinx.serialization.Serializable
+
 data class PermissionContext(
     val toolName: String,
     val input: Any? = null,
@@ -68,6 +70,25 @@ class PermissionService(
 
     fun denyForSession(toolName: String, ruleContent: String?) {
         sessionDeny = sessionDeny + PermissionRuleValue(toolName, ruleContent)
+    }
+
+    @Serializable
+    data class SessionGrant(
+        val toolName: String,
+        val ruleContent: String?,
+        val allowed: Boolean,
+    )
+
+    /** Snapshot for durable persistence; restored before the next tool call. */
+    fun sessionGrants(): List<SessionGrant> =
+        sessionAllow.allow.map { SessionGrant(it.toolName, it.ruleContent, allowed = true) } +
+            sessionDeny.map { SessionGrant(it.toolName, it.ruleContent, allowed = false) }
+
+    fun restoreSessionGrants(grants: List<SessionGrant>) {
+        sessionAllow = PermissionRuleset(
+            allow = grants.filter { it.allowed }.map { PermissionRuleValue(it.toolName, it.ruleContent) },
+        )
+        sessionDeny = grants.filterNot { it.allowed }.map { PermissionRuleValue(it.toolName, it.ruleContent) }
     }
 
     fun checkPermission(

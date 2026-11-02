@@ -771,6 +771,9 @@ class ChatController private constructor(private val context: Context) {
                         ),
                     )
                 }
+                if (scope == ApprovalScope.SESSION_ALLOW || scope == ApprovalScope.SESSION_DENY) {
+                    persistPermissionGrants(req.conversationId)
+                }
             }
         }
         session?.pending?.complete(allowed)
@@ -1750,6 +1753,7 @@ class ChatController private constructor(private val context: Context) {
             todoState = todoState,
             planModeState = planModeState,
             approvalMode = execMode,
+            permissions = restorePermissionGrants(conversationId),
         )
         planModeState.syncTo(execMode)
         _goal.value = goalState.goal
@@ -2103,6 +2107,29 @@ class ChatController private constructor(private val context: Context) {
 
     private suspend fun rebuildHistory(conversationId: Long): List<ApiMessage> =
         ChatControllerLogic.rebuildHistory(repo.messages(conversationId))
+
+    private suspend fun restorePermissionGrants(conversationId: Long): com.andmx.agent.permission.PermissionService {
+        val service = com.andmx.agent.permission.PermissionService()
+        val raw = runCatching {
+            com.andmx.data.AndmxDatabase.get(context).dao()
+                .getConversation(conversationId)?.permissionGrantsJson.orEmpty()
+        }.getOrDefault("")
+        service.restoreSessionGrants(com.andmx.agent.permission.PermissionGrantsCodec.decode(raw))
+        return service
+    }
+
+    private fun persistPermissionGrants(conversationId: Long) {
+        val session = sessions[conversationId] ?: return
+        val json = com.andmx.agent.permission.PermissionGrantsCodec.encode(
+            session.permissions.sessionGrants(),
+        )
+        controllerScope.launch {
+            runCatching {
+                com.andmx.data.AndmxDatabase.get(context).dao()
+                    .setPermissionGrants(conversationId, json)
+            }
+        }
+    }
 
     private suspend fun approveTool(
         conversationId: Long,

@@ -224,6 +224,9 @@ interface AndmxDao {
     @Query("UPDATE conversations SET pendingQueueJson = :json WHERE id = :conversationId")
     suspend fun setPendingQueue(conversationId: Long, json: String)
 
+    @Query("UPDATE conversations SET permissionGrantsJson = :json WHERE id = :conversationId")
+    suspend fun setPermissionGrants(conversationId: Long, json: String)
+
     // ── v14: Cron automations ──
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
