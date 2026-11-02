@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -11,6 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 模型调用轨迹（ZCode modelTrajectory.* 对齐）：逐次 LLM 调用的可回放记录。
@@ -120,6 +122,7 @@ object ModelCallTrace {
         @Volatile private var stateVersion = 0L
         @Volatile private var persistedVersion = -1L
         @Volatile private var stateEpoch = 0L
+        private val pendingWrites = AtomicInteger(0)
         private var seqCounter = 0L
 
         fun install(file: File) {
@@ -163,7 +166,14 @@ object ModelCallTrace {
             _calls.value = next
             val version = ++stateVersion
             val epoch = stateEpoch
-            ioScope.launch { persist(next, version, epoch) }
+            pendingWrites.incrementAndGet()
+            ioScope.launch {
+                try {
+                    persist(next, version, epoch)
+                } finally {
+                    pendingWrites.decrementAndGet()
+                }
+            }
             call
         }
 
@@ -172,7 +182,14 @@ object ModelCallTrace {
                 _calls.value = emptyList()
                 val version = ++stateVersion
                 val epoch = stateEpoch
-                ioScope.launch { persist(emptyList(), version, epoch) }
+                pendingWrites.incrementAndGet()
+                ioScope.launch {
+                    try {
+                        persist(emptyList(), version, epoch)
+                    } finally {
+                        pendingWrites.decrementAndGet()
+                    }
+                }
             }
         }
 
@@ -182,6 +199,11 @@ object ModelCallTrace {
         }
 
         suspend fun flush() {
+            persist(_calls.value, stateVersion, stateEpoch)
+            val deadline = System.currentTimeMillis() + 5_000
+            while (pendingWrites.get() > 0 && System.currentTimeMillis() < deadline) {
+                delay(2)
+            }
             persist(_calls.value, stateVersion, stateEpoch)
         }
 
