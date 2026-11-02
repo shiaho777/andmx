@@ -219,6 +219,23 @@ class ChatViewModel @Inject constructor(
     private val _currentConversationId = MutableStateFlow(0L)
     val currentConversationId: StateFlow<Long> = _currentConversationId.asStateFlow()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val backgroundTasks: StateFlow<List<com.andmx.agent.BackgroundTasks.Snapshot>> =
+        _currentConversationId.flatMapLatest { id ->
+            if (id > 0L) controller.backgroundTasks(id)
+            else kotlinx.coroutines.flow.flowOf(emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun stopBackgroundTask(taskId: String) {
+        val id = _currentConversationId.value
+        if (id > 0L) controller.stopBackgroundTask(id, taskId)
+    }
+
+    fun backgroundTaskOutput(taskId: String): String? {
+        val id = _currentConversationId.value
+        return if (id > 0L) controller.backgroundTaskOutput(id, taskId) else null
+    }
+
     private var lastStreamUiAt = 0L
     private var processSortCursor = 0L
     private var streamingMessageId = 0L

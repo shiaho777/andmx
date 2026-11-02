@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -176,6 +177,7 @@ fun defaultCommandCenterItems(
     onOpenSkills: () -> Unit,
     onOpenTerminal: () -> Unit,
     onToggleSidebar: () -> Unit,
+    onOpenBackgroundTasks: () -> Unit = {},
 ): List<CommandCenterItem> = listOf(
     CommandCenterItem(
         id = "new-task",
@@ -208,6 +210,14 @@ fun defaultCommandCenterItems(
         icon = Icons.Outlined.Terminal,
         keywords = listOf("terminal", "shell", "终端"),
         onRun = onOpenTerminal,
+    ),
+    CommandCenterItem(
+        id = "background-tasks",
+        title = "后台任务",
+        subtitle = "查看运行中的 shell 任务与输出",
+        icon = Icons.Outlined.TaskAlt,
+        keywords = listOf("background", "tasks", "task", "后台", "任务", "shell"),
+        onRun = onOpenBackgroundTasks,
     ),
     CommandCenterItem(
         id = "sidebar",

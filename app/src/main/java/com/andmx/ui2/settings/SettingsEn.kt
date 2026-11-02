@@ -1143,4 +1143,9 @@ internal val settingsEn: Map<String, String> = mapOf(
     "复制诊断信息" to "Copy diagnostics",
     "版本、设备与构建变体，便于反馈问题" to "Version, device and build variant for bug reports",
     "已复制诊断信息" to "Diagnostics copied",
+    "暂无后台任务" to "No background tasks",
+    "查看输出" to "Show output",
+    "收起输出" to "Hide output",
+    "暂无输出" to "No output yet",
+    "正在读取输出…" to "Reading output…",
 )
