@@ -11,7 +11,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -49,6 +52,17 @@ class BackgroundTasks(context: Context) {
             }
     }
 
+    /** UI 快照：不暴露 Process/Job，且每次刷新都会产生新对象，StateFlow 才会发值。 */
+    data class Snapshot(
+        val id: String,
+        val command: String,
+        val cwd: String,
+        val outputPath: String,
+        val startedAt: Long,
+        val state: TaskState,
+        val exitCode: Int?,
+    )
+
     sealed interface Event {
         data class Terminated(val task: BgTask) : Event
     }
@@ -56,7 +70,26 @@ class BackgroundTasks(context: Context) {
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 32)
     val events: SharedFlow<Event> = _events
 
+    private val _taskList = MutableStateFlow<List<Snapshot>>(emptyList())
+    val taskList: StateFlow<List<Snapshot>> = _taskList.asStateFlow()
+
     fun list(): List<BgTask> = tasks.values.sortedByDescending { it.startedAt }
+
+    fun listSnapshots(): List<Snapshot> = list().map {
+        Snapshot(
+            id = it.id,
+            command = it.command,
+            cwd = it.cwd,
+            outputPath = it.outputPath,
+            startedAt = it.startedAt,
+            state = it.state,
+            exitCode = it.exitCode,
+        )
+    }
+
+    private fun refresh() {
+        _taskList.value = listSnapshots()
+    }
 
     fun get(id: String): BgTask? = tasks[id]
 
@@ -68,6 +101,7 @@ class BackgroundTasks(context: Context) {
         hostFile.parentFile?.mkdirs()
         val task = BgTask(id = id, command = command, cwd = cwd, outputPath = guestOut)
         tasks[id] = task
+        refresh()
         task.job = scope.launch { runTask(task, hostFile) }
         return task
     }
@@ -92,6 +126,7 @@ class BackgroundTasks(context: Context) {
         }.getOrElse {
             hostFile.appendText("执行失败: ${it.message}\n[exit=-1]\n")
             task.state = TaskState.FAILED
+            refresh()
             _events.tryEmit(Event.Terminated(task))
             return
         }
@@ -116,6 +151,7 @@ class BackgroundTasks(context: Context) {
             task.process = null
             runCatching { if (process.isAlive) process.destroyForcibly() }
             runCatching { process.inputStream.close() }
+            refresh()
         }
         _events.tryEmit(Event.Terminated(task))
     }
@@ -126,6 +162,7 @@ class BackgroundTasks(context: Context) {
         task.state = TaskState.KILLED
         runCatching { task.process?.destroyForcibly() }
         task.job?.cancel()
+        refresh()
         return true
     }
 

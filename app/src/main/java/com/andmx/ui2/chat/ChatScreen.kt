@@ -91,6 +91,7 @@ import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
 import com.andmx.ui2.terminal.rememberTerminalColors
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -108,6 +109,7 @@ fun ChatScreen(
     val subAgentItems by viewModel.subAgentItems.collectAsState()
     val goalVerifications by viewModel.goalVerifications.collectAsState()
     val mcpStatus by viewModel.mcpStatus.collectAsState()
+    val backgroundTasks by viewModel.backgroundTasks.collectAsState()
     val contextTokens by viewModel.contextTokens.collectAsState()
     val contextWindow by viewModel.contextWindow.collectAsState()
     val contextBreakdown by viewModel.contextBreakdown.collectAsState()
@@ -119,6 +121,7 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val editingMessageId by viewModel.editingMessageId.collectAsState()
     val context = LocalContext.current
+    val draftStore = remember { DraftStore(context) }
     val motion = LocalMotion.current
     // 移动端惯例：冷启动不弹权限；首个任务发出（可能后台跑完）时才请求通知权限。
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -228,6 +231,7 @@ fun ChatScreen(
     }
 
     var showTerminal by remember { mutableStateOf(false) }
+    var showBackgroundTasks by remember { mutableStateOf(false) }
     var selectionError by remember { mutableStateOf<String?>(null) }
     var sideChatExcerpt by remember { mutableStateOf<String?>(null) }
     var showFiles by remember { mutableStateOf(false) }
@@ -263,6 +267,22 @@ fun ChatScreen(
     var drawerOpen by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
+    var draftOwner by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(currentConversationId) {
+        if (draftOwner != 0L && draftOwner != currentConversationId) {
+            draftStore.save(draftOwner, inputText)
+        }
+        if (currentConversationId > 0L) {
+            inputText = draftStore.load(currentConversationId)
+        }
+        draftOwner = currentConversationId
+    }
+    LaunchedEffect(inputText, currentConversationId) {
+        if (currentConversationId <= 0L || draftOwner != currentConversationId) return@LaunchedEffect
+        delay(400)
+        draftStore.save(currentConversationId, inputText)
+    }
 
     LaunchedEffect(Unit) {
         InboundBus.events.collect { event ->
@@ -1481,7 +1501,11 @@ LaunchedEffect(Unit) {
                     onToggleSidebar = {
                         showCommandCenter = false
                         drawerOpen = !drawerOpen
-                    }
+                    },
+                    onOpenBackgroundTasks = {
+                        showCommandCenter = false
+                        showBackgroundTasks = true
+                    },
                 ),
             )
         } // end Box
@@ -1506,6 +1530,15 @@ LaunchedEffect(Unit) {
                     colors = terminalColors,
                 )
             }
+        }
+
+        if (showBackgroundTasks) {
+            BackgroundTasksDialog(
+                tasks = backgroundTasks,
+                onDismiss = { showBackgroundTasks = false },
+                onStop = { viewModel.stopBackgroundTask(it) },
+                loadOutput = { viewModel.backgroundTaskOutput(it) },
+            )
         }
 
         // ── 分支切换对话框（ZCode：分支作为工作区上下文）──

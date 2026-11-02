@@ -205,6 +205,15 @@ class ChatController private constructor(private val context: Context) {
             }
         }
 
+    fun backgroundTasks(conversationId: Long): kotlinx.coroutines.flow.StateFlow<List<com.andmx.agent.BackgroundTasks.Snapshot>> =
+        backgroundTasksFor(conversationId).taskList
+
+    fun stopBackgroundTask(conversationId: Long, taskId: String): Boolean =
+        backgroundTasksFor(conversationId).stop(taskId)
+
+    fun backgroundTaskOutput(conversationId: Long, taskId: String, maxChars: Int = 12_000): String? =
+        backgroundTasksFor(conversationId).tail(taskId, maxChars)
+
 
 
     private suspend fun resolveSubAgentRun(
