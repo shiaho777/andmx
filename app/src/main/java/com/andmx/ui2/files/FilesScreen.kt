@@ -118,6 +118,7 @@ fun FilesScreen(
                 onOpenFile = { openFile = it },
                 onRefresh = { refresh++ },
                 conversationId = conversationId,
+                guestRootPath = projectManager.guestMountPath,
             )
         }
     }

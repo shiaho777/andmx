@@ -61,6 +61,7 @@ fun FileBrowser(
     onOpenFile: (String) -> Unit,
     onRefresh: () -> Unit,
     conversationId: Long = 0L,
+    guestRootPath: String = "",
 ) {
     val changes by ChangeTracker.changesFor(conversationId).collectAsState()
     val changedMap = remember(changes) {
@@ -72,13 +73,19 @@ fun FileBrowser(
     var deleteTarget by remember { mutableStateOf<File?>(null) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
-    val files = remember(currentPath, query, refreshKey, changedOnly, changes) {
+    val files = remember(currentPath, query, refreshKey, changedOnly, changes, guestRootPath) {
         (File(currentPath).listFiles()?.asList() ?: emptyList())
             .filter { !it.name.startsWith(".") }
             .filter { query.isBlank() || it.name.contains(query, true) }
             .filter { f ->
                 if (!changedOnly) true
-                else f.isDirectory || changedMap.keys.any { it.endsWith(f.name) }
+                else WorkspacePathMap.isChanged(
+                    hostPath = f.absolutePath,
+                    hostRoot = rootPath,
+                    guestRoot = guestRootPath,
+                    changedPaths = changedMap.keys,
+                    directory = f.isDirectory,
+                )
             }
             .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
     }
@@ -154,7 +161,11 @@ fun FileBrowser(
                         }
                     }
                     items(files, key = { it.absolutePath }) { file ->
-                        val gitKind = changedMap.entries.firstOrNull { it.key.endsWith(file.name) }?.value?.let { fc ->
+                        val guest = WorkspacePathMap.toGuest(file.absolutePath, rootPath, guestRootPath)
+                        val change = guest?.let { g ->
+                            changedMap.entries.firstOrNull { WorkspacePathMap.sameGuest(it.key, g) }?.value
+                        }
+                        val gitKind = change?.let { fc ->
                             when {
                                 fc.isNew -> "新增"
                                 !fc.existedBefore -> "新增"
