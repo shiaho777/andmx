@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -58,15 +60,19 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 private const val CHUNK = 256 * 1024
+private const val MAX_PDF_PAGES = 20
 
-private enum class FileKind { TEXT, MARKDOWN, IMAGE, BINARY }
+private enum class FileKind { TEXT, MARKDOWN, IMAGE, PDF, BINARY }
+
+private data class PdfPreview(val pages: List<ImageBitmap>, val totalPages: Int)
 
 private fun kindOf(name: String): FileKind {
     val ext = name.substringAfterLast('.', "").lowercase()
     return when (ext) {
         "md", "markdown" -> FileKind.MARKDOWN
         "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg" -> FileKind.IMAGE
-        "zip", "tar", "gz", "jar", "apk", "so", "bin", "exe", "pdf", "class", "o" -> FileKind.BINARY
+        "pdf" -> FileKind.PDF
+        "zip", "tar", "gz", "jar", "apk", "so", "bin", "exe", "class", "o" -> FileKind.BINARY
         else -> FileKind.TEXT
     }
 }
@@ -86,7 +92,7 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
     val config = LocalCodePreviewConfig.current
 
     val fullContent by produceState(initialValue = null as String?, key1 = path) {
-        if (kind == FileKind.IMAGE || kind == FileKind.BINARY) return@produceState
+        if (kind == FileKind.IMAGE || kind == FileKind.PDF || kind == FileKind.BINARY) return@produceState
         value = withContext(Dispatchers.IO) {
             runCatching { if (!file.exists()) null else file.readText() }.getOrNull()
         }
@@ -103,6 +109,51 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                 while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
                 val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
                 android.graphics.BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+
+    val pdfPreview by produceState(initialValue = null as PdfPreview?, key1 = path, key2 = kind) {
+        if (kind != FileKind.PDF) return@produceState
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val pfd = android.os.ParcelFileDescriptor.open(
+                    file,
+                    android.os.ParcelFileDescriptor.MODE_READ_ONLY,
+                )
+                val renderer = android.graphics.pdf.PdfRenderer(pfd)
+                try {
+                    val total = renderer.pageCount
+                    val count = minOf(total, MAX_PDF_PAGES)
+                    val pages = (0 until count).mapNotNull { index ->
+                        val page = renderer.openPage(index)
+                        try {
+                            val targetWidth = 1080
+                            val scale = targetWidth.toFloat() / page.width.coerceAtLeast(1)
+                            val width = (page.width * scale).toInt().coerceAtLeast(1)
+                            val height = (page.height * scale).toInt().coerceAtLeast(1)
+                            val bitmap = android.graphics.Bitmap.createBitmap(
+                                width,
+                                height,
+                                android.graphics.Bitmap.Config.ARGB_8888,
+                            )
+                            bitmap.eraseColor(android.graphics.Color.WHITE)
+                            page.render(
+                                bitmap,
+                                null,
+                                null,
+                                android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                            )
+                            bitmap.asImageBitmap()
+                        } finally {
+                            page.close()
+                        }
+                    }
+                    PdfPreview(pages, total)
+                } finally {
+                    renderer.close()
+                    pfd.close()
+                }
             }.getOrNull()
         }
     }
@@ -199,6 +250,33 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                         )
                     kind == FileKind.IMAGE ->
                         CenterHint("无法解码这张图片（SVG 等矢量格式暂不支持预览）。")
+                    kind == FileKind.PDF && pdfPreview != null -> {
+                        val preview = pdfPreview!!
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            itemsIndexed(preview.pages) { index, page ->
+                                Image(
+                                    bitmap = page,
+                                    contentDescription = "第 ${index + 1} 页",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    contentScale = ContentScale.FillWidth,
+                                )
+                            }
+                            if (preview.totalPages > preview.pages.size) {
+                                item {
+                                    Text(
+                                        tr("仅显示前 ${preview.pages.size} / ${preview.totalPages} 页"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    kind == FileKind.PDF ->
+                        CenterHint("无法打开这个 PDF 文件。")
                     fullContent == null ->
                         CenterHint("文件不存在，或当前环境无法访问该路径。")
                     fullContent!!.isEmpty() ->
