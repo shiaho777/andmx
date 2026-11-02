@@ -6,10 +6,12 @@ import org.junit.Test
 
 class PermissionModesTest {
     @Test
-    fun autoDenies() {
-        val decision = PermissionModes.decide(PermissionModes.Kind.AUTO, readTool())
-        assertEquals(PermissionModes.Effect.DENY, decision.effect)
-        assertEquals("Auto mode is reserved but not implemented yet", decision.reason)
+    fun autoAllowsLowRiskAndAsksForDestructive() {
+        val read = PermissionModes.decide(PermissionModes.Kind.AUTO, readTool())
+        val bash = PermissionModes.decide(PermissionModes.Kind.AUTO, bashTool())
+        assertEquals(PermissionModes.Effect.ALLOW, read.effect)
+        assertEquals(PermissionModes.Effect.ASK, bash.effect)
+        assertEquals("mode.auto.destructive", bash.ruleId)
     }
 
     @Test

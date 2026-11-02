@@ -110,10 +110,6 @@ class PermissionService(
             return allow(context, capability, "mode.yolo", "Yolo mode bypasses permission prompts")
         }
 
-        if (context.mode == CollaborationMode.AUTO) {
-            return deny(context, capability, "mode.auto.unimplemented", "Auto mode is reserved but not implemented yet")
-        }
-
         if (context.toolName in config.disallowedTools) {
             return deny(context, capability, "rule.disallowedTools", "Tool ${context.toolName} is explicitly disallowed")
         }
@@ -161,6 +157,10 @@ class PermissionService(
             return allow(context, capability, "rule.allowedTools", "Tool ${context.toolName} is explicitly allowed")
         }
 
+        if (context.mode == CollaborationMode.AUTO) {
+            return checkAutoMode(context, capability)
+        }
+
         if (context.mode == CollaborationMode.EDIT) {
             return checkEditMode(context, capability)
         }
@@ -173,9 +173,6 @@ class PermissionService(
         capability: ResolvedCapability,
         projectRules: PermissionRuleset?,
     ): PermissionDecisionResult {
-        if (context.mode == CollaborationMode.AUTO) {
-            return deny(context, capability, "mode.auto.unimplemented", "Auto mode is reserved but not implemented yet")
-        }
         if (context.toolName in config.disallowedTools) {
             return deny(context, capability, "rule.disallowedTools", "Tool ${context.toolName} is explicitly disallowed")
         }
@@ -248,6 +245,23 @@ class PermissionService(
             return ask(context, capability, "mode.build.sideEffect", "Tool has side effects and requires approval")
         }
         return allow(context, capability, "mode.build.lowRisk", "Build mode allows low-risk tool execution")
+    }
+
+    /**
+     * Auto：按风险分级。只读/低风险/工作区写自动放行；高风险与破坏性
+     * 操作仍走确认。alwaysAsk 已在更前面拦到独立分支，不会被这里抹掉。
+     */
+    private fun checkAutoMode(context: PermissionContext, capability: ResolvedCapability): PermissionDecisionResult {
+        if (capability.readOnly && !capability.destructive && !capability.needsApproval) {
+            return allow(context, capability, "mode.auto.readOnly", "Auto mode allows read-only tools")
+        }
+        if (capability.destructive || capability.riskLevel == "critical") {
+            return ask(context, capability, "mode.auto.destructive", "Auto mode still asks before destructive actions")
+        }
+        if (capability.riskLevel == "high") {
+            return ask(context, capability, "mode.auto.highRisk", "Auto mode still asks before high-risk tools")
+        }
+        return allow(context, capability, "mode.auto.lowRisk", "Auto mode allows low and medium risk tools")
     }
 
     private fun checkEditMode(context: PermissionContext, capability: ResolvedCapability): PermissionDecisionResult {

@@ -49,7 +49,7 @@ enum class ExecMode(
         id = "auto",
         collaboration = com.andmx.agent.permission.CollaborationMode.AUTO,
         labelText = "自动",
-        descriptionText = "保留模式，尚未实现，工具调用会被拒绝",
+        descriptionText = "低/中风险直接执行，高风险与破坏性操作仍要确认",
     );
 
     val label: String get() = com.andmx.ui2.settings.tr(labelText)

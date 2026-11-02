@@ -32,8 +32,10 @@ class PermissionServiceTest {
         assertEquals("allow", service.checkPermission(ctx("Bash", CollaborationMode.YOLO), bashCap).decision)
         assertEquals("mode.yolo", service.checkPermission(ctx("Bash", CollaborationMode.YOLO), bashCap).ruleId)
         assertEquals("allow", service.checkPermission(ctx("Bash", CollaborationMode.GUARDED), bashCap).decision)
-        assertEquals("deny", service.checkPermission(ctx("Bash", CollaborationMode.AUTO), bashCap).decision)
-        assertEquals("mode.auto.unimplemented", service.checkPermission(ctx("Bash", CollaborationMode.AUTO), bashCap).ruleId)
+        assertEquals("ask", service.checkPermission(ctx("Bash", CollaborationMode.AUTO), bashCap).decision)
+        assertEquals("mode.auto.destructive", service.checkPermission(ctx("Bash", CollaborationMode.AUTO), bashCap).ruleId)
+        assertEquals("allow", service.checkPermission(ctx("Edit", CollaborationMode.AUTO), editCap).decision)
+        assertEquals("mode.auto.lowRisk", service.checkPermission(ctx("Edit", CollaborationMode.AUTO), editCap).ruleId)
     }
 
     @Test
@@ -66,8 +68,8 @@ class PermissionServiceTest {
         assertEquals("deny", denied.decision)
         assertEquals("rule.project.deny", denied.ruleId)
         val auto = PermissionService().checkPermission(ctx("Read", CollaborationMode.AUTO), asking)
-        assertEquals("deny", auto.decision)
-        assertEquals("mode.auto.unimplemented", auto.ruleId)
+        assertEquals("ask", auto.decision)
+        assertEquals("tool.alwaysAsk", auto.ruleId)
     }
 
     @Test

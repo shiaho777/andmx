@@ -213,6 +213,7 @@ fun ChatScreen(
     val recentConversations by viewModel.recentConversations.collectAsState()
     val skills by viewModel.skills.collectAsState()
     val pluginSlashSpecs by viewModel.pluginSlashSpecs.collectAsState()
+    val customSlashSpecs by viewModel.customSlashSpecs.collectAsState()
     val subAgentCatalog by viewModel.subAgentCatalog.collectAsState()
 
     // ZCode 对齐：对话为唯一主屏，终端/文件/设置均为浮层
@@ -262,6 +263,27 @@ fun ChatScreen(
     var drawerOpen by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        InboundBus.events.collect { event ->
+            when (event) {
+                is InboundBus.Event.Text -> {
+                    inputText = if (inputText.isBlank()) event.text else "$inputText\n${event.text}"
+                }
+                is InboundBus.Event.Image -> {
+                    attachments = attachments + Attachment(event.name, event.uri)
+                }
+                is InboundBus.Event.OpenConversation -> {
+                    drawerOpen = false
+                    showCommandCenter = false
+                    showSettings = false
+                    showFiles = false
+                    showTerminal = false
+                    viewModel.switchToConversation(event.id)
+                }
+            }
+        }
+    }
 
     // 文件树长按拖拽 → Composer 引用（ZCode 对齐）
     val fileDragState by com.andmx.ui2.files.FileDragBus.state.collectAsState()
@@ -384,7 +406,7 @@ LaunchedEffect(Unit) {
     }
 
     // ── 输入触发：/ 与 # 建议 ──
-    val slashSuggestions by remember(inputText, pluginSlashSpecs) {
+    val slashSuggestions by remember(inputText, pluginSlashSpecs, customSlashSpecs) {
         derivedStateOf {
             val t = inputText
             // ZCode 对齐：中文 IME 的 、/／ 归一为 / 触发斜杠命令联想。
@@ -394,7 +416,7 @@ LaunchedEffect(Unit) {
                 else -> null
             }
             if (normalized != null && !normalized.contains(' ')) {
-                SlashCommands.suggestions(normalized, 8, extras = pluginSlashSpecs)
+                SlashCommands.suggestions(normalized, 8, extras = pluginSlashSpecs + customSlashSpecs)
             } else emptyList()
         }
     }

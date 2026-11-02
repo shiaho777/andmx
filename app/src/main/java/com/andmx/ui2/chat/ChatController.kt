@@ -177,6 +177,7 @@ class ChatController private constructor(private val context: Context) {
     private val orchestrators = ConcurrentHashMap<Long, SubAgentOrchestrator>()
     private val backgroundTasksByConversation = ConcurrentHashMap<Long, com.andmx.agent.BackgroundTasks>()
     private val readFileStates = ConcurrentHashMap<Long, com.andmx.agent.ReadFileState>()
+    private val shellWatchJobs = ConcurrentHashMap<Long, Job>()
     private val titleSidecarAttempted = ConcurrentHashMap.newKeySet<Long>()
 
     /**
@@ -887,6 +888,7 @@ class ChatController private constructor(private val context: Context) {
         sessions.remove(conversationId)
         orchestrators.remove(conversationId)?.shutdown()
         subAgentWatchJobs.remove(conversationId)?.cancel()
+        shellWatchJobs.remove(conversationId)?.cancel()
         rolloutWriters.remove(conversationId)?.let { w ->
             controllerScope.launch { runCatching { w.close() } }
         }
@@ -965,8 +967,8 @@ class ChatController private constructor(private val context: Context) {
         text: String,
         images: List<String> = emptyList(),
     ): Flow<ChatEvent> = flow {
-        emit(ChatEvent.UserMessage(text))
-        repo.addMessage(conversationId, "user", text)
+        emit(ChatEvent.UserMessage(text, images))
+        repo.addMessage(conversationId, "user", text, imageUrls = images)
         var firstUserMessage = false
         runCatching {
             val conv = repo.conversation(conversationId)
@@ -1620,7 +1622,23 @@ class ChatController private constructor(private val context: Context) {
                 persistGoal(conversationId, g)
             }
         }
-        val tools = buildTools(planTool, goalState, todoState, planModeState, conversationId)
+        val tools = buildTools(
+            planTool = planTool,
+            goalState = goalState,
+            todo = todoState,
+            planMode = planModeState,
+            conversationId = conversationId,
+            onShell = { shell ->
+                shellWatchJobs.remove(conversationId)?.cancel()
+                shellWatchJobs[conversationId] = controllerScope.launch {
+                    shell.events.collect { ev ->
+                        if (ev is com.andmx.agent.ShellTool.ShellEvent.Delta) {
+                            liveBus(conversationId).tryEmit(ChatEvent.ToolOutputDelta(ev.callId, ev.chunk))
+                        }
+                    }
+                }
+            },
+        )
         val client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.MAIN)
         val (systemBlocks, metaUser) = buildZCodePromptParts(
             settings = settings,
@@ -1784,6 +1802,7 @@ class ChatController private constructor(private val context: Context) {
         todo: TodoState = TodoState(),
         planMode: PlanModeState = PlanModeState(),
         conversationId: Long = 0L,
+        onShell: ((com.andmx.agent.ShellTool) -> Unit)? = null,
     ): List<Tool> {
         val cwd = { access.guestCwd() }
         val dynamicWorkflow = if (dynamicWorkflowEnabled) {
@@ -1908,6 +1927,7 @@ class ChatController private constructor(private val context: Context) {
             webFetchSummarizer = { content, prompt ->
                 summarizeFetchedContent(content, prompt, conversationId)
             },
+            onShell = onShell,
         ) + CronTools(
             store = cronStore,
             conversationId = { conversationId },

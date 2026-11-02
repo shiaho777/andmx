@@ -747,9 +747,11 @@ fun buildZCodeToolSurface(
     listModelsCurrent: (suspend () -> Pair<String, String>)? = null,
     readFileState: com.andmx.agent.ReadFileState? = null,
     webFetchSummarizer: (suspend (content: String, prompt: String) -> String?)? = null,
+    onShell: ((ShellTool) -> Unit)? = null,
 ): List<Tool> {
     val access = WorkspaceAccess(context)
     val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks)
+    onShell?.invoke(shell)
     val shellWithHint = GhRateLimitHintTool(shell)
     val read = ReadFileTool(context, readFileState)
     val write = WriteFileTool(context, readFileState)
