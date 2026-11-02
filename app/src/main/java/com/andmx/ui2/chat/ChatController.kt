@@ -1343,8 +1343,8 @@ class ChatController private constructor(private val context: Context) {
      * are restored. Anything changed afterwards (by bash, the user, or another
      * tool) is reported as unsafe and left untouched.
      */
-    suspend fun revertFileChanges(sinceMs: Long = 0L): RewindResult {
-        val pending = com.andmx.workspace.ChangeTracker.changes.value
+    suspend fun revertFileChanges(conversationId: Long, sinceMs: Long = 0L): RewindResult {
+        val pending = com.andmx.workspace.ChangeTracker.changesFor(conversationId).value
             .filter { it.timestamp >= sinceMs }
         if (pending.isEmpty()) return RewindResult(0, 0, emptyList())
         var reverted = 0
@@ -1362,7 +1362,7 @@ class ChatController private constructor(private val context: Context) {
                 } else {
                     access.writeText(resolved, change.oldContent)
                 }
-                com.andmx.workspace.ChangeTracker.remove(change.path)
+                com.andmx.workspace.ChangeTracker.remove(conversationId, change.path)
                 reverted++
             }.onFailure { unsafe += change.path }
         }
@@ -1370,8 +1370,8 @@ class ChatController private constructor(private val context: Context) {
     }
 
     /** 单文件还原：同样的“当前内容必须仍等于记录的修改后内容”安全闸。 */
-    suspend fun revertFileChange(path: String): RewindResult {
-        val change = com.andmx.workspace.ChangeTracker.changes.value
+    suspend fun revertFileChange(conversationId: Long, path: String): RewindResult {
+        val change = com.andmx.workspace.ChangeTracker.changesFor(conversationId).value
             .firstOrNull { com.andmx.workspace.GuestPaths.same(it.path, path) }
             ?: return RewindResult(0, 0, emptyList())
         val resolved = runCatching { access.resolvePath(change.path) }.getOrDefault(change.path)
@@ -1381,7 +1381,7 @@ class ChatController private constructor(private val context: Context) {
         }
         return runCatching {
             if (change.isNew) access.deleteFile(resolved) else access.writeText(resolved, change.oldContent)
-            com.andmx.workspace.ChangeTracker.remove(change.path)
+            com.andmx.workspace.ChangeTracker.remove(conversationId, change.path)
             RewindResult(1, 0, emptyList())
         }.getOrElse { RewindResult(0, 1, listOf(change.path)) }
     }
@@ -1562,6 +1562,7 @@ class ChatController private constructor(private val context: Context) {
         provider: ProviderDefinition,
         settings: ProviderSettings,
     ): Session {
+        com.andmx.workspace.ChangeTracker.load(conversationId)
         val execMode = ExecMode.from(settings.approvalMode)
         val existing = sessions[conversationId]
         if (existing != null &&
@@ -1951,6 +1952,7 @@ class ChatController private constructor(private val context: Context) {
                 summarizeFetchedContent(content, prompt, conversationId)
             },
             onShell = onShell,
+            conversationId = conversationId,
         ) + CronTools(
             store = cronStore,
             conversationId = { conversationId },

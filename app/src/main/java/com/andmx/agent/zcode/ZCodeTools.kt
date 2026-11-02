@@ -748,14 +748,15 @@ fun buildZCodeToolSurface(
     readFileState: com.andmx.agent.ReadFileState? = null,
     webFetchSummarizer: (suspend (content: String, prompt: String) -> String?)? = null,
     onShell: ((ShellTool) -> Unit)? = null,
+    conversationId: Long = 0L,
 ): List<Tool> {
     val access = WorkspaceAccess(context)
     val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks)
     onShell?.invoke(shell)
     val shellWithHint = GhRateLimitHintTool(shell)
     val read = ReadFileTool(context, readFileState)
-    val write = WriteFileTool(context, readFileState)
-    val edit = EditFileTool(context, readFileState)
+    val write = WriteFileTool(context, readFileState, conversationId)
+    val edit = EditFileTool(context, readFileState, conversationId)
     val grep = GrepTool(context, cwdProvider)
     val glob = GlobTool(context, cwdProvider)
     val listDir = ListDirTool(context)
@@ -784,7 +785,7 @@ fun buildZCodeToolSurface(
         ReadSessionContextTool(readSession),
         SkillTool(invokeSkill),
         listDir,
-        ApplyPatchTool(context),
+        ApplyPatchTool(context, conversationId),
         GitTool(context, cwdProvider = cwdProvider),
         ComputerUseTool(context),
     )

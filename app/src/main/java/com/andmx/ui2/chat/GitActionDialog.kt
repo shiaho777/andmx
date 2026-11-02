@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Commit
@@ -55,6 +56,7 @@ fun GitActionDialog(
     onFileDiff: (path: String, onDone: (String) -> Unit) -> Unit = { _, cb ->
         cb("当前会话不支持读取文件差异")
     },
+    onPickBranch: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var mode by remember { mutableStateOf(GitActionMode.MENU) }
@@ -163,6 +165,17 @@ fun GitActionDialog(
                     ) {
                         Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp))
                         Text(tr("拉取（快进）"), Modifier.padding(start = 8.dp))
+                    }
+                    TextButton(
+                        enabled = !busy && gitInfo.isRepo,
+                        onClick = {
+                            onPickBranch()
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.AccountTree, null, Modifier.size(18.dp))
+                        Text(tr("切换分支"), Modifier.padding(start = 8.dp))
                     }
                     if (!gitInfo.hasIdentity) {
                         TextButton(

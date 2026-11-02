@@ -50,6 +50,7 @@ import com.andmx.data.ConversationEntity
 import com.andmx.data.TaskGroupEntity
 import com.andmx.ui2.files.WorkspaceFileTree
 import com.andmx.ui2.chat.ChatActionBus
+import com.andmx.workspace.ChangeTracker
 import com.andmx.workspace.ProjectManager
 import kotlinx.coroutines.launch
 
@@ -221,6 +222,7 @@ fun ConversationDrawer(
                                 .weight(1f)
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp),
+                            conversationId = currentConversationId,
                         )
                     } else {
                     Column(
@@ -431,7 +433,10 @@ fun ConversationDrawer(
                 deleteArchived = false
             },
             onConfirm = {
-                scope.launch { dao.deleteConversation(target.id) }
+                scope.launch {
+                    dao.deleteConversation(target.id)
+                    ChangeTracker.clear(target.id)
+                }
                 com.andmx.agent.JsReplRuntime.dispose("conv-${target.id}")
                 deleteTarget = null
                 deleteArchived = false

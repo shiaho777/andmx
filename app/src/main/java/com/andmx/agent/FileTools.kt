@@ -389,7 +389,11 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
     }
 }
 
-class WriteFileTool(context: Context, private val readFileState: ReadFileState? = null) : Tool {
+class WriteFileTool(
+    context: Context,
+    private val readFileState: ReadFileState? = null,
+    private val conversationId: Long = 0L,
+) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "Write"
     override val description = WRITE_PROVIDER_DESCRIPTION
@@ -430,7 +434,7 @@ class WriteFileTool(context: Context, private val readFileState: ReadFileState? 
             }
             val old = if (existed) access.readText(resolved) else ""
             access.writeText(resolved, content)
-            ChangeTracker.record(resolved, old, content, existedBefore = existed)
+            ChangeTracker.record(conversationId, resolved, old, content, existedBefore = existed)
             rememberWritten(resolved, content, ReadFileState.WRITE_TOOL)
             ToolResult(formatWriteModelContent(path, created = !existed))
         }.getOrElse { ToolResult("写入失败: ${it.message}", isError = true) }
@@ -443,7 +447,11 @@ class WriteFileTool(context: Context, private val readFileState: ReadFileState? 
     }
 }
 
-class EditFileTool(context: Context, private val readFileState: ReadFileState? = null) : Tool {
+class EditFileTool(
+    context: Context,
+    private val readFileState: ReadFileState? = null,
+    private val conversationId: Long = 0L,
+) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "Edit"
     override val description = EDIT_PROVIDER_DESCRIPTION
@@ -494,7 +502,7 @@ class EditFileTool(context: Context, private val readFileState: ReadFileState? =
             if (!access.exists(resolved)) {
                 if (oldStr.isEmpty()) {
                     access.writeText(resolved, newStr)
-                    ChangeTracker.record(resolved, "", newStr, existedBefore = false)
+                    ChangeTracker.record(conversationId, resolved, "", newStr, existedBefore = false)
                     rememberWritten(resolved, newStr, "edit_file")
                     return@runCatching ToolResult(formatEditModelContent(path, replaceAll))
                 }
@@ -518,7 +526,7 @@ class EditFileTool(context: Context, private val readFileState: ReadFileState? =
                 val blocked = readStateFailure(resolved, original)
                 if (blocked != null) return@runCatching blocked
                 access.writeText(resolved, newStr)
-                ChangeTracker.record(resolved, original, newStr, existedBefore = true)
+                ChangeTracker.record(conversationId, resolved, original, newStr, existedBefore = true)
                 rememberWritten(resolved, newStr, "edit_file")
                 return@runCatching ToolResult(formatEditModelContent(path, replaceAll))
             }
@@ -552,7 +560,7 @@ class EditFileTool(context: Context, private val readFileState: ReadFileState? =
             val actualNew = EditMatcher.preserveQuoteStyle(oldStr, actualOld, normalizedNew)
             val updated = if (replaceAll) original.replace(actualOld, actualNew) else original.replaceFirst(actualOld, actualNew)
             access.writeText(resolved, updated)
-            ChangeTracker.record(resolved, original, updated, existedBefore = true)
+            ChangeTracker.record(conversationId, resolved, original, updated, existedBefore = true)
             rememberWritten(resolved, updated, "edit_file")
             ToolResult(formatEditModelContent(path, replaceAll))
         }.getOrElse { ToolResult("编辑失败: ${it.message}", isError = true) }

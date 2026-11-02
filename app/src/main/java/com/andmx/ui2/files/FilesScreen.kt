@@ -54,6 +54,7 @@ import kotlinx.coroutines.withContext
 fun FilesScreen(
     modifier: Modifier = Modifier,
     initialPath: String? = null,
+    conversationId: Long = 0L,
 ) {
     val context = LocalContext.current
     val projectManager = remember { ProjectManager(context) }
@@ -116,6 +117,7 @@ fun FilesScreen(
                 },
                 onOpenFile = { openFile = it },
                 onRefresh = { refresh++ },
+                conversationId = conversationId,
             )
         }
     }

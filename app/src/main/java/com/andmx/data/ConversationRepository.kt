@@ -19,6 +19,8 @@ class ConversationRepository(context: Context) {
 
     suspend fun conversation(id: Long): ConversationEntity? = dao.getConversation(id)
 
+    fun observeConversation(id: Long): Flow<ConversationEntity?> = dao.observeConversation(id)
+
     /**
      * Fork a conversation: clone the row (fresh rollout/session ids) and copy
      * every message verbatim. Returns the new conversation id, or null when the

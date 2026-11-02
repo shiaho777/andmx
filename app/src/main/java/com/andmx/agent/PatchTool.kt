@@ -15,7 +15,10 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-class ApplyPatchTool(context: Context) : Tool {
+class ApplyPatchTool(
+    context: Context,
+    private val conversationId: Long = 0L,
+) : Tool {
     private val access = WorkspaceAccess(context)
 
     private inner class AccessAdapter : PatchFileSystem {
@@ -63,9 +66,10 @@ class ApplyPatchTool(context: Context) : Tool {
             is CodexPatchEngine.Result.Ok -> {
                 for (change in r.changes) {
                     if (change.action == CodexPatchEngine.Action.DELETE) {
-                        ChangeTracker.record(change.path, change.oldContent, "", existedBefore = true)
+                        ChangeTracker.record(conversationId, change.path, change.oldContent, "", existedBefore = true)
                     } else if (change.action == CodexPatchEngine.Action.ADD) {
                         ChangeTracker.record(
+                            conversationId,
                             change.newPath ?: change.path,
                             "",
                             change.newContent,
@@ -73,6 +77,7 @@ class ApplyPatchTool(context: Context) : Tool {
                         )
                     } else {
                         ChangeTracker.record(
+                            conversationId,
                             change.path,
                             change.oldContent,
                             change.newContent,
@@ -101,7 +106,7 @@ class ApplyPatchTool(context: Context) : Tool {
         return when (val r = PatchEngine.apply(original, patch)) {
             is PatchEngine.Result.Ok -> {
                 runBlocking { access.writeText(resolved, r.content) }
-                ChangeTracker.record(resolved, original, r.content, existedBefore = existed)
+                ChangeTracker.record(conversationId, resolved, original, r.content, existedBefore = existed)
                 ToolResult("已应用补丁到 $resolved")
             }
             is PatchEngine.Result.Fail -> ToolResult("应用补丁失败: ${r.reason}", isError = true)

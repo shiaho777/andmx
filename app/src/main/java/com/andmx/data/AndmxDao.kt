@@ -39,6 +39,9 @@ interface AndmxDao {
     @Query("SELECT * FROM conversations WHERE id = :id")
     suspend fun getConversation(id: Long): ConversationEntity?
 
+    @Query("SELECT * FROM conversations WHERE id = :id")
+    fun observeConversation(id: Long): Flow<ConversationEntity?>
+
     @Query("UPDATE conversations SET title = :title, updatedAt = :ts WHERE id = :id")
     suspend fun touchConversation(id: Long, title: String, ts: Long)
 
@@ -272,4 +275,26 @@ interface AndmxDao {
 
     @Query("SELECT * FROM workflow_events WHERE runId = :runId ORDER BY seq ASC")
     suspend fun workflowEvents(runId: String): List<WorkflowEventEntity>
+
+    // ── per-conversation file changes ─────────────────────────
+
+    @Query("SELECT * FROM workspace_changes WHERE conversationId = :conversationId ORDER BY timestamp ASC")
+    suspend fun workspaceChanges(conversationId: Long): List<WorkspaceChangeEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWorkspaceChange(change: WorkspaceChangeEntity)
+
+    @Query("DELETE FROM workspace_changes WHERE conversationId = :conversationId AND path = :path")
+    suspend fun deleteWorkspaceChange(conversationId: Long, path: String)
+
+    @Query("DELETE FROM workspace_changes WHERE conversationId = :conversationId")
+    suspend fun deleteWorkspaceChanges(conversationId: Long)
+
+    @Query(
+        "INSERT OR REPLACE INTO workspace_changes " +
+            "(conversationId, path, oldContent, newContent, existedBefore, timestamp) " +
+            "SELECT :targetId, path, oldContent, newContent, existedBefore, timestamp " +
+            "FROM workspace_changes WHERE conversationId = :sourceId",
+    )
+    suspend fun copyWorkspaceChanges(sourceId: Long, targetId: Long)
 }

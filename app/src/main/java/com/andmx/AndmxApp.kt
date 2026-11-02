@@ -1,6 +1,7 @@
 package com.andmx
 
 import android.app.Application
+import com.andmx.workspace.ChangeTracker
 import com.andmx.workspace.ProjectManager
 import com.andmx.workspace.WorkspaceIndex
 import dagger.hilt.android.HiltAndroidApp
@@ -11,6 +12,7 @@ class AndmxApp : Application() {
         super.onCreate()
         val pm = ProjectManager(this)
         pm.restoreBinding()
+        ChangeTracker.install(this)
         WorkspaceIndex.get(this).onProjectSelected(pm.hostPath.value)
     }
 }

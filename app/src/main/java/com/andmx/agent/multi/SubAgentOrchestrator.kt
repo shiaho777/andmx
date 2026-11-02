@@ -269,6 +269,7 @@ class SubAgentOrchestrator(
             tools = tools,
             client = runClient,
             systemPrompt = buildSubAgentPrompt(spec.task, spec.systemHint, handoff, agentDef, agentsMd),
+            maxSteps = spec.maxTurns,
             approve = { tool, args ->
                 approveTool?.invoke(spec.permissionMode, tool, args) ?: ApprovalOutcome.AllowedOnce
             },
