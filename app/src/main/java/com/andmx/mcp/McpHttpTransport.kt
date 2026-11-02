@@ -100,6 +100,84 @@ class McpHttpTransport(
             ?.joinToString("\n")?.ifBlank { res.toString() } ?: res.toString()
     }
 
+    suspend fun listResources(): List<McpResource> {
+        if (!supportsCapability("resources")) return emptyList()
+        val res = request(McpProtocol.RESOURCES_LIST, null) ?: return emptyList()
+        val arr = (res.jsonObject["resources"] as? kotlinx.serialization.json.JsonArray) ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            McpResource(
+                uri = o["uri"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                name = o["name"]?.jsonPrimitive?.content ?: "",
+                description = o["description"]?.jsonPrimitive?.content,
+                mimeType = o["mimeType"]?.jsonPrimitive?.content,
+            )
+        }
+    }
+
+    suspend fun readResource(uri: String): String {
+        val res = request(McpProtocol.RESOURCES_READ, buildJsonObject { put("uri", uri) })
+            ?: return "(无响应)"
+        val contents = (res.jsonObject["contents"] as? kotlinx.serialization.json.JsonArray)
+            ?: return res.toString()
+        return contents.mapNotNull { (it as? JsonObject)?.get("text")?.jsonPrimitive?.content }
+            .joinToString("\n").ifBlank { res.toString() }
+    }
+
+    suspend fun subscribeResource(uri: String): Boolean =
+        runCatching {
+            request(McpProtocol.RESOURCES_SUBSCRIBE, buildJsonObject { put("uri", uri) })
+            true
+        }.getOrDefault(false)
+
+    suspend fun unsubscribeResource(uri: String): Boolean =
+        runCatching {
+            request(McpProtocol.RESOURCES_UNSUBSCRIBE, buildJsonObject { put("uri", uri) })
+            true
+        }.getOrDefault(false)
+
+    suspend fun listPrompts(): List<McpPrompt> {
+        if (!supportsCapability("prompts")) return emptyList()
+        val res = request(McpProtocol.PROMPTS_LIST, null) ?: return emptyList()
+        val arr = (res.jsonObject["prompts"] as? kotlinx.serialization.json.JsonArray) ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val name = o["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            val arguments = (o["arguments"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { ae ->
+                val ao = ae as? JsonObject ?: return@mapNotNull null
+                McpPromptArgument(
+                    name = ao["name"]?.jsonPrimitive?.content ?: "",
+                    description = ao["description"]?.jsonPrimitive?.content,
+                    required = ao["required"]?.jsonPrimitive?.content == "true",
+                )
+            } ?: emptyList()
+            McpPrompt(name, o["description"]?.jsonPrimitive?.content, arguments)
+        }
+    }
+
+    suspend fun getPrompt(name: String, args: Map<String, String> = emptyMap()): List<McpPromptContent> {
+        if (!supportsCapability("prompts")) return emptyList()
+        val res = request(McpProtocol.PROMPTS_GET, buildJsonObject {
+            put("name", name)
+            if (args.isNotEmpty()) {
+                put("arguments", buildJsonObject { args.forEach { (k, v) -> put(k, v) } })
+            }
+        }) ?: return emptyList()
+        val messages = (res.jsonObject["messages"] as? kotlinx.serialization.json.JsonArray)
+            ?: return emptyList()
+        return messages.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val role = o["role"]?.jsonPrimitive?.content ?: "assistant"
+            val content = o["content"]
+            val text = when {
+                content is JsonObject -> content["text"]?.jsonPrimitive?.content ?: ""
+                content != null -> content.toString()
+                else -> ""
+            }
+            McpPromptContent(role, text)
+        }
+    }
+
     fun supportsCapability(name: String): Boolean {
         val caps = serverCapabilities ?: return false
         return caps.containsKey(name)

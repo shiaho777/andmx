@@ -83,6 +83,7 @@ import com.andmx.llm.LlmClient
 import com.andmx.llm.TokenUsage
 import com.andmx.llm.TokenUsageTracker
 import com.andmx.llm.provider.ProviderDefinition
+import com.andmx.mcp.McpContextTools
 import com.andmx.mcp.McpManager
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.ProviderStore
@@ -272,13 +273,14 @@ class ChatController private constructor(private val context: Context) {
     @Volatile private var pluginTools: List<Tool> = emptyList()
     @Volatile private var mobileDevTools: List<Tool> = emptyList()
     @Volatile private var mcpTools: List<Tool> = emptyList()
+    @Volatile private var mcpContextTools: List<Tool> = emptyList()
     @Volatile private var mcpConfigLoaded: String? = null
     @Volatile private var pluginsLoaded = false
     @Volatile private var lastPluginReloadToken = -1L
     @Volatile private var lastHooksReloadToken = -1L
 
     private val sharedExtraTools: List<Tool>
-        get() = pluginTools + mobileDevTools + mcpTools
+        get() = pluginTools + mobileDevTools + mcpTools + mcpContextTools
 
     private val _pendingApproval = MutableStateFlow<ApprovalRequest?>(null)
     val pendingApproval: StateFlow<ApprovalRequest?> = _pendingApproval.asStateFlow()
@@ -1521,9 +1523,13 @@ class ChatController private constructor(private val context: Context) {
             } else {
                 emptyList()
             }
+            mcpContextTools = mcpContextToolsFor(mcpManager)
             _mcpStatus.value = mcpManager.connected
         }
     }
+
+    private fun mcpContextToolsFor(manager: McpManager): List<Tool> =
+        if (manager.connected.isEmpty()) emptyList() else McpContextTools.build(manager)
 
     /** /mcp connect <server>：按配置名连接单个 MCP 服务器并把工具挂入会话工具面。 */
     suspend fun mcpConnect(name: String): String {
@@ -1535,6 +1541,7 @@ class ChatController private constructor(private val context: Context) {
             .getOrElse { return "连接失败：${it.message}" }
         if (added.isEmpty()) return "连接失败：未获得工具（查看日志）。"
         mcpTools = mcpTools + added
+        mcpContextTools = mcpContextToolsFor(mcpManager)
         _mcpStatus.value = mcpManager.connected
         return "已连接 `$name` · ${added.size} tools"
     }
@@ -1543,6 +1550,7 @@ class ChatController private constructor(private val context: Context) {
     fun mcpDisconnect(name: String): String {
         if (!mcpManager.disconnect(name)) return "`$name` 未连接。"
         mcpTools = mcpTools.filterNot { it.name.startsWith("${name}__") }
+        mcpContextTools = mcpContextToolsFor(mcpManager)
         _mcpStatus.value = mcpManager.connected
         return "已断开 `$name`。"
     }
