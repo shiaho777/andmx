@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -11,6 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 模型调用轨迹（ZCode modelTrajectory.* 对齐）：逐次 LLM 调用的可回放记录。
@@ -62,31 +64,12 @@ object ModelCallTrace {
 
     internal val codec = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    private val _calls = kotlinx.coroutines.flow.MutableStateFlow<List<Call>>(emptyList())
-    val calls: kotlinx.coroutines.flow.StateFlow<List<Call>> = _calls
+    private val defaultStore = Store()
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val writeMutex = Mutex()
-    @Volatile private var traceFile: File? = null
-    @Volatile private var stateVersion = 0L
-    @Volatile private var persistedVersion = -1L
-    private var seqCounter = 0L
+    val calls: kotlinx.coroutines.flow.StateFlow<List<Call>> = defaultStore.calls
 
     fun install(context: Context) {
-        if (traceFile != null) return
-        synchronized(this) {
-            if (traceFile != null) return
-            val file = File(context.applicationContext.filesDir, TRACE_FILE)
-            traceFile = file
-            val loaded = runCatching {
-                if (file.isFile) codec.decodeFromString<List<Call>>(file.readText()) else emptyList()
-            }.getOrDefault(emptyList())
-            if (loaded.isNotEmpty()) {
-                _calls.value = loaded.takeLast(MAX_CALLS)
-                seqCounter = loaded.maxOfOrNull { it.seq } ?: 0L
-            }
-            persistedVersion = stateVersion
-        }
+        defaultStore.install(File(context.applicationContext.filesDir, TRACE_FILE))
     }
 
     fun record(
@@ -100,73 +83,153 @@ object ModelCallTrace {
         outputPreview: String,
         durationMs: Long,
         atMs: Long = System.currentTimeMillis(),
-    ): Call = synchronized(this) {
-        val call = Call(
-            seq = ++seqCounter,
-            atMs = atMs,
-            source = source,
-            model = model,
-            inputTokens = inputTokens,
-            cachedInputTokens = cachedInputTokens,
-            outputTokens = outputTokens,
-            finish = finish,
-            inputPreview = inputPreview.take(PREVIEW_CHARS),
-            outputPreview = outputPreview.take(PREVIEW_CHARS),
-            durationMs = durationMs,
-        )
-        val next = (_calls.value + call).takeLast(MAX_CALLS)
-        _calls.value = next
-        val version = ++stateVersion
-        ioScope.launch { persist(next, version) }
-        call
-    }
+    ): Call = defaultStore.record(
+        source, model, inputTokens, cachedInputTokens, outputTokens, finish,
+        inputPreview, outputPreview, durationMs, atMs,
+    )
 
-    fun clear() {
-        synchronized(this) {
-            _calls.value = emptyList()
-            val version = ++stateVersion
-            ioScope.launch { persist(emptyList(), version) }
-        }
-    }
+    fun clear() = defaultStore.clear()
 
-    /** 汇总（查看器顶部条）：调用数 + 总 token。 */
-    fun summary(): Pair<Int, Int> {
-        val list = _calls.value
-        return list.size to list.sumOf { it.totalTokens }
-    }
-
-    private suspend fun persist(calls: List<Call>, version: Long) {
-        val file = traceFile ?: return
-        writeMutex.withLock {
-            if (version < persistedVersion) return
-            runCatching {
-                file.parentFile?.mkdirs()
-                file.writeText(codec.encodeToString(calls))
-            }.onSuccess { persistedVersion = version }
-        }
-    }
+    fun summary(): Pair<Int, Int> = defaultStore.summary()
 
     @androidx.annotation.VisibleForTesting
-    suspend fun flush() {
-        val snapshot = _calls.value
-        persist(snapshot, stateVersion)
-    }
+    fun installFile(file: File) = defaultStore.install(file)
 
     @androidx.annotation.VisibleForTesting
-    fun resetInMemory() {
-        synchronized(this) {
-            traceFile = null
-            _calls.value = emptyList()
-            seqCounter = 0L
-            stateVersion = 0L
-            persistedVersion = -1L
-        }
-    }
+    suspend fun flush() = defaultStore.flush()
+
+    @androidx.annotation.VisibleForTesting
+    fun resetInMemory() = defaultStore.resetInMemory()
 
     @androidx.annotation.VisibleForTesting
     fun resetForTests(context: Context) {
-        resetInMemory()
+        defaultStore.resetInMemory()
         File(context.applicationContext.filesDir, TRACE_FILE).delete()
+    }
+
+    /**
+     * Independent trace store. The singleton uses one instance; tests create
+     * their own with a unique file so unrelated test classes cannot race on
+     * the process-wide object.
+     */
+    internal class Store {
+        private val _calls = kotlinx.coroutines.flow.MutableStateFlow<List<Call>>(emptyList())
+        val calls: kotlinx.coroutines.flow.StateFlow<List<Call>> = _calls
+
+        private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val writeMutex = Mutex()
+        @Volatile private var traceFile: File? = null
+        @Volatile private var stateVersion = 0L
+        @Volatile private var persistedVersion = -1L
+        @Volatile private var stateEpoch = 0L
+        private val pendingWrites = AtomicInteger(0)
+        private var seqCounter = 0L
+
+        fun install(file: File) {
+            synchronized(this) {
+                traceFile = file
+                val loaded = runCatching {
+                    if (file.isFile) codec.decodeFromString<List<Call>>(file.readText()) else emptyList()
+                }.getOrDefault(emptyList())
+                _calls.value = loaded.takeLast(MAX_CALLS)
+                seqCounter = loaded.maxOfOrNull { it.seq } ?: 0L
+                persistedVersion = stateVersion
+            }
+        }
+
+        fun record(
+            source: Source,
+            model: String,
+            inputTokens: Int,
+            cachedInputTokens: Int,
+            outputTokens: Int,
+            finish: Finish,
+            inputPreview: String,
+            outputPreview: String,
+            durationMs: Long,
+            atMs: Long = System.currentTimeMillis(),
+        ): Call = synchronized(this) {
+            val call = Call(
+                seq = ++seqCounter,
+                atMs = atMs,
+                source = source,
+                model = model,
+                inputTokens = inputTokens,
+                cachedInputTokens = cachedInputTokens,
+                outputTokens = outputTokens,
+                finish = finish,
+                inputPreview = inputPreview.take(PREVIEW_CHARS),
+                outputPreview = outputPreview.take(PREVIEW_CHARS),
+                durationMs = durationMs,
+            )
+            val next = (_calls.value + call).takeLast(MAX_CALLS)
+            _calls.value = next
+            val version = ++stateVersion
+            val epoch = stateEpoch
+            pendingWrites.incrementAndGet()
+            ioScope.launch {
+                try {
+                    persist(next, version, epoch)
+                } finally {
+                    pendingWrites.decrementAndGet()
+                }
+            }
+            call
+        }
+
+        fun clear() {
+            synchronized(this) {
+                _calls.value = emptyList()
+                val version = ++stateVersion
+                val epoch = stateEpoch
+                pendingWrites.incrementAndGet()
+                ioScope.launch {
+                    try {
+                        persist(emptyList(), version, epoch)
+                    } finally {
+                        pendingWrites.decrementAndGet()
+                    }
+                }
+            }
+        }
+
+        fun summary(): Pair<Int, Int> {
+            val list = _calls.value
+            return list.size to list.sumOf { it.totalTokens }
+        }
+
+        suspend fun flush() {
+            persist(_calls.value, stateVersion, stateEpoch)
+            val deadline = System.currentTimeMillis() + 5_000
+            while (pendingWrites.get() > 0 && System.currentTimeMillis() < deadline) {
+                delay(2)
+            }
+            persist(_calls.value, stateVersion, stateEpoch)
+        }
+
+        fun resetInMemory() {
+            synchronized(this) {
+                traceFile = null
+                _calls.value = emptyList()
+                seqCounter = 0L
+                stateVersion = 0L
+                persistedVersion = -1L
+                stateEpoch += 1
+            }
+        }
+
+        private suspend fun persist(calls: List<Call>, version: Long, epoch: Long) {
+            val file = traceFile ?: return
+            writeMutex.withLock {
+                if (epoch != stateEpoch) return
+                if (version < persistedVersion) return
+                val text = runCatching { codec.encodeToString(calls) }.getOrElse { return }
+                runCatching {
+                    file.parentFile?.mkdirs()
+                    file.writeText(text)
+                }.onSuccess { persistedVersion = version }
+            }
+        }
     }
 
     private const val TRACE_FILE = "model-traces.json"

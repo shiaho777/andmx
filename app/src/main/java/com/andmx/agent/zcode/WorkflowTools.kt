@@ -371,7 +371,17 @@ class WorkflowTools(
         override suspend fun execute(args: JsonObject): ToolResult {
             automationBlocked(name)?.let { return it }
             if (text(args, "run_id") == null) return absent("run_id is required")
-            return absent(WORKFLOW_RESUME_UNAVAILABLE)
+            val runId = text(args, "run_id")!!
+            val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
+            val (snapshot, error) = svc.resume(runId)
+            if (error != null) return ToolResult(error, isError = true)
+            if (snapshot == null) return absent("Workflow run $runId was not found.")
+            return ToolResult(
+                buildString {
+                    append("Resumed workflow run ").append(runId).append(".\n")
+                    append(renderRun(snapshot))
+                },
+            )
         }
     }
 
