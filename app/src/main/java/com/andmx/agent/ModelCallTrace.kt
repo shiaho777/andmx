@@ -1,15 +1,23 @@
 package com.andmx.agent
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
 
 /**
  * 模型调用轨迹（ZCode modelTrajectory.* 对齐）：逐次 LLM 调用的可回放记录。
  *
  * ZCode 把每次调用落盘 model-io 并在查看器展示来源、token、结束原因与
  * 输入/输出原文；AndMX 在会话进程内保存最近 [MAX_CALLS] 条（环形淘汰），
- * 供设置页查看器展示。
+ * 并异步镜像到 `files/model-traces.json`，进程重启后仍能查看。
  */
 object ModelCallTrace {
 
@@ -32,6 +40,7 @@ object ModelCallTrace {
         CONTENT_FILTER("内容过滤"),
     }
 
+    @Serializable
     data class Call(
         val seq: Long,
         val atMs: Long,
@@ -51,10 +60,34 @@ object ModelCallTrace {
     const val MAX_CALLS = 50
     const val PREVIEW_CHARS = 2_000
 
-    private val _calls = MutableStateFlow<List<Call>>(emptyList())
-    val calls: StateFlow<List<Call>> = _calls.asStateFlow()
+    internal val codec = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    private val _calls = kotlinx.coroutines.flow.MutableStateFlow<List<Call>>(emptyList())
+    val calls: kotlinx.coroutines.flow.StateFlow<List<Call>> = _calls
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val writeMutex = Mutex()
+    @Volatile private var traceFile: File? = null
+    @Volatile private var stateVersion = 0L
+    @Volatile private var persistedVersion = -1L
     private var seqCounter = 0L
+
+    fun install(context: Context) {
+        if (traceFile != null) return
+        synchronized(this) {
+            if (traceFile != null) return
+            val file = File(context.applicationContext.filesDir, TRACE_FILE)
+            traceFile = file
+            val loaded = runCatching {
+                if (file.isFile) codec.decodeFromString<List<Call>>(file.readText()) else emptyList()
+            }.getOrDefault(emptyList())
+            if (loaded.isNotEmpty()) {
+                _calls.value = loaded.takeLast(MAX_CALLS)
+                seqCounter = loaded.maxOfOrNull { it.seq } ?: 0L
+            }
+            persistedVersion = stateVersion
+        }
+    }
 
     fun record(
         source: Source,
@@ -67,7 +100,7 @@ object ModelCallTrace {
         outputPreview: String,
         durationMs: Long,
         atMs: Long = System.currentTimeMillis(),
-    ): Call {
+    ): Call = synchronized(this) {
         val call = Call(
             seq = ++seqCounter,
             atMs = atMs,
@@ -83,11 +116,17 @@ object ModelCallTrace {
         )
         val next = (_calls.value + call).takeLast(MAX_CALLS)
         _calls.value = next
-        return call
+        val version = ++stateVersion
+        ioScope.launch { persist(next, version) }
+        call
     }
 
     fun clear() {
-        _calls.value = emptyList()
+        synchronized(this) {
+            _calls.value = emptyList()
+            val version = ++stateVersion
+            ioScope.launch { persist(emptyList(), version) }
+        }
     }
 
     /** 汇总（查看器顶部条）：调用数 + 总 token。 */
@@ -95,4 +134,40 @@ object ModelCallTrace {
         val list = _calls.value
         return list.size to list.sumOf { it.totalTokens }
     }
+
+    private suspend fun persist(calls: List<Call>, version: Long) {
+        val file = traceFile ?: return
+        writeMutex.withLock {
+            if (version < persistedVersion) return
+            runCatching {
+                file.parentFile?.mkdirs()
+                file.writeText(codec.encodeToString(calls))
+            }.onSuccess { persistedVersion = version }
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    suspend fun flush() {
+        val snapshot = _calls.value
+        persist(snapshot, stateVersion)
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun resetInMemory() {
+        synchronized(this) {
+            traceFile = null
+            _calls.value = emptyList()
+            seqCounter = 0L
+            stateVersion = 0L
+            persistedVersion = -1L
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun resetForTests(context: Context) {
+        resetInMemory()
+        File(context.applicationContext.filesDir, TRACE_FILE).delete()
+    }
+
+    private const val TRACE_FILE = "model-traces.json"
 }
