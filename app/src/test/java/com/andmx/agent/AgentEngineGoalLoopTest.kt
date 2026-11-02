@@ -204,7 +204,7 @@ class AgentEngineGoalLoopTest {
     }
 
     private class ValidationTool(private val result: ToolResult) : Tool {
-        override val name = "run_shell"
+        override val name = "Bash"
         override val description = "Test validation"
         override val parameters = kotlinx.serialization.json.JsonObject(emptyMap())
         override val risk = ToolRisk.EXECUTE

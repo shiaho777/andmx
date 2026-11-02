@@ -32,7 +32,6 @@ import com.andmx.agent.ToolRisk
 import com.andmx.agent.TurnContext
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.zcode.isPlanModeAllowed
-import com.andmx.agent.zcode.DYNAMIC_WORKFLOW_TOOLS_ENABLED
 import com.andmx.agent.zcode.WorkflowTools
 import com.andmx.agent.zcode.applyDynamicWorkflowGate
 import com.andmx.agent.zcode.buildZCodeToolSurface
@@ -139,6 +138,22 @@ class ChatController private constructor(private val context: Context) {
     private val access = WorkspaceAccess(context)
     private val networkPolicy = NetworkPolicy.PERMISSIVE
     private val guestFs = GuestFs(ProotRuntime(context))
+    private val savedWorkflowStore = com.andmx.agent.workflow.SavedWorkflowStore(
+        com.andmx.agent.workflow.GuestWorkflowFileSystem(guestFs),
+        cwd = { access.guestCwd() },
+    )
+
+    /**
+     * 脚本静态分析器：上游 `analyzeWorkflowScript` 原样跑在 WebView 上。
+     *
+     * 单槽记忆是上游 `workflow-script-analysis.ts` 的同构件——审批 gate 分析一次、handler 又
+     * 分析一次，按脚本原文折叠成一次编译。
+     */
+    private val workflowAnalyzer by lazy {
+        com.andmx.agent.workflow.script.MemoizedWorkflowScriptAnalyzer(
+            com.andmx.agent.workflow.script.WebViewWorkflowScriptAnalyzer(context.applicationContext),
+        )
+    }
     private val memorySystem = MemorySystem(guestFs)
     private val memoryAgent = com.andmx.agent.memory.MemoryAgentRunner(
         guestFs,
@@ -163,6 +178,15 @@ class ChatController private constructor(private val context: Context) {
     private val backgroundTasksByConversation = ConcurrentHashMap<Long, com.andmx.agent.BackgroundTasks>()
     private val readFileStates = ConcurrentHashMap<Long, com.andmx.agent.ReadFileState>()
     private val titleSidecarAttempted = ConcurrentHashMap.newKeySet<Long>()
+
+    /**
+     * 最近一次读到的设置快照。buildTools 是同步函数，拿不到 DataStore 的挂起读取，
+     * 而动态工作流门又必须在每次建工具面时按当前设置求值，所以在这里缓存一份。
+     */
+    @Volatile private var settingsSnapshot = ProviderSettings()
+
+    private val dynamicWorkflowEnabled: Boolean
+        get() = settingsSnapshot.dynamicWorkflowToolsEnabled
 
     private fun backgroundTasksFor(conversationId: Long): com.andmx.agent.BackgroundTasks =
         backgroundTasksByConversation.getOrPut(conversationId) {
@@ -503,6 +527,15 @@ class ChatController private constructor(private val context: Context) {
     init {
         controllerScope.launch {
             settingsStore.settings.collect { s ->
+                val dynamicWorkflowChanged =
+                    s.dynamicWorkflowToolsEnabled != settingsSnapshot.dynamicWorkflowToolsEnabled
+                settingsSnapshot = s
+                if (dynamicWorkflowChanged) {
+                    // 工具面在会话建立时装配，切换开关后必须重建空闲会话才能生效。
+                    sessions.keys.toList()
+                        .filter { it !in runningConversations }
+                        .forEach { clearSession(it) }
+                }
                 WebFetchPolicy.browserEnabled = s.browserControlEnabled
                 WebFetchPolicy.allowInsecureCertificates = s.allowInsecureCertificates
                 AndroidUsePolicy.enabled = s.androidUseEnabled
@@ -1593,6 +1626,7 @@ class ChatController private constructor(private val context: Context) {
             settings = settings,
             provider = provider,
         )
+        val toolSearchRegistry = com.andmx.agent.ToolSearchRegistry()
         val engine = AgentEngine(
             tools = tools,
             client = client,
@@ -1619,7 +1653,9 @@ class ChatController private constructor(private val context: Context) {
                 }
                 sessionEventStore.append(conversationId, trace, type, payload)
             },
+            toolSearch = toolSearchRegistry,
         )
+        engine.addTools(toolSearchRegistry.controlTools())
         engine.setMetaUserContext(metaUser)
         engine.setTodoItemsProvider { todoItemsJson(todoState) }
         if (sharedExtraTools.isNotEmpty()) {
@@ -1646,6 +1682,7 @@ class ChatController private constructor(private val context: Context) {
                     "<agent-message from=\"${escXmlAttr(fromId)}\">$msg</agent-message>",
                 )
             },
+            dynamicWorkflowEnabled = dynamicWorkflowEnabled,
         )
         orchestrators[conversationId] = orch
         engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId))
@@ -1749,7 +1786,7 @@ class ChatController private constructor(private val context: Context) {
         conversationId: Long = 0L,
     ): List<Tool> {
         val cwd = { access.guestCwd() }
-        val dynamicWorkflow = if (DYNAMIC_WORKFLOW_TOOLS_ENABLED) {
+        val dynamicWorkflow = if (dynamicWorkflowEnabled) {
             WorkflowTools(
                 isAutomationTurn = { automationTurnIds.contains(conversationId) },
                 hasLoadedSkill = { skillName ->
@@ -1758,6 +1795,12 @@ class ChatController private constructor(private val context: Context) {
                         skillName,
                     )
                 },
+                service = workflowService,
+                savedWorkflows = savedWorkflowStore,
+                readText = { path -> runCatching { guestFs.readText(path) }.getOrNull() },
+                analyzer = workflowAnalyzer,
+                conversationId = conversationId,
+                cwd = cwd,
             ).all()
         } else {
             emptyList()
@@ -1872,6 +1915,7 @@ class ChatController private constructor(private val context: Context) {
             isAutomationTurn = { automationTurnIds.contains(conversationId) },
             offPeakStartHour = { settingsStore.settings.firstOrNull()?.offPeakStartHour ?: 0 },
         ).all() + dynamicWorkflow + com.andmx.agent.JsReplTool(context, "conv-$conversationId"),
+            enabled = dynamicWorkflowEnabled,
         )
     }
 
@@ -2771,7 +2815,10 @@ private fun PermissionModes.Effect.toDecision(): Decision = when (this) {
         com.andmx.agent.InitPrompt.build(args, access.guestCwd())
 
     fun workflowPrompt(args: String): String =
-        com.andmx.agent.WorkflowPrompt.expand(args)
+        com.andmx.agent.WorkflowPrompt.expand(args, dynamicWorkflowEnabled)
+
+    fun workflowBlankArgsNotice(): String =
+        com.andmx.agent.WorkflowPrompt.blankArgsNotice(dynamicWorkflowEnabled)
 
     /**
      * 上游 title-generation-sidecar：首发消息触发一次旁路标题生成。

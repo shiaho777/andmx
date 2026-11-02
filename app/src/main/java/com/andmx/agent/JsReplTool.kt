@@ -100,6 +100,7 @@ object JsReplRuntime {
 class JsReplTool(context: Context, private val sessionKey: String) : Tool {
     private val appContext = context.applicationContext
     override val name = "webview_js"
+    override val shouldDefer = true
     override val description =
         "Execute JavaScript in this conversation's WebView session (globalThis persists across calls). " +
             "This is a WebView evaluator, not a host REPL. " +

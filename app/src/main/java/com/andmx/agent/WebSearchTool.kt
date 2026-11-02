@@ -125,6 +125,7 @@ class WebSearchTool(
     private val now: () -> Calendar = { Calendar.getInstance() },
 ) : Tool {
     override val name = "WebSearch"
+    override val shouldDefer = true
     override val description: String
         get() = buildWebSearchProviderDescription(now())
     override val parameters = WEBSEARCH_PARAMETERS

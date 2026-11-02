@@ -1,16 +1,16 @@
 package com.andmx.agent
 
-import com.andmx.agent.zcode.DYNAMIC_WORKFLOW_TOOLS_ENABLED
+import com.andmx.agent.zcode.DYNAMIC_WORKFLOW_TOOLS_DEFAULT
 
 object WorkflowPrompt {
 
-    fun expand(args: String, toolsEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_ENABLED): String {
+    fun expand(args: String, toolsEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_DEFAULT): String {
         val request = args.ifBlank { "（用户未附描述：先询问这次工作流要完成什么）" }
         val body = if (toolsEnabled) enabledBody() else hiddenBody()
         return "$body\n\n$request"
     }
 
-    fun blankArgsNotice(toolsEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_ENABLED): String =
+    fun blankArgsNotice(toolsEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_DEFAULT): String =
         if (toolsEnabled) {
             "用法：`/workflow <要完成的任务>`。先加载 dynamic-workflows。CreateWorkflow 只接受 script、saved 或 path 之一，不会类型检查，也不会启动运行。"
         } else {

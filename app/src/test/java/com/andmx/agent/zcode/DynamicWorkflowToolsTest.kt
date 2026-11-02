@@ -53,11 +53,11 @@ class DynamicWorkflowToolsTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
-    fun dynamicNamesFollowThePinnedSwitch() {
-        assertFalse(DYNAMIC_WORKFLOW_TOOLS_ENABLED)
+    fun dynamicNamesFollowTheRuntimeGate() {
+        assertFalse(DYNAMIC_WORKFLOW_TOOLS_DEFAULT)
         assertTrue(DYNAMIC_WORKFLOW_DEFAULT_PIN.contains("defaults the tools on when the flag is absent"))
-        assertTrue(DYNAMIC_WORKFLOW_DEFAULT_PIN.contains("no embedded dynamic-workflow runner"))
-        assertTrue(DYNAMIC_WORKFLOW_DEFAULT_PIN.contains("does not execute a run"))
+        assertTrue(DYNAMIC_WORKFLOW_DEFAULT_PIN.contains("fail-closed"))
+        assertTrue(DYNAMIC_WORKFLOW_DEFAULT_PIN.contains("resolves it at runtime from settings"))
         val declared = WorkflowTools().all() + ListModelsTool({ emptyList() }, { "" to "" })
         val off = applyDynamicWorkflowGate(declared)
         assertTrue(DYNAMIC_WORKFLOW_TOOL_NAMES.none { name -> off.any { it.name == name } })
@@ -66,6 +66,27 @@ class DynamicWorkflowToolsTest {
         assertFalse(agentProviderDescription(dynamicWorkflowEnabled = false).contains("CreateWorkflow"))
         assertTrue(agentProviderDescription(dynamicWorkflowEnabled = true).contains("CreateWorkflow"))
         assertFalse(AGENT_PROVIDER_DESCRIPTION.contains("CreateWorkflow"))
+        assertFalse(taskProviderDescription(dynamicWorkflowEnabled = false).contains("CreateWorkflow"))
+        assertTrue(
+            taskProviderDescription(dynamicWorkflowEnabled = true)
+                .contains("Claude Code-compatible alias for the Agent tool"),
+        )
+    }
+
+    @Test
+    fun introspectionToolsDegradeWhenNoRunPortIsInjected() = runTest {
+        val byName = WorkflowTools().all().associateBy { it.name }
+        val listRuns = byName.getValue(LIST_WORKFLOW_RUNS_TOOL_NAME).execute(buildJsonObject { })
+        assertTrue(listRuns.isError)
+        assertEquals(WORKFLOW_INTROSPECTION_UNAVAILABLE, listRuns.output)
+        val getRun = byName.getValue(GET_WORKFLOW_RUN_TOOL_NAME).execute(
+            buildJsonObject { put("run_id", "wf_missing") },
+        )
+        assertTrue(getRun.isError)
+        assertEquals(WORKFLOW_INTROSPECTION_UNAVAILABLE, getRun.output)
+        val listSaved = byName.getValue(LIST_SAVED_WORKFLOWS_TOOL_NAME).execute(buildJsonObject { })
+        assertTrue(listSaved.isError)
+        assertEquals(WORKFLOW_SAVED_LIST_UNAVAILABLE, listSaved.output)
     }
 
     @Test
@@ -113,8 +134,9 @@ class DynamicWorkflowToolsTest {
         val create = WorkflowTools(hasLoadedSkill = { true }).all().first { it.name == CREATE_WORKFLOW_TOOL_NAME }
         val result = create.execute(buildJsonObject { put("script", "export {}") })
         assertTrue(result.isError)
-        assertTrue(result.output.contains("NOT executed"))
-        assertTrue(result.output.contains("Nothing was typechecked"))
+        // 没有分析器的会话必须失败关闭：编不过的检查不能因为少了个依赖就变成默认通过。
+        assertTrue(result.output.contains("no workflow script analyzer"))
+        assertTrue(result.output.contains("Nothing was executed"))
         assertFalse(result.output.contains("Workflow run started"))
         assertFalse(result.output.contains("backgroundTaskId"))
         val runs = WorkflowTools().all().first { it.name == LIST_WORKFLOW_RUNS_TOOL_NAME }

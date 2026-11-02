@@ -58,6 +58,7 @@ private class GhRateLimitHintTool(
     private val inner: Tool,
 ) : Tool, ExecutionAwareTool {
     override val name get() = inner.name
+    override val shouldDefer get() = inner.shouldDefer
     override val description get() = inner.description
     override val parameters get() = inner.parameters
     override val risk get() = inner.risk
@@ -168,6 +169,7 @@ class TodoWriteTool(
     private val planTool: UpdatePlanTool,
 ) : Tool {
     override val name = "TodoWrite"
+    override val shouldDefer = true
     override val description = TODO_WRITE_DESCRIPTION
     override val risk = ToolRisk.READ
     override val readOnly = true
@@ -221,6 +223,7 @@ private val TODO_PRIORITY = setOf("high", "medium", "low")
 
 class TodoReadTool(private val todo: TodoState) : Tool {
     override val name = "TodoRead"
+    override val shouldDefer = true
     override val description = TODO_READ_DESCRIPTION
     override val risk = ToolRisk.READ
     override val readOnly = true
@@ -245,6 +248,7 @@ class EnterPlanModeTool(
     private val currentMode: () -> ExecMode = { planMode.mode },
 ) : Tool {
     override val name = "EnterPlanMode"
+    override val shouldDefer = true
     override val description = """
 Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.
 
@@ -366,6 +370,7 @@ class ExitPlanModeTool(
     private val currentMode: () -> ExecMode = { planMode.mode },
 ) : Tool {
     override val name = "ExitPlanMode"
+    override val shouldDefer = true
     override val description = """
 Use this tool when you are in plan mode and have finished writing your plan and are ready for user approval.
 
@@ -593,6 +598,7 @@ class ReadSessionContextTool(
     private val resolve: suspend (sessionId: String, query: String, strategy: String, maxTokens: Int) -> SessionContextRead,
 ) : Tool {
     override val name = "ReadSessionContext"
+    override val shouldDefer = true
     override val description = READ_SESSION_DESCRIPTION
     override val risk = ToolRisk.READ
     override val readOnly = true
@@ -809,7 +815,7 @@ fun isPlanModeAllowed(toolName: String): Boolean {
         "todoread", "todowrite", "update_plan",
         "enterplanmode", "exitplanmode", "askuserquestion",
         "readsessioncontext", "skill", "agent", "task", "taskoutput", "taskstop", "spawn_agent", "multi_agent",
-        "listmodels", "cronlist",
+        "listmodels", "cronlist", "toolsearch", "deferredtoolcall",
         "listsavedworkflows", "listworkflowruns", "getworkflowrun",
         "getworkflowrunroster", "evalworkflowsnippet",
         "get_goal", "create_goal", "update_goal",

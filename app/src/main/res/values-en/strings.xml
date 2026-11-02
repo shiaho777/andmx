@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AndMX</string>
+    <string name="accessibility_service_description">Lets AndMX operate this device\'s screen when you allow it (tap, swipe, and type) for Android Use. It only runs while you are using it.</string>
+</resources>

@@ -36,12 +36,23 @@ val DYNAMIC_WORKFLOW_TOOL_NAMES: Set<String> = setOf(
     FILL_WORKFLOW_HOLE_TOOL_NAME,
 )
 
-const val DYNAMIC_WORKFLOW_TOOLS_ENABLED = false
+/**
+ * 动态工作流工具面的默认值。
+ *
+ * ZCode 的 `includeDynamicWorkflow` 是 host 运行时偏好：`registerBuiltInTools` 只有收到
+ * 显式 `false` 才下架这 11 个工具，缺省值由协议服务端的 `appRuntimePreferences` 决定
+ * （fail-closed）。所以「默认关闭」本身与上游一致。
+ *
+ * 与上游的差异在于它必须是**运行时**可改的。这里曾是一个 `const val`，导致
+ * `ChatController` 里 `if (DYNAMIC_WORKFLOW_TOOLS_ENABLED)` 被编译器折叠，工具面永远不可达。
+ * 现在它只是默认值，真正的开关走 `ProviderSettings.dynamicWorkflowToolsEnabled`。
+ */
+const val DYNAMIC_WORKFLOW_TOOLS_DEFAULT = false
 
 const val DYNAMIC_WORKFLOW_DEFAULT_PIN =
-    "Upstream includeDynamicWorkflow defaults the tools on when the flag is absent. " +
-        "AndMX defaults them off because there is no embedded dynamic-workflow runner. " +
-        "Turning the switch on only registers the declarations; it does not execute a run."
+    "Upstream includeDynamicWorkflow defaults the tools on when the flag is absent; " +
+        "the protocol server's appRuntimePreferences decides the effective default and is fail-closed. " +
+        "AndMX keeps the same default but resolves it at runtime from settings, not at compile time."
 
 const val CREATE_WORKFLOW_TIMEOUT_MS = 15_000L
 const val AMEND_WORKFLOW_TIMEOUT_MS = 15_000L
@@ -72,14 +83,15 @@ const val AMEND_WORKFLOW_SOURCE_ERROR =
 const val SAVE_WORKFLOW_SOURCE_ERROR =
     "Provide exactly one script source: `script` for the body inline, or `script_path` for the file holding it (a draft, usually). Passing both, or neither, is ambiguous."
 
+const val ARG_DECLARATION_ERROR =
+    "`args` must be an object whose values are `{ type, description?, required?, default? }`, " +
+        "with type one of string, number, boolean, json."
+
 const val EVAL_WORKFLOW_SNIPPET_SOURCE_ERROR =
     "Provide exactly one snippet source: `code` for the snippet inline, or `path` for a file holding it. Passing both, or neither, is ambiguous."
 
 const val FILL_WORKFLOW_HOLE_SOURCE_ERROR =
     "Provide exactly one body source: `script` for the hole's statements written inline, or `path` for a file holding them (usually the fill file a rejected attempt was saved to). Passing both, or neither, is ambiguous."
-
-const val WORKFLOW_NOT_EXECUTED_NOTE =
-    "NOTE: The workflow was NOT executed — workflow execution is not available in this session. Nothing was typechecked and nothing was started."
 
 const val SNIPPET_NOT_EXECUTED_NOTE =
     "NOTE: The snippet was NOT executed — snippet evaluation is not available in this session."
@@ -240,7 +252,7 @@ fun workflowSkillRefusal(toolName: String): String =
 
 fun applyDynamicWorkflowGate(
     tools: List<Tool>,
-    enabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_ENABLED,
+    enabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_DEFAULT,
 ): List<Tool> {
     if (enabled) return tools
     return tools.filter { it.name !in DYNAMIC_WORKFLOW_TOOL_NAMES }

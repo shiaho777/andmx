@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -135,6 +137,11 @@ class AgentEngine(
     private val dateProvider: () -> String = { java.time.LocalDate.now().toString() },
     private val hiddenTools: () -> Set<String> = { emptySet() },
     private val sessionEvents: ((type: String, payload: kotlinx.serialization.json.JsonObject) -> Unit)? = null,
+    /**
+     * ZCode ToolSearch/DeferredToolCall 的运行时目录。null = 保持旧行为：
+     * 所有工具定义一次性注入。非 null 时 `shouldDefer` 的工具改为按需加载。
+     */
+    private val toolSearch: ToolSearchRegistry? = null,
 ) {
     private val history = mutableListOf<ApiMessage>().also { h ->
         baseSystemBlocks().forEach { h += ApiMessage(role = "system", content = it) }
@@ -426,6 +433,7 @@ class AgentEngine(
 
     fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
         if (!acquireTurnLoop()) return@flow
+        toolSearch?.attach({ allTools }, hiddenTools)
         try {
             val isFirstUserTurn = history.none { it.role == "user" }
             val effectiveInput = if (isFirstUserTurn && metaUserContext.isNotBlank()) {
@@ -765,11 +773,21 @@ class AgentEngine(
             }
 
             val hidden = hiddenTools()
-            val exposedTools = if (hidden.isEmpty()) allTools else allTools.filter { it.name !in hidden }
-            val toolsForRequest = if (turn.modelMeta?.supportsToolCall == false) null else exposedTools.map { it.toApiTool() }
+            val supportsToolCall = turn.modelMeta?.supportsToolCall != false
+            val exposedTools = toolSearch?.exposed(allTools, hidden)
+                ?: allTools.filter { it.name !in hidden }
+            val toolsForRequest = if (supportsToolCall) exposedTools.map { it.toApiTool() } else null
+            val requestMessages = history.toMutableList()
+            if (supportsToolCall) {
+                toolSearch?.announcement(allTools, hidden)?.let { note ->
+                    val insertAt = requestMessages.indexOfFirst { it.role != "system" }
+                        .let { if (it < 0) requestMessages.size else it }
+                    requestMessages.add(insertAt, ApiMessage(role = "system", content = note))
+                }
+            }
             val request = ChatRequest(
                 model = turn.model,
-                messages = history.toList(),
+                messages = requestMessages,
                 tools = toolsForRequest,
                 reasoningEffort = reasoningFor(settings, turn),
             )
@@ -1022,7 +1040,7 @@ class AgentEngine(
                 emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, timed.second))
                 history += ApiMessage(
                     role = "tool",
-                    content = trimToolOutput(call.function.name, result.output),
+                    content = trimToolOutput(resolvedToolName(call), result.output),
                     toolCallId = call.id,
                     name = call.function.name,
                     imageUrls = if (relayImagesToUser) null else result.imageUrls,
@@ -1322,7 +1340,13 @@ class AgentEngine(
     private fun trimToolOutput(toolName: String, output: String): String {
         if (output.isEmpty()) return ResultBudget.emptyOutput(toolName)
         val declared = toolsByName[toolName]?.maxOutputBytes?.takeIf { it > 0 }
-        val cap = minOf(historyToolOutputLimit, declared ?: ResultBudget.DEFAULT_MAX_MODEL_BYTES)
+        // ToolSearch 的返回值就是被加载的 schema 本身；按普通历史输出截到 8k
+        // 会让「已加载」变成假话，模型拿到的仍是残页。
+        val cap = if (toolName == ToolSearchRegistry.TOOL_SEARCH_NAME) {
+            declared ?: ResultBudget.DEFAULT_MAX_MODEL_BYTES
+        } else {
+            minOf(historyToolOutputLimit, declared ?: ResultBudget.DEFAULT_MAX_MODEL_BYTES)
+        }
         val originalBytes = output.toByteArray(Charsets.UTF_8).size
         if (originalBytes <= cap) return output
         val path = spillToolArtifact(toolName, output)
@@ -1371,6 +1395,14 @@ class AgentEngine(
         json.parseToJsonElement(raw).jsonObject
     }.getOrElse { JsonObject(emptyMap()) }
 
+    /** Budget/telemetry name after a DeferredToolCall is unwrapped to its target. */
+    private fun resolvedToolName(call: com.andmx.llm.ApiToolCall): String {
+        if (call.function.name != ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME) return call.function.name
+        val args = parseArgs(call.function.arguments)
+        return (args["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: call.function.name
+    }
+
     private suspend fun timedExecuteToolCall(
         call: com.andmx.llm.ApiToolCall,
         validation: Boolean = false,
@@ -1380,88 +1412,159 @@ class AgentEngine(
         return r to (System.nanoTime() - t0) / 1_000_000
     }
 
+    private sealed interface CallTarget {
+        data class Resolved(
+            val tool: Tool,
+            val call: com.andmx.llm.ApiToolCall,
+            val args: JsonObject,
+        ) : CallTarget
+
+        data class Failed(val message: String) : CallTarget
+    }
+
+    /**
+     * Resolve the effective tool for one model call. A DeferredToolCall is
+     * unwrapped here so approval, hooks, deadlines and output budgets all see
+     * the target tool — the control wrapper never becomes the thing that runs.
+     */
+    private fun resolveCallTarget(call: com.andmx.llm.ApiToolCall): CallTarget {
+        val registry = toolSearch
+        if (call.function.name != ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME) {
+            val tool = toolsByName[call.function.name]
+                ?: return CallTarget.Failed("未知工具: ${call.function.name}")
+            if (registry != null && registry.isEnabled() && tool.shouldDefer) {
+                return CallTarget.Failed(
+                    "${tool.name} is deferred: its schema is not loaded. Use " +
+                        "${ToolSearchRegistry.TOOL_SEARCH_NAME} with query \"select:${tool.name}\" first, " +
+                        "then call it through ${ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME}.",
+                )
+            }
+            return CallTarget.Resolved(tool, call, parseArgs(call.function.arguments))
+        }
+        if (registry == null || !registry.isEnabled()) {
+            return CallTarget.Failed("DeferredToolCall is not enabled for this request.")
+        }
+        val wrapper = parseArgs(call.function.arguments)
+        val targetName = (wrapper["name"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        if (targetName.isEmpty()) {
+            return CallTarget.Failed(
+                "DeferredToolCall requires `name` to be the exact name of a deferred tool.",
+            )
+        }
+        val target = registry.resolveDeferred(targetName)
+        if (target == null) {
+            val known = toolsByName[targetName]
+            return CallTarget.Failed(
+                if (known != null && !known.shouldDefer) {
+                    "$targetName is a resident tool; call it directly instead of through DeferredToolCall."
+                } else {
+                    "No deferred tool named $targetName is available. Use " +
+                        "${ToolSearchRegistry.TOOL_SEARCH_NAME} to find it."
+                },
+            )
+        }
+        if (!registry.isDiscovered(targetName)) {
+            return CallTarget.Failed(
+                "The schema for $targetName is not loaded. Use ${ToolSearchRegistry.TOOL_SEARCH_NAME} " +
+                    "with query \"select:$targetName\" first.",
+            )
+        }
+        val input = when (val raw = wrapper["input"]) {
+            null -> JsonObject(emptyMap())
+            is JsonObject -> raw
+            else -> return CallTarget.Failed("DeferredToolCall `input` must be a JSON object.")
+        }
+        val targetCall = com.andmx.llm.ApiToolCall(
+            id = call.id,
+            type = call.type,
+            function = com.andmx.llm.ApiFunctionCall(target.name, input.toString()),
+        )
+        return CallTarget.Resolved(target, targetCall, input)
+    }
+
     /** Execute a single tool call: PRE_TOOL_USE hook → approval → run → POST_TOOL_USE hook. */
     private suspend fun executeToolCall(call: com.andmx.llm.ApiToolCall, validation: Boolean = false): ToolResult {
         if (call.function.name in hiddenTools()) {
             return ToolResult(TurnToolGate.denial(call.function.name), isError = true)
         }
-        val tool = toolsByName[call.function.name]
-        return if (tool == null) {
-            ToolResult("未知工具: ${call.function.name}", isError = true)
-        } else {
-            // ── PRE_TOOL_USE: hooks may block or modify args ──
-            val preCtx = com.andmx.agent.hooks.HookSystem.HookContext(
-                toolName = call.function.name,
-                toolArgs = call.function.arguments,
-            )
-            val pre = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_TOOL_USE, preCtx)
-                ?: com.andmx.agent.hooks.HookSystem.HookResult(com.andmx.agent.hooks.HookSystem.HookDecision.CONTINUE)
-            if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.BLOCK) {
-                return ToolResult("被 hook 拦截: ${pre.message.orEmpty()}", isError = true)
-            }
-            val effectiveArgs = if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && pre.modifiedInput != null) {
-                parseArgs(pre.modifiedInput!!)
-            } else {
-                parseArgs(call.function.arguments)
-            }
-
-            if (validation && effectiveArgs != parseArgs(call.function.arguments)) {
-                return ToolResult("Validation command arguments were changed by a hook; verification refused.", isError = true)
-            }
-            val machine = activeMachine
-            val phase = machine?.state?.phase
-            val canAsk = phase == com.andmx.agent.turn.TurnPhase.SCHEDULING_TOOLS ||
-                phase == com.andmx.agent.turn.TurnPhase.EXECUTING_TOOLS
-            if (machine != null && canAsk) {
-                machine.requestPermission(call.id)
-                sessionEvents?.invoke(
-                    com.andmx.data.session.SessionEventType.PERMISSION_REQUESTED,
-                    buildJsonObject { put("id", call.id); put("name", call.function.name) },
-                )
-            }
-            val outcome = approve(tool, effectiveArgs)
-            val allowed = outcome is ApprovalOutcome.AllowedOnce
-            if (machine != null && machine.state.phase == com.andmx.agent.turn.TurnPhase.AWAITING_PERMISSION) {
-                machine.resolvePermission(call.id, allowed)
-                sessionEvents?.invoke(
-                    if (allowed) {
-                        com.andmx.data.session.SessionEventType.PERMISSION_RESOLVED
-                    } else {
-                        com.andmx.data.session.SessionEventType.PERMISSION_DENIED
-                    },
-                    buildJsonObject { put("id", call.id); put("name", call.function.name) },
-                )
-                machine.startToolExecution()
-            }
-            if (!allowed) {
-                ToolResult(ApprovalOutcome.denialText(outcome), isError = true)
-            } else {
-                val raw = if (validation) {
-                    kotlinx.coroutines.withTimeoutOrNull(120_000L) { invokeTool(tool, call, effectiveArgs) }
-                        ?: ToolResult("Validation command timed out after 120000ms", isError = true)
-                } else invokeTool(tool, call, effectiveArgs)
-                // ── POST_TOOL_USE: hooks may rewrite the output ──
-                val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
-                    toolName = call.function.name,
-                    toolArgs = call.function.arguments,
-                    toolOutput = raw.output,
-                )
-                val post = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE, postCtx)
-                // 上游 PostToolUseFailure：失败结果走独立事件
-                if (raw.isError) {
-                    hooks?.runEvent(
-                        com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE_FAILURE,
-                        postCtx,
-                    )
-                }
-                val settled = if (post?.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && post.modifiedOutput != null) {
-                    raw.copy(output = post.modifiedOutput!!)
-                } else {
-                    raw
-                }
-                applyStopTurn(tool, settled)
-            }
+        val target = when (val resolved = resolveCallTarget(call)) {
+            is CallTarget.Failed -> return ToolResult(resolved.message, isError = true)
+            is CallTarget.Resolved -> resolved
         }
+        val tool = target.tool
+        val dispatched = target.call
+
+        // ── PRE_TOOL_USE: hooks may block or modify args ──
+        val preCtx = com.andmx.agent.hooks.HookSystem.HookContext(
+            toolName = dispatched.function.name,
+            toolArgs = dispatched.function.arguments,
+        )
+        val pre = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.PRE_TOOL_USE, preCtx)
+            ?: com.andmx.agent.hooks.HookSystem.HookResult(com.andmx.agent.hooks.HookSystem.HookDecision.CONTINUE)
+        if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.BLOCK) {
+            return ToolResult("被 hook 拦截: ${pre.message.orEmpty()}", isError = true)
+        }
+        val effectiveArgs = if (pre.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && pre.modifiedInput != null) {
+            parseArgs(pre.modifiedInput!!)
+        } else {
+            target.args
+        }
+
+        if (validation && effectiveArgs != parseArgs(dispatched.function.arguments)) {
+            return ToolResult("Validation command arguments were changed by a hook; verification refused.", isError = true)
+        }
+        val machine = activeMachine
+        val phase = machine?.state?.phase
+        val canAsk = phase == com.andmx.agent.turn.TurnPhase.SCHEDULING_TOOLS ||
+            phase == com.andmx.agent.turn.TurnPhase.EXECUTING_TOOLS
+        if (machine != null && canAsk) {
+            machine.requestPermission(call.id)
+            sessionEvents?.invoke(
+                com.andmx.data.session.SessionEventType.PERMISSION_REQUESTED,
+                buildJsonObject { put("id", call.id); put("name", dispatched.function.name) },
+            )
+        }
+        val outcome = approve(tool, effectiveArgs)
+        val allowed = outcome is ApprovalOutcome.AllowedOnce
+        if (machine != null && machine.state.phase == com.andmx.agent.turn.TurnPhase.AWAITING_PERMISSION) {
+            machine.resolvePermission(call.id, allowed)
+            sessionEvents?.invoke(
+                if (allowed) {
+                    com.andmx.data.session.SessionEventType.PERMISSION_RESOLVED
+                } else {
+                    com.andmx.data.session.SessionEventType.PERMISSION_DENIED
+                },
+                buildJsonObject { put("id", call.id); put("name", dispatched.function.name) },
+            )
+            machine.startToolExecution()
+        }
+        if (!allowed) {
+            return ToolResult(ApprovalOutcome.denialText(outcome), isError = true)
+        }
+        val raw = if (validation) {
+            kotlinx.coroutines.withTimeoutOrNull(120_000L) { invokeTool(tool, dispatched, effectiveArgs) }
+                ?: ToolResult("Validation command timed out after 120000ms", isError = true)
+        } else invokeTool(tool, dispatched, effectiveArgs)
+        // ── POST_TOOL_USE: hooks may rewrite the output ──
+        val postCtx = com.andmx.agent.hooks.HookSystem.HookContext(
+            toolName = dispatched.function.name,
+            toolArgs = dispatched.function.arguments,
+            toolOutput = raw.output,
+        )
+        val post = hooks?.runEvent(com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE, postCtx)
+        // 上游 PostToolUseFailure：失败结果走独立事件
+        if (raw.isError) {
+            hooks?.runEvent(
+                com.andmx.agent.hooks.HookSystem.HookEvent.POST_TOOL_USE_FAILURE,
+                postCtx,
+            )
+        }
+        val settled = if (post?.decision == com.andmx.agent.hooks.HookSystem.HookDecision.MODIFY && post.modifiedOutput != null) {
+            raw.copy(output = post.modifiedOutput!!)
+        } else {
+            raw
+        }
+        return applyStopTurn(tool, settled)
     }
 
     /**

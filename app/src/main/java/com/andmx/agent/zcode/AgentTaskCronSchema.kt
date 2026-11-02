@@ -30,7 +30,7 @@ internal const val TASK_STOP_LOOKUP_FAILURE_GUIDANCE =
     "This lookup failure does not mean the task has completed or stopped; use the full task_id returned when the task started to stop it."
 
 internal fun agentProviderDescription(
-    dynamicWorkflowEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_ENABLED,
+    dynamicWorkflowEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_DEFAULT,
 ): String {
     val lines = mutableListOf(
         "Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.",
@@ -56,11 +56,15 @@ internal fun agentProviderDescription(
 
 internal val AGENT_PROVIDER_DESCRIPTION = agentProviderDescription()
 
-internal val TASK_PROVIDER_DESCRIPTION = listOf(
+internal fun taskProviderDescription(
+    dynamicWorkflowEnabled: Boolean = DYNAMIC_WORKFLOW_TOOLS_DEFAULT,
+): String = listOf(
     "Claude Code-compatible alias for the Agent tool. Use this when plugin instructions ask for the Task tool.",
     "",
-    AGENT_PROVIDER_DESCRIPTION,
+    agentProviderDescription(dynamicWorkflowEnabled),
 ).joinToString("\n")
+
+internal val TASK_PROVIDER_DESCRIPTION = taskProviderDescription()
 
 internal val TASK_OUTPUT_PROVIDER_DESCRIPTION =
     "DEPRECATED: Background tasks return their output file path in the tool result, and you receive a <task-notification> with the same path when the task completes.\n" +

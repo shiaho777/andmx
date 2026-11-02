@@ -11,6 +11,7 @@ class ListModelsTool(
     private val current: suspend () -> Pair<String, String>,
 ) : Tool {
     override val name = "ListModels"
+    override val shouldDefer = true
     override val description = LIST_MODELS_DESCRIPTION
     override val risk = ToolRisk.READ
     override val readOnly = true

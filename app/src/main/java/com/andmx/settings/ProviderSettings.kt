@@ -72,6 +72,11 @@ data class ProviderSettings(
     val summaryPanelDisplayMode: String = "auto",
     /** AskUserQuestion 无作答时 5 分钟自动以空答案继续（上游 autoResolution 对齐）。 */
     val askAutoResolve: Boolean = true,
+    /**
+     * 动态工作流工具面（CreateWorkflow 等 11 个工具）的运行时开关。
+     * 对齐 ZCode `includeDynamicWorkflow`：默认关闭，由用户在设置里打开。
+     */
+    val dynamicWorkflowToolsEnabled: Boolean = false,
 
     // ── 代码预览（对标 ZCode Code Preview）──
     /** 浅色模式下代码块主题 id。 */

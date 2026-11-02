@@ -6,7 +6,8 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.zcode.AGENT_MODEL_BYTES
 import com.andmx.agent.zcode.AGENT_PARAMETERS
-import com.andmx.agent.zcode.AGENT_PROVIDER_DESCRIPTION
+import com.andmx.agent.zcode.agentProviderDescription
+import com.andmx.agent.zcode.taskProviderDescription
 import com.andmx.agent.zcode.SEND_MESSAGE_MAX_CONTENT_CHARS
 import com.andmx.agent.zcode.SEND_MESSAGE_MODEL_BYTES
 import com.andmx.agent.zcode.SEND_MESSAGE_PARAMETERS
@@ -102,6 +103,11 @@ class SubAgentOrchestrator(
     private val agentsMdProvider: suspend () -> String = { "" },
     /** 子代理→协调者回话（上游 RespondToCoordinator 的投递端口）。 */
     private val coordinatorMessageSink: (fromAgentId: String, message: String) -> Unit = { _, _ -> },
+    /**
+     * 动态工作流工具面是否启用。上游在注册 Agent 工具时就按当前 flag 生成描述，
+     * 因此这条链必须是运行时值，不能是编译期常量。
+     */
+    private val dynamicWorkflowEnabled: Boolean = false,
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
@@ -539,10 +545,16 @@ class SubAgentOrchestrator(
         listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
         backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
     ): List<Tool> {
-        val agent = ZCodeAgentTool(this, resolveAgent, listTypes)
+        val agent = ZCodeAgentTool(
+            this, resolveAgent, listTypes,
+            dynamicWorkflowEnabled = dynamicWorkflowEnabled,
+        )
         return listOf(
             agent,
-            ZCodeTaskTool(this, resolveAgent, listTypes),
+            ZCodeTaskTool(
+                this, resolveAgent, listTypes,
+                dynamicWorkflowEnabled = dynamicWorkflowEnabled,
+            ),
             TaskOutputTool(this, backgroundTasks),
             TaskStopTool(this, backgroundTasks),
             SendMessageTool(this),
@@ -748,9 +760,11 @@ class ZCodeAgentTool(
     private val listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
     private val callerToolNames: () -> Collection<String> = { listOf("Read", "Bash") },
     private val reportedName: String = "Agent",
+    private val dynamicWorkflowEnabled: Boolean = false,
 ) : Tool {
     override val name = reportedName
-    override val description = AGENT_PROVIDER_DESCRIPTION
+    override val shouldDefer = true
+    override val description = agentProviderDescription(dynamicWorkflowEnabled)
     override val risk = com.andmx.agent.ToolRisk.READ
     override val readOnly = true
     override val destructive = false
@@ -840,10 +854,16 @@ class ZCodeTaskTool(
     private val resolveAgent: suspend (String?) -> CustomSubAgent? = { null },
     private val listTypes: suspend () -> List<String> = { listOf("Explore", "general-purpose") },
     private val callerToolNames: () -> Collection<String> = { listOf("Read", "Bash") },
+    private val dynamicWorkflowEnabled: Boolean = false,
 ) : Tool {
-    private val agentTool = ZCodeAgentTool(orchestrator, resolveAgent, listTypes, callerToolNames, reportedName = "Task")
+    private val agentTool = ZCodeAgentTool(
+        orchestrator, resolveAgent, listTypes, callerToolNames,
+        reportedName = "Task",
+        dynamicWorkflowEnabled = dynamicWorkflowEnabled,
+    )
     override val name = "Task"
-    override val description = TASK_PROVIDER_DESCRIPTION
+    override val shouldDefer = true
+    override val description = taskProviderDescription(dynamicWorkflowEnabled)
     override val risk = com.andmx.agent.ToolRisk.READ
     override val readOnly = true
     override val destructive = false
@@ -863,6 +883,7 @@ class TaskOutputTool(
     private val backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
 ) : Tool {
     override val name = "TaskOutput"
+    override val shouldDefer = true
     override val description = TASK_OUTPUT_PROVIDER_DESCRIPTION
     override val risk = com.andmx.agent.ToolRisk.READ
     override val readOnly = true
@@ -959,6 +980,7 @@ class SendMessageTool(
     private val orchestrator: SubAgentOrchestrator,
 ) : Tool {
     override val name = "SendMessage"
+    override val shouldDefer = true
     override val description = SEND_MESSAGE_PROVIDER_DESCRIPTION
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
     override val readOnly = false
@@ -1022,6 +1044,7 @@ class TaskStopTool(
     private val backgroundTasks: com.andmx.agent.BackgroundTasks? = null,
 ) : Tool {
     override val name = "TaskStop"
+    override val shouldDefer = true
     override val description = TASK_STOP_PROVIDER_DESCRIPTION
     override val risk = com.andmx.agent.ToolRisk.EXECUTE
     override val readOnly = false
@@ -1169,6 +1192,7 @@ class RespondToCoordinatorTool(
     private val sink: (fromAgentId: String, message: String) -> Unit,
 ) : Tool {
     override val name = "RespondToCoordinator"
+    override val shouldDefer = true
     override val description =
         "# RespondToCoordinator\n\n" +
             "Reply to the agent that spawned or messaged you.\n\n" +

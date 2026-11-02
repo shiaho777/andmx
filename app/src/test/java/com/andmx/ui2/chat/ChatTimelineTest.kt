@@ -9,8 +9,14 @@ class ChatTimelineTest {
     private fun msg(id: Long, sortKey: Long = id) =
         ChatMessage(id = id, role = "assistant", content = "m$id", sortKey = sortKey)
 
-    private fun tool(id: String, sortKey: Long, name: String = "Read", running: Boolean = false, error: Boolean = false) =
-        ToolCall(id = id, name = name, args = "{}", isRunning = running, isError = error, sortKey = sortKey)
+    private fun tool(
+        id: String,
+        sortKey: Long,
+        name: String = "Read",
+        running: Boolean = false,
+        error: Boolean = false,
+        args: String = "{}",
+    ) = ToolCall(id = id, name = name, args = args, isRunning = running, isError = error, sortKey = sortKey)
 
     @Test
     fun sortsItemsBySortKey() {
@@ -47,7 +53,7 @@ class ChatTimelineTest {
     }
 
     @Test
-    fun runningAndFailedToolsAreNeverGrouped() {
+    fun consecutiveExploreToolsGroupRegardlessOfStatus() {
         val timeline = buildTimeline(
             messages = emptyList(),
             tools = listOf(
@@ -56,8 +62,20 @@ class ChatTimelineTest {
                 tool("t3", sortKey = 102, name = "Read"),
             ),
         )
-        assertEquals(3, timeline.size)
-        assertTrue(timeline.all { it is TimelineItem.Tool })
+        val group = timeline.single() as TimelineItem.ToolGroup
+        assertEquals(listOf("t1", "t2", "t3"), group.tools.map { it.id })
+    }
+
+    fun readonlyShellGroupsWithReadAsExplore() {
+        val timeline = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(
+                tool("r1", sortKey = 100, name = "Read"),
+                tool("b1", sortKey = 101, name = "Bash", args = """{"command":"ls src"}"""),
+            ),
+        )
+        val group = timeline.single() as TimelineItem.ToolGroup
+        assertEquals(listOf("r1", "b1"), group.tools.map { it.id })
     }
 
     @Test
@@ -111,6 +129,31 @@ class ChatTimelineTest {
     }
 
     @Test
+    fun changesGroupOnlyWhenEnabled() {
+        val timeline = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(
+                tool("e1", sortKey = 102, name = "Edit"),
+                tool("w1", sortKey = 103, name = "Write"),
+            ),
+            groupChanges = true,
+        )
+        val group = timeline.single() as TimelineItem.ToolGroup
+        assertEquals(listOf("Edit", "Write"), group.tools.map { it.name })
+    }
+
+    fun readonlyShellDoesNotJoinTerminalGroup() {
+        val timeline = buildTimeline(
+            messages = emptyList(),
+            tools = listOf(
+                tool("b1", sortKey = 100, name = "Bash", args = """{"command":"ls"}"""),
+                tool("b2", sortKey = 101, name = "Bash", args = """{"command":"rm x"}"""),
+            ),
+        )
+        assertTrue(timeline[0] is TimelineItem.Tool)
+        assertTrue(timeline[1] is TimelineItem.Tool)
+    }
+
     fun changeToolsGroupSeparatelyFromReads() {
         // ZCode changes/execute 分组：Edit+Write 同组，Read 不与改动混组。
         val timeline = buildTimeline(
@@ -124,10 +167,10 @@ class ChatTimelineTest {
                 tool("g1", sortKey = 105, name = "Git"),
             ),
         )
-        assertEquals(3, timeline.size)
-        assertTrue(timeline.all { it is TimelineItem.ToolGroup })
-        val kinds = timeline.map { (it as TimelineItem.ToolGroup).tools.map { t -> t.name } }
-        assertEquals(listOf(listOf("Read", "Grep"), listOf("Edit", "Write"), listOf("Bash", "Git")), kinds)
+        assertEquals(5, timeline.size)
+        val group = timeline[0] as TimelineItem.ToolGroup
+        assertEquals(listOf("Read", "Grep"), group.tools.map { it.name })
+        assertTrue(timeline.drop(1).all { it is TimelineItem.Tool })
     }
 
     @Test

@@ -71,6 +71,8 @@ object ToolPresentation {
         "mcp" -> Family("MCP", Icons.Outlined.Code)
         "cron" -> Family("定时", Icons.Outlined.Schedule)
         "offpeak" -> Family("闲时", Icons.Outlined.Schedule)
+        "toolsearch" -> Family("工具检索", Icons.Outlined.Search)
+        "deferred" -> Family("延迟工具", Icons.Outlined.Build)
         else -> Family(displayName(name), Icons.Outlined.Build)
     }
 
@@ -110,6 +112,8 @@ object ToolPresentation {
             "cron" -> if (running) "更新定时任务" else "定时任务已更新"
             "offpeak" -> if (running) "排入闲时" else "已排入闲时"
             "workflow" -> if (running) "工作流操作" else "工作流已更新"
+            "toolsearch" -> if (running) "检索工具" else "已检索工具"
+            "deferred" -> if (running) "调用工具" else "已调用工具"
             else -> if (running) "运行中" else family(tc.name).label
         }
     }

@@ -44,6 +44,7 @@ class CronTools(
 
     inner class Create : Tool {
         override val name = "CronCreate"
+        override val shouldDefer = true
         override val description = CRON_CREATE_DESCRIPTION
         override val risk = ToolRisk.WRITE
         override val readOnly = false
@@ -153,6 +154,7 @@ class CronTools(
 
     inner class ListAll : Tool {
         override val name = "CronList"
+        override val shouldDefer = true
         override val description = CRON_LIST_DESCRIPTION
         override val risk = ToolRisk.READ
         override val readOnly = true
@@ -175,6 +177,7 @@ class CronTools(
 
     inner class Update : Tool {
         override val name = "CronUpdate"
+        override val shouldDefer = true
         override val description = CRON_UPDATE_DESCRIPTION
         override val risk = ToolRisk.WRITE
         override val readOnly = false
@@ -261,6 +264,7 @@ class CronTools(
 
     inner class Delete : Tool {
         override val name = "CronDelete"
+        override val shouldDefer = true
         override val description = CRON_DELETE_DESCRIPTION
         override val risk = ToolRisk.EXECUTE
         override val readOnly = false
@@ -288,6 +292,7 @@ class CronTools(
     /** 上游 OffPeakCreate：把任务排进下一个闲时窗口（local offPeakStartHour:00）。 */
     inner class OffPeakCreate : Tool {
         override val name = "OffPeakCreate"
+        override val shouldDefer = true
         override val description =
             "Queue an unattended task to run at the next off-peak window. The prompt continues THIS conversation later with full history, so it may reference established context; state the deliverable explicitly and never ask the run to schedule another task."
         override val risk = ToolRisk.WRITE
@@ -338,6 +343,7 @@ class CronTools(
     /** 上游 OffPeakList：列出闲时任务与状态（queued/paused/completed/failed）。 */
     inner class OffPeakList : Tool {
         override val name = "OffPeakList"
+        override val shouldDefer = true
         override val description = "List queued idle-time (off-peak) tasks in the current workspace."
         override val risk = ToolRisk.READ
         override val parameters: JsonObject = buildJsonObject {

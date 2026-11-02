@@ -20,6 +20,28 @@ class RelativeTimeTest {
         assertEquals("23小时", relativeTaskTime(ago(TimeUnit.HOURS.toMillis(23))))
         assertEquals("2天", relativeTaskTime(ago(TimeUnit.DAYS.toMillis(2))))
         assertEquals("30天", relativeTaskTime(ago(TimeUnit.DAYS.toMillis(30))))
+        assertEquals("", relativeTaskTime(0L))
+    }
+
+    @Test
+    fun historySentLabelUsesClockAndDay() {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 15)
+            set(Calendar.MINUTE, 4)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val now = cal.timeInMillis
+        assertEquals("15:04", historySentLabel(now, now))
+        val yesterday = (cal.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+        assertEquals("昨天 15:04", historySentLabel(yesterday, now))
+    }
+
+    @Test
+    fun missingUpdatedAtFallsBackToCreatedAt() {
+        val created = ago(TimeUnit.HOURS.toMillis(20))
+        assertEquals(created, activityTimestamp(created, updatedAt = 0L, preferCreated = false))
+        assertEquals("20小时", relativeTaskTime(activityTimestamp(created, 0L, preferCreated = false)))
     }
 
     @Test

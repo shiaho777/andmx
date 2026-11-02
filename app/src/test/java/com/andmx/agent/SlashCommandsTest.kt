@@ -78,10 +78,11 @@ class SlashCommandsTest {
 
     @Test
     fun recognizesApprovalModes() {
-        assertEquals(ApprovalMode.FULL, (SlashCommands.parse("/full") as SlashResult.Mode).mode)
-        assertEquals(ApprovalMode.ASK, (SlashCommands.parse("/ask") as SlashResult.Mode).mode)
-        assertEquals(ApprovalMode.READ_ONLY, (SlashCommands.parse("/readonly") as SlashResult.Mode).mode)
-        assertEquals(ApprovalMode.READ_ONLY, (SlashCommands.parse("/read") as SlashResult.Mode).mode)
+        assertEquals(com.andmx.ui2.chat.ExecMode.YOLO, (SlashCommands.parse("/full") as SlashResult.Mode).mode)
+        assertEquals(com.andmx.ui2.chat.ExecMode.BUILD, (SlashCommands.parse("/ask") as SlashResult.Mode).mode)
+        assertEquals(com.andmx.ui2.chat.ExecMode.PLAN, (SlashCommands.parse("/readonly") as SlashResult.Mode).mode)
+        assertEquals(com.andmx.ui2.chat.ExecMode.PLAN, (SlashCommands.parse("/read") as SlashResult.Mode).mode)
+        assertEquals(com.andmx.ui2.chat.ExecMode.GUARDED, (SlashCommands.parse("/guarded") as SlashResult.Mode).mode)
     }
 
     @Test

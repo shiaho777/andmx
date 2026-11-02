@@ -111,6 +111,22 @@ class ReadFileStateTest {
     }
 
     @Test
+    fun unchangedFullReadMatchesMtimeAndSize() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "abc", mtimeMs = 1000L, sizeBytes = 3L)
+        assertTrue(state.unchangedFullRead("/w/a.kt", 1000L, 3L))
+        assertTrue(!state.unchangedFullRead("/w/a.kt", 1000L, 4L))
+        assertTrue(!state.unchangedFullRead("/w/a.kt", 2000L, 3L))
+    }
+
+    @Test
+    fun partialReadDoesNotShortCircuit() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "abc", offset = 0, limit = 1, mtimeMs = 1000L, sizeBytes = 3L)
+        assertTrue(!state.unchangedFullRead("/w/a.kt", 1000L, 3L))
+    }
+
+    @Test
     fun writeThenEditRefreshesState() {
         val state = ReadFileState()
         state.record("/w/a.kt", "v1", sourceTool = ReadFileState.WRITE_TOOL, mtimeMs = 500L, sizeBytes = 2L)

@@ -990,7 +990,7 @@ class ChatViewModel @Inject constructor(
             is SlashResult.WorkflowPrompt -> {
                 viewModelScope.launch {
                     if (cmd.args.isBlank()) {
-                        appendLocalAssistant(WorkflowPrompt.blankArgsNotice())
+                        appendLocalAssistant(controller.workflowBlankArgsNotice())
                     } else {
                         sendMessage(controller.workflowPrompt(cmd.args))
                     }

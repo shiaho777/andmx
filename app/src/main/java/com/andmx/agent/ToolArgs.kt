@@ -65,6 +65,8 @@ object ToolArgs {
             "get_goal", "create_goal", "update_goal" -> "goal"
             "computer", "Computer" -> "computer"
             "ListModels" -> "listmodels"
+            "ToolSearch" -> "toolsearch"
+            "DeferredToolCall" -> "deferred"
             "submit_result", "SubmitResult" -> "submit"
             "escalate", "Escalate" -> "escalate"
             "SendMessage" -> "send"
@@ -104,6 +106,8 @@ object ToolArgs {
             "enterplan" -> firstValue(args, "reason").ifBlank { "进入计划模式" }
             "exitplan" -> "计划已就绪"
             "mcp" -> toolName.substringAfterLast('_').ifBlank { toolName }
+            "toolsearch" -> firstValue(args, "query")
+            "deferred" -> firstValue(args, "name")
             else -> ""
         }
         return body.ifBlank { args.take(limit) }.singleLine(limit)

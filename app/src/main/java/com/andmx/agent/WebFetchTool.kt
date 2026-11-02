@@ -240,6 +240,7 @@ class WebFetchTool(
     private val summarizer: (suspend (content: String, prompt: String) -> String?)? = null,
 ) : Tool {
     override val name = "WebFetch"
+    override val shouldDefer = true
     override val description = WEBFETCH_DESCRIPTION
     override val parameters = WEBFETCH_PARAMETERS
     override val risk = ToolRisk.NETWORK

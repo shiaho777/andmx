@@ -1,0 +1,10 @@
+{
+  "name": "andmx-dwf-runner",
+  "private": true,
+  "type": "module",
+  "//": "依赖与 ../dwf-analyzer 共用：node_modules 是指向它的符号链接，先在那里 npm install。",
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

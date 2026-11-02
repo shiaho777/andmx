@@ -54,8 +54,9 @@ class WorkflowToolsGateTest {
             put("saved", buildJsonObject { put("name", "expert") })
         })
         assertTrue(r.isError)
+        // 技能门对 saved 来源放行，于是它一路走到了来源解析。
         assertFalse(r.output.contains("before it accepts a script"))
-        assertTrue(r.output.contains("NOT executed"))
+        assertTrue(r.output.contains("no saved-workflow archive"))
         assertFalse(r.output.contains("Workflow run started"))
     }
 

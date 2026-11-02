@@ -46,6 +46,13 @@ interface Tool {
 
     val permissionName: String? get() = null
 
+    /**
+     * ZCode `shouldDefer` 对齐：为 true 时工具不进入每轮工具定义，模型只看到
+     * 名字/一行描述；完整 JSONSchema 必须经 ToolSearch 加载，再通过
+     * DeferredToolCall 调用。没有 ToolSearchRegistry 的引擎仍全量暴露。
+     */
+    val shouldDefer: Boolean get() = false
+
     val riskLevel: String get() = when {
         destructive -> "high"
         risk == ToolRisk.READ -> "low"
