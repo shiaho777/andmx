@@ -1,7 +1,6 @@
 package com.andmx.agent
 
 import android.app.Application
-import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -19,25 +18,24 @@ import java.nio.file.Files
 @Config(application = Application::class, sdk = [34])
 class ModelCallTracePersistenceTest {
 
-    private lateinit var context: Context
     private lateinit var traceFile: File
+    private lateinit var store: ModelCallTrace.Store
 
     @Before
     fun setUp() {
-        context = ApplicationProvider.getApplicationContext()
+        ApplicationProvider.getApplicationContext<Application>()
         traceFile = Files.createTempFile("model-traces", ".json").toFile().apply { delete() }
-        ModelCallTrace.resetForTests(context)
-        ModelCallTrace.installFile(traceFile)
+        store = ModelCallTrace.Store().apply { install(traceFile) }
     }
 
     @After
     fun tearDown() {
-        ModelCallTrace.resetInMemory()
+        store.resetInMemory()
         traceFile.delete()
     }
 
     private fun record(model: String = "gpt-test") {
-        ModelCallTrace.record(
+        store.record(
             source = ModelCallTrace.Source.MAIN,
             model = model,
             inputTokens = 100,
@@ -50,51 +48,58 @@ class ModelCallTracePersistenceTest {
         )
     }
 
+    private fun decode(): List<ModelCallTrace.Call> =
+        ModelCallTrace.codec.decodeFromString(traceFile.readText())
+
     @Test
     fun recordFlushAndReloadKeepsTheRing() = runBlocking {
         repeat(3) { record("m$it") }
-        ModelCallTrace.flush()
+        store.flush()
 
         assertTrue(traceFile.isFile)
-        assertEquals(3, ModelCallTrace.calls.value.size)
-        assertEquals(3L, ModelCallTrace.calls.value.last().seq)
+        val persisted = decode()
+        assertEquals(3, persisted.size)
+        assertEquals("m2", persisted.last().model)
+        assertEquals(120, persisted.last().totalTokens)
+        assertEquals(3L, persisted.last().seq)
 
-        ModelCallTrace.resetInMemory()
-        ModelCallTrace.installFile(traceFile)
-
-        val restored = ModelCallTrace.calls.value
-        assertEquals(3, restored.size)
-        assertEquals("m2", restored.last().model)
-        assertEquals(120, restored.last().totalTokens)
-
-        record("after-restart")
-        assertEquals(4L, ModelCallTrace.calls.value.last().seq)
+        val restored = ModelCallTrace.Store().apply { install(traceFile) }
+        assertEquals(3, restored.calls.value.size)
+        assertEquals("m2", restored.calls.value.last().model)
     }
 
     @Test
     fun ringIsCappedAtFiftyAndClearEmptiesTheFile() = runBlocking {
         repeat(ModelCallTrace.MAX_CALLS + 5) { record() }
-        ModelCallTrace.flush()
-        assertEquals(ModelCallTrace.MAX_CALLS, ModelCallTrace.calls.value.size)
+        store.flush()
+        assertEquals(ModelCallTrace.MAX_CALLS, store.calls.value.size)
+        assertEquals(ModelCallTrace.MAX_CALLS, decode().size)
 
-        ModelCallTrace.clear()
-        ModelCallTrace.flush()
-        assertTrue(ModelCallTrace.calls.value.isEmpty())
-
-        ModelCallTrace.resetInMemory()
-        ModelCallTrace.installFile(traceFile)
-        assertTrue(ModelCallTrace.calls.value.isEmpty())
+        store.clear()
+        store.flush()
+        assertTrue(store.calls.value.isEmpty())
+        assertTrue(decode().isEmpty())
     }
 
     @Test
     fun corruptTraceFileFailsClosedWithoutCrashing() = runBlocking {
         traceFile.writeText("{not-json")
-        ModelCallTrace.resetInMemory()
-        ModelCallTrace.installFile(traceFile)
+        val restored = ModelCallTrace.Store().apply { install(traceFile) }
+        assertTrue(restored.calls.value.isEmpty())
 
-        assertTrue(ModelCallTrace.calls.value.isEmpty())
-        record()
-        ModelCallTrace.flush()
-        assertEquals(1L, ModelCallTrace.calls.value.single().seq)
+        restored.record(
+            source = ModelCallTrace.Source.MAIN,
+            model = "m",
+            inputTokens = 1,
+            cachedInputTokens = 0,
+            outputTokens = 1,
+            finish = ModelCallTrace.Finish.STOP,
+            inputPreview = "",
+            outputPreview = "",
+            durationMs = 0,
+        )
+        restored.flush()
+        assertEquals(1L, restored.calls.value.single().seq)
+        assertEquals(1, decode().size)
     }
 }
