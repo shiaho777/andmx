@@ -63,6 +63,7 @@ import com.andmx.agent.plugins.PluginSystem
 import com.andmx.exec.files.GuestFs
 import com.andmx.exec.proot.ProotRuntime
 import com.andmx.mcp.McpManager
+import com.andmx.mcp.McpOAuth
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.SettingsStore
 import com.andmx.ui2.settings.EmptyState
@@ -122,6 +123,7 @@ fun McpPage(onBack: () -> Unit) {
                 },
                 onDelete = target.entry?.let { e ->
                     {
+                        McpOAuth(context).clear(e.toConfig())
                         persist(entries.filterNot { it.name == e.name })
                         view = McpView.List
                     }

@@ -214,6 +214,7 @@ class McpManager(private val context: Context) {
     private val runtime = ProotRuntime(context)
     private val clients = mutableListOf<McpClient>()
     private val httpTransports = mutableListOf<McpHttpTransport>()
+    private val oauth = McpOAuth(context)
 
     /** A connected MCP server and the tools it advertised. */
     data class Connected(val name: String, val tools: List<String>, val transport: String)
@@ -243,10 +244,19 @@ class McpManager(private val context: Context) {
         runCatching {
             when (cfg.transport) {
                 McpTransport.HTTP, McpTransport.WEBSOCKET -> {
+                    val headers = cfg.headers.toMutableMap()
+                    if (cfg.oauthJson.isNotBlank()) {
+                        val token = runCatching { oauth.accessToken(cfg) }.getOrNull()
+                        if (token.isNullOrBlank()) {
+                            onLog("MCP ${cfg.name}: OAuth 配置存在，但没有可用 access token")
+                        } else {
+                            headers["Authorization"] = "Bearer $token"
+                        }
+                    }
                     val transport = McpHttpTransport(
                         cfg.name,
                         cfg.command,
-                        headers = cfg.headers,
+                        headers = headers,
                         protocolVersion = cfg.wireProtocol(),
                         timeoutMs = cfg.timeoutMs,
                     )
