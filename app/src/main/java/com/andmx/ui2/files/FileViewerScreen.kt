@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.WrapText
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,9 +48,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.andmx.ui2.markdown.CodeBlockThemed
 import com.andmx.ui2.markdown.CodeThemes
 import com.andmx.ui2.markdown.LocalCodePreviewConfig
@@ -62,7 +66,7 @@ import java.io.File
 private const val CHUNK = 256 * 1024
 private const val MAX_PDF_PAGES = 10
 
-private enum class FileKind { TEXT, MARKDOWN, IMAGE, PDF, BINARY }
+private enum class FileKind { TEXT, MARKDOWN, IMAGE, PDF, AUDIO, VIDEO, OFFICE, BINARY }
 
 private data class PdfPreview(val pages: List<ImageBitmap>, val totalPages: Int)
 
@@ -72,6 +76,9 @@ private fun kindOf(name: String): FileKind {
         "md", "markdown" -> FileKind.MARKDOWN
         "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg" -> FileKind.IMAGE
         "pdf" -> FileKind.PDF
+        "mp3", "m4a", "aac", "wav", "ogg", "flac", "opus" -> FileKind.AUDIO
+        "mp4", "webm", "mkv", "mov", "3gp", "m4v", "avi" -> FileKind.VIDEO
+        "docx", "pptx", "xlsx" -> FileKind.OFFICE
         "zip", "tar", "gz", "jar", "apk", "so", "bin", "exe", "class", "o" -> FileKind.BINARY
         else -> FileKind.TEXT
     }
@@ -80,6 +87,7 @@ private fun kindOf(name: String): FileKind {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileViewerScreen(path: String, onBack: () -> Unit) {
+    val context = LocalContext.current
     val file = remember(path) { File(path) }
     val kind = remember(path) { kindOf(file.name) }
     val scope = rememberCoroutineScope()
@@ -92,7 +100,11 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
     val config = LocalCodePreviewConfig.current
 
     val fullContent by produceState(initialValue = null as String?, key1 = path) {
-        if (kind == FileKind.IMAGE || kind == FileKind.PDF || kind == FileKind.BINARY) return@produceState
+        if (kind == FileKind.IMAGE || kind == FileKind.PDF || kind == FileKind.BINARY ||
+            kind == FileKind.AUDIO || kind == FileKind.VIDEO || kind == FileKind.OFFICE
+        ) {
+            return@produceState
+        }
         value = withContext(Dispatchers.IO) {
             runCatching { if (!file.exists()) null else file.readText() }.getOrNull()
         }
@@ -158,6 +170,13 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
         }
     }
 
+    val officeText by produceState(initialValue = null as String?, key1 = path, key2 = kind) {
+        if (kind != FileKind.OFFICE) return@produceState
+        value = withContext(Dispatchers.IO) {
+            runCatching { OfficeTextExtractor.extract(file) }.getOrNull()
+        }
+    }
+
     val totalLen = fullContent?.length ?: 0
     val chunkCount = ((totalLen + CHUNK - 1) / CHUNK).coerceAtLeast(1)
     val safeChunk = chunkIndex.coerceIn(0, chunkCount - 1)
@@ -188,6 +207,11 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
                 },
                 actions = {
+                    if (kind == FileKind.OFFICE) {
+                        IconButton(onClick = { openFileExternally(context, file) }) {
+                            Icon(Icons.Outlined.OpenInNew, "用其他应用打开")
+                        }
+                    }
                     if (kind == FileKind.TEXT || kind == FileKind.MARKDOWN) {
                         IconButton(onClick = { wrap = !wrap }) {
                             Icon(
@@ -237,6 +261,12 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
+                    kind == FileKind.AUDIO || kind == FileKind.VIDEO ->
+                        MediaPreview(file, audio = kind == FileKind.AUDIO)
+                    kind == FileKind.OFFICE && officeText != null ->
+                        OfficePreview(officeText!!)
+                    kind == FileKind.OFFICE ->
+                        CenterHint("无法提取这个 Office 文档的文本。可能已加密，或文件结构不受支持。")
                     kind == FileKind.BINARY ->
                         CenterHint("当前文件看起来像二进制内容，暂不支持预览。")
                     kind == FileKind.IMAGE && imageBitmap != null ->
@@ -296,6 +326,77 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OfficePreview(text: String) {
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            tr("仅提取文本，版式、图片与图表不会显示。"),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+        )
+    }
+}
+
+@Composable
+private fun MediaPreview(file: File, audio: Boolean) {
+    val context = LocalContext.current
+    var failed by remember(file) { mutableStateOf(false) }
+    val view = remember(file) { mutableStateOf<android.widget.VideoView?>(null) }
+    DisposableEffect(file) {
+        onDispose { view.value?.stopPlayback() }
+    }
+    if (failed) {
+        CenterHint("系统无法播放这个文件（缺少解码器，或文件已损坏）。")
+        return
+    }
+    Column(Modifier.fillMaxSize()) {
+        if (!file.exists()) {
+            CenterHint("文件不存在，或当前环境无法访问该路径。")
+            return@Column
+        }
+        if (audio) {
+            Text(
+                "🎵 ${file.name}",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+        AndroidView(
+            factory = { ctx ->
+                android.widget.VideoView(ctx).apply {
+                    setMediaController(
+                        android.widget.MediaController(ctx).also { it.setAnchorView(this) },
+                    )
+                    setVideoURI(android.net.Uri.fromFile(file))
+                    setOnPreparedListener { player ->
+                        player.isLooping = false
+                        start()
+                    }
+                    setOnErrorListener { _, _, _ ->
+                        failed = true
+                        true
+                    }
+                    view.value = this
+                }
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color.Black),
+        )
     }
 }
 
@@ -369,5 +470,29 @@ private fun EditView(draft: String, onChange: (String) -> Unit) {
 private fun CenterHint(text: String) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+private fun openFileExternally(context: android.content.Context, file: File) {
+    runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        val mime = android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(file.extension.lowercase())
+            ?: "*/*"
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }.onFailure {
+        android.widget.Toast.makeText(
+            context,
+            "没有可打开该文件的应用。",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
     }
 }

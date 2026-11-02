@@ -1187,4 +1187,12 @@ internal val settingsEn: Map<String, String> = mapOf(
     "添加文档" to "Add document",
     "文本/代码/JSON 等可读文档会直接内联为上下文" to
         "Readable documents such as text, code, and JSON are inlined into the context.",
+    "仅提取文本，版式、图片与图表不会显示。" to
+        "Text only. Layout, images, and charts are not rendered.",
+    "无法提取这个 Office 文档的文本。可能已加密，或文件结构不受支持。" to
+        "Couldn't extract text from this Office document. It may be encrypted or use an unsupported structure.",
+    "系统无法播放这个文件（缺少解码器，或文件已损坏）。" to
+        "The system can't play this file (missing codec or damaged file).",
+    "用其他应用打开" to "Open with another app",
+    "没有可打开该文件的应用。" to "No app can open this file.",
 )
