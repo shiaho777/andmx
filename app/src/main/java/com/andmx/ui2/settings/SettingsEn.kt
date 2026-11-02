@@ -1199,4 +1199,7 @@ internal val settingsEn: Map<String, String> = mapOf(
     "没有可显示的差异。" to "No diff to show.",
     "变更过大，未展开逐行 diff。可先查看文件或直接还原。" to
         "This change is too large to expand line by line. Open the file or restore it directly.",
+    "可选。填写 authorizationUrl / tokenUrl / clientId / scopes 后可走浏览器授权；也可直接填 accessToken 或 refreshToken。" to
+        "Optional. Fill authorizationUrl / tokenUrl / clientId / scopes to sign in with the browser, or provide accessToken / refreshToken directly.",
+    "浏览器授权" to "Browser sign-in",
 )
