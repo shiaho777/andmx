@@ -12,7 +12,7 @@ data class ChangeSummaryItem(
 
 fun changeSummaryItems(changes: List<FileChange>): List<ChangeSummaryItem> =
     changes.map { change ->
-        val stats = DiffEngine.stats(DiffEngine.diff(change.oldContent, change.newContent))
+        val stats = DiffEngine.lineStats(change.oldContent, change.newContent)
         ChangeSummaryItem(
             path = change.path,
             added = stats.added,
@@ -20,6 +20,19 @@ fun changeSummaryItems(changes: List<FileChange>): List<ChangeSummaryItem> =
             isNew = change.isNew,
         )
     }
+
+data class ChangeTotals(val added: Int, val removed: Int)
+
+fun changeTotals(changes: List<FileChange>): ChangeTotals {
+    var added = 0
+    var removed = 0
+    changes.forEach { change ->
+        val stats = DiffEngine.lineStats(change.oldContent, change.newContent)
+        added += stats.added
+        removed += stats.removed
+    }
+    return ChangeTotals(added, removed)
+}
 
 fun changeSummaryText(changes: List<FileChange>): String = buildString {
     val items = changeSummaryItems(changes)

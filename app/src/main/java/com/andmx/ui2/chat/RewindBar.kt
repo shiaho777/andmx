@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.andmx.agent.changeTotals
 import com.andmx.workspace.FileChange
 
 @Composable
@@ -46,6 +47,7 @@ fun RewindBar(
     if (changes.isEmpty() && rewindResult == null) return
 
     if (changes.isNotEmpty()) {
+        val totals = remember(changes) { changeTotals(changes) }
         Row(
             modifier
                 .fillMaxWidth()
@@ -66,7 +68,7 @@ fun RewindBar(
                 tint = MaterialTheme.colorScheme.onTertiaryContainer,
             )
             Spacer(Modifier.width(8.dp))
-            Text(tr("撤回 ${changes.size} 项文件改动"),
+            Text(tr("撤回 ${changes.size} 项文件改动 · +${totals.added}/-${totals.removed}"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 modifier = Modifier.weight(1f),

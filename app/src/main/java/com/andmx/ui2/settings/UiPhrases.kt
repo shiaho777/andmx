@@ -7,6 +7,9 @@ internal class PhraseTemplate(
 
 internal val phraseTemplates: List<PhraseTemplate> = listOf(
     "已整理：{*} → {*} 条" to "Dreamed: {} → {} entries",
+    "撤回 {*} 项文件改动 · +{*}/-{*}" to "Undo {} file changes · +{}/-{}",
+    "{*} 个文件 · +{*}/-{*}" to "{} files · +{}/-{}",
+    "{*} · +{*}/-{*} · {*}" to "{} · +{}/-{} · {}",
     "{*}年{*}月{*}日 {*}" to "{}/{}/{} {}",
     "确定要删除子智能体「{*}」吗？此操作无法撤销。" to "Delete subagent \"{}\"? This can't be undone.",
     "确定删除「{*}」？将从磁盘移除该技能目录，且无法撤销。" to "Delete \"{}\"? The skill folder will be removed from disk. This can't be undone.",

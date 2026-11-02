@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.andmx.diff.DiffEngine
+import com.andmx.diff.DiffStats
 import com.andmx.workspace.FileChange
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -39,6 +41,14 @@ fun FileRewindDialog(
 ) {
     var confirmAll by remember { mutableStateOf(false) }
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
+    val statsByPath = remember(changes) {
+        changes.associate { it.path to DiffEngine.lineStats(it.oldContent, it.newContent) }
+    }
+    val totals = remember(statsByPath) {
+        statsByPath.values.fold(DiffStats(0, 0)) { acc, s ->
+            DiffStats(acc.added + s.added, acc.removed + s.removed)
+        }
+    }
 
     if (confirmAll) {
         AlertDialog(
@@ -73,6 +83,12 @@ fun FileRewindDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else {
+                    Text(
+                        tr("${changes.size} 个文件 · +${totals.added}/-${totals.removed}"),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
                 }
                 changes.forEach { c ->
                     Row(
@@ -86,11 +102,10 @@ fun FileRewindDialog(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            val added = c.newContent.lineSequence().count()
-                            val removed = c.oldContent.lineSequence().count()
+                            val stats = statsByPath[c.path] ?: DiffStats(0, 0)
                             val kind = if (c.isNew) "新建" else "修改"
                             Text(
-                                "$kind · +$added/-$removed · ${fmt.format(Date(c.timestamp))}",
+                                tr("$kind · +${stats.added}/-${stats.removed} · ${fmt.format(Date(c.timestamp))}"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
