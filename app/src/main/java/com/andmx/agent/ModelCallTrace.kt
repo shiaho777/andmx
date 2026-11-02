@@ -70,6 +70,7 @@ object ModelCallTrace {
     @Volatile private var traceFile: File? = null
     @Volatile private var stateVersion = 0L
     @Volatile private var persistedVersion = -1L
+    @Volatile private var stateEpoch = 0L
     private var seqCounter = 0L
 
     fun install(context: Context) {
@@ -117,7 +118,8 @@ object ModelCallTrace {
         val next = (_calls.value + call).takeLast(MAX_CALLS)
         _calls.value = next
         val version = ++stateVersion
-        ioScope.launch { persist(next, version) }
+        val epoch = stateEpoch
+        ioScope.launch { persist(next, version, epoch) }
         call
     }
 
@@ -125,7 +127,8 @@ object ModelCallTrace {
         synchronized(this) {
             _calls.value = emptyList()
             val version = ++stateVersion
-            ioScope.launch { persist(emptyList(), version) }
+            val epoch = stateEpoch
+            ioScope.launch { persist(emptyList(), version, epoch) }
         }
     }
 
@@ -135,9 +138,10 @@ object ModelCallTrace {
         return list.size to list.sumOf { it.totalTokens }
     }
 
-    private suspend fun persist(calls: List<Call>, version: Long) {
+    private suspend fun persist(calls: List<Call>, version: Long, epoch: Long) {
         val file = traceFile ?: return
         writeMutex.withLock {
+            if (epoch != stateEpoch) return
             if (version < persistedVersion) return
             runCatching {
                 file.parentFile?.mkdirs()
@@ -149,7 +153,7 @@ object ModelCallTrace {
     @androidx.annotation.VisibleForTesting
     suspend fun flush() {
         val snapshot = _calls.value
-        persist(snapshot, stateVersion)
+        persist(snapshot, stateVersion, stateEpoch)
     }
 
     @androidx.annotation.VisibleForTesting
@@ -160,6 +164,7 @@ object ModelCallTrace {
             seqCounter = 0L
             stateVersion = 0L
             persistedVersion = -1L
+            stateEpoch += 1
         }
     }
 
