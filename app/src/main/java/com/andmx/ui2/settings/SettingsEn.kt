@@ -1172,4 +1172,12 @@ internal val settingsEn: Map<String, String> = mapOf(
     "信任并启用" to "Trust and enable",
     "撤销信任" to "Revoke trust",
     "刷新" to "Refresh",
+    "巩固记忆" to "Consolidate memory",
+    "整理记忆" to "Dream memory",
+    "已巩固记忆" to "Memory consolidated",
+    "巩固失败" to "Consolidation failed",
+    "整理失败" to "Dream failed",
+    "最近原始记忆" to "Recent raw memories",
+    "删除" to "Delete",
+    "已删除一条原始记忆" to "Deleted one raw memory",
 )

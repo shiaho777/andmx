@@ -1035,6 +1035,12 @@ class ChatController private constructor(private val context: Context) {
         val session = obtainSession(conversationId, provider, settings)
         session.lastUserText = text
         session.turnToolOutputs.clear()
+        val memoryRecall = if (settings.memoryEnabled) {
+            runCatching { memorySystem.recallFragment(text) }.getOrDefault("")
+        } else {
+            ""
+        }
+        session.engine.setTurnMemoryFragment(memoryRecall)
         _planSteps.value = session.planTool.state.value
         var modelInput = text
         if (hookSystem.hasHooksFor(HookSystem.HookEvent.USER_PROMPT_SUBMIT)) {

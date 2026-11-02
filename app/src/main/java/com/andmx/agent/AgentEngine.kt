@@ -217,6 +217,8 @@ class AgentEngine(
         }
     }
 
+    private var turnMemoryFragment: String = ""
+
     private fun baseSystemBlocks(): List<String> =
         systemPromptBlocks.ifEmpty { listOf(systemPrompt) }
 
@@ -227,6 +229,9 @@ class AgentEngine(
             if (systemSuffix.isNotBlank()) append("\n\n# 用户自定义指令\n$systemSuffix")
         }
         if (extras.isNotBlank()) blocks[blocks.lastIndex] = blocks.last() + extras
+        if (turnMemoryFragment.isNotBlank()) {
+            blocks[blocks.lastIndex] = blocks.last().trimEnd() + "\n\n" + turnMemoryFragment
+        }
         return blocks.map { ApiMessage(role = "system", content = it) }
     }
 
@@ -240,6 +245,14 @@ class AgentEngine(
     /** Replace the split system-prompt blocks (settings/env refresh). */
     fun setSystemBlocks(blocks: List<String>) {
         systemPromptBlocks = blocks
+        rewriteSystemPrefix()
+    }
+
+    /** Per-turn memory recall; cleared by passing a blank string. */
+    fun setTurnMemoryFragment(text: String) {
+        val normalized = text.trim()
+        if (normalized == turnMemoryFragment) return
+        turnMemoryFragment = normalized
         rewriteSystemPrefix()
     }
 

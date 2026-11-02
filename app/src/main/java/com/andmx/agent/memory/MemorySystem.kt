@@ -104,6 +104,13 @@ class MemorySystem(
         val needsConsolidation: Boolean,
     )
 
+    data class DreamResult(
+        val before: Int,
+        val after: Int,
+        val removed: Int,
+        val consolidated: Boolean,
+    )
+
     private val _state = MutableStateFlow(
         MemorySnapshot(false, "", "", 0, emptyList(), emptyMap(), false)
     )
@@ -354,7 +361,10 @@ class MemorySystem(
 
         // Auto-consolidate if too many raw memories
         val rawCount = loadRawMemories().size
-        if (rawCount >= consolidateThreshold) {
+        if (rawCount >= consolidateThreshold * 3) {
+            Log.i(TAG, "Auto-dreaming $rawCount raw memories")
+            dream()
+        } else if (rawCount >= consolidateThreshold) {
             Log.i(TAG, "Auto-consolidating $rawCount raw memories")
             consolidate()
         } else {
@@ -426,6 +436,73 @@ class MemorySystem(
                     "fixes, git history, AGENTS.md) or what only matters to the current conversation.",
             )
         }
+    }
+
+    /**
+     * Query-aware recall over raw memories. Memories are background evidence,
+     * so the fragment explicitly tells the model to verify before relying on
+     * anything that might be stale.
+     */
+    suspend fun recall(query: String, limit: Int = 5): List<ParsedMemory> =
+        MemoryRecall.rank(query, loadRawMemories(), limit)
+
+    suspend fun recallFragment(query: String, limit: Int = 5, maxChars: Int = 1_600): String {
+        val hits = recall(query, limit)
+        if (hits.isEmpty()) return ""
+        return buildString {
+            appendLine("# Memory recall")
+            appendLine("以下历史记忆与当前请求相关，仅作背景参考，可能已过时；使用前先验证。")
+            for (hit in hits) {
+                val line = "- [${hit.category.label}] ${hit.content.take(320)}"
+                if (length + line.length > maxChars) break
+                appendLine(line)
+            }
+        }.trimEnd()
+    }
+
+    /**
+     * Dream pass: deduplicate and cap raw memories, then rebuild MEMORY.md and
+     * the summary. Unlike [consolidate], this actually shrinks the raw store so
+     * long-lived installs do not grow without bound.
+     */
+    suspend fun dream(): DreamResult {
+        val raws = loadRawMemories()
+        if (raws.isEmpty()) return DreamResult(0, 0, 0, consolidated = false)
+
+        val seen = mutableSetOf<String>()
+        val kept = mutableListOf<ParsedMemory>()
+        for (memory in raws.sortedByDescending { it.timestamp }) {
+            if (seen.add(dedupeKey(memory))) kept += memory
+        }
+        val capped = kept.take(MAX_RAW_MEMORIES)
+        val rebuilt = buildString {
+            appendLine("# AndMX Raw Memories")
+            appendLine()
+            for (memory in capped) {
+                appendLine("## [${memory.category.name}] ${memory.timestamp} (session: ${memory.sessionId})")
+                appendLine(memory.content)
+                appendLine()
+            }
+        }
+        ensureDir()
+        fs.writeText(RAW_MEMORIES, rebuilt)
+        consolidate()
+        load()
+        return DreamResult(
+            before = raws.size,
+            after = capped.size,
+            removed = raws.size - capped.size,
+            consolidated = true,
+        )
+    }
+
+    private fun dedupeKey(memory: ParsedMemory): String {
+        val normalized = memory.content.lowercase()
+            .replace(Regex("\\s+"), " ")
+            .replace(Regex("[\\p{Punct}，。；：！？、]"), "")
+            .trim()
+            .take(80)
+        return "${memory.category}:$normalized"
     }
 
     /** Clear all memories. */

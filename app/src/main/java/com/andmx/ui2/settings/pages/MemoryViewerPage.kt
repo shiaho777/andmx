@@ -16,11 +16,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -83,8 +86,13 @@ fun MemoryViewerPage(onBack: () -> Unit) {
     val memorySystem = remember { MemorySystem(fs) }
     var selected by remember { mutableStateOf<MemoryFileEntry?>(null) }
     var query by remember { mutableStateOf("") }
+    var refresh by remember { mutableIntStateOf(0) }
+    var note by remember { mutableStateOf("") }
 
-    val snapshot by produceState(MemorySystem.MemorySnapshot(false, "", "", 0, emptyList(), emptyMap(), false)) {
+    val snapshot by produceState(
+        MemorySystem.MemorySnapshot(false, "", "", 0, emptyList(), emptyMap(), false),
+        refresh,
+    ) {
         value = withContext(Dispatchers.IO) {
             runCatching { memorySystem.load() }.getOrNull()
                 ?: MemorySystem.MemorySnapshot(false, "", "", 0, emptyList(), emptyMap(), false)
@@ -177,6 +185,44 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                     )
                 }
             }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { memorySystem.consolidate() }.isSuccess
+                            }
+                            note = if (result) "已巩固记忆" else "巩固失败"
+                            refresh++
+                        }
+                    },
+                ) { Text(tr("巩固记忆")) }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { memorySystem.dream() }.getOrNull()
+                            }
+                            note = if (result == null) {
+                                "整理失败"
+                            } else {
+                                "已整理：${result.before} → ${result.after} 条"
+                            }
+                            refresh++
+                        }
+                    },
+                    modifier = Modifier.padding(start = 8.dp),
+                ) { Text(tr("整理记忆")) }
+            }
+            if (note.isNotBlank()) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             Spacer(Modifier.height(4.dp))
             OutlinedTextField(
                 value = query,
@@ -229,6 +275,47 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                     )
                     Text(item.content, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
+            } else if (snapshot.rawMemories.isNotEmpty()) {
+                Text(
+                    tr("最近原始记忆"),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                )
+                snapshot.rawMemories
+                    .sortedByDescending { it.timestamp }
+                    .take(8)
+                    .forEach { item ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    listOf(item.category.label, relativeInstant(item.timestamp))
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" · "),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                Text(
+                                    item.content,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            runCatching { memorySystem.deleteRaw(item.content) }
+                                        }
+                                        note = "已删除一条原始记忆"
+                                        refresh++
+                                    }
+                                },
+                            ) { Text(tr("删除")) }
+                        }
+                    }
             }
         }
     }
