@@ -1590,6 +1590,9 @@ LaunchedEffect(Unit) {
                 onCommit = { message, cb -> viewModel.commitWorkspace(message, cb) },
                 onPush = { cb -> viewModel.pushBranch(cb) },
                 onCommitAndPush = { message, cb -> viewModel.commitAndPush(message, cb) },
+                onFetch = { cb -> viewModel.fetchRemote(cb) },
+                onPull = { cb -> viewModel.pullRemote(cb) },
+                onSetIdentity = { name, email, cb -> viewModel.setGitIdentity(name, email, cb) },
                 onDismiss = { showGitActions = false },
             )
         }
