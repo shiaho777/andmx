@@ -683,6 +683,23 @@ class GitBaseline(
         val gitInfo: GitInfo? = null,
     )
 
+    /** 单个文件的 unified diff；未跟踪文件用 /dev/null 对比展示为新增。 */
+    suspend fun fileDiff(
+        workspacePath: String,
+        path: String,
+        maxChars: Int = 40_000,
+    ): String = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val escaped = shellEscape(path)
+        val script = "cd '$workspacePath' 2>/dev/null && " +
+            "if git ls-files --error-unmatch -- $escaped >/dev/null 2>&1; then " +
+            "git diff --no-color HEAD -- $escaped 2>&1; " +
+            "else git diff --no-color --no-index /dev/null $escaped 2>&1; fi"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr).trim()
+        out.take(maxChars).ifBlank { "没有可显示的差异。" }
+    }
+
     suspend fun diffStat(workspacePath: String, maxLines: Int = 80): String = withContext(Dispatchers.IO) {
         ensureGit(workspacePath)
         val script = "cd '$workspacePath' 2>/dev/null && git diff --stat HEAD 2>/dev/null; echo '---'; git status --porcelain 2>/dev/null | head -n 40"
