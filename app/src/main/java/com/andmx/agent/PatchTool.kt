@@ -20,6 +20,7 @@ class ApplyPatchTool(
     private val conversationId: Long = 0L,
 ) : Tool {
     private val access = WorkspaceAccess(context)
+    private val appContext = context.applicationContext
 
     private inner class AccessAdapter : PatchFileSystem {
         override fun exists(path: String): Boolean = runBlocking { access.exists(path) }
@@ -85,6 +86,9 @@ class ApplyPatchTool(
                         )
                     }
                 }
+                r.changes.forEach { change ->
+                    invalidateWorkspaceIndex(appContext, access, change.newPath ?: change.path)
+                }
                 val summary = r.changes.joinToString(", ") { c ->
                     val verb = when (c.action) {
                         CodexPatchEngine.Action.ADD -> "新建"
@@ -107,6 +111,7 @@ class ApplyPatchTool(
             is PatchEngine.Result.Ok -> {
                 runBlocking { access.writeText(resolved, r.content) }
                 ChangeTracker.record(conversationId, resolved, original, r.content, existedBefore = existed)
+                invalidateWorkspaceIndex(appContext, access, resolved)
                 ToolResult("已应用补丁到 $resolved")
             }
             is PatchEngine.Result.Fail -> ToolResult("应用补丁失败: ${r.reason}", isError = true)
