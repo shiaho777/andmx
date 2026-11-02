@@ -1158,4 +1158,18 @@ internal val settingsEn: Map<String, String> = mapOf(
     "文件差异" to "File diff",
     "Git 操作" to "Git actions",
     "切换分支" to "Switch branch",
+    "项目钩子 (.zcode/hooks.json)" to "Project hooks (.zcode/hooks.json)",
+    "项目钩子随仓库分发，默认不执行。信任绑定到当前文件内容，文件一旦修改会重新要求审查。" to
+        "Project hooks ship with the repository and never run by default. Trust is pinned to the current file contents; any edit requires another review.",
+    "未打开工作区。" to "No workspace is open.",
+    "正在读取项目钩子…" to "Reading project hooks…",
+    "当前项目没有 .zcode/hooks.json。" to "This project has no .zcode/hooks.json.",
+    "项目钩子已信任，将随会话加载执行。" to "Project hooks are trusted and will load with the session.",
+    "钩子文件已变更，需要重新审查后才能执行。" to "The hooks file changed; review it again before it can run.",
+    "项目钩子未信任，不会执行。审查后点击信任。" to "Project hooks are untrusted and will not run. Review them, then trust.",
+    "文件指纹" to "Fingerprint",
+    "文件里没有可执行的有效钩子。" to "The file has no valid executable hooks.",
+    "信任并启用" to "Trust and enable",
+    "撤销信任" to "Revoke trust",
+    "刷新" to "Refresh",
 )
