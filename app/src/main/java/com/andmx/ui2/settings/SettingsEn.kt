@@ -1182,4 +1182,9 @@ internal val settingsEn: Map<String, String> = mapOf(
     "已删除一条原始记忆" to "Deleted one raw memory",
     "优先使用会话 rollout 中的真实 token 用量；没有记录的旧会话按消息长度估算。" to
         "Real token usage from session rollouts is preferred; older sessions without a rollout fall back to message-length estimates.",
+    "添加图片" to "Add image",
+    "从相册或文件选择图片" to "Pick an image from photos or files",
+    "添加文档" to "Add document",
+    "文本/代码/JSON 等可读文档会直接内联为上下文" to
+        "Readable documents such as text, code, and JSON are inlined into the context.",
 )

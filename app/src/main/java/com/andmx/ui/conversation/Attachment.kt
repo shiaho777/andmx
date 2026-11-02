@@ -155,6 +155,26 @@ object Attachments {
         }
     }
 
+    /**
+     * Inline readable text attachments without touching the image channel.
+     * Binary placeholders are skipped so the model does not see a useless
+     * "(binary, not inlined)" block.
+     */
+    fun augmentText(text: String, attachments: List<Attachment>): String {
+        val textAtt = attachments.filterNot { it.isImage }
+            .filterNot { it.content.startsWith(BINARY_PLACEHOLDER) }
+        if (textAtt.isEmpty()) return text
+        return buildString {
+            append(text)
+            for (a in textAtt) {
+                append("\n\n附件 ").append(a.name).append(":\n```\n").append(a.content).append("\n```")
+                if (a.truncated) append("\n(已截断)")
+            }
+        }
+    }
+
+    private const val BINARY_PLACEHOLDER = "(二进制文件,未内联)"
+
     fun displaySummary(attachments: List<Attachment>): String =
         attachments.joinToString("") { "\n${if (it.isImage) "🖼" else "📎"} ${it.referenceLabel}" }
 

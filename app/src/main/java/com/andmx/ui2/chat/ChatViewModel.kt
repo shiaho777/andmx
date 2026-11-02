@@ -882,7 +882,18 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(text: String, attachments: List<Attachment> = emptyList()) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() && _contextChips.value.isEmpty() && attachments.isEmpty()) return
-        val withContext = buildMessageWithContext(trimmed, attachments)
+        val resolvedAttachments = attachments.mapNotNull { attachment ->
+            runCatching {
+                com.andmx.ui.conversation.Attachments.fromUri(
+                    context,
+                    android.net.Uri.parse(attachment.uri),
+                )
+            }.getOrNull()
+        }
+        val withContext = com.andmx.ui.conversation.Attachments.augmentText(
+            buildMessageWithContext(trimmed, attachments),
+            resolvedAttachments,
+        )
         if (attachments.isEmpty()) {
             val slashText = when {
                 trimmed.startsWith("/") -> trimmed
@@ -897,7 +908,8 @@ class ChatViewModel @Inject constructor(
                 return
             }
         }
-        val images = attachments.mapNotNull { resolveImageDataUrl(it) }
+        val images = resolvedAttachments.mapNotNull { it.imageDataUrl } +
+            attachments.mapNotNull { it.uri.takeIf { uri -> uri.startsWith("data:image") } }
         if (compactJob?.isActive == true) {
             _queue.value = _queue.value + withContext
             persistQueue()
@@ -954,16 +966,6 @@ class ChatViewModel @Inject constructor(
 
     fun cancelSteer() {
         _steeringMessage.value = null
-    }
-
-    private fun resolveImageDataUrl(attachment: Attachment): String? {
-        val uri = attachment.uri
-        if (uri.startsWith("data:image")) return uri
-        return runCatching {
-            val parsed = android.net.Uri.parse(uri)
-            val att = com.andmx.ui.conversation.Attachments.fromUri(context, parsed)
-            att?.imageDataUrl
-        }.getOrNull()
     }
 
     private fun handleSlash(text: String): Boolean {
