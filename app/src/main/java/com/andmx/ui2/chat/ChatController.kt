@@ -592,6 +592,16 @@ class ChatController private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * Entry point for the alarm receiver when no UI created the controller.
+     * The turn itself immediately acquires AgentRunService, so the receiver can
+     * return without holding a broadcast for the whole model call.
+     */
+    suspend fun runDueAutomationsNow() {
+        cronTick()
+        scheduleAutomationWake()
+    }
+
     private suspend fun runAutomation(auto: com.andmx.data.CronAutomationEntity) {
         val offPeak = auto.title.startsWith("[闲时]")
         val bucket = if (offPeak) offPeakTurnIds else automationTurnIds
