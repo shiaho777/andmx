@@ -30,7 +30,7 @@ interface RunResult {
   actors: number;
 }
 
-async function runScript(script: string, worldValue?: unknown): Promise<RunResult> {
+async function runScript(script: string, worldValue?: unknown, fillCode?: string): Promise<RunResult> {
   const analyzer = loadAnalyzer();
   const prepared = analyzer.prepare(script);
   if (!prepared.ok) throw new Error(`prepare failed: ${JSON.stringify(prepared.diagnostics)}`);
@@ -84,8 +84,9 @@ async function runScript(script: string, worldValue?: unknown): Promise<RunResul
     log() {},
   };
   runner = new WorkflowRunner({ createRealm: async () => nodeRealm(), bridge });
+  const runId = `probe-${Date.now()}`;
   await runner.start(JSON.stringify({
-    runId: `probe-${Date.now()}`,
+    runId,
     lowered: prepared.lowered.code,
     scriptText: script,
     cwd: "/tmp/andmx-dwf-runner",
@@ -94,6 +95,25 @@ async function runScript(script: string, worldValue?: unknown): Promise<RunResul
     sitePhases: prepared.sitePhases,
     timeoutMs: 30_000,
   }));
+  if (fillCode !== undefined) {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const holes = runner.openHoles(runId) as Array<{ siteId: string }>;
+      if (holes.length > 0) {
+        for (const hole of holes) {
+          runner.fillHole(runId, JSON.stringify({
+            siteId: hole.siteId,
+            code: fillCode,
+            script: { text: script, hash: "probe-hash" },
+            askSpecs: prepared.askSpecs,
+            sitePhases: prepared.sitePhases,
+            phaseNames: [],
+          }));
+        }
+        break;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  }
   const settlement = await settled;
   return { settlement, journal, asks, events, actors };
 }
@@ -142,11 +162,25 @@ async function main(): Promise<void> {
   check("artifact completed", artifact.settlement.status === "completed", artifact.settlement);
   check("artifact ref", artifact.settlement.artifact === "note:1", artifact.settlement.artifact);
 
+  const hole = await runScript(
+    String.raw`
+      const extra = await hole<string>('补充规则', '需要补一段规则');
+      const a = agent('a');
+      const answer = await a.ask('结论：' + extra);
+      return extra + '|' + answer;
+    `,
+    undefined,
+    String.raw`(async () => '补好的值')`,
+  );
+  check("hole completed", hole.settlement.status === "completed", hole.settlement);
+  check("hole artifact", hole.settlement.artifact === "补好的值|actor-done", hole.settlement.artifact);
+  check("hole instructions", hole.asks[0]?.instructions === "结论：补好的值", hole.asks);
+
   if (failures.length > 0) {
     process.stderr.write(`runner-probe failures:\n${failures.map((f) => `  - ${f}`).join("\n")}\n`);
     process.exit(1);
   }
-  process.stdout.write("runner-probe: sequential/worldread/errored/fanout/artifact passed\n");
+  process.stdout.write("runner-probe: sequential/worldread/errored/fanout/artifact/hole passed\n");
 }
 
 void main();

@@ -4,11 +4,13 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.andmx.agent.workflow.WorkflowRunStatus
+import com.andmx.agent.workflow.WorkflowService
 import com.andmx.agent.workflow.dynamic.DynamicAskRequest
 import com.andmx.agent.workflow.dynamic.DynamicAskResult
 import com.andmx.agent.workflow.dynamic.DynamicWorkflowHost
 import com.andmx.agent.workflow.dynamic.DynamicWorkflowRunner
 import com.andmx.agent.workflow.script.WebViewWorkflowScriptAnalyzer
+import com.andmx.agent.zcode.WorkflowTools
 import com.andmx.data.WorkflowJournalStore
 import com.andmx.data.WorkflowStore
 import com.andmx.exec.files.GuestFs
@@ -20,6 +22,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -34,6 +43,7 @@ class DynamicWorkflowRunnerTest {
         val asks = AtomicInteger(0)
         val worldReads = AtomicInteger(0)
         val typedStarts = AtomicInteger(0)
+        val instructions = java.util.concurrent.CopyOnWriteArrayList<String>()
         @Volatile var typedRepair = false
         @Volatile var blockSecondAsk = false
         val secondAskStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -48,6 +58,7 @@ class DynamicWorkflowRunnerTest {
 
         override suspend fun ask(request: DynamicAskRequest): DynamicAskResult {
             val call = asks.incrementAndGet()
+            instructions += request.instructions
             if (typedRepair && request.typed) {
                 typedStarts.incrementAndGet()
                 return DynamicAskResult.Submit("{}")
@@ -170,6 +181,171 @@ class DynamicWorkflowRunnerTest {
             assertNotNull(journal)
             assertTrue(journal!!.contains("\"runId\":\"$runId\""))
             assertTrue(journal.contains("\"ask\""))
+        } finally {
+            runner.close()
+            analyzer.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun fillHoleThroughToolCompletesRunAndRecordsArtifact() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val analyzer = WebViewWorkflowScriptAnalyzer(context)
+        val host = Host()
+        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val journals = WorkflowJournalStore(context)
+        val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
+        val service = WorkflowService(
+            scope = scope,
+            store = store,
+            actorRunner = { error("dynamic runs do not use the phase actor runner") },
+        )
+        try {
+            val script = """
+                const extra = await hole<string>('补充规则', '需要补一段规则');
+                const worker = agent('worker');
+                const answer = await worker.ask('结论：' + extra);
+                await artifact.markdown('hole-result', answer);
+                return extra + '|' + answer;
+            """.trimIndent()
+            val (runId, error) = runner.start(script, cwd = "/root/project", conversationId = 0L)
+            assertFalse(error.orEmpty(), error != null)
+            assertNotNull(runId)
+
+            var siteId: String? = null
+            val holeDeadline = System.currentTimeMillis() + 45_000
+            while (siteId == null && System.currentTimeMillis() < holeDeadline) {
+                val open = runner.openHoles(runId!!)
+                val parsed = runCatching { Json.parseToJsonElement(open) }.getOrNull()
+                siteId = parsed?.jsonArray?.firstOrNull()
+                    ?.jsonObject?.get("siteId")?.jsonPrimitive?.contentOrNull
+                if (siteId == null) delay(100)
+            }
+            assertNotNull("hole never opened", siteId)
+
+            val filled = script.replace(
+                "hole<string>('补充规则', '需要补一段规则')",
+                "hole<string>('补充规则', async () => '补好的值')",
+            )
+            val tools = WorkflowTools(
+                service = service,
+                analyzer = analyzer,
+                conversationId = 0L,
+                cwd = { "/root/project" },
+                dynamicRunner = runner,
+            )
+            val fill = tools.all().first { it.name == "FillWorkflowHole" }
+            val result = fill.execute(
+                buildJsonObject {
+                    put("run_id", runId)
+                    put("hole_id", siteId)
+                    put("script", filled)
+                },
+            )
+            assertFalse(result.output, result.isError)
+
+            var snapshot = store.readSnapshot(runId!!)
+            val deadline = System.currentTimeMillis() + 30_000
+            while (snapshot?.status != WorkflowRunStatus.completed &&
+                System.currentTimeMillis() < deadline
+            ) {
+                delay(200)
+                snapshot = store.readSnapshot(runId)
+            }
+
+            assertEquals(WorkflowRunStatus.completed, snapshot?.status)
+            assertTrue(
+                "filled value never reached the actor: ${host.instructions}",
+                host.instructions.any { it.contains("补好的值") },
+            )
+            assertTrue("artifact was not recorded", snapshot?.artifacts?.isNotEmpty() == true)
+            assertTrue(
+                "result was not recorded: ${snapshot?.resultJson}",
+                snapshot?.resultJson?.contains("补好的值") == true,
+            )
+            assertNotNull(journals.load(runId))
+        } finally {
+            runner.close()
+            analyzer.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun amendThroughToolSupersedesPredecessor() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val analyzer = WebViewWorkflowScriptAnalyzer(context)
+        val host = Host().apply { blockSecondAsk = true }
+        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val journals = WorkflowJournalStore(context)
+        val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
+        val service = WorkflowService(
+            scope = scope,
+            store = store,
+            actorRunner = { error("dynamic runs do not use the phase actor runner") },
+        )
+        try {
+            val oldScript = """
+                const worker = agent('worker');
+                const first = await worker.ask('first');
+                const second = await worker.ask('second');
+                return first + '|' + second;
+            """.trimIndent()
+            val (oldRunId, error) = runner.start(oldScript, cwd = "/root/project", conversationId = 0L)
+            assertFalse(error.orEmpty(), error != null)
+            assertNotNull(oldRunId)
+            kotlinx.coroutines.withTimeout(30_000) { host.secondAskStarted.await() }
+
+            val tools = WorkflowTools(
+                service = service,
+                analyzer = analyzer,
+                conversationId = 0L,
+                cwd = { "/root/project" },
+                dynamicRunner = runner,
+            )
+            val amend = tools.all().first { it.name == "AmendWorkflow" }
+            val result = amend.execute(
+                buildJsonObject {
+                    put("run_id", oldRunId)
+                    put(
+                        "script",
+                        "const worker = agent('worker'); return await worker.ask('amended');",
+                    )
+                },
+            )
+            assertFalse(result.output, result.isError)
+
+            var predecessor = store.readSnapshot(oldRunId!!)
+            val deadline = System.currentTimeMillis() + 20_000
+            while (predecessor?.pauseReason != "superseded" &&
+                System.currentTimeMillis() < deadline
+            ) {
+                delay(100)
+                predecessor = store.readSnapshot(oldRunId)
+            }
+            assertEquals(WorkflowRunStatus.cancelled, predecessor?.status)
+            assertEquals("superseded", predecessor?.pauseReason)
+            val successorId = predecessor?.supersededBy
+            assertNotNull("successor id was not recorded", successorId)
+            assertEquals(oldRunId, store.readSnapshot(successorId!!)?.resumedFrom)
+
+            val (resumed, resumeError) = runner.resume(oldRunId)
+            assertFalse(resumed)
+            assertTrue(resumeError.orEmpty().contains("superseded"))
+
+            var successor = store.readSnapshot(successorId)
+            val successorDeadline = System.currentTimeMillis() + 30_000
+            while (successor?.status != WorkflowRunStatus.completed &&
+                System.currentTimeMillis() < successorDeadline
+            ) {
+                delay(200)
+                successor = store.readSnapshot(successorId)
+            }
+            assertEquals(WorkflowRunStatus.completed, successor?.status)
+            assertNotNull(journals.load(successorId))
         } finally {
             runner.close()
             analyzer.close()

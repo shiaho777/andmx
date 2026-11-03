@@ -264,17 +264,26 @@ class WorkflowTools(
                     isError = true,
                 )
             }
-            runner.cancel(runId)
-            val (newRunId, error) = runner.start(
+            val newRunId = "dwf_${java.util.UUID.randomUUID().toString().replace("-", "").take(12)}"
+            val (started, error) = runner.start(
                 script = input.script,
                 cwd = existing.cwd,
                 conversationId = conversationId,
+                runIdOverride = newRunId,
+                resumedFrom = runId,
             )
-            if (error != null) return ToolResult("Amend failed to start a new run: $error", isError = true)
+            if (error != null || started == null) {
+                return ToolResult("Amend failed to start a new run: ${error ?: "unknown"}", isError = true)
+            }
+            val predecessorLive = existing.status == WorkflowRunStatus.running ||
+                existing.status == WorkflowRunStatus.paused ||
+                existing.status == WorkflowRunStatus.pending
+            if (predecessorLive) runner.supersede(runId, newRunId)
             return ToolResult(
                 buildString {
                     append("Amended workflow ").append(runId).append(" into new run ")
-                    append(newRunId).append(".\nThe previous run was stopped. ")
+                    append(newRunId).append(".\n")
+                    if (predecessorLive) append("The previous run was marked superseded. ")
                     append("Use GetWorkflowRun to follow the new run.")
                 },
             )

@@ -3792,6 +3792,7 @@ declare const args: Readonly<Record<string, unknown>>;
       ...options.args === void 0 ? {} : { args: options.args },
       ...options.name === void 0 ? {} : { name: options.name },
       ...options.parentSessionId === void 0 ? {} : { parentSessionId: options.parentSessionId },
+      ...options.resumedFrom === void 0 ? {} : { resumedFrom: options.resumedFrom },
       ...options.scriptHash === void 0 ? {} : { scriptHash: options.scriptHash },
       ...options.scriptText === void 0 ? {} : { scriptText: options.scriptText },
       ...options.sitePhases === void 0 ? {} : { sitePhases: options.sitePhases }
@@ -4081,6 +4082,7 @@ declare const args: Readonly<Record<string, unknown>>;
         ...config.scriptText === void 0 ? {} : { scriptText: config.scriptText },
         ...config.args === void 0 ? {} : { args: config.args },
         ...config.scriptHash === void 0 ? {} : { scriptHash: config.scriptHash },
+        ...config.resumedFrom === void 0 ? {} : { resumedFrom: config.resumedFrom },
         ...config.timeoutMs === void 0 ? {} : { timeoutMs: config.timeoutMs },
         cwd: config.cwd
       });
@@ -4149,6 +4151,13 @@ declare const args: Readonly<Record<string, unknown>>;
       const run = this.runs.get(runId);
       run?.endpoint.close();
       this.runs.delete(runId);
+    }
+    stop(runId, reason, supersededBy) {
+      const run = this.runs.get(runId);
+      if (run === void 0) return false;
+      const engine = run.engine;
+      engine.stop(reason, void 0, supersededBy);
+      return true;
     }
     driverForRequest(requestId) {
       for (const run of this.runs.values()) {
@@ -4473,6 +4482,7 @@ declare const args: Readonly<Record<string, unknown>>;
     artifactResult: /* @__PURE__ */ __name((requestId, ok, payloadJson, error) => runner.artifactResult(requestId, ok, payloadJson, error), "artifactResult"),
     fillHole: /* @__PURE__ */ __name((runId, fillJson) => runner.fillHole(runId, fillJson), "fillHole"),
     openHoles: /* @__PURE__ */ __name((runId) => runner.openHoles(runId), "openHoles"),
+    stop: /* @__PURE__ */ __name((runId, reason, supersededBy) => runner.stop(runId, reason, supersededBy), "stop"),
     cancel: /* @__PURE__ */ __name((runId) => runner.cancel(runId), "cancel")
   };
 })();

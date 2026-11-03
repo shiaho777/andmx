@@ -1970,6 +1970,13 @@ class ChatViewModel @Inject constructor(
 
     // ── /workflows ────────────────────────────────────────────
 
+    data class WorkflowOpenHole(
+        val siteId: String,
+        val ordinal: Int,
+        val name: String,
+        val since: Long,
+    )
+
     private val _workflowsOpen = MutableStateFlow(false)
     val workflowsOpen: StateFlow<Boolean> = _workflowsOpen.asStateFlow()
     private val _workflowDefs = MutableStateFlow<List<com.andmx.agent.workflow.WorkflowDefinition>>(emptyList())
@@ -1980,6 +1987,8 @@ class ChatViewModel @Inject constructor(
     val workflowDetail: StateFlow<com.andmx.agent.workflow.WorkflowRunSnapshot?> = _workflowDetail.asStateFlow()
     private val _workflowDetailEvents = MutableStateFlow<List<com.andmx.agent.workflow.WorkflowEvent>>(emptyList())
     val workflowDetailEvents: StateFlow<List<com.andmx.agent.workflow.WorkflowEvent>> = _workflowDetailEvents.asStateFlow()
+    private val _workflowOpenHoles = MutableStateFlow<List<WorkflowOpenHole>>(emptyList())
+    val workflowOpenHoles: StateFlow<List<WorkflowOpenHole>> = _workflowOpenHoles.asStateFlow()
 
     fun openWorkflows() {
         _workflowsOpen.value = true
@@ -2014,18 +2023,42 @@ class ChatViewModel @Inject constructor(
         _workflowsOpen.value = false
         _workflowDetail.value = null
         _workflowDetailEvents.value = emptyList()
+        _workflowOpenHoles.value = emptyList()
     }
 
     fun openWorkflowDetail(runId: String) {
         viewModelScope.launch {
-            _workflowDetail.value = controller.workflowService.getRun(runId)
+            val snapshot = controller.workflowService.getRun(runId)
+            _workflowDetail.value = snapshot
             _workflowDetailEvents.value = controller.workflowService.events(runId).takeLast(60)
+            _workflowOpenHoles.value = loadOpenHoles(runId, snapshot?.kind)
         }
     }
 
     fun dismissWorkflowDetail() {
         _workflowDetail.value = null
         _workflowDetailEvents.value = emptyList()
+        _workflowOpenHoles.value = emptyList()
+    }
+
+    private suspend fun loadOpenHoles(runId: String, kind: String?): List<WorkflowOpenHole> {
+        if (kind != "dynamic") return emptyList()
+        val raw = controller.dynamicWorkflowRunner.openHoles(runId)
+        val array = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(raw)
+                as kotlinx.serialization.json.JsonArray
+        }.getOrNull() ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+            fun text(key: String): String? =
+                (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            WorkflowOpenHole(
+                siteId = text("siteId") ?: return@mapNotNull null,
+                ordinal = text("ordinal")?.toIntOrNull() ?: 1,
+                name = text("name").orEmpty(),
+                since = text("since")?.toLongOrNull() ?: 0L,
+            )
+        }
     }
 
     fun cancelWorkflowRun(runId: String) {
@@ -2077,6 +2110,32 @@ class ChatViewModel @Inject constructor(
                     appendLocalAssistant("用法：/dwf resume <runId>")
                 } else {
                     resumeWorkflowRun(runId)
+                    openWorkflowDetail(runId)
+                }
+            }
+            sub == "holes" -> {
+                if (runId.isBlank()) {
+                    appendLocalAssistant("用法：/dwf holes <runId>")
+                } else {
+                    viewModelScope.launch {
+                        val snapshot = controller.workflowService.getRun(runId)
+                        val holes = loadOpenHoles(runId, snapshot?.kind)
+                        appendLocalAssistant(
+                            if (holes.isEmpty()) {
+                                "工作流 $runId 当前没有等待补全的留白。"
+                            } else {
+                                buildString {
+                                    append("工作流 ").append(runId).append(" 的待补全留白：\n")
+                                    holes.forEach { hole ->
+                                        append("- ").append(hole.siteId)
+                                        if (hole.name.isNotBlank()) append(" · ").append(hole.name)
+                                        append("（第 ").append(hole.ordinal).append(" 个实例）\n")
+                                    }
+                                    append("用 FillWorkflowHole 提供补全后的脚本和 hole_id。")
+                                }
+                            },
+                        )
+                    }
                     openWorkflowDetail(runId)
                 }
             }

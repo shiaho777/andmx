@@ -1204,4 +1204,8 @@ internal val settingsEn: Map<String, String> = mapOf(
     "浏览器授权" to "Browser sign-in",
     "动态脚本在设备侧 WebView 沙箱执行；节点与产物写入 workflow journal。" to
         "Dynamic scripts run in an on-device WebView sandbox; nodes and artifacts are written to the workflow journal.",
+    "返回值" to "Result",
+    "待补全留白" to "Open holes",
+    "刷新" to "Refresh",
+    "产物" to "Artifacts",
 )

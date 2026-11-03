@@ -220,8 +220,13 @@ Kotlin 也喂探针，所以它不是「另写一个 demo」，而是那条链�
 打包；WebView 主 realm + iframe cell、`PortableJournal` 同步桥、`DynamicWorkflowRunner`（Room
 `workflow_journals`，DB v21）、actor ask/world read/artifact publish 回调、`CreateWorkflow` 启动、
 `AmendWorkflow`、`FillWorkflowHole`、`ResumeWorkflowRun`/cancel 均已在设备上跑通一条 sequential +
-ask + files.read 脚本；`runner-probe` 覆盖 fanout/artifact。
-尚未覆盖：hole/fill 的设备侧回归、动态 run 的产物卡片/完整看板。typed ask 的 reject→repair 设备回归已通过。
+ask + files.read 脚本；`runner-probe` 覆盖 fanout/artifact/hole。
+
+**v2 设备回归**（2026-11-03）：`DynamicWorkflowRunnerTest` 现有 5 条——sequential + journal、
+cancel→paused→resume→completed、typed ask 拒绝→修复、FillWorkflowHole 补全后 run 完成并记录产物、
+Amend 启动后继 run 并把前驱标为 `superseded`（`supersededBy`/`resumedFrom` 两端可查，前驱拒绝 resume）。
+动态 run 详情新增开放留白卡片、产物卡片与脚本返回值；`/dwf holes <runId>` 可列当前等待补全的留白。
+仍缺：Amend 的 warm-cache/导入前缀（当前后继 run 重新执行，不导入前驱已完成 ask）、完整看板。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
 
@@ -427,17 +432,18 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **工作区索引接入工具**：Grep/Glob 在索引就绪时走快速路径；写入后立即 dirty、回退文件扫描并延迟重建。
 - **模型轨迹持久化**：`ModelCallTrace` 镜像到 `files/model-traces.json`，重启后仍可查看最近 50 次调用。
 - **工作流恢复**：`ResumeWorkflowRun` 接入 `WorkflowService.resume`，模型侧与 `/dwf resume` 行为一致。
-- **动态脚本 runner v1**：WebView + iframe cell、`runner.js`、Room journal（DB v21）、
+- **动态脚本 runner v1/v2**：WebView + iframe cell、`runner.js`、Room journal（DB v21）、
   actor ask / world read / artifact publish 桥；`CreateWorkflow` 启动、`AmendWorkflow`、`FillWorkflowHole`、
-  `ResumeWorkflowRun`/cancel 已接线；sequential + ask + files.read 在设备上跑通并落 journal，fanout/artifact 有探针。
+  `ResumeWorkflowRun`/cancel 已接线；设备侧覆盖 sequential/journal、cancel→resume、typed repair、hole/fill、
+  Amend supersede；详情显示开放留白、产物卡片与返回值。fanout/artifact/hole 有 `runner-probe`。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
 
 仍缺（按优先级）：
 
-1. **动态工作流 v2**：v1 已能跑 sequential/ask/files.read、fanout/artifact 探针、journal 持久化/恢复，
-   `AmendWorkflow`/`FillWorkflowHole` 已接线；仍缺 hole/fill 设备回归与完整产物看板；typed ask 拒绝→修复设备回归已通过。
+1. **动态工作流 v2**：设备侧已覆盖 sequential/journal、cancel→resume、typed repair、hole/fill、
+   Amend supersede，并显示开放留白/产物卡片/返回值；仍缺 Amend 的 warm-cache（导入前驱已完成 ask）与完整看板。
 2. **MCP OAuth DCR**：浏览器授权码 + PKCE 已接；尚未实现动态客户端注册（Dynamic Client Registration），
    用户仍需自备 clientId/clientSecret。
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
