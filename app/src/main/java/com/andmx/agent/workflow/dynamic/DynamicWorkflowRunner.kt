@@ -47,6 +47,7 @@ data class DynamicAskRequest(
     val typed: Boolean,
     val schemaJson: String?,
     val conversationId: Long,
+    val personaJson: String? = null,
 )
 
 sealed interface DynamicAskResult {
@@ -82,6 +83,7 @@ class DynamicWorkflowRunner(
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val pendingAsks = java.util.concurrent.ConcurrentHashMap<String, DynamicAskRequest>()
+    private val actorPersonas = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var webView: WebView? = null
     @Volatile private var ready = false
     private val lock = kotlinx.coroutines.sync.Mutex()
@@ -361,6 +363,7 @@ class DynamicWorkflowRunner(
 
         @JavascriptInterface
         fun createActor(runId: String, siteId: String, ordinal: Int, personaJson: String) {
+            actorPersonas["$runId|$siteId|$ordinal"] = personaJson
             scope.launch { runCatching { host.createActor(runId, siteId, ordinal, personaJson) } }
         }
 
@@ -477,16 +480,19 @@ class DynamicWorkflowRunner(
     private fun parseAsk(runId: String, requestId: String, requestJson: String): DynamicAskRequest? =
         runCatching {
             val obj = json.parseToJsonElement(requestJson).jsonObject
+            val siteId = obj["siteId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val ordinal = obj["ordinal"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1
             DynamicAskRequest(
                 runId = runId,
                 requestId = requestId,
                 sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                siteId = obj["siteId"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                ordinal = obj["ordinal"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1,
+                siteId = siteId,
+                ordinal = ordinal,
                 instructions = obj["instructions"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 typed = obj["typed"]?.jsonPrimitive?.contentOrNull == "true",
                 schemaJson = obj["schema"]?.toString(),
                 conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                personaJson = actorPersonas["$runId|$siteId|$ordinal"],
             )
         }.getOrNull()
 

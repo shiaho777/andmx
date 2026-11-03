@@ -787,7 +787,9 @@ class ChatController private constructor(private val context: Context) {
             ?: providerStore.primary.firstOrNull()
             ?: return DynamicAskResult.Fail("no provider")
         val persona = runCatching {
-            Json.parseToJsonElement(dynamicActorPersonas[request.sessionId].orEmpty()).jsonObject
+            Json.parseToJsonElement(
+                request.personaJson ?: dynamicActorPersonas[request.sessionId].orEmpty(),
+            ).jsonObject
         }.getOrNull()
         val personaName = persona?.get("name")?.jsonPrimitive?.contentOrNull.orEmpty()
         val personaSystem = persona?.get("system")?.jsonPrimitive?.contentOrNull.orEmpty()
