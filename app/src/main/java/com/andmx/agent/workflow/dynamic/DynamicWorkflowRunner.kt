@@ -8,6 +8,9 @@ import android.webkit.WebView
 import com.andmx.agent.workflow.WorkflowArtifact
 import com.andmx.agent.workflow.WorkflowFailure
 import com.andmx.agent.workflow.WorkflowGraph
+import com.andmx.agent.workflow.WorkflowGraphEdge
+import com.andmx.agent.workflow.WorkflowGraphNode
+import com.andmx.agent.workflow.WorkflowNodeStatus
 import com.andmx.agent.workflow.WorkflowRunSnapshot
 import com.andmx.agent.workflow.WorkflowRunStatus
 import com.andmx.agent.workflow.WorkflowStrategy
@@ -99,6 +102,7 @@ class DynamicWorkflowRunner(
     @Volatile private var webView: WebView? = null
     @Volatile private var ready = false
     private val lock = kotlinx.coroutines.sync.Mutex()
+    private val snapshotLock = Mutex()
 
     suspend fun start(
         script: String,
@@ -122,7 +126,19 @@ class DynamicWorkflowRunner(
             artifacts = emptyList(),
             createdAt = now,
             cwd = cwd,
-            graph = WorkflowGraph(edges = emptyList(), nodes = emptyList()),
+            graph = analysis.siteGraph?.let { site ->
+                WorkflowGraph(
+                    edges = site.edges.map { WorkflowGraphEdge(from = it.from, to = it.to) },
+                    nodes = site.nodes.map { node ->
+                        WorkflowGraphNode(
+                            id = node.id,
+                            kind = node.kind,
+                            title = node.label,
+                            status = WorkflowNodeStatus.pending,
+                        )
+                    },
+                )
+            } ?: WorkflowGraph(edges = emptyList(), nodes = emptyList()),
             kind = KIND,
             phaseOrder = emptyList(),
             phases = emptyList(),
@@ -397,8 +413,10 @@ class DynamicWorkflowRunner(
 
     private fun updateSnapshot(runId: String, transform: (WorkflowRunSnapshot) -> WorkflowRunSnapshot) {
         scope.launch {
-            val current = runStore.readSnapshot(runId) ?: return@launch
-            runStore.writeSnapshot(transform(current))
+            snapshotLock.withLock {
+                val current = runStore.readSnapshot(runId) ?: return@withLock
+                runStore.writeSnapshot(transform(current))
+            }
         }
     }
 
@@ -444,6 +462,71 @@ class DynamicWorkflowRunner(
         else -> WorkflowRunStatus.running
     }
 
+    private fun noteGraphEvent(runId: String, type: String, event: JsonObject) {
+        val instance = event["instance"] as? JsonObject ?: return
+        val siteId = instance["siteId"]?.jsonPrimitive?.contentOrNull ?: return
+        val outcome = event["outcome"]?.jsonPrimitive?.contentOrNull
+        val status = when (type) {
+            "node-queued", "node-dispatched", "node-executing" -> WorkflowNodeStatus.active
+            "node-settled" -> when (outcome) {
+                "ok" -> WorkflowNodeStatus.completed
+                "failed" -> WorkflowNodeStatus.failed
+                "cancelled" -> WorkflowNodeStatus.cancelled
+                else -> null
+            }
+            else -> null
+        } ?: return
+        val error = event["error"]
+            ?.let { (it as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull }
+        updateSnapshot(runId) { snapshot ->
+            if (status == WorkflowNodeStatus.active &&
+                snapshot.status != WorkflowRunStatus.running &&
+                snapshot.status != WorkflowRunStatus.pending
+            ) {
+                return@updateSnapshot snapshot
+            }
+            if (snapshot.graph.nodes.none { it.id == siteId }) {
+                snapshot
+            } else {
+                snapshot.copy(
+                    graph = snapshot.graph.copy(
+                        nodes = snapshot.graph.nodes.map { node ->
+                            if (node.id != siteId) {
+                                node
+                            } else {
+                                node.copy(
+                                    status = status,
+                                    error = if (status == WorkflowNodeStatus.failed) error else node.error,
+                                )
+                            }
+                        },
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun settledGraph(
+        graph: WorkflowGraph,
+        status: WorkflowRunStatus,
+    ): WorkflowGraph {
+        val terminal = when (status) {
+            WorkflowRunStatus.completed -> WorkflowNodeStatus.completed
+            WorkflowRunStatus.failed -> WorkflowNodeStatus.failed
+            WorkflowRunStatus.cancelled -> WorkflowNodeStatus.cancelled
+            else -> return graph
+        }
+        return graph.copy(
+            nodes = graph.nodes.map { node ->
+                when (node.status) {
+                    WorkflowNodeStatus.pending -> node.copy(status = WorkflowNodeStatus.skipped)
+                    WorkflowNodeStatus.active -> node.copy(status = terminal)
+                    else -> node
+                }
+            },
+        )
+    }
+
     inner class Bridge {
         @JavascriptInterface
         fun saveJournal(runId: String, journal: String) {
@@ -456,6 +539,7 @@ class DynamicWorkflowRunner(
             val type = event?.get("type")?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "event" }
             val message = event?.get("message")?.jsonPrimitive?.contentOrNull
             appendEvent(runId, type, message)
+            event?.let { noteGraphEvent(runId, type, it) }
         }
 
         @JavascriptInterface
@@ -577,28 +661,31 @@ class DynamicWorkflowRunner(
                 ?.toString()
                 ?.take(64_000)
             scope.launch {
-                val current = runStore.readSnapshot(runId) ?: return@launch
-                val journalArtifacts = journalArtifacts(runId)
-                val merged = (current.artifacts + journalArtifacts).distinctBy { it.path to it.label }
-                runStore.writeSnapshot(
-                    current.copy(
-                        artifacts = merged,
-                        status = status,
-                        updatedAt = Instant.now().toString(),
-                        completedAt = if (status == WorkflowRunStatus.running) null else Instant.now().toString(),
-                        resultJson = resultJson ?: current.resultJson,
-                        supersededBy = supersededBy ?: current.supersededBy,
-                        pauseReason = if (stopReason == "superseded") "superseded" else current.pauseReason,
-                        failure = failureMessage?.let {
-                            WorkflowFailure(
-                                kind = if (status == WorkflowRunStatus.failed) "workflow" else "interrupted",
-                                message = it,
-                                recoverable = status == WorkflowRunStatus.paused,
-                                retryable = status == WorkflowRunStatus.paused,
-                            )
-                        },
-                    ),
-                )
+                snapshotLock.withLock {
+                    val current = runStore.readSnapshot(runId) ?: return@withLock
+                    val journalArtifacts = journalArtifacts(runId)
+                    val merged = (current.artifacts + journalArtifacts).distinctBy { it.path to it.label }
+                    runStore.writeSnapshot(
+                        current.copy(
+                            artifacts = merged,
+                            status = status,
+                            updatedAt = Instant.now().toString(),
+                            completedAt = if (status == WorkflowRunStatus.running) null else Instant.now().toString(),
+                            resultJson = resultJson ?: current.resultJson,
+                            supersededBy = supersededBy ?: current.supersededBy,
+                            pauseReason = if (stopReason == "superseded") "superseded" else current.pauseReason,
+                            graph = settledGraph(current.graph, status),
+                            failure = failureMessage?.let {
+                                WorkflowFailure(
+                                    kind = if (status == WorkflowRunStatus.failed) "workflow" else "interrupted",
+                                    message = it,
+                                    recoverable = status == WorkflowRunStatus.paused,
+                                    retryable = status == WorkflowRunStatus.paused,
+                                )
+                            },
+                        ),
+                    )
+                }
             }
         }
 
@@ -612,16 +699,18 @@ class DynamicWorkflowRunner(
         val obj = runCatching { json.parseToJsonElement(recordJson).jsonObject }.getOrNull() ?: return
         val artifact = artifactFromRecord(obj) ?: return
         scope.launch {
-            val current = runStore.readSnapshot(runId) ?: return@launch
-            if (current.artifacts.any { it.path == artifact.path && it.label == artifact.label }) {
-                return@launch
+            snapshotLock.withLock {
+                val current = runStore.readSnapshot(runId) ?: return@withLock
+                if (current.artifacts.any { it.path == artifact.path && it.label == artifact.label }) {
+                    return@withLock
+                }
+                runStore.writeSnapshot(
+                    current.copy(
+                        artifacts = current.artifacts + artifact,
+                        updatedAt = Instant.now().toString(),
+                    ),
+                )
             }
-            runStore.writeSnapshot(
-                current.copy(
-                    artifacts = current.artifacts + artifact,
-                    updatedAt = Instant.now().toString(),
-                ),
-            )
         }
     }
 
