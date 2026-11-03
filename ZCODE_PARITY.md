@@ -221,7 +221,7 @@ Kotlin 也喂探针，所以它不是「另写一个 demo」，而是那条链�
 `workflow_journals`，DB v21）、actor ask/world read/artifact publish 回调、`CreateWorkflow` 启动、
 `AmendWorkflow`、`FillWorkflowHole`、`ResumeWorkflowRun`/cancel 均已在设备上跑通一条 sequential +
 ask + files.read 脚本；`runner-probe` 覆盖 fanout/artifact。
-尚未接线：typed ask 的 reject/nudge 设备回归、动态 run 的产物卡片/完整看板，以及 hole/fill 的设备侧回归。
+尚未覆盖：hole/fill 的设备侧回归、动态 run 的产物卡片/完整看板。typed ask 的 reject→repair 设备回归已通过。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
 
@@ -437,8 +437,7 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 仍缺（按优先级）：
 
 1. **动态工作流 v2**：v1 已能跑 sequential/ask/files.read、fanout/artifact 探针、journal 持久化/恢复，
-   `AmendWorkflow`/`FillWorkflowHole` 已接线；仍缺 typed ask 拒绝修复的设备回归、hole/fill 设备回归
-   与完整产物看板。
+   `AmendWorkflow`/`FillWorkflowHole` 已接线；仍缺 hole/fill 设备回归与完整产物看板；typed ask 拒绝→修复设备回归已通过。
 2. **MCP OAuth DCR**：浏览器授权码 + PKCE 已接；尚未实现动态客户端注册（Dynamic Client Registration），
    用户仍需自备 clientId/clientSecret。
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
