@@ -542,9 +542,8 @@ class DynamicWorkflowRunner(
                 .flatMap { bucket ->
                     val entries = bucket.jsonArray.getOrNull(1)?.jsonArray ?: return@flatMap emptyList()
                     entries.mapNotNull { entry ->
-                        val node = entry.jsonObject["event"] as? JsonObject
-                            ?: entry.jsonArray.getOrNull(1)?.jsonObject
-                            ?: return@mapNotNull null
+                        val pair = entry as? JsonArray ?: return@mapNotNull null
+                        val node = pair.getOrNull(1)?.jsonObject ?: return@mapNotNull null
                         if (node["kind"]?.jsonPrimitive?.contentOrNull != "report") return@mapNotNull null
                         val artifactId = node["artifactId"]?.jsonPrimitive?.contentOrNull
                             ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
