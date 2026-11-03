@@ -187,6 +187,12 @@ class DynamicWorkflowRunnerTest {
             assertEquals(WorkflowRunStatus.completed, snapshot?.status)
             assertEquals(1, host.asks.get())
             assertEquals(1, host.worldReads.get())
+            assertTrue(
+                "graph nodes were not populated",
+                snapshot!!.graph.nodes.any {
+                    it.kind == "ask" && it.status == com.andmx.agent.workflow.WorkflowNodeStatus.completed
+                },
+            )
             val journal = journals.load(runId)
             assertNotNull(journal)
             assertTrue(journal!!.contains("\"runId\":\"$runId\""))
