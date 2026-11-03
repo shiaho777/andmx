@@ -22,8 +22,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowEventEntity::class,
         WorkspaceChangeEntity::class,
         WorkflowJournalEntity::class,
+        WorkflowActorMessageEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -55,6 +56,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_18_19,
                     MIGRATION_19_20,
                     MIGRATION_20_21,
+                    MIGRATION_21_22,
                 )
                 .build()
                 .also { instance = it }
@@ -376,6 +378,23 @@ abstract class AndmxDatabase : RoomDatabase() {
                         json TEXT NOT NULL,
                         updatedAt INTEGER NOT NULL
                     )""",
+                )
+            }
+        }
+
+        /** v21 → v22: durable dynamic-workflow actor conversations. */
+        private val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS workflow_actor_messages (
+                        sessionId TEXT NOT NULL PRIMARY KEY,
+                        runId TEXT NOT NULL,
+                        messagesJson TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )""",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_workflow_actor_messages_runId ON workflow_actor_messages(runId)",
                 )
             }
         }

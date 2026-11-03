@@ -279,6 +279,15 @@ data class WorkflowJournalEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+/** Durable dynamic-workflow actor conversations (one row per actor session). */
+@Entity(tableName = "workflow_actor_messages", indices = [Index("runId")])
+data class WorkflowActorMessageEntity(
+    @PrimaryKey val sessionId: String,
+    val runId: String,
+    val messagesJson: String,
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
 // ── v8: Model providers (mirrors Codex model_providers + ZCode provider map) ──
 
 /**
