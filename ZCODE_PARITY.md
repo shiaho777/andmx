@@ -231,11 +231,13 @@ Amend 会从前驱 journal 构建导入缓存，复用按 actorSeq 连续完成�
 warm 命中（只重跑新增 ask 与世界读取）。
 动态 run 详情新增开放留白卡片、可点开的产物卡片与脚本返回值；启动时用 `siteGraph` 填充节点/边，
 `node-queued`/`node-dispatched`/`node-settled` 实时更新节点状态（结算时 pending→skipped、active→终态），
-snapshot 读改写加 Mutex 防止 settled/artifact/graph 并发丢更新。`/dwf holes <runId>` 可列当前等待补全的留白。
+snapshot 读改写加 Mutex 防止 settled/artifact/graph 并发丢更新。`report()` 行与
+`artifact.chart/table/metrics/board` 声明会投影到 snapshot 的 `reports`/`presets`，详情页可看
+表/指标/看板/图序列文本。`/dwf holes <runId>` 可列当前等待补全的留白。
 actor 的 ask 多轮上下文会保存非 system 历史到 Room `workflow_actor_messages`（DB v22），下一次 ask
 用 `engine.seed` 恢复；进程重启后同一 session 仍能接着聊。ask 结算时 driver 通过 `actorMessageCount`
 把消息边界写回 journal；Amend 的后继 live actor 经 `createActorSession(seed)` 复制直接前驱的历史前缀。
-仍缺：上游那种 report/chart/table/board 看板；链式 Amend 的祖先转录解析仍是直接前驱（未沿 `resumedFrom` 链回溯）。
+仍缺：链式 Amend 的祖先转录解析仍是直接前驱（未沿 `resumedFrom` 链回溯）；看板目前是文本投影，未做 Canvas 图形。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
 
@@ -454,7 +456,7 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 
 1. **动态工作流 v2**：设备侧已覆盖 sequential/journal、销毁重建后 resume、typed repair、hole/fill、
    Amend supersede + ask/world 导入 + 直接前驱转录种子、actor 多轮上下文持久化，并显示开放留白/
-   产物卡片/返回值与站点图实时状态；仍缺 report/board 看板与链式 Amend 的祖先转录解析。
+   产物卡片/返回值、站点图实时状态与 report/board 文本投影；仍缺 Canvas 看板与链式 Amend 的祖先转录解析。
 2. **MCP OAuth DCR**：浏览器授权码 + PKCE 已接；尚未实现动态客户端注册（Dynamic Client Registration），
    用户仍需自备 clientId/clientSecret。
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
