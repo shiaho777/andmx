@@ -2030,7 +2030,12 @@ class ChatViewModel @Inject constructor(
 
     fun cancelWorkflowRun(runId: String) {
         viewModelScope.launch {
-            controller.workflowService.cancel(runId)
+            val snapshot = controller.workflowService.getRun(runId)
+            if (snapshot?.kind == "dynamic") {
+                controller.dynamicWorkflowRunner.cancel(runId)
+            } else {
+                controller.workflowService.cancel(runId)
+            }
             _workflowRuns.value = controller.workflowService.listRuns()
             _workflowDetail.value = controller.workflowService.getRun(runId)
         }
@@ -2038,10 +2043,15 @@ class ChatViewModel @Inject constructor(
 
     fun resumeWorkflowRun(runId: String) {
         viewModelScope.launch {
-            val (_, err) = controller.workflowService.resume(
-                runId,
-                parentSessionId = _currentConversationId.value.takeIf { it > 0 }?.toString(),
-            )
+            val snapshot = controller.workflowService.getRun(runId)
+            val err = if (snapshot?.kind == "dynamic") {
+                controller.dynamicWorkflowRunner.resume(runId).second
+            } else {
+                controller.workflowService.resume(
+                    runId,
+                    parentSessionId = _currentConversationId.value.takeIf { it > 0 }?.toString(),
+                ).second
+            }
             _workflowRuns.value = controller.workflowService.listRuns()
             _workflowDetail.value = controller.workflowService.getRun(runId)
             if (err != null) appendLocalAssistant("工作流恢复失败：$err")

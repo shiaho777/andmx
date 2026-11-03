@@ -86,8 +86,10 @@ class WorkflowStore(
         updatedAtMs = updatedAtMs,
     )
 
-    suspend fun writeRunRow(snapshot: WorkflowRunSnapshot, conversationId: Long) {
-        val existing = dao.workflowRun(snapshot.runId)
+    suspend fun conversationId(runId: String): Long =
+        dao.workflowRun(runId)?.conversationId ?: 0L
+
+    suspend fun writeRunRow(snapshot: WorkflowRunSnapshot, conversationId: Long) {        val existing = dao.workflowRun(snapshot.runId)
         dao.upsertWorkflowRun(
             WorkflowRunEntity(
                 runId = snapshot.runId,

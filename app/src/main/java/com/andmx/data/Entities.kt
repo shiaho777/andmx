@@ -271,6 +271,14 @@ data class WorkflowEventEntity(
     val timestamp: String,
 )
 
+/** Durable dynamic-workflow journal snapshots (one row per run). */
+@Entity(tableName = "workflow_journals")
+data class WorkflowJournalEntity(
+    @PrimaryKey val runId: String,
+    val json: String,
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
 // ── v8: Model providers (mirrors Codex model_providers + ZCode provider map) ──
 
 /**

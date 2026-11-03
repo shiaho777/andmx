@@ -103,7 +103,7 @@ class WebViewWorkflowScriptAnalyzer(
     private var ready = false
 
     override suspend fun analyze(script: String): WorkflowAnalysis = lock.withLock {
-        val root = call("analyze", script)
+        val root = call("prepare", script)
         WorkflowAnalysisCodec.decode(root)
     }
 

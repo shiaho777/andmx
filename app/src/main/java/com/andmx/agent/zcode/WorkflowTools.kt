@@ -13,6 +13,7 @@ import com.andmx.agent.workflow.WorkflowRunStatus
 import com.andmx.agent.workflow.WorkflowScriptFrontmatter
 import com.andmx.agent.workflow.WorkflowScriptNotes
 import com.andmx.agent.workflow.WorkflowService
+import com.andmx.agent.workflow.dynamic.DynamicWorkflowRunner
 import com.andmx.agent.workflow.script.WorkflowAnalyzerUnavailableException
 import com.andmx.agent.workflow.script.WorkflowScriptAnalyzer
 import com.andmx.data.WorkflowStore
@@ -36,6 +37,7 @@ class WorkflowTools(
     private val analyzer: WorkflowScriptAnalyzer? = null,
     private val conversationId: Long = 0L,
     private val cwd: () -> String = { "/" },
+    private val dynamicRunner: DynamicWorkflowRunner? = null,
 ) {
     abstract class Declaration(
         override val name: String,
@@ -158,6 +160,29 @@ class WorkflowTools(
                         append("\n\n").append(note)
                     },
                     isError = true,
+                )
+            }
+
+            val runner = dynamicRunner
+            if (runner != null) {
+                val (runId, error) = runner.start(
+                    script = input.script,
+                    cwd = cwd(),
+                    conversationId = conversationId,
+                )
+                if (error != null) {
+                    return ToolResult("The workflow compiled but could not start: $error", isError = true)
+                }
+                return ToolResult(
+                    buildString {
+                        append("Started workflow run ").append(runId).append(".\n")
+                        append("The script is running in the device sandbox. ")
+                        append("Use GetWorkflowRun to follow it, or ResumeWorkflowRun if it stops.\n")
+                        analysis.siteGraph?.let { graph ->
+                            append("Sites: ").append(graph.nodes.size).append(" node(s) across ")
+                            append(graph.actors.size).append(" actor(s).\n")
+                        }
+                    },
                 )
             }
 
@@ -373,6 +398,21 @@ class WorkflowTools(
             if (text(args, "run_id") == null) return absent("run_id is required")
             val runId = text(args, "run_id")!!
             val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
+            val existing = svc.getRun(runId)
+                ?: return absent("Workflow run $runId was not found.")
+            if (existing.kind == "dynamic") {
+                val runner = dynamicRunner
+                    ?: return absent("Dynamic workflow runner is unavailable in this session.")
+                val (ok, error) = runner.resume(runId)
+                if (!ok) return ToolResult(error ?: "Workflow resume failed.", isError = true)
+                val snapshot = svc.getRun(runId)
+                return ToolResult(
+                    buildString {
+                        append("Resumed workflow run ").append(runId).append(".\n")
+                        if (snapshot != null) append(renderRun(snapshot))
+                    },
+                )
+            }
             val (snapshot, error) = svc.resume(runId)
             if (error != null) return ToolResult(error, isError = true)
             if (snapshot == null) return absent("Workflow run $runId was not found.")
