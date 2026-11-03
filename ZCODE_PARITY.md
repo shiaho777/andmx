@@ -230,7 +230,10 @@ Amend 会从前驱 journal 构建导入缓存，复用按 actorSeq 连续完成�
 后继首个改写型工具或 live `world.run` 会经 `askMutating`/引擎关门关闭缓存。`runner-probe` 已覆盖
 warm 命中（只重跑新增 ask 与世界读取）。
 动态 run 详情新增开放留白卡片、可点开的产物卡片与脚本返回值；`/dwf holes <runId>` 可列当前等待补全的留白。
-仍缺：完整看板；全保真转录种子（当前只复用 journal 结果，不复制前驱会话消息，也不写真实 messageBoundary）。
+actor 的 ask 多轮上下文会保存非 system 历史到 Room `workflow_actor_messages`（DB v22），下一次 ask
+用 `engine.seed` 恢复；进程重启后同一 session 仍能接着聊。Amend 目前只导入结果，尚未用
+`createActorSession(seed)` 复制前驱消息前缀（messageBoundary 也还未由 driver 回填）。
+仍缺：完整看板；全保真转录种子。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
 
@@ -436,10 +439,11 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **工作区索引接入工具**：Grep/Glob 在索引就绪时走快速路径；写入后立即 dirty、回退文件扫描并延迟重建。
 - **模型轨迹持久化**：`ModelCallTrace` 镜像到 `files/model-traces.json`，重启后仍可查看最近 50 次调用。
 - **工作流恢复**：`ResumeWorkflowRun` 接入 `WorkflowService.resume`，模型侧与 `/dwf resume` 行为一致。
-- **动态脚本 runner v1/v2**：WebView + iframe cell、`runner.js`、Room journal（DB v21）、
+- **动态脚本 runner v1/v2**：WebView + iframe cell、`runner.js`、Room journal（DB v22）、
   actor ask / world read / artifact publish 桥；`CreateWorkflow` 启动、`AmendWorkflow`、`FillWorkflowHole`、
   `ResumeWorkflowRun`/cancel 已接线；设备侧覆盖 sequential/journal、销毁重建后 resume、typed repair、hole/fill、
-  Amend supersede + ask/world 前缀导入；详情显示开放留白、可打开产物与返回值。fanout/artifact/hole/warm 有 `runner-probe`。
+  Amend supersede + ask/world 前缀导入；actor 多轮历史持久化到 `workflow_actor_messages`；
+  详情显示开放留白、可打开产物与返回值。fanout/artifact/hole/warm 有 `runner-probe`。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
@@ -447,7 +451,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 仍缺（按优先级）：
 
 1. **动态工作流 v2**：设备侧已覆盖 sequential/journal、销毁重建后 resume、typed repair、hole/fill、
-   Amend supersede + ask/world 导入，并显示开放留白/产物卡片/返回值；仍缺完整看板与全保真转录种子。
+   Amend supersede + ask/world 导入、actor 多轮上下文持久化，并显示开放留白/产物卡片/返回值；
+   仍缺完整看板与 Amend 的全保真转录种子。
 2. **MCP OAuth DCR**：浏览器授权码 + PKCE 已接；尚未实现动态客户端注册（Dynamic Client Registration），
    用户仍需自备 clientId/clientSecret。
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。

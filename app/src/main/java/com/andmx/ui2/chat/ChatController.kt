@@ -449,6 +449,11 @@ class ChatController private constructor(private val context: Context) {
         actorRunner = { input -> runWorkflowActor(input) },
     )
     private val workflowJournalStore = WorkflowJournalStore(context)
+    private val workflowActorStore = com.andmx.data.WorkflowActorStore(context)
+    private val dynamicActorHistoryCache = ConcurrentHashMap<String, String>()
+    private val dynamicActorJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val dynamicActorHistorySerializer =
+        kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.ApiMessage.serializer())
     private val dynamicAskJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private val dynamicActorPersonas = ConcurrentHashMap<String, String>()
     private val dynamicWorkflowHost = object : DynamicWorkflowHost {
@@ -856,6 +861,7 @@ class ChatController private constructor(private val context: Context) {
                 approveTool(convId, mode, tool, args)
             },
         )
+        loadDynamicActorHistory(request.sessionId).takeIf { it.isNotEmpty() }?.let(engine::seed)
         var finalText = ""
         var failure: String? = null
         try {
@@ -873,10 +879,34 @@ class ChatController private constructor(private val context: Context) {
             failure = e.message
         }
         failure?.let { return DynamicAskResult.Fail(it) }
+        saveDynamicActorHistory(request, engine)
         val submitted = submitSlot.get()
         if (submitted != null) return DynamicAskResult.Submit(submitted)
         if (request.typed) return DynamicAskResult.Fail("typed ask ended without submit_result")
         return DynamicAskResult.Text(finalText)
+    }
+
+    private suspend fun loadDynamicActorHistory(sessionId: String): List<com.andmx.llm.ApiMessage> {
+        if (sessionId.isBlank()) return emptyList()
+        val raw = dynamicActorHistoryCache[sessionId]
+            ?: workflowActorStore.load(sessionId)?.also { dynamicActorHistoryCache[sessionId] = it }
+            ?: return emptyList()
+        return runCatching {
+            dynamicActorJson.decodeFromString(dynamicActorHistorySerializer, raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private suspend fun saveDynamicActorHistory(request: DynamicAskRequest, engine: AgentEngine) {
+        if (request.sessionId.isBlank()) return
+        val snapshot = com.andmx.agent.workflow.dynamic.DynamicActorHistory.snapshot(
+            engine.snapshotHistory(),
+        )
+        if (snapshot.isEmpty()) return
+        val raw = runCatching {
+            dynamicActorJson.encodeToString(dynamicActorHistorySerializer, snapshot)
+        }.getOrNull() ?: return
+        dynamicActorHistoryCache[request.sessionId] = raw
+        runCatching { workflowActorStore.save(request.sessionId, request.runId, raw) }
     }
 
     private suspend fun dynamicWorldRead(op: String, argsJson: String): String {

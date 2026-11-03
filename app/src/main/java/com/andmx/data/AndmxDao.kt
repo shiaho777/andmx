@@ -288,6 +288,15 @@ interface AndmxDao {
     @Query("DELETE FROM workflow_journals WHERE runId = :runId")
     suspend fun deleteWorkflowJournal(runId: String): Int
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWorkflowActorMessages(messages: WorkflowActorMessageEntity)
+
+    @Query("SELECT * FROM workflow_actor_messages WHERE sessionId = :sessionId")
+    suspend fun workflowActorMessages(sessionId: String): WorkflowActorMessageEntity?
+
+    @Query("DELETE FROM workflow_actor_messages WHERE runId = :runId")
+    suspend fun deleteWorkflowActorMessages(runId: String): Int
+
     // ── per-conversation file changes ─────────────────────────
 
     @Query("SELECT * FROM workspace_changes WHERE conversationId = :conversationId ORDER BY timestamp ASC")
