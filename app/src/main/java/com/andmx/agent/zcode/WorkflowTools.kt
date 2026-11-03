@@ -241,7 +241,7 @@ class WorkflowTools(
             val runId = text(args, "run_id") ?: return absent("run_id is required")
             if (present(args, "script") && present(args, "path")) return absent(AMEND_WORKFLOW_SOURCE_ERROR)
             val runner = dynamicRunner
-                ?: return absent("Dynamic workflow runner is unavailable in this session.")
+                ?: return absent(WORKFLOW_AMEND_UNAVAILABLE)
             val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
             val existing = svc.getRun(runId)
                 ?: return absent("Workflow run $runId was not found.")
@@ -468,7 +468,7 @@ class WorkflowTools(
                 ?: return absent("Workflow run $runId was not found.")
             if (existing.kind == "dynamic") {
                 val runner = dynamicRunner
-                    ?: return absent("Dynamic workflow runner is unavailable in this session.")
+                    ?: return absent(WORKFLOW_RESUME_UNAVAILABLE)
                 val (ok, error) = runner.resume(runId)
                 if (!ok) return ToolResult(error ?: "Workflow resume failed.", isError = true)
                 val snapshot = svc.getRun(runId)

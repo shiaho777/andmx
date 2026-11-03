@@ -77,9 +77,11 @@ AndMX 现状（2026-11-02）：
 - `applyDynamicWorkflowGate`、`agentProviderDescription`、`taskProviderDescription`、`WorkflowPrompt` 全部改为接收运行时值；
 - 切换开关会重建空闲会话，使新工具面生效。
 
-**尚未解决**：11 个工具里只有 3 个（`ListWorkflowRuns`/`GetWorkflowRun`/`ListSavedWorkflows`）接上了
-`WorkflowService`，其余 7 个 `execute()` 仍返回 `*_UNAVAILABLE` 桩。因此在桩接完之前**不要把开关暴露到 UI**，
-否则模型会被 `/workflow` 引导去调用必然失败的工具。
+**尚未解决**（2026-11-03 更新）：`CreateWorkflow` / `AmendWorkflow` / `SaveWorkflow` / `ListSavedWorkflows` /
+`ListWorkflowRuns` / `GetWorkflowRun` / `ResumeWorkflowRun` / `FillWorkflowHole` 已接上 `WorkflowService` 与
+`DynamicWorkflowRunner`（无 runner 时返回对应 `*_UNAVAILABLE`）。仍是桩的只有 `EvalWorkflowSnippet`（只校验来源，
+返回 `SNIPPET_NOT_EXECUTED_NOTE`）与 `ResolveWorkflowQuestion`（返回 `WORKFLOW_QUESTION_UNAVAILABLE`）。
+这两个接完之前仍**不要把开关暴露到 UI**，否则模型会被 `/workflow` 引导去调用必然失败的工具。
 
 ### 3.4 超集（需确认是否有意）
 
@@ -154,7 +156,8 @@ validateSource（三选一 XOR；args 只跟 path 走）
   → resolve（script 恒等 / saved 走 SavedWorkflowStore / path 读盘并剥元数据块）
   → analyzer.analyze（上游 analyzeWorkflowScript）
       ├─ !ok → 「The workflow script has errors:」+ 逐条 `L:C message`（有文件则按文件行）
-      └─ ok  → 分析事实（产物清单、脚本点名的模型、站点数）+ EXECUTION_UNAVAILABLE
+      └─ ok  → 有 runner：启动 run 并返回 runId 与站点数
+               无 runner：分析事实（产物清单、脚本点名的模型、站点数）+ EXECUTION_UNAVAILABLE
 ```
 
 失败关闭的三道口：**来源缺失**、**没有分析器**、**分析器不可用**——三者都拒绝执行，绝不默认通过。
@@ -163,8 +166,8 @@ validateSource（三选一 XOR；args 只跟 path 走）
 一个照搬中发现的上游细节：`describeValue` 里那条 `null` 分支说明**显式 `null` 必须走到类型检查**
 （`json` 收它，`string` 拒它并报 `got null`），不能被当作「没给」。参数校验据此实现。
 
-仍未接：`AmendWorkflow` / `EvalWorkflowSnippet` / `ResumeWorkflowRun` /
-`ResolveWorkflowQuestion` / `FillWorkflowHole`。真正的拦路虎见 3.7。
+`AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole` 已随设备侧 runner 接线（见 3.7）；
+仍未接：`EvalWorkflowSnippet` / `ResolveWorkflowQuestion`。
 
 ### 3.7 执行引擎：形态由证据定，不是选择题（2026-10-29）
 
@@ -386,11 +389,10 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 ## 六、建议补齐顺序
 
 1. ~~**P0｜打开动态工作流**~~（已完成基础设施）：`DYNAMIC_WORKFLOW_TOOLS_ENABLED` 已改为运行时 flag。
-   下一步是把它真正打开：先接完剩余 7 个工具的桩，再把设置开关放出来。
+   下一步是把它真正打开：先接完剩余 2 个工具的桩，再把设置开关放出来。
 2. **P0｜工作流桩接线**（进行中）：已完成 `ListWorkflowRuns` / `GetWorkflowRun` / `ListSavedWorkflows` / `SaveWorkflow` /
-   **`CreateWorkflow`**（见 3.6）；
-   `AmendWorkflow` / `EvalWorkflowSnippet` / `ResumeWorkflowRun` / `ResolveWorkflowQuestion` / `FillWorkflowHole`
-   仍返回 `*_UNAVAILABLE`。已完成的前置件：
+   **`CreateWorkflow`**（见 3.6）/ `AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole`（见 3.7）；
+   `EvalWorkflowSnippet` / `ResolveWorkflowQuestion` 仍是桩。已完成的前置件：
    - `agent/workflow/WorkflowScriptFrontmatter.kt` —— 文件头编解码（对齐上游 `frontmatter.ts`）。
    - `agent/workflow/YamlSubset.kt` —— 该文件头所需的 YAML 子集解析器，超出子集即带行号报错。
    - `agent/workflow/SavedWorkflowStore.kt` —— 保存库（对齐上游 `store.ts`）：项目/全局双档、
@@ -398,8 +400,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
    - `agent/workflow/CreateWorkflowSource.kt` + `WorkflowArgs.kt` + `WorkflowScriptNotes.kt` ——
      `create-workflow-source.ts` 的三源解析、参数校验与模型面文案。
    - **静态分析层已就位**（见 3.5）：上游分析器已在 assets 里跑通，Kotlin 解码层与单槽记忆到位。
-   - 剩余：`create-workflow.ts` 的确认窗与 run 启动、`AmendWorkflow` 的三态模型继承、
-     `FillWorkflowHole` 的留白拼接，以及**脚本执行引擎**——形态已由证据定下，见 3.7。
+   - 已接：run 启动（确认窗由 `alwaysAsk` 审批承担）、`FillWorkflowHole` 的留白拼接、**脚本执行引擎**（见 3.7）。
+   - 剩余：`AmendWorkflow` 的三态模型继承、`EvalWorkflowSnippet` 执行、`ResolveWorkflowQuestion` 应答。
 3. ~~**P0｜ToolSearch / DeferredToolCall**~~（已完成 local 模式，2026-11-02）：`shouldDefer` 已落到
    `Tool` 接口，两个控制工具与 `ToolSearchRegistry` 已接线到主引擎，deferred 工具覆盖见 3.1。
    下一步是把 discovered 集合写进压缩/恢复元数据，并评估子代理是否也接入同一机制。
