@@ -495,6 +495,10 @@ class ChatController private constructor(private val context: Context) {
 
         override suspend fun publishArtifact(runId: String, requestJson: String): String =
             dynamicPublishArtifact(runId, requestJson)
+
+        override suspend fun markMutating(runId: String, siteId: String, ordinal: Int) {
+            runCatching { dynamicWorkflowRunner.markMutating(runId, siteId, ordinal) }
+        }
     }
     val dynamicWorkflowRunner: DynamicWorkflowRunner by lazy {
         DynamicWorkflowRunner(
@@ -845,6 +849,9 @@ class ChatController private constructor(private val context: Context) {
             systemPrompt = systemPrompt,
             maxSteps = 24,
             approve = { tool, args ->
+                if (tool.risk == ToolRisk.WRITE || tool.risk == ToolRisk.EXECUTE) {
+                    dynamicWorkflowHost.markMutating(request.runId, request.siteId, request.ordinal)
+                }
                 val mode = sessions[convId]?.approvalMode ?: ExecMode.from(settings.approvalMode)
                 approveTool(convId, mode, tool, args)
             },

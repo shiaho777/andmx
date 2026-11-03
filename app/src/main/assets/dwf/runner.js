@@ -3793,6 +3793,7 @@ declare const args: Readonly<Record<string, unknown>>;
       ...options.name === void 0 ? {} : { name: options.name },
       ...options.parentSessionId === void 0 ? {} : { parentSessionId: options.parentSessionId },
       ...options.resumedFrom === void 0 ? {} : { resumedFrom: options.resumedFrom },
+      ...options.importedCache === void 0 ? {} : { importedCache: options.importedCache },
       ...options.scriptHash === void 0 ? {} : { scriptHash: options.scriptHash },
       ...options.scriptText === void 0 ? {} : { scriptText: options.scriptText },
       ...options.sitePhases === void 0 ? {} : { sitePhases: options.sitePhases }
@@ -4040,6 +4041,48 @@ declare const args: Readonly<Record<string, unknown>>;
   __name(readSupersededBy, "readSupersededBy");
 
   // src/android-runner.ts
+  function importedCacheFromJournal(journalJson) {
+    const data = JSON.parse(journalJson);
+    const actors = (data.actors ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
+    const nodes = (data.nodes ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
+    const byName = /* @__PURE__ */ new Map();
+    for (const actor of actors) {
+      const name = actor.name;
+      if (name === void 0 || name === "") continue;
+      const bucket = byName.get(name);
+      if (bucket === void 0) byName.set(name, [actor]);
+      else bucket.push(actor);
+    }
+    const cache = /* @__PURE__ */ new Map();
+    for (const [name, candidates] of byName) {
+      if (candidates.length !== 1) continue;
+      const actor = candidates[0];
+      const asks = nodes.filter(
+        (node) => node.kind === "ask" && node.actorSiteId === actor.siteId && node.actorOrdinal === actor.ordinal
+      );
+      const entries = [];
+      for (let seq = 0; ; seq += 1) {
+        const node = asks.find((candidate) => candidate.actorSeq === seq);
+        if (node === void 0 || node.status !== "completed") break;
+        entries.push({
+          inputHash: node.inputHash,
+          result: node.result,
+          ...node.stats === void 0 ? {} : { stats: node.stats },
+          messageBoundary: node.messageBoundary ?? 0
+        });
+      }
+      if (entries.length === 0) continue;
+      cache.set(name, {
+        persona: actor.persona ?? { name },
+        entries,
+        transcriptSourceSessionId: actor.sessionId ?? "",
+        ...actor.resolvedModel === void 0 ? {} : { resolvedModel: actor.resolvedModel }
+      });
+    }
+    if (cache.size === 0) return void 0;
+    return { actors: cache, world: /* @__PURE__ */ new Map() };
+  }
+  __name(importedCacheFromJournal, "importedCacheFromJournal");
   var _WorkflowRunner = class _WorkflowRunner {
     constructor(env) {
       __publicField(this, "env", env);
@@ -4053,6 +4096,7 @@ declare const args: Readonly<Record<string, unknown>>;
       if (!config.runId || !config.lowered || !config.cwd) {
         throw new Error("runner: runId, lowered and cwd are required");
       }
+      const importedCache = config.importedJournal === void 0 ? void 0 : importedCacheFromJournal(config.importedJournal);
       const journal = config.journalJson ? PortableJournal.fromJSON(JSON.parse(config.journalJson), this.env.bridge) : new PortableJournal(this.env.bridge);
       const driver = new BridgeDriver(
         config.runId,
@@ -4083,6 +4127,7 @@ declare const args: Readonly<Record<string, unknown>>;
         ...config.args === void 0 ? {} : { args: config.args },
         ...config.scriptHash === void 0 ? {} : { scriptHash: config.scriptHash },
         ...config.resumedFrom === void 0 ? {} : { resumedFrom: config.resumedFrom },
+        ...importedCache === void 0 ? {} : { importedCache },
         ...config.timeoutMs === void 0 ? {} : { timeoutMs: config.timeoutMs },
         cwd: config.cwd
       });
@@ -4146,6 +4191,13 @@ declare const args: Readonly<Record<string, unknown>>;
       if (run === void 0) return [];
       const engine = run.engine;
       return engine.openHoles();
+    }
+    markMutating(runId, siteId, ordinal) {
+      const run = this.runs.get(runId);
+      if (run === void 0) return false;
+      const engine = run.engine;
+      engine.askMutating({ siteId, ordinal });
+      return true;
     }
     cancel(runId) {
       const run = this.runs.get(runId);
@@ -4482,6 +4534,7 @@ declare const args: Readonly<Record<string, unknown>>;
     artifactResult: /* @__PURE__ */ __name((requestId, ok, payloadJson, error) => runner.artifactResult(requestId, ok, payloadJson, error), "artifactResult"),
     fillHole: /* @__PURE__ */ __name((runId, fillJson) => runner.fillHole(runId, fillJson), "fillHole"),
     openHoles: /* @__PURE__ */ __name((runId) => runner.openHoles(runId), "openHoles"),
+    markMutating: /* @__PURE__ */ __name((runId, siteId, ordinal) => runner.markMutating(runId, siteId, ordinal), "markMutating"),
     stop: /* @__PURE__ */ __name((runId, reason, supersededBy) => runner.stop(runId, reason, supersededBy), "stop"),
     cancel: /* @__PURE__ */ __name((runId) => runner.cancel(runId), "cancel")
   };

@@ -10,12 +10,16 @@ import { WorkflowError } from "@zcode/dynamic-workflow/engine/errors";
 import { validate } from "@zcode/dynamic-workflow/schema/validate";
 import type {
   ActorRef,
+  AskStats,
   ArtifactPublishRequest,
   ArtifactVersionRecord,
   AskMessage,
   AskSpec,
   Caps,
   InstanceRef,
+  ImportedActorCandidate,
+  ImportedAskEntry,
+  ImportedRunCache,
   JournalStorePort,
   PersonaSpec,
   RunEvent,
@@ -64,6 +68,7 @@ export interface StartConfig {
   args?: Record<string, unknown>;
   scriptHash?: string;
   journalJson?: string;
+  importedJournal?: string;
   resumedFrom?: string;
   timeoutMs?: number;
 }
@@ -76,6 +81,82 @@ interface PendingWorld {
 interface PendingArtifact {
   resolve: (value: ArtifactVersionRecord) => void;
   reject: (error: unknown) => void;
+}
+
+interface JournalNode {
+  runId: string;
+  siteId: string;
+  ordinal: number;
+  kind: string;
+  actorSiteId?: string;
+  actorOrdinal?: number;
+  actorSeq?: number;
+  inputHash: string;
+  status: string;
+  result?: unknown;
+  stats?: AskStats;
+  messageBoundary?: number;
+}
+
+interface JournalActor {
+  siteId: string;
+  ordinal: number;
+  name?: string;
+  persona?: { name?: string; system?: string };
+  sessionId?: string;
+  resolvedModel?: string;
+}
+
+/**
+ * 前驱 journal → amend-resume 导入缓存。只导入按 actorSeq 连续完成的 ask 前缀；
+ * 重名 actor 两个都不收（名字是缓存身份键）；world 条目暂不导入。
+ */
+function importedCacheFromJournal(journalJson: string): ImportedRunCache | undefined {
+  const data = JSON.parse(journalJson) as {
+    actors?: Array<[string, Array<[string, JournalActor]>]>;
+    nodes?: Array<[string, Array<[string, JournalNode]>]>;
+  };
+  const actors = (data.actors ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
+  const nodes = (data.nodes ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
+  const byName = new Map<string, JournalActor[]>();
+  for (const actor of actors) {
+    const name = actor.name;
+    if (name === undefined || name === "") continue;
+    const bucket = byName.get(name);
+    if (bucket === undefined) byName.set(name, [actor]);
+    else bucket.push(actor);
+  }
+  const cache = new Map<string, ImportedActorCandidate>();
+  for (const [name, candidates] of byName) {
+    if (candidates.length !== 1) continue;
+    const actor = candidates[0]!;
+    const asks = nodes.filter(
+      (node) =>
+        node.kind === "ask" &&
+        node.actorSiteId === actor.siteId &&
+        node.actorOrdinal === actor.ordinal,
+    );
+    const entries: ImportedAskEntry[] = [];
+    for (let seq = 0; ; seq += 1) {
+      const node = asks.find((candidate) => candidate.actorSeq === seq);
+      if (node === undefined || node.status !== "completed") break;
+      entries.push({
+        inputHash: node.inputHash,
+        result: node.result,
+        ...(node.stats === undefined ? {} : { stats: node.stats }),
+        messageBoundary: node.messageBoundary ?? 0,
+      });
+    }
+    if (entries.length === 0) continue;
+    cache.set(name, {
+      persona: actor.persona ?? { name },
+      entries,
+      transcriptSourceSessionId: actor.sessionId ?? "",
+      ...(actor.resolvedModel === undefined ? {} : { resolvedModel: actor.resolvedModel }),
+    });
+  }
+  if (cache.size === 0) return undefined;
+  return { actors: cache, world: new Map() };
 }
 
 export class WorkflowRunner {
@@ -96,6 +177,10 @@ export class WorkflowRunner {
     if (!config.runId || !config.lowered || !config.cwd) {
       throw new Error("runner: runId, lowered and cwd are required");
     }
+    const importedCache =
+      config.importedJournal === undefined
+        ? undefined
+        : importedCacheFromJournal(config.importedJournal);
     const journal = config.journalJson
       ? PortableJournal.fromJSON(JSON.parse(config.journalJson), this.env.bridge)
       : new PortableJournal(this.env.bridge);
@@ -128,6 +213,7 @@ export class WorkflowRunner {
       ...(config.args === undefined ? {} : { args: config.args }),
       ...(config.scriptHash === undefined ? {} : { scriptHash: config.scriptHash }),
       ...(config.resumedFrom === undefined ? {} : { resumedFrom: config.resumedFrom }),
+      ...(importedCache === undefined ? {} : { importedCache }),
       ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
       cwd: config.cwd,
     });
@@ -210,6 +296,14 @@ export class WorkflowRunner {
     if (run === undefined) return [];
     const engine = run.engine as { openHoles(): unknown[] };
     return engine.openHoles();
+  }
+
+  markMutating(runId: string, siteId: string, ordinal: number): boolean {
+    const run = this.runs.get(runId);
+    if (run === undefined) return false;
+    const engine = run.engine as { askMutating(instance: { siteId: string; ordinal: number }): void };
+    engine.askMutating({ siteId, ordinal });
+    return true;
   }
 
   cancel(runId: string): void {

@@ -30,7 +30,12 @@ interface RunResult {
   actors: number;
 }
 
-async function runScript(script: string, worldValue?: unknown, fillCode?: string): Promise<RunResult> {
+async function runScript(
+  script: string,
+  worldValue?: unknown,
+  fillCode?: string,
+  importedJournal?: string,
+): Promise<RunResult> {
   const analyzer = loadAnalyzer();
   const prepared = analyzer.prepare(script);
   if (!prepared.ok) throw new Error(`prepare failed: ${JSON.stringify(prepared.diagnostics)}`);
@@ -93,6 +98,7 @@ async function runScript(script: string, worldValue?: unknown, fillCode?: string
     caps: { maxConcurrency: 4 },
     askSpecs: prepared.askSpecs,
     sitePhases: prepared.sitePhases,
+    ...(importedJournal === undefined ? {} : { importedJournal }),
     timeoutMs: 30_000,
   }));
   if (fillCode !== undefined) {
@@ -176,11 +182,33 @@ async function main(): Promise<void> {
   check("hole artifact", hole.settlement.artifact === "补好的值|actor-done", hole.settlement.artifact);
   check("hole instructions", hole.asks[0]?.instructions === "结论：补好的值", hole.asks);
 
+  const warmBase = await runScript(String.raw`
+    const worker = agent('warm');
+    const first = await worker.ask('first');
+    return first;
+  `);
+  check("warm base completed", warmBase.settlement.status === "completed", warmBase.settlement);
+  const warm = await runScript(
+    String.raw`
+      const worker = agent('warm');
+      const first = await worker.ask('first');
+      const second = await worker.ask('second');
+      return first + '|' + second;
+    `,
+    undefined,
+    undefined,
+    JSON.stringify(warmBase.journal),
+  );
+  check("warm completed", warm.settlement.status === "completed", warm.settlement);
+  check("warm reused first ask", warm.asks.length === 1, warm.asks);
+  check("warm ran only the new ask", warm.asks[0]?.instructions === "second", warm.asks);
+  check("warm artifact", warm.settlement.artifact === "actor-done|actor-done", warm.settlement.artifact);
+
   if (failures.length > 0) {
     process.stderr.write(`runner-probe failures:\n${failures.map((f) => `  - ${f}`).join("\n")}\n`);
     process.exit(1);
   }
-  process.stdout.write("runner-probe: sequential/worldread/errored/fanout/artifact/hole passed\n");
+  process.stdout.write("runner-probe: sequential/worldread/errored/fanout/artifact/hole/warm passed\n");
 }
 
 void main();

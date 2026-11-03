@@ -265,20 +265,34 @@ class WorkflowTools(
                 )
             }
             val newRunId = "dwf_${java.util.UUID.randomUUID().toString().replace("-", "").take(12)}"
+            val predecessorLive = existing.status == WorkflowRunStatus.running ||
+                existing.status == WorkflowRunStatus.paused ||
+                existing.status == WorkflowRunStatus.pending
+            if (predecessorLive) {
+                runner.supersede(runId, newRunId)
+                val deadline = System.currentTimeMillis() + 10_000
+                while (System.currentTimeMillis() < deadline) {
+                    val current = svc.getRun(runId)
+                    if (current == null ||
+                        (current.status != WorkflowRunStatus.running &&
+                            current.status != WorkflowRunStatus.pending)
+                    ) {
+                        break
+                    }
+                    kotlinx.coroutines.delay(50)
+                }
+            }
             val (started, error) = runner.start(
                 script = input.script,
                 cwd = existing.cwd,
                 conversationId = conversationId,
                 runIdOverride = newRunId,
                 resumedFrom = runId,
+                importJournalFrom = runId,
             )
             if (error != null || started == null) {
                 return ToolResult("Amend failed to start a new run: ${error ?: "unknown"}", isError = true)
             }
-            val predecessorLive = existing.status == WorkflowRunStatus.running ||
-                existing.status == WorkflowRunStatus.paused ||
-                existing.status == WorkflowRunStatus.pending
-            if (predecessorLive) runner.supersede(runId, newRunId)
             return ToolResult(
                 buildString {
                     append("Amended workflow ").append(runId).append(" into new run ")
