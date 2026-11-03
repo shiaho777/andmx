@@ -78,7 +78,10 @@ interface PendingArtifact {
 }
 
 export class WorkflowRunner {
-  private readonly runs = new Map<string, { driver: BridgeDriver; endpoint: DeviceEndpoint }>();
+  private readonly runs = new Map<
+    string,
+    { driver: BridgeDriver; endpoint: DeviceEndpoint; engine: unknown }
+  >();
 
   constructor(private readonly env: RunnerEnv) {
     if (typeof structuredClone === "undefined") {
@@ -148,7 +151,7 @@ export class WorkflowRunner {
       (error: unknown) => endpoint.fail(error),
     );
 
-    this.runs.set(config.runId, { driver, endpoint });
+    this.runs.set(config.runId, { driver, endpoint, engine: handle.engine });
     void handle.settled.then((settlement) => {
       try {
         this.env.bridge.settled(config.runId, JSON.stringify(settlement));
@@ -175,6 +178,36 @@ export class WorkflowRunner {
 
   artifactResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void {
     this.driverForRequest(requestId)?.artifactResult(requestId, ok, payloadJson, error);
+  }
+
+  fillHole(runId: string, fillJson: string): { ok: boolean; reason?: string } {
+    const run = this.runs.get(runId);
+    if (run === undefined) return { ok: false, reason: "not_running" };
+    const raw = JSON.parse(fillJson) as {
+      siteId: string;
+      code: string;
+      script: { text: string; hash: string };
+      askSpecs?: Array<[string, AskSpec]>;
+      sitePhases?: Array<[string, string]>;
+      phaseNames?: string[];
+      holes?: number[];
+      filledBy?: string;
+    };
+    const engine = run.engine as {
+      fillHole(fill: unknown): { ok: boolean; reason?: string };
+    };
+    return engine.fillHole({
+      ...raw,
+      askSpecs: new Map(raw.askSpecs ?? []),
+      sitePhases: new Map(raw.sitePhases ?? []),
+    });
+  }
+
+  openHoles(runId: string): unknown[] {
+    const run = this.runs.get(runId);
+    if (run === undefined) return [];
+    const engine = run.engine as { openHoles(): unknown[] };
+    return engine.openHoles();
   }
 
   cancel(runId: string): void {

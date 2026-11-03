@@ -170,6 +170,30 @@ class DynamicWorkflowRunner(
         }
     }
 
+    suspend fun fillHole(runId: String, fillJson: String): Pair<Boolean, String?> {
+        val view = ensureWebView() ?: return false to "dynamic workflow WebView is unavailable"
+        val raw = evaluate(
+            view,
+            "JSON.stringify(window.__DWF_RUNNER.fillHole(" +
+                "${JSONObject.quote(runId)},${JSONObject.quote(fillJson)}))",
+        ) ?: return false to "fill hole returned no result"
+        val text = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull() ?: raw
+        val obj = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: return false to "fill hole returned malformed JSON"
+        val ok = obj["ok"]?.jsonPrimitive?.contentOrNull == "true"
+        val reason = obj["reason"]?.jsonPrimitive?.contentOrNull
+        return ok to reason
+    }
+
+    suspend fun openHoles(runId: String): String {
+        val view = ensureWebView() ?: return "[]"
+        val raw = evaluate(
+            view,
+            "JSON.stringify(window.__DWF_RUNNER.openHoles(${JSONObject.quote(runId)}))",
+        ) ?: return "[]"
+        return runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull() ?: raw
+    }
+
     suspend fun close() {
         withContext(Dispatchers.Main.immediate) {
             webView?.destroy()

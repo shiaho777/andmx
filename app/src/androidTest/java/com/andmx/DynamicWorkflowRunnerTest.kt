@@ -33,6 +33,8 @@ class DynamicWorkflowRunnerTest {
     private class Host : DynamicWorkflowHost {
         val asks = AtomicInteger(0)
         val worldReads = AtomicInteger(0)
+        val typedStarts = AtomicInteger(0)
+        @Volatile var typedRepair = false
         @Volatile var blockSecondAsk = false
         val secondAskStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
         private val secondAskGate = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -46,6 +48,10 @@ class DynamicWorkflowRunnerTest {
 
         override suspend fun ask(request: DynamicAskRequest): DynamicAskResult {
             val call = asks.incrementAndGet()
+            if (typedRepair && request.typed) {
+                typedStarts.incrementAndGet()
+                return DynamicAskResult.Submit("{}")
+            }
             if (blockSecondAsk && call == 2) {
                 secondAskStarted.complete(Unit)
                 secondAskGate.await()
@@ -56,7 +62,9 @@ class DynamicWorkflowRunnerTest {
         override suspend fun continueAsk(
             request: DynamicAskRequest,
             verdictJson: String,
-        ): DynamicAskResult = DynamicAskResult.Text("fixed")
+        ): DynamicAskResult =
+            if (typedRepair) DynamicAskResult.Submit("""{"value":"repaired"}""")
+            else DynamicAskResult.Text("fixed")
 
         override fun cancelAsk(requestId: String) {
             secondAskGate.completeExceptionally(
@@ -162,6 +170,45 @@ class DynamicWorkflowRunnerTest {
             assertNotNull(journal)
             assertTrue(journal!!.contains("\"runId\":\"$runId\""))
             assertTrue(journal.contains("\"ask\""))
+        } finally {
+            runner.close()
+            analyzer.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun typedAskRejectsAndRepairs() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val analyzer = WebViewWorkflowScriptAnalyzer(context)
+        val host = Host().apply { typedRepair = true }
+        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val journals = WorkflowJournalStore(context)
+        val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
+        try {
+            val script = """
+                interface Answer { value: string }
+                const worker = agent('worker');
+                const result = await worker.ask<Answer>('give me a value');
+                return result.value;
+            """.trimIndent()
+            val (runId, error) = runner.start(script, cwd = "/root/project", conversationId = 0L)
+            assertFalse(error.orEmpty(), error != null)
+            assertNotNull(runId)
+
+            var snapshot = store.readSnapshot(runId!!)
+            val deadline = System.currentTimeMillis() + 45_000
+            while (snapshot?.status != WorkflowRunStatus.completed &&
+                System.currentTimeMillis() < deadline
+            ) {
+                delay(200)
+                snapshot = store.readSnapshot(runId)
+            }
+
+            assertEquals(WorkflowRunStatus.completed, snapshot?.status)
+            assertTrue("typed ask was not dispatched", host.typedStarts.get() >= 1)
+            assertNotNull(journals.load(runId))
         } finally {
             runner.close()
             analyzer.close()

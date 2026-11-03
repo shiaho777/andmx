@@ -4104,7 +4104,7 @@ declare const args: Readonly<Record<string, unknown>>;
         () => endpoint.finish(),
         (error) => endpoint.fail(error)
       );
-      this.runs.set(config.runId, { driver, endpoint });
+      this.runs.set(config.runId, { driver, endpoint, engine: handle.engine });
       void handle.settled.then((settlement) => {
         try {
           this.env.bridge.settled(config.runId, JSON.stringify(settlement));
@@ -4127,6 +4127,23 @@ declare const args: Readonly<Record<string, unknown>>;
     }
     artifactResult(requestId, ok, payloadJson, error) {
       this.driverForRequest(requestId)?.artifactResult(requestId, ok, payloadJson, error);
+    }
+    fillHole(runId, fillJson) {
+      const run = this.runs.get(runId);
+      if (run === void 0) return { ok: false, reason: "not_running" };
+      const raw = JSON.parse(fillJson);
+      const engine = run.engine;
+      return engine.fillHole({
+        ...raw,
+        askSpecs: new Map(raw.askSpecs ?? []),
+        sitePhases: new Map(raw.sitePhases ?? [])
+      });
+    }
+    openHoles(runId) {
+      const run = this.runs.get(runId);
+      if (run === void 0) return [];
+      const engine = run.engine;
+      return engine.openHoles();
     }
     cancel(runId) {
       const run = this.runs.get(runId);
@@ -4454,6 +4471,8 @@ declare const args: Readonly<Record<string, unknown>>;
     askResult: /* @__PURE__ */ __name((requestId, resultJson) => runner.askResult(requestId, resultJson), "askResult"),
     worldResult: /* @__PURE__ */ __name((requestId, ok, payloadJson, error) => runner.worldResult(requestId, ok, payloadJson, error), "worldResult"),
     artifactResult: /* @__PURE__ */ __name((requestId, ok, payloadJson, error) => runner.artifactResult(requestId, ok, payloadJson, error), "artifactResult"),
+    fillHole: /* @__PURE__ */ __name((runId, fillJson) => runner.fillHole(runId, fillJson), "fillHole"),
+    openHoles: /* @__PURE__ */ __name((runId) => runner.openHoles(runId), "openHoles"),
     cancel: /* @__PURE__ */ __name((runId) => runner.cancel(runId), "cancel")
   };
 })();
