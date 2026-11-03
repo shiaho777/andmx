@@ -52,6 +52,7 @@ async function runScript(
     saveJournal(_runId, json) { journal = JSON.parse(json); },
     emit(_runId, eventJson) { events.push(JSON.parse(eventJson).type); },
     createActor() { actors += 1; },
+    actorMessageCount() { return 2; },
     startAsk(_runId, requestId, requestJson) {
       const request = JSON.parse(requestJson);
       asks.push({

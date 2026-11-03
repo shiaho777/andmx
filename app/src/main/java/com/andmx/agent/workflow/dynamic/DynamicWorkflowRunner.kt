@@ -49,6 +49,7 @@ data class DynamicAskRequest(
     val schemaJson: String?,
     val conversationId: Long,
     val personaJson: String? = null,
+    val seedJson: String? = null,
 )
 
 sealed interface DynamicAskResult {
@@ -58,12 +59,19 @@ sealed interface DynamicAskResult {
 }
 
 interface DynamicWorkflowHost {
-    suspend fun createActor(runId: String, siteId: String, ordinal: Int, personaJson: String): String
+    suspend fun createActor(
+        runId: String,
+        siteId: String,
+        ordinal: Int,
+        personaJson: String,
+        seedJson: String,
+    ): String
     suspend fun ask(request: DynamicAskRequest): DynamicAskResult
     suspend fun continueAsk(request: DynamicAskRequest, verdictJson: String): DynamicAskResult
     fun cancelAsk(requestId: String)
     suspend fun worldRead(op: String, argsJson: String): String
     suspend fun publishArtifact(runId: String, requestJson: String): String
+    fun actorMessageCount(sessionId: String): Int = 0
 
     /** 子代理即将执行改写型工具：关闭 amend 导入缓存，避免复用陈旧结果。 */
     suspend fun markMutating(runId: String, siteId: String, ordinal: Int) {}
@@ -451,10 +459,21 @@ class DynamicWorkflowRunner(
         }
 
         @JavascriptInterface
-        fun createActor(runId: String, siteId: String, ordinal: Int, personaJson: String) {
+        fun createActor(
+            runId: String,
+            siteId: String,
+            ordinal: Int,
+            personaJson: String,
+            seedJson: String,
+        ) {
             actorPersonas["$runId|$siteId|$ordinal"] = personaJson
-            scope.launch { runCatching { host.createActor(runId, siteId, ordinal, personaJson) } }
+            scope.launch {
+                runCatching { host.createActor(runId, siteId, ordinal, personaJson, seedJson) }
+            }
         }
+
+        @JavascriptInterface
+        fun actorMessageCount(sessionId: String): Int = host.actorMessageCount(sessionId)
 
         @JavascriptInterface
         fun startAsk(runId: String, requestId: String, requestJson: String) {
@@ -668,6 +687,7 @@ class DynamicWorkflowRunner(
                 schemaJson = obj["schema"]?.toString(),
                 conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
                 personaJson = actorPersonas["$runId|$siteId|$ordinal"],
+                seedJson = obj["seedJson"]?.jsonPrimitive?.contentOrNull,
             )
         }.getOrNull()
 

@@ -231,9 +231,9 @@ Amend 会从前驱 journal 构建导入缓存，复用按 actorSeq 连续完成�
 warm 命中（只重跑新增 ask 与世界读取）。
 动态 run 详情新增开放留白卡片、可点开的产物卡片与脚本返回值；`/dwf holes <runId>` 可列当前等待补全的留白。
 actor 的 ask 多轮上下文会保存非 system 历史到 Room `workflow_actor_messages`（DB v22），下一次 ask
-用 `engine.seed` 恢复；进程重启后同一 session 仍能接着聊。Amend 目前只导入结果，尚未用
-`createActorSession(seed)` 复制前驱消息前缀（messageBoundary 也还未由 driver 回填）。
-仍缺：完整看板；全保真转录种子。
+用 `engine.seed` 恢复；进程重启后同一 session 仍能接着聊。ask 结算时 driver 通过 `actorMessageCount`
+把消息边界写回 journal；Amend 的后继 live actor 经 `createActorSession(seed)` 复制直接前驱的历史前缀。
+仍缺：完整看板；链式 Amend 的祖先转录解析仍是直接前驱（未沿 `resumedFrom` 链回溯）。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
 
@@ -451,8 +451,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 仍缺（按优先级）：
 
 1. **动态工作流 v2**：设备侧已覆盖 sequential/journal、销毁重建后 resume、typed repair、hole/fill、
-   Amend supersede + ask/world 导入、actor 多轮上下文持久化，并显示开放留白/产物卡片/返回值；
-   仍缺完整看板与 Amend 的全保真转录种子。
+   Amend supersede + ask/world 导入 + 直接前驱转录种子、actor 多轮上下文持久化，并显示开放留白/
+   产物卡片/返回值；仍缺完整看板与链式 Amend 的祖先转录解析。
 2. **MCP OAuth DCR**：浏览器授权码 + PKCE 已接；尚未实现动态客户端注册（Dynamic Client Registration），
    用户仍需自备 clientId/clientSecret。
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。

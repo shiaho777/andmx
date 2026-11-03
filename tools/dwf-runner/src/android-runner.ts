@@ -10,6 +10,7 @@ import { WorkflowError } from "@zcode/dynamic-workflow/engine/errors";
 import { validate } from "@zcode/dynamic-workflow/schema/validate";
 import type {
   ActorRef,
+  ActorSessionSeed,
   AskStats,
   ArtifactPublishRequest,
   ArtifactVersionRecord,
@@ -43,7 +44,14 @@ declare const structuredClone: <T>(value: T) => T;
 export interface RunnerBridge {
   saveJournal(runId: string, json: string): void;
   emit(runId: string, eventJson: string): void;
-  createActor(runId: string, siteId: string, ordinal: number, personaJson: string): void;
+  createActor(
+    runId: string,
+    siteId: string,
+    ordinal: number,
+    personaJson: string,
+    seedJson: string,
+  ): void;
+  actorMessageCount(sessionId: string): number;
   startAsk(runId: string, requestId: string, requestJson: string): void;
   continueAsk(requestId: string, verdictJson: string): void;
   cancelAsk(requestId: string): void;
@@ -535,6 +543,8 @@ class BridgeDriver implements WorkflowDriver {
   private seq = 0;
   private readonly requests = new Map<string, InstanceRef>();
   private readonly instanceRequests = new Map<string, string>();
+  private readonly sessions = new Map<string, string>();
+  private readonly seeds = new Map<string, string>();
   private readonly worlds = new Map<string, PendingWorld>();
   private readonly artifacts = new Map<string, PendingArtifact>();
 
@@ -556,8 +566,23 @@ class BridgeDriver implements WorkflowDriver {
       this.instanceRequests.has(requestId);
   }
 
-  createActorSession(actor: ActorRef, persona: PersonaSpec): Promise<SessionRef> {
-    this.bridge.createActor(this.runId, actor.siteId, actor.ordinal, JSON.stringify(persona));
+  createActorSession(
+    actor: ActorRef,
+    persona: PersonaSpec,
+    seed?: ActorSessionSeed,
+  ): Promise<SessionRef> {
+    this.bridge.createActor(
+      this.runId,
+      actor.siteId,
+      actor.ordinal,
+      JSON.stringify(persona),
+      JSON.stringify(seed ?? null),
+    );
+    if (seed !== undefined) {
+      this.seeds.set(`${actor.siteId}@${actor.ordinal}`, JSON.stringify(seed));
+    } else {
+      this.seeds.delete(`${actor.siteId}@${actor.ordinal}`);
+    }
     return Promise.resolve({ id: `session:${this.runId}:${actor.siteId}@${actor.ordinal}` });
   }
 
@@ -565,6 +590,7 @@ class BridgeDriver implements WorkflowDriver {
     const requestId = `${this.runId}:ask:${++this.seq}`;
     this.requests.set(requestId, instance);
     this.instanceRequests.set(`${instance.siteId}@${instance.ordinal}`, requestId);
+    this.sessions.set(`${instance.siteId}@${instance.ordinal}`, session.id);
     this.bridge.startAsk(
       this.runId,
       requestId,
@@ -576,6 +602,9 @@ class BridgeDriver implements WorkflowDriver {
         typed: message.typed,
         schema: message.schema,
         conversationId: this.conversationId,
+        ...(this.seeds.get(`${instance.siteId}@${instance.ordinal}`) === undefined
+          ? {}
+          : { seedJson: this.seeds.get(`${instance.siteId}@${instance.ordinal}`) }),
       }),
     );
   }
@@ -638,6 +667,7 @@ class BridgeDriver implements WorkflowDriver {
         case "submit":
           // Keep the mapping: if validation rejects, respondToSubmit reuses it.
           this.sink.askSubmitAttempted(instance, result.value);
+          this.stampBoundary(instance);
           return;
         case "fail":
           this.requests.delete(requestId);
@@ -648,10 +678,25 @@ class BridgeDriver implements WorkflowDriver {
           this.requests.delete(requestId);
           this.instanceRequests.delete(`${instance.siteId}@${instance.ordinal}`);
           this.sink.askTurnEnded(instance, typeof result.value === "string" ? result.value : "");
+          this.stampBoundary(instance);
       }
     } catch (error) {
       this.bridge.log(`askResult sink threw: ${String(error)}`);
     }
+  }
+
+  /**
+   * After an ask settles, record how many messages the actor session had produced. The engine
+   * copies this count into the journal row; a later Amend uses it as the transcript boundary.
+   */
+  private stampBoundary(instance: InstanceRef): void {
+    const sessionId = this.sessions.get(`${instance.siteId}@${instance.ordinal}`);
+    if (sessionId === undefined) return;
+    const node = this.journal.getNode(this.runId, instance.siteId, instance.ordinal);
+    if (node === undefined || node.status !== "completed") return;
+    const count = this.bridge.actorMessageCount(sessionId);
+    if (count <= 0) return;
+    this.journal.putNode({ ...node, messageBoundary: count });
   }
 
   worldResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void {
