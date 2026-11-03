@@ -25,17 +25,17 @@
  * 才触发，所以收到的行一定先于它到达。设备上没有进程可等，所以这里在端点 `done` 之后**再等
  * 一个宏任务**才判定死亡——否则 `complete` 那一行还在路上就会被误判成崩溃。
  */
-import {
-  WorkflowEngine,
-  WorkflowError,
-  type ActorId,
-  type AskSpec,
-  type Caps,
-  type RunSettlement,
-  type ValidateFn,
-  type WorkflowDriver,
-  type WorkflowReportSink,
-} from "@zcode/dynamic-workflow";
+import { WorkflowEngine } from "@zcode/dynamic-workflow/engine/engine";
+import { WorkflowError } from "@zcode/dynamic-workflow/engine/errors";
+import type {
+  ActorId,
+  AskSpec,
+  Caps,
+  RunSettlement,
+  ValidateFn,
+  WorkflowDriver,
+  WorkflowReportSink,
+} from "@zcode/dynamic-workflow/engine/types";
 import type { ChildMessage, ResponseMessage } from "../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow-runtime/src/protocol.js";
 
 /** 宿主对沙箱说的话：一条 NDJSON 行。 */

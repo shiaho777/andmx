@@ -21,8 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowRunEntity::class,
         WorkflowEventEntity::class,
         WorkspaceChangeEntity::class,
+        WorkflowJournalEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -53,6 +54,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_17_18,
                     MIGRATION_18_19,
                     MIGRATION_19_20,
+                    MIGRATION_20_21,
                 )
                 .build()
                 .also { instance = it }
@@ -361,6 +363,19 @@ abstract class AndmxDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE conversations ADD COLUMN permissionGrantsJson TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+
+        /** v20 → v21: durable dynamic-workflow journal snapshots. */
+        private val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS workflow_journals (
+                        runId TEXT NOT NULL PRIMARY KEY,
+                        json TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )""",
                 )
             }
         }

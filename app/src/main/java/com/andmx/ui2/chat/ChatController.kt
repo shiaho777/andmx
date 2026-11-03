@@ -54,6 +54,11 @@ import com.andmx.agent.WebFetchPolicy
 import com.andmx.agent.WebSearchTool
 import com.andmx.agent.WriteFileTool
 import com.andmx.agent.hooks.HookSystem
+import com.andmx.agent.workflow.dynamic.DynamicAskRequest
+import com.andmx.agent.workflow.dynamic.DynamicAskResult
+import com.andmx.agent.workflow.dynamic.DynamicWorkflowHost
+import com.andmx.agent.workflow.dynamic.DynamicWorkflowRunner
+import com.andmx.data.WorkflowJournalStore
 import com.andmx.agent.suggestions.AmbientSuggestions
 import com.andmx.agent.memory.MemorySystem
 import com.andmx.agent.GoalPhase
@@ -108,10 +113,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
@@ -436,6 +448,64 @@ class ChatController private constructor(private val context: Context) {
         store = workflowStore,
         actorRunner = { input -> runWorkflowActor(input) },
     )
+    private val workflowJournalStore = WorkflowJournalStore(context)
+    private val dynamicAskJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+    private val dynamicActorPersonas = ConcurrentHashMap<String, String>()
+    private val dynamicWorkflowHost = object : DynamicWorkflowHost {
+        override suspend fun createActor(
+            runId: String,
+            siteId: String,
+            ordinal: Int,
+            personaJson: String,
+        ): String {
+            val sessionId = "wf_actor_${runId}_${siteId}_$ordinal"
+            dynamicActorPersonas[sessionId] = personaJson
+            return sessionId
+        }
+
+        override suspend fun ask(request: DynamicAskRequest): DynamicAskResult {
+            val job = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+            if (job != null) dynamicAskJobs[request.requestId] = job
+            return try {
+                runDynamicAsk(request, continuation = null)
+            } finally {
+                dynamicAskJobs.remove(request.requestId)
+            }
+        }
+
+        override suspend fun continueAsk(
+            request: DynamicAskRequest,
+            verdictJson: String,
+        ): DynamicAskResult {
+            val job = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+            if (job != null) dynamicAskJobs[request.requestId] = job
+            return try {
+                runDynamicAsk(request, continuation = verdictJson)
+            } finally {
+                dynamicAskJobs.remove(request.requestId)
+            }
+        }
+
+        override fun cancelAsk(requestId: String) {
+            dynamicAskJobs.remove(requestId)?.cancel()
+        }
+
+        override suspend fun worldRead(op: String, argsJson: String): String =
+            dynamicWorldRead(op, argsJson)
+
+        override suspend fun publishArtifact(runId: String, requestJson: String): String =
+            dynamicPublishArtifact(runId, requestJson)
+    }
+    val dynamicWorkflowRunner: DynamicWorkflowRunner by lazy {
+        DynamicWorkflowRunner(
+            context = context,
+            analyzer = workflowAnalyzer,
+            host = dynamicWorkflowHost,
+            runStore = workflowStore,
+            journalStore = workflowJournalStore,
+            scope = controllerScope,
+        )
+    }
 
     private fun liveBus(conversationId: Long): kotlinx.coroutines.flow.MutableSharedFlow<ChatEvent> =
         liveChatEvents.getOrPut(conversationId) {
@@ -700,6 +770,319 @@ class ChatController private constructor(private val context: Context) {
             sessionId = "wf_actor_${input.activityId}",
             model = settings.model,
         )
+    }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\"'\"'") + "'"
+
+    private suspend fun runDynamicAsk(
+        request: DynamicAskRequest,
+        continuation: String?,
+    ): DynamicAskResult {
+        val convId = request.conversationId
+        val settings = settingsStore.settings.firstOrNull()
+            ?: return DynamicAskResult.Fail("settings unavailable")
+        val providers = providerStore.providers.firstOrNull().orEmpty()
+        val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
+            ?: providerStore.primary.firstOrNull()
+            ?: return DynamicAskResult.Fail("no provider")
+        val persona = runCatching {
+            Json.parseToJsonElement(dynamicActorPersonas[request.sessionId].orEmpty()).jsonObject
+        }.getOrNull()
+        val personaName = persona?.get("name")?.jsonPrimitive?.contentOrNull.orEmpty()
+        val personaSystem = persona?.get("system")?.jsonPrimitive?.contentOrNull.orEmpty()
+        val submitSlot = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val blocked = setOf(
+            "CreateWorkflow", "AmendWorkflow", "SaveWorkflow",
+            "ResumeWorkflowRun", "CancelWorkflowRun",
+        )
+        val tools = buildTools(
+            UpdatePlanTool(), GoalToolState(), TodoState(), PlanModeState(), convId,
+        ).filter { it.name !in blocked }.toMutableList().apply {
+            if (request.typed || request.schemaJson != null) add(com.andmx.agent.workflow.SubmitResultTool(submitSlot))
+            add(
+                com.andmx.agent.workflow.EscalateTool { question, ctx ->
+                    askWorkflowEscalation(
+                        convId,
+                        com.andmx.agent.workflow.WorkflowAgentInput(
+                            activityId = request.requestId,
+                            phase = "dynamic",
+                            prompt = request.instructions,
+                            runId = request.runId,
+                            task = request.instructions,
+                        ),
+                        question,
+                        ctx,
+                    )
+                },
+            )
+        }
+        val systemPrompt = buildString {
+            append("You are a dynamic-workflow actor.\n")
+            append("Run: ").append(request.runId)
+            if (personaName.isNotBlank()) append(" | actor: ").append(personaName)
+            append("\nWork on the instructions from the coordinator.")
+            if (personaSystem.isNotBlank()) append("\n\n").append(personaSystem)
+            if (request.typed) {
+                append("\n\nThis is a typed ask. Call submit_result with a JSON value matching the schema.")
+                request.schemaJson?.let { append("\nSchema: ").append(it.take(4_000)) }
+            } else {
+                append("\nReturn the result as your final assistant message.")
+            }
+            if (!continuation.isNullOrBlank()) {
+                append("\n\nA previous submission was rejected. Fix it and submit again.\n")
+                append(continuation.take(4_000))
+            }
+        }
+        val engine = AgentEngine(
+            tools = tools,
+            client = TracedLlm(
+                LlmClient(provider, trackerFor(convId)),
+                ModelCallTrace.Source.WORKFLOW,
+            ),
+            systemPrompt = systemPrompt,
+            maxSteps = 24,
+            approve = { tool, args ->
+                val mode = sessions[convId]?.approvalMode ?: ExecMode.from(settings.approvalMode)
+                approveTool(convId, mode, tool, args)
+            },
+        )
+        var finalText = ""
+        var failure: String? = null
+        try {
+            engine.runTurn(settings, TurnContext(provider, settings.model), request.instructions)
+                .collect { ev ->
+                    when (ev) {
+                        is AgentEvent.Assistant -> finalText = ev.text
+                        is AgentEvent.Failed -> failure = ev.message
+                        else -> {}
+                    }
+                }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failure = e.message
+        }
+        failure?.let { return DynamicAskResult.Fail(it) }
+        val submitted = submitSlot.get()
+        if (submitted != null) return DynamicAskResult.Submit(submitted)
+        if (request.typed) return DynamicAskResult.Fail("typed ask ended without submit_result")
+        return DynamicAskResult.Text(finalText)
+    }
+
+    private suspend fun dynamicWorldRead(op: String, argsJson: String): String {
+        val args = runCatching { Json.parseToJsonElement(argsJson).jsonArray }.getOrDefault(JsonArray(emptyList()))
+        fun arg(index: Int): String =
+            (args.getOrNull(index) as? JsonPrimitive)?.contentOrNull.orEmpty()
+        fun argInt(index: Int, fallback: Int): Int =
+            (args.getOrNull(index) as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: fallback
+        val cwd = access.guestCwd()
+        return when (op) {
+            "read" -> {
+                val path = arg(0).ifBlank { return JsonPrimitive("").toString() }
+                JsonPrimitive(access.readText(path, limit = 512 * 1024)).toString()
+            }
+            "glob" -> {
+                val pattern = arg(0).ifBlank { return JsonArray(emptyList()).toString() }
+                val matcher = runCatching {
+                    java.nio.file.FileSystems.getDefault().getPathMatcher("glob:$pattern")
+                }.getOrNull()
+                val base = access.hostFile(cwd) ?: return JsonArray(emptyList()).toString()
+                val rootPath = base.toPath()
+                val out = mutableListOf<String>()
+                java.nio.file.Files.walk(rootPath).use { stream ->
+                    stream.filter { java.nio.file.Files.isRegularFile(it) }
+                        .forEach { path ->
+                            if (out.size >= 2_000) return@forEach
+                            val rel = rootPath.relativize(path).toString().replace('\\', '/')
+                            if (matcher == null || matcher.matches(java.nio.file.Path.of(rel)) ||
+                                matcher.matches(path.fileName)
+                            ) {
+                                out += rel
+                            }
+                        }
+                }
+                buildJsonArray { out.sorted().forEach { add(JsonPrimitive(it)) } }.toString()
+            }
+            "grep" -> {
+                val pattern = arg(0)
+                if (pattern.isBlank()) return JsonArray(emptyList()).toString()
+                val regex = runCatching { Regex(pattern) }.getOrElse {
+                    throw IllegalArgumentException("invalid grep pattern: ${it.message}")
+                }
+                val glob = arg(1).takeIf { it.isNotBlank() }
+                val matcher = glob?.let {
+                    runCatching { java.nio.file.FileSystems.getDefault().getPathMatcher("glob:$it") }.getOrNull()
+                }
+                val base = access.hostFile(cwd) ?: return JsonArray(emptyList()).toString()
+                val rootPath = base.toPath()
+                val out = mutableListOf<JsonObject>()
+                var bytes = 0
+                java.nio.file.Files.walk(rootPath).use { stream ->
+                    stream.filter { java.nio.file.Files.isRegularFile(it) }.forEach { path ->
+                        if (out.size >= 2_000 || bytes > 256 * 1024) return@forEach
+                        val rel = rootPath.relativize(path).toString().replace('\\', '/')
+                        if (matcher != null && !matcher.matches(java.nio.file.Path.of(rel)) &&
+                            !matcher.matches(path.fileName)
+                        ) {
+                            return@forEach
+                        }
+                        if (java.nio.file.Files.size(path) > 512 * 1024) return@forEach
+                        val text = runCatching { path.toFile().readText() }.getOrNull() ?: return@forEach
+                        text.lineSequence().forEachIndexed { index, line ->
+                            if (regex.containsMatchIn(line)) {
+                                out += buildJsonObject {
+                                    put("path", rel)
+                                    put("line", index + 1)
+                                    put("text", line)
+                                }
+                                bytes += line.length + rel.length + 24
+                            }
+                        }
+                    }
+                }
+                buildJsonArray { out.forEach { add(it) } }.toString()
+            }
+            "git-changed-files" -> {
+                val base = arg(0).takeIf { it.isNotBlank() }
+                val diff = access.executeShell(
+                    if (base == null) "git diff --name-only" else "git diff --name-only ${shellQuote(base)}",
+                    cwd = cwd,
+                ).stdout
+                val untracked = access.executeShell(
+                    "git ls-files --others --exclude-standard",
+                    cwd = cwd,
+                ).stdout
+                val paths = (diff.lineSequence() + untracked.lineSequence())
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .sorted()
+                    .toList()
+                buildJsonArray { paths.forEach { add(JsonPrimitive(it)) } }.toString()
+            }
+            "git-diff" -> {
+                val base = arg(0).takeIf { it.isNotBlank() }
+                val path = arg(1).takeIf { it.isNotBlank() }
+                val cmd = buildString {
+                    append("git diff --no-color")
+                    if (base != null) append(' ').append(shellQuote(base))
+                    if (path != null) append(" -- ").append(shellQuote(path))
+                }
+                JsonPrimitive(access.executeShell(cmd, cwd = cwd).stdout.take(512 * 1024)).toString()
+            }
+            "git-status" -> {
+                val raw = access.executeShell("git status --porcelain=v1 -b", cwd = cwd)
+                if (raw.exitCode != 0) return JsonObject(emptyMap()).toString()
+                val lines = raw.stdout.lineSequence().toList()
+                val branch = lines.firstOrNull { it.startsWith("## ") }
+                    ?.removePrefix("## ")
+                    ?.substringBefore("...")
+                    ?.substringBefore(' ')
+                    ?.takeIf { it.isNotBlank() && !it.startsWith("HEAD") }
+                val staged = mutableListOf<String>()
+                val unstaged = mutableListOf<String>()
+                val untracked = mutableListOf<String>()
+                lines.drop(1).forEach { line ->
+                    if (line.length < 3) return@forEach
+                    val x = line[0]
+                    val y = line[1]
+                    val path = line.substring(3).trim()
+                    when {
+                        x == '?' && y == '?' -> untracked += path
+                        else -> {
+                            if (x != ' ') staged += path
+                            if (y != ' ') unstaged += path
+                        }
+                    }
+                }
+                buildJsonObject {
+                    branch?.let { put("branch", it) }
+                    put("clean", staged.isEmpty() && unstaged.isEmpty() && untracked.isEmpty())
+                    put("staged", buildJsonArray { staged.forEach { add(JsonPrimitive(it)) } })
+                    put("unstaged", buildJsonArray { unstaged.forEach { add(JsonPrimitive(it)) } })
+                    put("untracked", buildJsonArray { untracked.forEach { add(JsonPrimitive(it)) } })
+                }.toString()
+            }
+            "git-log" -> {
+                val count = argInt(0, 20).coerceIn(1, 100)
+                val raw = access.executeShell(
+                    "git log -n $count --pretty=format:%H%x1f%s%x1f%an%x1f%aI",
+                    cwd = cwd,
+                )
+                val commits = raw.stdout.lineSequence().mapNotNull { line ->
+                    val parts = line.split('\u001f')
+                    if (parts.size < 4) null else buildJsonObject {
+                        put("hash", parts[0])
+                        put("subject", parts[1])
+                        put("author", parts[2])
+                        put("date", parts[3])
+                    }
+                }.toList()
+                buildJsonArray { commits.forEach { add(it) } }.toString()
+            }
+            "run" -> {
+                val command = arg(0)
+                if (command.isBlank()) throw IllegalArgumentException("world.run requires a command")
+                val argv = (args.getOrNull(1) as? JsonArray)
+                    ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                    .orEmpty()
+                val full = (listOf(command) + argv).joinToString(" ") { shellQuote(it) }
+                val timeout = (args.getOrNull(2) as? JsonObject)
+                    ?.get("timeoutMs")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                val result = kotlinx.coroutines.withTimeoutOrNull(
+                    (timeout ?: 120_000L).coerceIn(1_000L, 600_000L),
+                ) {
+                    access.executeShell(full, cwd = cwd)
+                } ?: return buildJsonObject {
+                    put("exitCode", 124)
+                    put("stdout", "")
+                    put("stderr", "world.run timed out")
+                }.toString()
+                buildJsonObject {
+                    put("exitCode", result.exitCode)
+                    put("stdout", result.stdout.take(256 * 1024))
+                    put("stderr", result.stderr.take(256 * 1024))
+                }.toString()
+            }
+            else -> throw IllegalArgumentException("unsupported world read: $op")
+        }
+    }
+
+    private suspend fun dynamicPublishArtifact(runId: String, requestJson: String): String {
+        val request = runCatching { Json.parseToJsonElement(requestJson).jsonObject }.getOrElse {
+            throw IllegalArgumentException("invalid artifact request: ${it.message}")
+        }
+        val id = request["id"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "artifact" }
+        val op = request["op"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "markdown" }
+        val version = request["version"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1
+        val sourcePath = request["path"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val content = request["content"]?.jsonPrimitive?.contentOrNull
+            ?: sourcePath?.let { access.readText(it) }
+            ?: ""
+        val suffix = when (op) {
+            "markdown" -> ".md"
+            "file" -> sourcePath?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }?.let { ".$it" } ?: ".bin"
+            else -> ".bin"
+        }
+        val relative = "artifacts/$id-v$version$suffix".replace("..", "_")
+        val stored = workflowStore.writeArtifact(runId, relative, content)
+        val contentType = when {
+            op == "markdown" -> "text/markdown"
+            suffix == ".txt" -> "text/plain"
+            suffix == ".json" -> "application/json"
+            else -> "application/octet-stream"
+        }
+        return buildJsonObject {
+            put("id", id)
+            put("kind", op)
+            put("version", version)
+            put("contentType", contentType)
+            put("bytes", content.toByteArray().size)
+            put("uri", stored)
+            sourcePath?.let { put("sourcePath", it) }
+            put("publishedAt", System.currentTimeMillis())
+        }.toString()
     }
 
     private suspend fun askWorkflowEscalation(
@@ -1874,6 +2257,7 @@ class ChatController private constructor(private val context: Context) {
                 analyzer = workflowAnalyzer,
                 conversationId = conversationId,
                 cwd = cwd,
+                dynamicRunner = dynamicWorkflowRunner,
             ).all()
         } else {
             emptyList()

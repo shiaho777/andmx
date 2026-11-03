@@ -27,7 +27,8 @@
  * `__checkStalled`。在 node 的 vm 里那个对象是 context 全局的活视图；这里改成一组访问器，
  * 读写都落到 realm 全局上——效果相同，且不需要平台支持任何对象代理。
  */
-import { childMain, type ChildPayload } from "@zcode/dynamic-workflow-runtime";
+import { childMain } from "@zcode/dynamic-workflow-runtime/child-source";
+import type { ChildPayload } from "@zcode/dynamic-workflow-runtime/protocol";
 
 /** 一个求值 realm。设备侧是 iframe 的 window，node 侧是 `vm` 的 context。 */
 export interface CellRealm {
@@ -35,6 +36,8 @@ export interface CellRealm {
   readonly global: Record<string, unknown>;
   /** 在**该 realm 里**求值一段脚本，返回其完成值。 */
   evaluate(code: string, filename: string): unknown;
+  /** 可选：销毁 realm（设备侧用于移除 iframe）。 */
+  close?(): void;
 }
 
 /** 与 cell 之间的双向异步通道。行是 NDJSON，不含换行。 */

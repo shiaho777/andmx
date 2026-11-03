@@ -1202,4 +1202,6 @@ internal val settingsEn: Map<String, String> = mapOf(
     "可选。填写 authorizationUrl / tokenUrl / clientId / scopes 后可走浏览器授权；也可直接填 accessToken 或 refreshToken。" to
         "Optional. Fill authorizationUrl / tokenUrl / clientId / scopes to sign in with the browser, or provide accessToken / refreshToken directly.",
     "浏览器授权" to "Browser sign-in",
+    "动态脚本在设备侧 WebView 沙箱执行；节点与产物写入 workflow journal。" to
+        "Dynamic scripts run in an on-device WebView sandbox; nodes and artifacts are written to the workflow journal.",
 )

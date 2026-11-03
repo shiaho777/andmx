@@ -25,7 +25,24 @@ if (!existsSync(resolve(repo, "app/src/main/assets/dwf/analyzer.js"))) {
 await build({
   alias: {
     "@zcode/dynamic-workflow": resolve(cliPackages, "dynamic-workflow/src/index.ts"),
+    "@zcode/dynamic-workflow/engine/engine": resolve(cliPackages, "dynamic-workflow/src/engine/engine.ts"),
+    "@zcode/dynamic-workflow/engine/errors": resolve(cliPackages, "dynamic-workflow/src/engine/errors.ts"),
+    "@zcode/dynamic-workflow/engine/types": resolve(cliPackages, "dynamic-workflow/src/engine/types.ts"),
+    "@zcode/dynamic-workflow/engine/journal-memory": resolve(cliPackages, "dynamic-workflow/src/engine/journal-memory.ts"),
+    "@zcode/dynamic-workflow/schema/validate": resolve(cliPackages, "dynamic-workflow/src/schema/validate.ts"),
     "@zcode/dynamic-workflow-runtime": resolve(cliPackages, "dynamic-workflow-runtime/src/index.ts"),
+    "@zcode/dynamic-workflow-runtime/child-cell-streams": resolve(
+      cliPackages,
+      "dynamic-workflow-runtime/src/child-cell-streams.ts",
+    ),
+    "@zcode/dynamic-workflow-runtime/child-source": resolve(
+      cliPackages,
+      "dynamic-workflow-runtime/src/child-source.ts",
+    ),
+    "@zcode/dynamic-workflow-runtime/protocol": resolve(
+      cliPackages,
+      "dynamic-workflow-runtime/src/protocol.ts",
+    ),
   },
   bundle: true,
   entryNames: "[name]",
@@ -33,6 +50,7 @@ await build({
     resolve(here, "probe.ts"),
     resolve(here, "cell-probe.ts"),
     resolve(here, "host-probe.ts"),
+    resolve(here, "runner-probe.ts"),
   ],
   // CJS 而不是 ESM：TypeScript 的 `getNodeSystem()` 里是 `require("fs")`，esbuild 在 ESM 输出里
   // 会把它降级成一个抛错的 `__require` 桩。WebView 那份 bundle 用 IIFE，永远走不到那条路
@@ -45,4 +63,40 @@ await build({
   platform: "node",
   sourcemap: false,
   target: ["node22"],
+});
+
+// WebView/iframe runner: IIFE, no Node built-ins, no minify (childMain is
+// stringified by upstream and must stay self-contained).
+await build({
+  alias: {
+    "typescript": resolve(here, "src/typescript-stub.ts"),
+    "@zcode/dynamic-workflow": resolve(cliPackages, "dynamic-workflow/src/index.ts"),
+    "@zcode/dynamic-workflow/engine/engine": resolve(cliPackages, "dynamic-workflow/src/engine/engine.ts"),
+    "@zcode/dynamic-workflow/engine/errors": resolve(cliPackages, "dynamic-workflow/src/engine/errors.ts"),
+    "@zcode/dynamic-workflow/engine/types": resolve(cliPackages, "dynamic-workflow/src/engine/types.ts"),
+    "@zcode/dynamic-workflow/engine/journal-memory": resolve(cliPackages, "dynamic-workflow/src/engine/journal-memory.ts"),
+    "@zcode/dynamic-workflow/schema/validate": resolve(cliPackages, "dynamic-workflow/src/schema/validate.ts"),
+    "@zcode/dynamic-workflow-runtime": resolve(cliPackages, "dynamic-workflow-runtime/src/index.ts"),
+    "@zcode/dynamic-workflow-runtime/child-cell-streams": resolve(
+      cliPackages,
+      "dynamic-workflow-runtime/src/child-cell-streams.ts",
+    ),
+    "@zcode/dynamic-workflow-runtime/child-source": resolve(
+      cliPackages,
+      "dynamic-workflow-runtime/src/child-source.ts",
+    ),
+    "@zcode/dynamic-workflow-runtime/protocol": resolve(
+      cliPackages,
+      "dynamic-workflow-runtime/src/protocol.ts",
+    ),
+  },
+  bundle: true,
+  entryPoints: [resolve(here, "src/android-entry.ts")],
+  format: "iife",
+  keepNames: true,
+  logLevel: "info",
+  outfile: resolve(repo, "app/src/main/assets/dwf/runner.js"),
+  platform: "browser",
+  sourcemap: false,
+  target: ["es2020"],
 });

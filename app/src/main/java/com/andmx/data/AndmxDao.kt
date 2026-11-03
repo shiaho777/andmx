@@ -279,6 +279,15 @@ interface AndmxDao {
     @Query("SELECT * FROM workflow_events WHERE runId = :runId ORDER BY seq ASC")
     suspend fun workflowEvents(runId: String): List<WorkflowEventEntity>
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWorkflowJournal(journal: WorkflowJournalEntity)
+
+    @Query("SELECT * FROM workflow_journals WHERE runId = :runId")
+    suspend fun workflowJournal(runId: String): WorkflowJournalEntity?
+
+    @Query("DELETE FROM workflow_journals WHERE runId = :runId")
+    suspend fun deleteWorkflowJournal(runId: String): Int
+
     // ── per-conversation file changes ─────────────────────────
 
     @Query("SELECT * FROM workspace_changes WHERE conversationId = :conversationId ORDER BY timestamp ASC")

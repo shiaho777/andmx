@@ -126,9 +126,17 @@ fun WorkflowRunDetailDialog(
                         "status: ${snapshot.status}  ·  kind: ${snapshot.kind}\n" +
                         snapshot.currentPhase?.let { "current: $it\n" }.orEmpty() +
                         snapshot.reportPath?.let { "report: $it\n" }.orEmpty() +
-                        snapshot.pauseReason?.let { "paused: $it\n" }.orEmpty(),
+                        snapshot.pauseReason?.let { "paused: $it\n" }.orEmpty() +
+                        snapshot.failure?.message?.let { "failure: $it\n" }.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (snapshot.kind == "dynamic") {
+                    Text(
+                        tr("动态脚本在设备侧 WebView 沙箱执行；节点与产物写入 workflow journal。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Spacer(Modifier.padding(4.dp))
                 Text(tr("阶段"), style = MaterialTheme.typography.titleSmall)
                 snapshot.phases.forEach { p ->
