@@ -63,7 +63,23 @@ async function runScript(script: string, worldValue?: unknown): Promise<RunResul
         runner.worldResult(requestId, true, JSON.stringify(worldValue ?? "world-content"));
       });
     },
-    publishArtifact() {},
+    publishArtifact(requestId) {
+      queueMicrotask(() => {
+        runner.artifactResult(
+          requestId,
+          true,
+          JSON.stringify({
+            id: "note",
+            kind: "markdown",
+            version: 1,
+            contentType: "text/markdown",
+            bytes: 5,
+            uri: ".andmx/workflow-runs/probe/note-v1.md",
+            publishedAt: 1,
+          }),
+        );
+      });
+    },
     settled(_runId, json) { settle(JSON.parse(json)); },
     log() {},
   };
@@ -109,11 +125,28 @@ async function main(): Promise<void> {
   `);
   check("errored run is errored", errored.settlement.status === "errored", errored.settlement);
 
+  const fanout = await runScript(String.raw`
+    const a = agent('a');
+    const b = agent('b');
+    const [first, second] = await Promise.all([a.ask('A'), b.ask('B')]);
+    return first + '|' + second;
+  `);
+  check("fanout completed", fanout.settlement.status === "completed", fanout.settlement);
+  check("fanout asked twice", fanout.asks.length === 2, fanout.asks);
+  check("fanout artifact", fanout.settlement.artifact === "actor-done|actor-done", fanout.settlement.artifact);
+
+  const artifact = await runScript(String.raw`
+    const ref = await artifact.markdown('note', 'hello');
+    return ref.id + ':' + ref.version;
+  `);
+  check("artifact completed", artifact.settlement.status === "completed", artifact.settlement);
+  check("artifact ref", artifact.settlement.artifact === "note:1", artifact.settlement.artifact);
+
   if (failures.length > 0) {
     process.stderr.write(`runner-probe failures:\n${failures.map((f) => `  - ${f}`).join("\n")}\n`);
     process.exit(1);
   }
-  process.stdout.write("runner-probe: sequential/worldread/errored passed\n");
+  process.stdout.write("runner-probe: sequential/worldread/errored/fanout/artifact passed\n");
 }
 
 void main();

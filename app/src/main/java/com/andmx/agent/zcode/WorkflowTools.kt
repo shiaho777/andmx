@@ -232,9 +232,46 @@ class WorkflowTools(
         override suspend fun execute(args: JsonObject): ToolResult {
             automationBlocked(name)?.let { return it }
             if (present(args, "script") || present(args, "path")) skillRefusal(name)?.let { return it }
-            if (text(args, "run_id") == null) return absent("run_id is required")
+            val runId = text(args, "run_id") ?: return absent("run_id is required")
             if (present(args, "script") && present(args, "path")) return absent(AMEND_WORKFLOW_SOURCE_ERROR)
-            return absent(WORKFLOW_AMEND_UNAVAILABLE)
+            val runner = dynamicRunner
+                ?: return absent("Dynamic workflow runner is unavailable in this session.")
+            val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
+            val existing = svc.getRun(runId)
+                ?: return absent("Workflow run $runId was not found.")
+            if (existing.kind != "dynamic") {
+                return absent("AmendWorkflow currently supports dynamic script runs, not phase workflows.")
+            }
+            createSource.validateSource(args)?.let { return absent(it) }
+            val input = when (val resolved = createSource.resolve(args)) {
+                is CreateWorkflowSource.Result.Failure -> return absent(resolved.message)
+                is CreateWorkflowSource.Result.Ok -> resolved.input
+            }
+            val analysis = runCatching { analyzer?.analyze(input.script) }.getOrNull()
+                ?: return absent("This session has no workflow script analyzer.")
+            if (!analysis.ok) {
+                return ToolResult(
+                    buildString {
+                        append("The amended workflow script has errors:\n")
+                        analysis.diagnostics.forEach { append(it.render()).append('\n') }
+                    }.trimEnd(),
+                    isError = true,
+                )
+            }
+            runner.cancel(runId)
+            val (newRunId, error) = runner.start(
+                script = input.script,
+                cwd = existing.cwd,
+                conversationId = conversationId,
+            )
+            if (error != null) return ToolResult("Amend failed to start a new run: $error", isError = true)
+            return ToolResult(
+                buildString {
+                    append("Amended workflow ").append(runId).append(" into new run ")
+                    append(newRunId).append(".\nThe previous run was stopped. ")
+                    append("Use GetWorkflowRun to follow the new run.")
+                },
+            )
         }
     }
 

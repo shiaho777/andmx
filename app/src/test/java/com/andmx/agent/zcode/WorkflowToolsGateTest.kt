@@ -68,6 +68,6 @@ class WorkflowToolsGateTest {
         })
         assertTrue(r.isError)
         assertFalse(r.output.contains("before it accepts a script"))
-        assertTrue(r.output.contains("workflow_amend_unavailable"))
+        assertTrue(r.output.contains("unavailable"))
     }
 }
