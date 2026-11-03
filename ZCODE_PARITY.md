@@ -223,9 +223,10 @@ Kotlin 也喂探针，所以它不是「另写一个 demo」，而是那条链�
 ask + files.read 脚本；`runner-probe` 覆盖 fanout/artifact/hole。
 
 **v2 设备回归**（2026-11-03）：`DynamicWorkflowRunnerTest` 现有 5 条——sequential + journal、
-cancel→paused→resume→completed、typed ask 拒绝→修复、FillWorkflowHole 补全后 run 完成并记录产物、
-Amend 启动后继 run 并把前驱标为 `superseded`（`supersededBy`/`resumedFrom` 两端可查，前驱拒绝 resume）。
-动态 run 详情新增开放留白卡片、产物卡片与脚本返回值；`/dwf holes <runId>` 可列当前等待补全的留白。
+cancel→销毁 runner/analyzer→重建→从 Room journal resume→completed、typed ask 拒绝→修复、
+FillWorkflowHole 补全后 run 完成并记录产物、Amend 启动后继 run 并把前驱标为 `superseded`
+（`supersededBy`/`resumedFrom` 两端可查，前驱拒绝 resume）。
+动态 run 详情新增开放留白卡片、可点开的产物卡片与脚本返回值；`/dwf holes <runId>` 可列当前等待补全的留白。
 仍缺：Amend 的 warm-cache/导入前缀（当前后继 run 重新执行，不导入前驱已完成 ask）、完整看板。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
@@ -434,8 +435,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **工作流恢复**：`ResumeWorkflowRun` 接入 `WorkflowService.resume`，模型侧与 `/dwf resume` 行为一致。
 - **动态脚本 runner v1/v2**：WebView + iframe cell、`runner.js`、Room journal（DB v21）、
   actor ask / world read / artifact publish 桥；`CreateWorkflow` 启动、`AmendWorkflow`、`FillWorkflowHole`、
-  `ResumeWorkflowRun`/cancel 已接线；设备侧覆盖 sequential/journal、cancel→resume、typed repair、hole/fill、
-  Amend supersede；详情显示开放留白、产物卡片与返回值。fanout/artifact/hole 有 `runner-probe`。
+  `ResumeWorkflowRun`/cancel 已接线；设备侧覆盖 sequential/journal、销毁重建后 resume、typed repair、hole/fill、
+  Amend supersede；详情显示开放留白、可打开产物与返回值。fanout/artifact/hole 有 `runner-probe`。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。

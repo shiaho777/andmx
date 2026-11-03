@@ -16,6 +16,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,6 +43,25 @@ class WorkflowResumeToolTest {
 
             assertTrue(result.isError)
             assertTrue(result.output.contains("not found"))
+        } finally {
+            scope.cancel()
+            AndmxDatabase.resetForTests()
+        }
+    }
+
+    @Test
+    fun readArtifactTextRoundTripsThroughService() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val service = WorkflowService(
+            scope = scope,
+            store = store,
+            actorRunner = { WorkflowAgentResult("ok") },
+        )
+        try {
+            val path = store.writeArtifact("wf_artifact", "artifacts/note-v1.md", "# hello\n")
+            assertEquals("# hello\n", service.readArtifactText(path))
         } finally {
             scope.cancel()
             AndmxDatabase.resetForTests()

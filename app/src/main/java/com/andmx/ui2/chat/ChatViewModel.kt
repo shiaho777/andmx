@@ -1977,6 +1977,12 @@ class ChatViewModel @Inject constructor(
         val since: Long,
     )
 
+    data class WorkflowArtifactView(
+        val label: String,
+        val path: String,
+        val content: String,
+    )
+
     private val _workflowsOpen = MutableStateFlow(false)
     val workflowsOpen: StateFlow<Boolean> = _workflowsOpen.asStateFlow()
     private val _workflowDefs = MutableStateFlow<List<com.andmx.agent.workflow.WorkflowDefinition>>(emptyList())
@@ -1989,6 +1995,8 @@ class ChatViewModel @Inject constructor(
     val workflowDetailEvents: StateFlow<List<com.andmx.agent.workflow.WorkflowEvent>> = _workflowDetailEvents.asStateFlow()
     private val _workflowOpenHoles = MutableStateFlow<List<WorkflowOpenHole>>(emptyList())
     val workflowOpenHoles: StateFlow<List<WorkflowOpenHole>> = _workflowOpenHoles.asStateFlow()
+    private val _workflowArtifactView = MutableStateFlow<WorkflowArtifactView?>(null)
+    val workflowArtifactView: StateFlow<WorkflowArtifactView?> = _workflowArtifactView.asStateFlow()
 
     fun openWorkflows() {
         _workflowsOpen.value = true
@@ -2024,6 +2032,7 @@ class ChatViewModel @Inject constructor(
         _workflowDetail.value = null
         _workflowDetailEvents.value = emptyList()
         _workflowOpenHoles.value = emptyList()
+        _workflowArtifactView.value = null
     }
 
     fun openWorkflowDetail(runId: String) {
@@ -2039,6 +2048,24 @@ class ChatViewModel @Inject constructor(
         _workflowDetail.value = null
         _workflowDetailEvents.value = emptyList()
         _workflowOpenHoles.value = emptyList()
+        _workflowArtifactView.value = null
+    }
+
+    fun openWorkflowArtifact(label: String, path: String) {
+        if (path.isBlank()) return
+        viewModelScope.launch {
+            val content = controller.workflowService.readArtifactText(path)
+                ?: "无法读取产物：$path"
+            _workflowArtifactView.value = WorkflowArtifactView(
+                label = label,
+                path = path,
+                content = content.take(128 * 1024),
+            )
+        }
+    }
+
+    fun dismissWorkflowArtifact() {
+        _workflowArtifactView.value = null
     }
 
     private suspend fun loadOpenHoles(runId: String, kind: String?): List<WorkflowOpenHole> {

@@ -96,11 +96,11 @@ class DynamicWorkflowRunnerTest {
     fun cancelAndResumeReplaysFinishedAskAndCompletes() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val analyzer = WebViewWorkflowScriptAnalyzer(context)
+        var analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host().apply { blockSecondAsk = true }
         val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
         val journals = WorkflowJournalStore(context)
-        val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
+        var runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         try {
             val script = """
                 const reviewer = agent('reviewer', { system: 'be brief' });
@@ -124,7 +124,10 @@ class DynamicWorkflowRunnerTest {
             }
             assertEquals(WorkflowRunStatus.paused, snapshot?.status)
 
-            host.blockSecondAsk = false
+            runner.close()
+            analyzer.close()
+            analyzer = WebViewWorkflowScriptAnalyzer(context)
+            runner = DynamicWorkflowRunner(context, analyzer, Host(), store, journals, scope)
             val (resumed, resumeError) = runner.resume(runId)
             assertTrue(resumeError.orEmpty(), resumed)
 

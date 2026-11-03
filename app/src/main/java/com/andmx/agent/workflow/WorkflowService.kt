@@ -105,6 +105,9 @@ class WorkflowService(
 
     suspend fun events(runId: String) = store.events(runId)
 
+    suspend fun readArtifactText(path: String, limit: Int = 128 * 1024): String? =
+        store.readArtifactText(path, limit)
+
     suspend fun schedulerState(runId: String) =
         store.readSnapshot(runId)?.let { deriveWorkflowSchedulerState(it.graph) }
 
