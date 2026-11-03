@@ -4385,6 +4385,8 @@ declare const args: Readonly<Record<string, unknown>>;
       __publicField(this, "seq", 0);
       __publicField(this, "requests", /* @__PURE__ */ new Map());
       __publicField(this, "instanceRequests", /* @__PURE__ */ new Map());
+      __publicField(this, "sessions", /* @__PURE__ */ new Map());
+      __publicField(this, "seeds", /* @__PURE__ */ new Map());
       __publicField(this, "worlds", /* @__PURE__ */ new Map());
       __publicField(this, "artifacts", /* @__PURE__ */ new Map());
     }
@@ -4394,14 +4396,26 @@ declare const args: Readonly<Record<string, unknown>>;
     owns(requestId) {
       return this.requests.has(requestId) || this.worlds.has(requestId) || this.artifacts.has(requestId) || this.instanceRequests.has(requestId);
     }
-    createActorSession(actor, persona) {
-      this.bridge.createActor(this.runId, actor.siteId, actor.ordinal, JSON.stringify(persona));
+    createActorSession(actor, persona, seed) {
+      this.bridge.createActor(
+        this.runId,
+        actor.siteId,
+        actor.ordinal,
+        JSON.stringify(persona),
+        JSON.stringify(seed ?? null)
+      );
+      if (seed !== void 0) {
+        this.seeds.set(`${actor.siteId}@${actor.ordinal}`, JSON.stringify(seed));
+      } else {
+        this.seeds.delete(`${actor.siteId}@${actor.ordinal}`);
+      }
       return Promise.resolve({ id: `session:${this.runId}:${actor.siteId}@${actor.ordinal}` });
     }
     startAsk(session, instance, message) {
       const requestId = `${this.runId}:ask:${++this.seq}`;
       this.requests.set(requestId, instance);
       this.instanceRequests.set(`${instance.siteId}@${instance.ordinal}`, requestId);
+      this.sessions.set(`${instance.siteId}@${instance.ordinal}`, session.id);
       this.bridge.startAsk(
         this.runId,
         requestId,
@@ -4412,7 +4426,8 @@ declare const args: Readonly<Record<string, unknown>>;
           instructions: message.instructions,
           typed: message.typed,
           schema: message.schema,
-          conversationId: this.conversationId
+          conversationId: this.conversationId,
+          ...this.seeds.get(`${instance.siteId}@${instance.ordinal}`) === void 0 ? {} : { seedJson: this.seeds.get(`${instance.siteId}@${instance.ordinal}`) }
         })
       );
     }
@@ -4463,6 +4478,7 @@ declare const args: Readonly<Record<string, unknown>>;
         switch (result.kind) {
           case "submit":
             this.sink.askSubmitAttempted(instance, result.value);
+            this.stampBoundary(instance);
             return;
           case "fail":
             this.requests.delete(requestId);
@@ -4473,10 +4489,24 @@ declare const args: Readonly<Record<string, unknown>>;
             this.requests.delete(requestId);
             this.instanceRequests.delete(`${instance.siteId}@${instance.ordinal}`);
             this.sink.askTurnEnded(instance, typeof result.value === "string" ? result.value : "");
+            this.stampBoundary(instance);
         }
       } catch (error) {
         this.bridge.log(`askResult sink threw: ${String(error)}`);
       }
+    }
+    /**
+     * After an ask settles, record how many messages the actor session had produced. The engine
+     * copies this count into the journal row; a later Amend uses it as the transcript boundary.
+     */
+    stampBoundary(instance) {
+      const sessionId = this.sessions.get(`${instance.siteId}@${instance.ordinal}`);
+      if (sessionId === void 0) return;
+      const node = this.journal.getNode(this.runId, instance.siteId, instance.ordinal);
+      if (node === void 0 || node.status !== "completed") return;
+      const count = this.bridge.actorMessageCount(sessionId);
+      if (count <= 0) return;
+      this.journal.putNode({ ...node, messageBoundary: count });
     }
     worldResult(requestId, ok, payloadJson, error) {
       const pending = this.worlds.get(requestId);

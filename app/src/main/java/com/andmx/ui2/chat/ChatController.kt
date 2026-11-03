@@ -451,6 +451,7 @@ class ChatController private constructor(private val context: Context) {
     private val workflowJournalStore = WorkflowJournalStore(context)
     private val workflowActorStore = com.andmx.data.WorkflowActorStore(context)
     private val dynamicActorHistoryCache = ConcurrentHashMap<String, String>()
+    private val dynamicActorCounts = ConcurrentHashMap<String, Int>()
     private val dynamicActorJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     private val dynamicActorHistorySerializer =
         kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.ApiMessage.serializer())
@@ -462,11 +463,15 @@ class ChatController private constructor(private val context: Context) {
             siteId: String,
             ordinal: Int,
             personaJson: String,
+            seedJson: String,
         ): String {
-            val sessionId = "wf_actor_${runId}_${siteId}_$ordinal"
+            val sessionId = "session:$runId:$siteId@$ordinal"
             dynamicActorPersonas[sessionId] = personaJson
             return sessionId
         }
+
+        override fun actorMessageCount(sessionId: String): Int =
+            dynamicActorCounts[sessionId] ?: 0
 
         override suspend fun ask(request: DynamicAskRequest): DynamicAskResult {
             val job = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
@@ -861,7 +866,7 @@ class ChatController private constructor(private val context: Context) {
                 approveTool(convId, mode, tool, args)
             },
         )
-        loadDynamicActorHistory(request.sessionId).takeIf { it.isNotEmpty() }?.let(engine::seed)
+        loadDynamicActorHistory(request).takeIf { it.isNotEmpty() }?.let(engine::seed)
         var finalText = ""
         var failure: String? = null
         try {
@@ -886,7 +891,30 @@ class ChatController private constructor(private val context: Context) {
         return DynamicAskResult.Text(finalText)
     }
 
-    private suspend fun loadDynamicActorHistory(sessionId: String): List<com.andmx.llm.ApiMessage> {
+    private suspend fun loadDynamicActorHistory(
+        request: DynamicAskRequest,
+    ): List<com.andmx.llm.ApiMessage> {
+        if (request.sessionId.isBlank()) return emptyList()
+        val direct = readActorHistory(request.sessionId)
+        if (direct.isNotEmpty()) return direct
+        val seed = parseActorSeed(request.seedJson) ?: return emptyList()
+        val source = readActorHistory(seed.first)
+        if (source.isEmpty() || seed.second <= 0) return emptyList()
+        val prefix = com.andmx.agent.workflow.dynamic.DynamicActorHistory.copyPrefix(
+            source,
+            seed.second,
+        )
+        if (prefix.isEmpty()) return emptyList()
+        val raw = runCatching {
+            dynamicActorJson.encodeToString(dynamicActorHistorySerializer, prefix)
+        }.getOrNull() ?: return emptyList()
+        dynamicActorHistoryCache[request.sessionId] = raw
+        dynamicActorCounts[request.sessionId] = prefix.size
+        runCatching { workflowActorStore.save(request.sessionId, request.runId, raw) }
+        return prefix
+    }
+
+    private suspend fun readActorHistory(sessionId: String): List<com.andmx.llm.ApiMessage> {
         if (sessionId.isBlank()) return emptyList()
         val raw = dynamicActorHistoryCache[sessionId]
             ?: workflowActorStore.load(sessionId)?.also { dynamicActorHistoryCache[sessionId] = it }
@@ -894,6 +922,17 @@ class ChatController private constructor(private val context: Context) {
         return runCatching {
             dynamicActorJson.decodeFromString(dynamicActorHistorySerializer, raw)
         }.getOrDefault(emptyList())
+    }
+
+    private fun parseActorSeed(seedJson: String?): Pair<String, Int>? {
+        if (seedJson.isNullOrBlank() || seedJson == "null") return null
+        return runCatching {
+            val obj = Json.parseToJsonElement(seedJson).jsonObject
+            val source = obj["sourceSessionId"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+                ?: return null
+            source to (obj["messageCount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0)
+        }.getOrNull()
     }
 
     private suspend fun saveDynamicActorHistory(request: DynamicAskRequest, engine: AgentEngine) {
@@ -906,6 +945,7 @@ class ChatController private constructor(private val context: Context) {
             dynamicActorJson.encodeToString(dynamicActorHistorySerializer, snapshot)
         }.getOrNull() ?: return
         dynamicActorHistoryCache[request.sessionId] = raw
+        dynamicActorCounts[request.sessionId] = snapshot.size
         runCatching { workflowActorStore.save(request.sessionId, request.runId, raw) }
     }
 

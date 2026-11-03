@@ -19,4 +19,10 @@ object DynamicActorHistory {
         val firstUser = tail.indexOfFirst { it.role == "user" }
         return if (firstUser > 0) tail.drop(firstUser) else tail
     }
+
+    /** The prefix a successor actor inherits from its predecessor's transcript. */
+    fun copyPrefix(messages: List<ApiMessage>, messageCount: Int): List<ApiMessage> {
+        if (messageCount <= 0) return emptyList()
+        return snapshot(messages.take(messageCount))
+    }
 }

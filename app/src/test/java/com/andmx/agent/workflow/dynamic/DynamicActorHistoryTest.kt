@@ -25,6 +25,26 @@ class DynamicActorHistoryTest {
     }
 
     @Test
+    fun copyPrefixUsesMessageCountAndStartsAtUser() {
+        val messages = listOf(
+            ApiMessage(role = "user", content = "u0"),
+            ApiMessage(role = "assistant", content = "a0"),
+            ApiMessage(role = "user", content = "u1"),
+            ApiMessage(role = "assistant", content = "a1"),
+        )
+
+        assertEquals(
+            listOf("u0", "a0"),
+            DynamicActorHistory.copyPrefix(messages, 2).map { it.content },
+        )
+        assertEquals(
+            listOf("u1", "a1"),
+            DynamicActorHistory.copyPrefix(messages, 4).takeLast(2).map { it.content },
+        )
+        assertEquals(emptyList<ApiMessage>(), DynamicActorHistory.copyPrefix(messages, 0))
+    }
+
+    @Test
     fun seededHistoryReachesTheNextEngine() = runTest {
         val turn = TurnContext(
             provider = ProviderDefinition(id = "test", name = "test", baseUrl = "http://x", apiKey = "x"),

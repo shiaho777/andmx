@@ -44,6 +44,7 @@ class DynamicWorkflowRunnerTest {
         val worldReads = AtomicInteger(0)
         val typedStarts = AtomicInteger(0)
         val instructions = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val seeds = java.util.concurrent.CopyOnWriteArrayList<String>()
         @Volatile var typedRepair = false
         @Volatile var blockSecondAsk = false
         val secondAskStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -54,7 +55,13 @@ class DynamicWorkflowRunnerTest {
             siteId: String,
             ordinal: Int,
             personaJson: String,
-        ): String = "session:$runId:$siteId@$ordinal"
+            seedJson: String,
+        ): String {
+            seeds += seedJson
+            return "session:$runId:$siteId@$ordinal"
+        }
+
+        override fun actorMessageCount(sessionId: String): Int = asks.get()
 
         override suspend fun ask(request: DynamicAskRequest): DynamicAskResult {
             val call = asks.incrementAndGet()
@@ -365,6 +372,10 @@ class DynamicWorkflowRunnerTest {
                 "the world read should have been imported",
                 1,
                 host.worldReads.get(),
+            )
+            assertTrue(
+                "successor did not receive a transcript seed: ${host.seeds}",
+                host.seeds.any { it.contains("\"messageCount\":1") },
             )
             assertNotNull(journals.load(successorId))
         } finally {
