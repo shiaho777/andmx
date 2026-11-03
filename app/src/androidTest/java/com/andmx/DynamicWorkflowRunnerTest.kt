@@ -167,8 +167,11 @@ class DynamicWorkflowRunnerTest {
             val script = """
                 const reviewer = agent('reviewer', { system: 'be brief' });
                 artifact.metrics('latency', { metrics: [{ field: 'ms', label: 'Latency', unit: 'ms' }] });
+                artifact.chart('trend', { x: { field: 'label' }, y: { field: 'v', label: 'Value' } });
                 report({ ms: 12 }, 'latency');
                 report({ ms: 18 }, 'latency');
+                report({ label: 'a', v: 1 }, 'trend');
+                report({ label: 'b', v: 2 }, 'trend');
                 log('starting');
                 const answer = await reviewer.ask('say hi');
                 const body = await files.read('README.md');
@@ -201,6 +204,11 @@ class DynamicWorkflowRunnerTest {
                 snapshot.presets.any { it.id == "latency" && it.kind == "metrics" },
             )
             assertEquals(2, snapshot.reports.count { it.artifactId == "latency" })
+            assertTrue(
+                "chart preset was not recorded: ${snapshot.presets}",
+                snapshot.presets.any { it.id == "trend" && it.kind == "chart" },
+            )
+            assertEquals(2, snapshot.reports.count { it.artifactId == "trend" })
             val journal = journals.load(runId)
             assertNotNull(journal)
             assertTrue(journal!!.contains("\"runId\":\"$runId\""))

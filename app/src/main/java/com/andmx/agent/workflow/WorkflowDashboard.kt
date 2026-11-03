@@ -18,7 +18,15 @@ object WorkflowDashboard {
     data class Table(val columns: List<Field>, val rows: List<List<String>>)
     data class Metric(val label: String, val value: String, val unit: String? = null)
     data class BoardColumn(val name: String, val cards: List<String>)
-    data class ChartSeries(val label: String, val unit: String?, val points: List<Pair<String, Double>>)
+    data class ChartPoint(val index: Int, val x: String, val y: Double)
+    data class ChartSeries(val label: String, val unit: String?, val points: List<ChartPoint>)
+    data class Chart(
+        val type: String,
+        val scale: String,
+        val baseline: Double?,
+        val xLabels: List<String>,
+        val series: List<ChartSeries>,
+    )
 
     fun parseSpec(specJson: String): JsonObject? =
         runCatching { json.parseToJsonElement(specJson).jsonObject }.getOrNull()
@@ -68,25 +76,40 @@ object WorkflowDashboard {
         return ordered.map { (name, values) -> BoardColumn(name, values) }
     }
 
-    fun chart(spec: JsonObject, items: List<JsonObject>): List<ChartSeries> {
-        val x = spec["x"]?.jsonObject?.let { Field(it["field"]?.stringOrNull().orEmpty(), it["label"]?.stringOrNull().orEmpty()) }
-            ?: return emptyList()
+    fun chart(spec: JsonObject, items: List<JsonObject>): Chart? {
+        val x = spec["x"]?.jsonObject?.let {
+            Field(it["field"]?.stringOrNull().orEmpty(), it["label"]?.stringOrNull().orEmpty())
+        } ?: return null
         val ySpecs = when (val y = spec["y"]) {
-            null -> return emptyList()
+            null -> return null
             is JsonArray -> y.mapNotNull { it as? JsonObject }
             is JsonObject -> listOf(y)
-            else -> return emptyList()
+            else -> return null
         }
-        return ySpecs.mapNotNull { ySpec ->
+        val series = ySpecs.mapNotNull { ySpec ->
             val field = ySpec["field"]?.stringOrNull()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val label = ySpec["label"]?.stringOrNull()?.takeIf { it.isNotBlank() } ?: field
             val unit = ySpec["unit"]?.stringOrNull()
-            val points = items.mapNotNull { item ->
-                val yValue = cell(item, field).toDoubleOrNull() ?: return@mapNotNull null
-                cell(item, x.field) to yValue
+            val points = items.mapIndexedNotNull { index, item ->
+                val yValue = cell(item, field).toDoubleOrNull() ?: return@mapIndexedNotNull null
+                ChartPoint(index, cell(item, x.field), yValue)
             }
             if (points.isEmpty()) null else ChartSeries(label, unit, points)
         }
+        if (series.isEmpty()) return null
+        val type = spec["type"]?.stringOrNull()?.takeIf { it in setOf("line", "bar", "scatter") } ?: "line"
+        val scale = spec["scale"]?.stringOrNull()?.takeIf { it == "log" } ?: "linear"
+        val baselineField = (spec["baseline"] as? JsonObject)?.get("field")?.stringOrNull()
+        val baseline = baselineField?.let { field ->
+            items.firstNotNullOfOrNull { item -> cell(item, field).toDoubleOrNull() }
+        }
+        return Chart(
+            type = type,
+            scale = scale,
+            baseline = baseline,
+            xLabels = items.map { cell(it, x.field) },
+            series = series,
+        )
     }
 
     private fun fields(element: JsonElement?): List<Field>? {

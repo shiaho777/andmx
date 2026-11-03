@@ -64,12 +64,24 @@ class WorkflowDashboardTest {
     @Test
     fun chartProjectsNumericPoints() {
         val chart = WorkflowDashboard.chart(
-            spec("""{"x":{"field":"label"},"y":[{"field":"v","label":"Value","unit":"ms"}]}"""),
-            items("""{"label":"a","v":1}""", """{"label":"b","v":2}""", """{"label":"c","v":"x"}"""),
-        )
+            spec(
+                """
+                {"type":"bar","scale":"linear","x":{"field":"label"},
+                 "y":[{"field":"v","label":"Value","unit":"ms"}],"baseline":{"field":"base"}}
+                """.trimIndent(),
+            ),
+            items(
+                """{"label":"a","v":1,"base":0}""",
+                """{"label":"b","v":2,"base":0}""",
+                """{"label":"c","v":"x","base":0}""",
+            ),
+        )!!
 
-        assertEquals(1, chart.size)
-        assertEquals("Value", chart[0].label)
-        assertEquals(listOf("a" to 1.0, "b" to 2.0), chart[0].points)
+        assertEquals("bar", chart.type)
+        assertEquals("linear", chart.scale)
+        assertEquals(0.0, chart.baseline)
+        assertEquals(listOf("a", "b", "c"), chart.xLabels)
+        assertEquals("Value", chart.series[0].label)
+        assertEquals(listOf(0 to 1.0, 1 to 2.0), chart.series[0].points.map { it.index to it.y })
     }
 }
