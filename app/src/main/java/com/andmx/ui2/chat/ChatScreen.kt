@@ -207,6 +207,7 @@ fun ChatScreen(
     val workflowDetail by viewModel.workflowDetail.collectAsState()
     val workflowDetailEvents by viewModel.workflowDetailEvents.collectAsState()
     val workflowOpenHoles by viewModel.workflowOpenHoles.collectAsState()
+    val workflowArtifactView by viewModel.workflowArtifactView.collectAsState()
     val modelSwitchGuard by viewModel.modelSwitchGuard.collectAsState()
     val contextChips by viewModel.contextChips.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
@@ -1439,9 +1440,16 @@ LaunchedEffect(Unit) {
                         events = workflowDetailEvents,
                         openHoles = workflowOpenHoles,
                         onRefresh = { viewModel.openWorkflowDetail(snap.runId) },
+                        onOpenArtifact = { label, path -> viewModel.openWorkflowArtifact(label, path) },
                         onCancel = { viewModel.cancelWorkflowRun(it) },
                         onResume = { viewModel.resumeWorkflowRun(it) },
                         onDismiss = { viewModel.dismissWorkflowDetail() },
+                    )
+                }
+                workflowArtifactView?.let { artifact ->
+                    WorkflowArtifactDialog(
+                        artifact = artifact,
+                        onDismiss = { viewModel.dismissWorkflowArtifact() },
                     )
                 }
                 modelSwitchGuard?.let { g ->

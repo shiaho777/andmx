@@ -117,6 +117,7 @@ fun WorkflowRunDetailDialog(
     events: List<WorkflowEvent>,
     openHoles: List<ChatViewModel.WorkflowOpenHole> = emptyList(),
     onRefresh: () -> Unit = {},
+    onOpenArtifact: (String, String) -> Unit = { _, _ -> },
     onCancel: (String) -> Unit,
     onResume: (String) -> Unit = {},
     onDismiss: () -> Unit,
@@ -220,7 +221,12 @@ fun WorkflowRunDetailDialog(
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                                .clickable(enabled = a.path.isNotBlank()) {
+                                    onOpenArtifact(a.label, a.path)
+                                },
                         ) {
                             Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                                 Text(
@@ -299,6 +305,35 @@ fun WorkflowRunDetailDialog(
                 TextButton(onClick = onRefresh) { Text(tr("刷新")) }
                 TextButton(onClick = onDismiss) { Text(tr("返回")) }
             }
+        },
+    )
+}
+
+@Composable
+fun WorkflowArtifactDialog(
+    artifact: ChatViewModel.WorkflowArtifactView,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(artifact.label, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    artifact.path,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.padding(4.dp))
+                Text(
+                    artifact.content,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(tr("关闭")) }
         },
     )
 }
