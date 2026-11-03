@@ -452,6 +452,7 @@ class ChatController private constructor(private val context: Context) {
     private val workflowActorStore = com.andmx.data.WorkflowActorStore(context)
     private val dynamicActorHistoryCache = ConcurrentHashMap<String, String>()
     private val dynamicActorCounts = ConcurrentHashMap<String, Int>()
+    private val workflowEscalations = com.andmx.agent.workflow.dynamic.WorkflowEscalationRegistry()
     private val dynamicActorJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     private val dynamicActorHistorySerializer =
         kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.ApiMessage.serializer())
@@ -816,20 +817,13 @@ class ChatController private constructor(private val context: Context) {
             UpdatePlanTool(), GoalToolState(), TodoState(), PlanModeState(), convId,
         ).filter { it.name !in blocked }.toMutableList().apply {
             if (request.typed || request.schemaJson != null) add(com.andmx.agent.workflow.SubmitResultTool(submitSlot))
+            val escalationCount = java.util.concurrent.atomic.AtomicInteger(0)
             add(
                 com.andmx.agent.workflow.EscalateTool { question, ctx ->
-                    askWorkflowEscalation(
-                        convId,
-                        com.andmx.agent.workflow.WorkflowAgentInput(
-                            activityId = request.requestId,
-                            phase = "dynamic",
-                            prompt = request.instructions,
-                            runId = request.runId,
-                            task = request.instructions,
-                        ),
-                        question,
-                        ctx,
-                    )
+                    if (escalationCount.incrementAndGet() > com.andmx.agent.workflow.dynamic.MAX_ESCALATIONS_PER_ASK) {
+                        return@EscalateTool com.andmx.agent.workflow.dynamic.ESCALATION_BUDGET_EXHAUSTED
+                    }
+                    escalateDynamicQuestion(request, personaName, question, ctx)
                 },
             )
         }
@@ -1162,6 +1156,72 @@ class ChatController private constructor(private val context: Context) {
             sourcePath?.let { put("sourcePath", it) }
             put("publishedAt", System.currentTimeMillis())
         }.toString()
+    }
+
+    private suspend fun escalateDynamicQuestion(
+        request: DynamicAskRequest,
+        personaName: String,
+        question: String,
+        context: String,
+    ): String {
+        val convId = request.conversationId
+        val engine = sessions[convId]?.engine
+        val turnJob = turnJobs[convId]?.takeIf { it.isActive }
+        val askUser: suspend () -> String = {
+            askWorkflowEscalation(
+                convId,
+                com.andmx.agent.workflow.WorkflowAgentInput(
+                    activityId = request.requestId,
+                    phase = "dynamic",
+                    prompt = request.instructions,
+                    runId = request.runId,
+                    task = request.instructions,
+                ),
+                question,
+                context,
+            )
+        }
+        if (engine == null || turnJob == null) return askUser()
+        val qid = workflowEscalations.mintQuestionId(request.runId)
+        val actorRef = "${request.siteId}#${request.ordinal}"
+        val actorName = personaName.takeIf { it.isNotEmpty() }
+        val normalizedContext = context.trim().takeIf { it.isNotEmpty() }
+        val answer = CompletableDeferred<String>()
+        workflowEscalations.park(
+            com.andmx.agent.workflow.dynamic.PendingWorkflowQuestion(
+                qid = qid,
+                runId = request.runId,
+                actor = actorRef,
+                actorName = actorName,
+                question = question,
+                context = normalizedContext,
+                askedAt = System.currentTimeMillis(),
+            ),
+        ) { answer.complete(it) }
+        engine.injectSystemReminder(
+            com.andmx.agent.SystemReminder.Source.QUEUED_SYSTEM_NOTIFICATION,
+            com.andmx.agent.workflow.dynamic.formatWorkflowEscalationNotification(
+                runLabel = request.runId,
+                runId = request.runId,
+                qid = qid,
+                actor = actorName ?: actorRef,
+                question = question,
+                context = normalizedContext,
+            ),
+        )
+        val turnEnded = CompletableDeferred<Unit>()
+        val handle = turnJob.invokeOnCompletion { turnEnded.complete(Unit) }
+        return try {
+            kotlinx.coroutines.selects.select<String?> {
+                answer.onAwait { it }
+                turnEnded.onAwait { null }
+            } ?: run {
+                if (workflowEscalations.withdraw(qid)) askUser() else answer.await()
+            }
+        } finally {
+            handle.dispose()
+            workflowEscalations.withdraw(qid)
+        }
     }
 
     private suspend fun askWorkflowEscalation(
@@ -2337,6 +2397,7 @@ class ChatController private constructor(private val context: Context) {
                 conversationId = conversationId,
                 cwd = cwd,
                 dynamicRunner = dynamicWorkflowRunner,
+                escalations = workflowEscalations,
             ).all()
         } else {
             emptyList()

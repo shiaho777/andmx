@@ -14,6 +14,9 @@ import com.andmx.agent.workflow.WorkflowScriptFrontmatter
 import com.andmx.agent.workflow.WorkflowScriptNotes
 import com.andmx.agent.workflow.WorkflowService
 import com.andmx.agent.workflow.dynamic.DynamicWorkflowRunner
+import com.andmx.agent.workflow.dynamic.RESOLVE_WORKFLOW_QUESTION_DELIVERED
+import com.andmx.agent.workflow.dynamic.ResolveQuestionResult
+import com.andmx.agent.workflow.dynamic.WorkflowEscalationRegistry
 import com.andmx.agent.workflow.script.WorkflowAnalyzerUnavailableException
 import com.andmx.agent.workflow.script.WorkflowScriptAnalyzer
 import com.andmx.data.WorkflowStore
@@ -44,6 +47,7 @@ class WorkflowTools(
     private val conversationId: Long = 0L,
     private val cwd: () -> String = { "/" },
     private val dynamicRunner: DynamicWorkflowRunner? = null,
+    private val escalations: WorkflowEscalationRegistry? = null,
 ) {
     abstract class Declaration(
         override val name: String,
@@ -442,7 +446,20 @@ class WorkflowTools(
             val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
             val snapshot = svc.getRun(runId)
                 ?: return absent("Workflow run $runId was not found.")
-            return ToolResult(renderRun(snapshot))
+            val pending = escalations?.pendingFor(runId).orEmpty()
+            return ToolResult(
+                buildString {
+                    append(renderRun(snapshot))
+                    if (pending.isNotEmpty()) {
+                        append("\n\nPending questions (answer with ResolveWorkflowQuestion):\n")
+                        pending.forEach { q ->
+                            append("- ").append(q.qid).append(" from ").append(q.actorName ?: q.actor)
+                            append(": ").append(q.question).append('\n')
+                            q.context?.let { append("  context: ").append(it).append('\n') }
+                        }
+                    }
+                },
+            )
         }
     }
 
@@ -505,9 +522,16 @@ class WorkflowTools(
         permissionName = "resolveWorkflowQuestion",
     ) {
         override suspend fun execute(args: JsonObject): ToolResult {
-            if (text(args, "question_id") == null) return absent("question_id is required")
-            if (text(args, "answer") == null) return absent("answer is required")
-            return absent(WORKFLOW_QUESTION_UNAVAILABLE)
+            val qid = text(args, "question_id") ?: return absent("question_id is required")
+            val answer = rawText(args, "answer")?.takeIf { it.isNotBlank() }
+                ?: return absent("answer is required")
+            val registry = escalations ?: return absent(WORKFLOW_QUESTION_UNAVAILABLE)
+            return when (val result = registry.resolve(qid, answer)) {
+                is ResolveQuestionResult.Delivered -> ToolResult(
+                    "Answer delivered for question ${result.qid}. $RESOLVE_WORKFLOW_QUESTION_DELIVERED",
+                )
+                is ResolveQuestionResult.Rejected -> absent(result.message)
+            }
         }
     }
 
