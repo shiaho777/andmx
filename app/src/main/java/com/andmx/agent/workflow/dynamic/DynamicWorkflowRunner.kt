@@ -153,7 +153,7 @@ class DynamicWorkflowRunner(
             definitionId = KIND,
         )
         runStore.writeRunRow(snapshot, conversationId)
-        val importedJournal = importJournalFrom?.let { journalStore.load(it) }
+        val importedJournals = importJournalFrom?.let { loadJournalChain(it) }
         val config = configJson(
             runId = runId,
             analysis = analysis,
@@ -163,7 +163,7 @@ class DynamicWorkflowRunner(
             journalJson = null,
             conversationId = conversationId,
             resumedFrom = resumedFrom,
-            importedJournal = importedJournal,
+            importedJournals = importedJournals,
         )
         val error = launch(config)
         return if (error == null) runId to null else {
@@ -362,7 +362,7 @@ class DynamicWorkflowRunner(
         journalJson: String?,
         conversationId: Long,
         resumedFrom: String? = null,
-        importedJournal: String? = null,
+        importedJournals: List<String>? = null,
     ): String {
         val raw = analysis.raw
         val askSpecs = raw["askSpecs"] as? JsonArray ?: JsonArray(emptyList())
@@ -378,7 +378,9 @@ class DynamicWorkflowRunner(
             put("scriptHash", sha256(script))
             put("conversationId", conversationId)
             resumedFrom?.let { put("resumedFrom", it) }
-            importedJournal?.let { put("importedJournal", it) }
+            importedJournals?.takeIf { it.isNotEmpty() }?.let {
+                put("importedJournals", JsonArray(it.map { text -> JsonPrimitive(text) }))
+            }
             journalJson?.let { put("journalJson", it) }
         }.toString()
     }
@@ -809,6 +811,22 @@ class DynamicWorkflowRunner(
         fun log(message: String) {
             android.util.Log.i("DynamicWorkflowRunner", message.take(4_000))
         }
+    }
+
+    private suspend fun loadJournalChain(runId: String, limit: Int = 8): List<String> {
+        val chain = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
+        var current: String? = runId
+        while (current != null && chain.size < limit && seen.add(current)) {
+            val text = journalStore.load(current) ?: break
+            chain += text
+            current = runCatching {
+                json.parseToJsonElement(text).jsonObject["runs"]?.jsonArray
+                    ?.firstOrNull()?.jsonObject
+                    ?.get("resumedFrom")?.jsonPrimitive?.contentOrNull
+            }.getOrNull()
+        }
+        return chain
     }
 
     private fun recordArtifact(runId: String, recordJson: String) {

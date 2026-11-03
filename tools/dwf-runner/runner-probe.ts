@@ -102,7 +102,7 @@ async function runScript(
     caps: { maxConcurrency: 4 },
     askSpecs: prepared.askSpecs,
     sitePhases: prepared.sitePhases,
-    ...(importedJournal === undefined ? {} : { importedJournal }),
+    ...(importedJournal === undefined ? {} : { importedJournals: [importedJournal] }),
     timeoutMs: 30_000,
   }));
   if (fillCode !== undefined) {
