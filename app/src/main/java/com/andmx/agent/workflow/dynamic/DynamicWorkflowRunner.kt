@@ -479,6 +479,12 @@ class DynamicWorkflowRunner(
         val error = event["error"]
             ?.let { (it as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull }
         updateSnapshot(runId) { snapshot ->
+            if (status == WorkflowNodeStatus.active &&
+                snapshot.status != WorkflowRunStatus.running &&
+                snapshot.status != WorkflowRunStatus.pending
+            ) {
+                return@updateSnapshot snapshot
+            }
             if (snapshot.graph.nodes.none { it.id == siteId }) {
                 snapshot
             } else {
