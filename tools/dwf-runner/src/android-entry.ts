@@ -10,6 +10,8 @@ declare global {
       askResult(requestId: string, resultJson: string): void;
       worldResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void;
       artifactResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void;
+      fillHole(runId: string, fillJson: string): { ok: boolean; reason?: string };
+      openHoles(runId: string): unknown[];
       cancel(runId: string): void;
     };
   }
@@ -61,5 +63,7 @@ window.__DWF_RUNNER = {
     runner.worldResult(requestId, ok, payloadJson, error),
   artifactResult: (requestId, ok, payloadJson, error) =>
     runner.artifactResult(requestId, ok, payloadJson, error),
+  fillHole: (runId, fillJson) => runner.fillHole(runId, fillJson),
+  openHoles: (runId) => runner.openHoles(runId),
   cancel: (runId) => runner.cancel(runId),
 };

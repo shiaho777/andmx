@@ -18,11 +18,17 @@ import com.andmx.agent.workflow.script.WorkflowAnalyzerUnavailableException
 import com.andmx.agent.workflow.script.WorkflowScriptAnalyzer
 import com.andmx.data.WorkflowStore
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.security.MessageDigest
 
 class WorkflowTools(
     private val isAutomationTurn: suspend () -> Boolean = { false },
@@ -499,11 +505,51 @@ class WorkflowTools(
         override suspend fun execute(args: JsonObject): ToolResult {
             automationBlocked(name)?.let { return it }
             skillRefusal(name)?.let { return it }
-            if (text(args, "run_id") == null) return absent("run_id is required")
-            if (text(args, "hole_id") == null) return absent("hole_id is required")
+            val runId = text(args, "run_id") ?: return absent("run_id is required")
+            val holeId = text(args, "hole_id") ?: return absent("hole_id is required")
             val sources = listOf("script", "path").count { present(args, it) }
             if (sources != 1) return absent(FILL_WORKFLOW_HOLE_SOURCE_ERROR)
-            return absent(WORKFLOW_FILL_UNAVAILABLE)
+            val runner = dynamicRunner ?: return absent(WORKFLOW_FILL_UNAVAILABLE)
+            val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
+            val existing = svc.getRun(runId)
+                ?: return absent("Workflow run $runId was not found.")
+            if (existing.kind != "dynamic") {
+                return absent("FillWorkflowHole currently supports dynamic script runs.")
+            }
+            val input = when (val resolved = createSource.resolve(args)) {
+                is CreateWorkflowSource.Result.Failure -> return absent(resolved.message)
+                is CreateWorkflowSource.Result.Ok -> resolved.input
+            }
+            val analysis = runCatching { analyzer?.analyze(input.script) }.getOrNull()
+                ?: return absent("This session has no workflow script analyzer.")
+            if (!analysis.ok) {
+                return ToolResult(
+                    buildString {
+                        append("The workflow script has errors:\n")
+                        analysis.diagnostics.forEach { append(it.render()).append('\n') }
+                    }.trimEnd(),
+                    isError = true,
+                )
+            }
+            val lowered = analysis.raw["lowered"] as? JsonObject
+            val code = (lowered?.get("holeBodies") as? JsonObject)
+                ?.get(holeId)?.jsonPrimitive?.contentOrNull
+                ?: return absent("Hole `$holeId` was not found in the workflow script.")
+            val fill = buildJsonObject {
+                put("siteId", holeId)
+                put("code", code)
+                put("script", buildJsonObject {
+                    put("text", input.script)
+                    put("hash", sha256(input.script))
+                })
+                put("askSpecs", analysis.raw["askSpecs"] ?: JsonArray(emptyList()))
+                put("sitePhases", analysis.raw["sitePhases"] ?: JsonArray(emptyList()))
+                put("phaseNames", analysis.raw["phaseNames"] ?: JsonArray(emptyList()))
+                put("filledBy", "model")
+            }
+            val (ok, reason) = runner.fillHole(runId, fill.toString())
+            if (!ok) return ToolResult("Could not fill hole `$holeId`: ${reason ?: "unknown"}", isError = true)
+            return ToolResult("Filled hole `$holeId`; run $runId continues.")
         }
     }
 
@@ -529,6 +575,10 @@ class WorkflowTools(
             return ToolResult(renderSaved(listed))
         }
     }
+
+    private fun sha256(text: String): String =
+        MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
+            .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     private fun renderRuns(runs: List<WorkflowStore.RunListItem>): String = buildString {
         append("Workflow runs (${runs.size}):\n")
