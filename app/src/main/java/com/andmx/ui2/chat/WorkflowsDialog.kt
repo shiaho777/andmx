@@ -312,16 +312,8 @@ fun WorkflowRunDetailDialog(
                                                 style = MaterialTheme.typography.labelSmall,
                                             )
                                         }
-                                        "chart" -> WorkflowDashboard.chart(spec, items).forEach { series ->
-                                            Text(
-                                                buildString {
-                                                    append(series.label)
-                                                    series.unit?.let { append(" (").append(it).append(')') }
-                                                    append(": ")
-                                                    append(series.points.take(20).joinToString(", ") { (x, y) -> "$x=$y" })
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
+                                        "chart" -> WorkflowDashboard.chart(spec, items)?.let { chart ->
+                                            WorkflowChart(chart)
                                         }
                                     }
                                 }
