@@ -11,6 +11,8 @@ import com.andmx.agent.workflow.WorkflowGraph
 import com.andmx.agent.workflow.WorkflowGraphEdge
 import com.andmx.agent.workflow.WorkflowGraphNode
 import com.andmx.agent.workflow.WorkflowNodeStatus
+import com.andmx.agent.workflow.WorkflowPresetArtifact
+import com.andmx.agent.workflow.WorkflowReportItem
 import com.andmx.agent.workflow.WorkflowRunSnapshot
 import com.andmx.agent.workflow.WorkflowRunStatus
 import com.andmx.agent.workflow.WorkflowStrategy
@@ -462,6 +464,113 @@ class DynamicWorkflowRunner(
         else -> WorkflowRunStatus.running
     }
 
+    private fun noteDashboardEvent(runId: String, type: String, event: JsonObject) {
+        when (type) {
+            "report" -> {
+                val artifactId = event["artifactId"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { it.isNotBlank() } ?: return
+                val item = event["item"] ?: return
+                val instance = event["instance"] as? JsonObject
+                val ordinal = instance?.get("ordinal")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val siteId = instance?.get("siteId")?.jsonPrimitive?.contentOrNull.orEmpty()
+                val report = WorkflowReportItem(
+                    artifactId = artifactId,
+                    itemJson = item.toString(),
+                    ordinal = ordinal,
+                    siteId = siteId,
+                )
+                scope.launch {
+                    snapshotLock.withLock {
+                        val current = runStore.readSnapshot(runId) ?: return@withLock
+                        if (current.reports.any {
+                                it.artifactId == artifactId &&
+                                    it.siteId == siteId &&
+                                    it.ordinal == ordinal
+                            }
+                        ) {
+                            return@withLock
+                        }
+                        runStore.writeSnapshot(
+                            current.copy(
+                                reports = current.reports + report,
+                                updatedAt = Instant.now().toString(),
+                            ),
+                        )
+                    }
+                }
+            }
+            "artifact-published" -> {
+                val record = event["artifact"] as? JsonObject ?: return
+                val preset = presetFromRecord(record) ?: return
+                scope.launch {
+                    snapshotLock.withLock {
+                        val current = runStore.readSnapshot(runId) ?: return@withLock
+                        if (current.presets.any { it.id == preset.id }) return@withLock
+                        runStore.writeSnapshot(
+                            current.copy(
+                                presets = current.presets + preset,
+                                updatedAt = Instant.now().toString(),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun presetFromRecord(record: JsonObject): WorkflowPresetArtifact? {
+        val id = record["id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: return null
+        val kind = record["kind"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (kind !in PRESET_KINDS) return null
+        return WorkflowPresetArtifact(
+            description = record["description"]?.jsonPrimitive?.contentOrNull,
+            id = id,
+            kind = kind,
+            specJson = record["spec"]?.toString() ?: "{}",
+            title = record["title"]?.jsonPrimitive?.contentOrNull,
+        )
+    }
+
+    private suspend fun journalDashboard(
+        runId: String,
+    ): Pair<List<WorkflowReportItem>, List<WorkflowPresetArtifact>> {
+        val text = journalStore.load(runId) ?: return emptyList<WorkflowReportItem>() to emptyList()
+        return runCatching {
+            val root = json.parseToJsonElement(text).jsonObject
+            val reports = (root["nodes"]?.jsonArray ?: JsonArray(emptyList()))
+                .flatMap { bucket ->
+                    val entries = bucket.jsonArray.getOrNull(1)?.jsonArray ?: return@flatMap emptyList()
+                    entries.mapNotNull { entry ->
+                        val pair = entry as? JsonArray ?: return@mapNotNull null
+                        val node = pair.getOrNull(1)?.jsonObject ?: return@mapNotNull null
+                        if (node["kind"]?.jsonPrimitive?.contentOrNull != "report") return@mapNotNull null
+                        val artifactId = node["artifactId"]?.jsonPrimitive?.contentOrNull
+                            ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        val item = node["result"] ?: return@mapNotNull null
+                        WorkflowReportItem(
+                            artifactId = artifactId,
+                            itemJson = item.toString(),
+                            ordinal = node["ordinal"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
+                            siteId = node["siteId"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        )
+                    }
+                }
+            val presets = (root["events"]?.jsonArray ?: JsonArray(emptyList()))
+                .flatMap { bucket ->
+                    val entries = bucket.jsonArray.getOrNull(1)?.jsonArray ?: return@flatMap emptyList()
+                    entries.mapNotNull { entry ->
+                        val event = entry.jsonObject["event"]?.jsonObject ?: return@mapNotNull null
+                        if (event["type"]?.jsonPrimitive?.contentOrNull != "artifact-published") {
+                            return@mapNotNull null
+                        }
+                        (event["artifact"] as? JsonObject)?.let(::presetFromRecord)
+                    }
+                }
+            reports to presets.distinctBy { it.id }
+        }.getOrDefault(emptyList<WorkflowReportItem>() to emptyList())
+    }
+
     private fun noteGraphEvent(runId: String, type: String, event: JsonObject) {
         val instance = event["instance"] as? JsonObject ?: return
         val siteId = instance["siteId"]?.jsonPrimitive?.contentOrNull ?: return
@@ -539,7 +648,10 @@ class DynamicWorkflowRunner(
             val type = event?.get("type")?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "event" }
             val message = event?.get("message")?.jsonPrimitive?.contentOrNull
             appendEvent(runId, type, message)
-            event?.let { noteGraphEvent(runId, type, it) }
+            event?.let {
+                noteGraphEvent(runId, type, it)
+                noteDashboardEvent(runId, type, it)
+            }
         }
 
         @JavascriptInterface
@@ -664,10 +776,14 @@ class DynamicWorkflowRunner(
                 snapshotLock.withLock {
                     val current = runStore.readSnapshot(runId) ?: return@withLock
                     val journalArtifacts = journalArtifacts(runId)
+                    val (journalReports, journalPresets) = journalDashboard(runId)
                     val merged = (current.artifacts + journalArtifacts).distinctBy { it.path to it.label }
                     runStore.writeSnapshot(
                         current.copy(
                             artifacts = merged,
+                            presets = (current.presets + journalPresets).distinctBy { it.id },
+                            reports = (current.reports + journalReports)
+                                .distinctBy { Triple(it.artifactId, it.siteId, it.ordinal) },
                             status = status,
                             updatedAt = Instant.now().toString(),
                             completedAt = if (status == WorkflowRunStatus.running) null else Instant.now().toString(),
@@ -784,5 +900,6 @@ class DynamicWorkflowRunner(
         const val KIND = "dynamic"
         const val ASSET_URL = "file:///android_asset/dwf/runner.html"
         const val READY_TIMEOUT_MS = 20_000L
+        private val PRESET_KINDS = setOf("chart", "table", "metrics", "board")
     }
 }

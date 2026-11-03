@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.andmx.agent.workflow.WorkflowDashboard
 import com.andmx.agent.workflow.WorkflowDefinition
 import com.andmx.agent.workflow.WorkflowEvent
 import com.andmx.agent.workflow.WorkflowNodeStatus
@@ -245,6 +246,85 @@ fun WorkflowRunDetailDialog(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                            }
+                        }
+                    }
+                }
+                if (snapshot.presets.isNotEmpty()) {
+                    Spacer(Modifier.padding(4.dp))
+                    Text(tr("看板"), style = MaterialTheme.typography.titleSmall)
+                    snapshot.presets.forEach { preset ->
+                        val spec = WorkflowDashboard.parseSpec(preset.specJson)
+                        val items = WorkflowDashboard.parseItems(
+                            snapshot.reports
+                                .filter { it.artifactId == preset.id }
+                                .map { it.itemJson },
+                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                Text(
+                                    preset.title ?: preset.id,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                if (spec == null) {
+                                    Text(
+                                        tr("无效的看板定义"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                } else {
+                                    when (preset.kind) {
+                                        "table" -> WorkflowDashboard.table(spec, items)?.let { table ->
+                                            Text(
+                                                table.columns.joinToString(" · ") { it.label },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                            table.rows.take(20).forEach { row ->
+                                                Text(
+                                                    row.joinToString(" · "),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                )
+                                            }
+                                        }
+                                        "metrics" -> WorkflowDashboard.metrics(spec, items).forEach { metric ->
+                                            Text(
+                                                buildString {
+                                                    append(metric.label).append(": ").append(metric.value)
+                                                    metric.unit?.let { append(' ').append(it) }
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                        "board" -> WorkflowDashboard.board(spec, items).forEach { column ->
+                                            Text(
+                                                buildString {
+                                                    append(column.name).append(" (")
+                                                    append(column.cards.size).append(")")
+                                                    if (column.cards.isNotEmpty()) {
+                                                        append(" · ").append(column.cards.joinToString(", "))
+                                                    }
+                                                },
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                        "chart" -> WorkflowDashboard.chart(spec, items).forEach { series ->
+                                            Text(
+                                                buildString {
+                                                    append(series.label)
+                                                    series.unit?.let { append(" (").append(it).append(')') }
+                                                    append(": ")
+                                                    append(series.points.take(20).joinToString(", ") { (x, y) -> "$x=$y" })
+                                                },
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

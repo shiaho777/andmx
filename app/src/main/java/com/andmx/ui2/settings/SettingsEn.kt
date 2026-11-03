@@ -1208,4 +1208,6 @@ internal val settingsEn: Map<String, String> = mapOf(
     "待补全留白" to "Open holes",
     "刷新" to "Refresh",
     "产物" to "Artifacts",
+    "看板" to "Dashboard",
+    "无效的看板定义" to "Invalid dashboard spec",
 )

@@ -127,6 +127,23 @@ data class WorkflowArtifact(
 )
 
 @Serializable
+data class WorkflowReportItem(
+    val artifactId: String,
+    val itemJson: String,
+    val ordinal: Int = 0,
+    val siteId: String = "",
+)
+
+@Serializable
+data class WorkflowPresetArtifact(
+    val description: String? = null,
+    val id: String,
+    val kind: String,
+    val specJson: String = "{}",
+    val title: String? = null,
+)
+
+@Serializable
 data class WorkflowPhaseSnapshot(
     val artifactPath: String? = null,
     val activityId: String? = null,
@@ -342,6 +359,8 @@ data class WorkflowRunSnapshot(
     val phases: List<WorkflowPhaseSnapshot>,
     val failure: WorkflowFailure? = null,
     val pauseReason: String? = null,
+    val presets: List<WorkflowPresetArtifact> = emptyList(),
+    val reports: List<WorkflowReportItem> = emptyList(),
     val reportPath: String? = null,
     val recoveryActions: List<WorkflowRecoveryAction> = emptyList(),
     val resultJson: String? = null,

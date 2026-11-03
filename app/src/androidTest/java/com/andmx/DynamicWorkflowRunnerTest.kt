@@ -166,6 +166,9 @@ class DynamicWorkflowRunnerTest {
         try {
             val script = """
                 const reviewer = agent('reviewer', { system: 'be brief' });
+                artifact.metrics('latency', { metrics: [{ field: 'ms', label: 'Latency', unit: 'ms' }] });
+                report({ ms: 12 }, 'latency');
+                report({ ms: 18 }, 'latency');
                 log('starting');
                 const answer = await reviewer.ask('say hi');
                 const body = await files.read('README.md');
@@ -193,6 +196,11 @@ class DynamicWorkflowRunnerTest {
                     it.kind == "ask" && it.status == com.andmx.agent.workflow.WorkflowNodeStatus.completed
                 },
             )
+            assertTrue(
+                "preset artifact was not recorded: ${snapshot.presets}",
+                snapshot.presets.any { it.id == "latency" && it.kind == "metrics" },
+            )
+            assertEquals(2, snapshot.reports.count { it.artifactId == "latency" })
             val journal = journals.load(runId)
             assertNotNull(journal)
             assertTrue(journal!!.contains("\"runId\":\"$runId\""))
