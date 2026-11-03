@@ -218,10 +218,10 @@ Kotlin 也喂探针，所以它不是「另写一个 demo」，而是那条链�
 
 **设备侧 v1 已接线**（2026-11-03）：`assets/dwf/runner.js` 由 `tools/dwf-runner/src/android-entry.ts`
 打包；WebView 主 realm + iframe cell、`PortableJournal` 同步桥、`DynamicWorkflowRunner`（Room
-`workflow_journals`，DB v21）、actor ask/world read/artifact publish 回调、`CreateWorkflow` 启动与
-`ResumeWorkflowRun`/cancel 均已在设备上跑通一条 sequential + ask + files.read 脚本。
-尚未接线：`AmendWorkflow`、`FillWorkflowHole`、typed ask 的 reject/nudge 修复回路、动态 run 的
-产物卡片/完整看板，以及 fanout/hole 的设备侧回归。
+`workflow_journals`，DB v21）、actor ask/world read/artifact publish 回调、`CreateWorkflow` 启动、
+`AmendWorkflow`、`FillWorkflowHole`、`ResumeWorkflowRun`/cancel 均已在设备上跑通一条 sequential +
+ask + files.read 脚本；`runner-probe` 覆盖 fanout/artifact。
+尚未接线：typed ask 的 reject/nudge 设备回归、动态 run 的产物卡片/完整看板，以及 hole/fill 的设备侧回归。
 
 #### 3.7.1 cell 的 realm 替换已验证（2026-10-29）
 
@@ -428,16 +428,17 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **模型轨迹持久化**：`ModelCallTrace` 镜像到 `files/model-traces.json`，重启后仍可查看最近 50 次调用。
 - **工作流恢复**：`ResumeWorkflowRun` 接入 `WorkflowService.resume`，模型侧与 `/dwf resume` 行为一致。
 - **动态脚本 runner v1**：WebView + iframe cell、`runner.js`、Room journal（DB v21）、
-  actor ask / world read / artifact publish 桥；`CreateWorkflow` 启动、`ResumeWorkflowRun`/cancel 已接线，
-  sequential + ask + files.read 在设备上跑通并落 journal。
+  actor ask / world read / artifact publish 桥；`CreateWorkflow` 启动、`AmendWorkflow`、`FillWorkflowHole`、
+  `ResumeWorkflowRun`/cancel 已接线；sequential + ask + files.read 在设备上跑通并落 journal，fanout/artifact 有探针。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
 
 仍缺（按优先级）：
 
-1. **动态工作流 v2**：v1 已能跑 sequential/ask/files.read 并持久化/恢复 journal；仍缺
-   `AmendWorkflow`、`FillWorkflowHole`、typed ask 修复回路，以及 fanout/hole 的设备侧回归与完整产物看板。
+1. **动态工作流 v2**：v1 已能跑 sequential/ask/files.read、fanout/artifact 探针、journal 持久化/恢复，
+   `AmendWorkflow`/`FillWorkflowHole` 已接线；仍缺 typed ask 拒绝修复的设备回归、hole/fill 设备回归
+   与完整产物看板。
 2. **MCP OAuth DCR**：浏览器授权码 + PKCE 已接；尚未实现动态客户端注册（Dynamic Client Registration），
    用户仍需自备 clientId/clientSecret。
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
