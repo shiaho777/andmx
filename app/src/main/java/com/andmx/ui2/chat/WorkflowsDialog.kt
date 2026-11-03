@@ -14,11 +14,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.andmx.agent.workflow.WorkflowDefinition
@@ -112,6 +115,8 @@ fun WorkflowsDialog(
 fun WorkflowRunDetailDialog(
     snapshot: WorkflowRunSnapshot,
     events: List<WorkflowEvent>,
+    openHoles: List<ChatViewModel.WorkflowOpenHole> = emptyList(),
+    onRefresh: () -> Unit = {},
     onCancel: (String) -> Unit,
     onResume: (String) -> Unit = {},
     onDismiss: () -> Unit,
@@ -126,6 +131,8 @@ fun WorkflowRunDetailDialog(
                         "status: ${snapshot.status}  ·  kind: ${snapshot.kind}\n" +
                         snapshot.currentPhase?.let { "current: $it\n" }.orEmpty() +
                         snapshot.reportPath?.let { "report: $it\n" }.orEmpty() +
+                        snapshot.resumedFrom?.let { "resumedFrom: $it\n" }.orEmpty() +
+                        snapshot.supersededBy?.let { "supersededBy: $it\n" }.orEmpty() +
                         snapshot.pauseReason?.let { "paused: $it\n" }.orEmpty() +
                         snapshot.failure?.message?.let { "failure: $it\n" }.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
@@ -136,6 +143,43 @@ fun WorkflowRunDetailDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (openHoles.isNotEmpty()) {
+                    Spacer(Modifier.padding(4.dp))
+                    Text(
+                        tr("待补全留白") + " (${openHoles.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    val now = System.currentTimeMillis()
+                    openHoles.forEach { hole ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                Text(
+                                    hole.name.ifBlank { hole.siteId },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    buildString {
+                                        append(hole.siteId)
+                                        append(" · #").append(hole.ordinal)
+                                        if (hole.since > 0) {
+                                            append(" · 等待 ")
+                                            append(((now - hole.since).coerceAtLeast(0)) / 1000)
+                                            append("s")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
                 }
                 Spacer(Modifier.padding(4.dp))
                 Text(tr("阶段"), style = MaterialTheme.typography.titleSmall)
@@ -171,14 +215,47 @@ fun WorkflowRunDetailDialog(
                 }
                 if (snapshot.artifacts.isNotEmpty()) {
                     Spacer(Modifier.padding(4.dp))
-                    Text(tr("产物 (${snapshot.artifacts.size})"), style = MaterialTheme.typography.titleSmall)
+                    Text(tr("产物") + " (${snapshot.artifacts.size})", style = MaterialTheme.typography.titleSmall)
                     snapshot.artifacts.forEach { a ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                Text(
+                                    a.label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    buildString {
+                                        append(a.contentType)
+                                        if (a.path.isNotBlank()) append(" · ").append(a.path)
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+                snapshot.resultJson?.let { result ->
+                    Spacer(Modifier.padding(4.dp))
+                    Text(tr("返回值"), style = MaterialTheme.typography.titleSmall)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    ) {
                         Text(
-                            a.path,
+                            result.take(4_000),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                         )
                     }
                 }
@@ -199,9 +276,10 @@ fun WorkflowRunDetailDialog(
         },
         confirmButton = {
             Row {
-                if (snapshot.status == WorkflowRunStatus.paused ||
-                    snapshot.status == WorkflowRunStatus.failed ||
-                    snapshot.status == WorkflowRunStatus.cancelled
+                if (snapshot.pauseReason != "superseded" &&
+                    (snapshot.status == WorkflowRunStatus.paused ||
+                        snapshot.status == WorkflowRunStatus.failed ||
+                        snapshot.status == WorkflowRunStatus.cancelled)
                 ) {
                     TextButton(onClick = { onResume(snapshot.runId) }) {
                         Text(tr("恢复运行"))
@@ -217,7 +295,10 @@ fun WorkflowRunDetailDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(tr("返回")) }
+            Row {
+                TextButton(onClick = onRefresh) { Text(tr("刷新")) }
+                TextButton(onClick = onDismiss) { Text(tr("返回")) }
+            }
         },
     )
 }

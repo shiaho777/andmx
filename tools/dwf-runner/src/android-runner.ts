@@ -64,6 +64,7 @@ export interface StartConfig {
   args?: Record<string, unknown>;
   scriptHash?: string;
   journalJson?: string;
+  resumedFrom?: string;
   timeoutMs?: number;
 }
 
@@ -126,6 +127,7 @@ export class WorkflowRunner {
       ...(config.scriptText === undefined ? {} : { scriptText: config.scriptText }),
       ...(config.args === undefined ? {} : { args: config.args }),
       ...(config.scriptHash === undefined ? {} : { scriptHash: config.scriptHash }),
+      ...(config.resumedFrom === undefined ? {} : { resumedFrom: config.resumedFrom }),
       ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
       cwd: config.cwd,
     });
@@ -214,6 +216,16 @@ export class WorkflowRunner {
     const run = this.runs.get(runId);
     run?.endpoint.close();
     this.runs.delete(runId);
+  }
+
+  stop(runId: string, reason: string, supersededBy?: string): boolean {
+    const run = this.runs.get(runId);
+    if (run === undefined) return false;
+    const engine = run.engine as {
+      stop(reason: string, error?: unknown, supersededBy?: string): void;
+    };
+    engine.stop(reason, undefined, supersededBy);
+    return true;
   }
 
   private driverForRequest(requestId: string): BridgeDriver | undefined {

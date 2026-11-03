@@ -12,6 +12,7 @@ declare global {
       artifactResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void;
       fillHole(runId: string, fillJson: string): { ok: boolean; reason?: string };
       openHoles(runId: string): unknown[];
+      stop(runId: string, reason: string, supersededBy?: string): boolean;
       cancel(runId: string): void;
     };
   }
@@ -65,5 +66,6 @@ window.__DWF_RUNNER = {
     runner.artifactResult(requestId, ok, payloadJson, error),
   fillHole: (runId, fillJson) => runner.fillHole(runId, fillJson),
   openHoles: (runId) => runner.openHoles(runId),
+  stop: (runId, reason, supersededBy) => runner.stop(runId, reason, supersededBy),
   cancel: (runId) => runner.cancel(runId),
 };

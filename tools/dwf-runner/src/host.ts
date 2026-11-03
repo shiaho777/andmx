@@ -66,6 +66,7 @@ export interface StartRunOptions {
   args?: Record<string, unknown>;
   scriptHash?: string;
   parentSessionId?: string;
+  resumedFrom?: string;
   cwd: string;
   /**
    * journal **不在这里**：它挂在 `driver.journal` 上（上游 `EngineConfig` 没有这个字段）。
@@ -106,6 +107,7 @@ export function startRun(options: StartRunOptions): RunHandle {
     ...(options.args === undefined ? {} : { args: options.args }),
     ...(options.name === undefined ? {} : { name: options.name }),
     ...(options.parentSessionId === undefined ? {} : { parentSessionId: options.parentSessionId }),
+    ...(options.resumedFrom === undefined ? {} : { resumedFrom: options.resumedFrom }),
     ...(options.scriptHash === undefined ? {} : { scriptHash: options.scriptHash }),
     ...(options.scriptText === undefined ? {} : { scriptText: options.scriptText }),
     ...(options.sitePhases === undefined ? {} : { sitePhases: options.sitePhases }),

@@ -5,6 +5,7 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import com.andmx.agent.workflow.WorkflowArtifact
 import com.andmx.agent.workflow.WorkflowFailure
 import com.andmx.agent.workflow.WorkflowGraph
 import com.andmx.agent.workflow.WorkflowRunSnapshot
@@ -92,6 +93,8 @@ class DynamicWorkflowRunner(
         script: String,
         cwd: String,
         conversationId: Long,
+        runIdOverride: String? = null,
+        resumedFrom: String? = null,
     ): Pair<String?, String?> {
         val analysis = runCatching { analyzer.analyze(script) }.getOrElse {
             return null to (it.message ?: "workflow analysis failed")
@@ -100,7 +103,8 @@ class DynamicWorkflowRunner(
             return null to analysis.diagnostics.joinToString("\n") { it.render() }
         }
         val lowered = loweredOf(analysis) ?: return null to "workflow analysis did not produce a lowered body"
-        val runId = "dwf_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+        val runId = runIdOverride
+            ?: "dwf_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val now = Instant.now().toString()
         val snapshot = WorkflowRunSnapshot(
             artifacts = emptyList(),
@@ -111,6 +115,7 @@ class DynamicWorkflowRunner(
             phaseOrder = emptyList(),
             phases = emptyList(),
             runId = runId,
+            resumedFrom = resumedFrom,
             status = WorkflowRunStatus.running,
             strategy = WorkflowStrategy.DEFAULT,
             task = script.lineSequence().firstOrNull()?.trim()?.take(200).orEmpty().ifBlank { "dynamic workflow" },
@@ -126,6 +131,7 @@ class DynamicWorkflowRunner(
             lowered = lowered,
             journalJson = null,
             conversationId = conversationId,
+            resumedFrom = resumedFrom,
         )
         val error = launch(config)
         return if (error == null) runId to null else {
@@ -135,6 +141,11 @@ class DynamicWorkflowRunner(
     }
 
     suspend fun resume(runId: String): Pair<Boolean, String?> {
+        val existing = runStore.readSnapshot(runId)
+        if (existing?.pauseReason == "superseded") {
+            val by = existing.supersededBy?.let { " by $it" }.orEmpty()
+            return false to "Workflow run $runId was superseded$by; resume the successor instead."
+        }
         val journal = journalStore.load(runId) ?: return false to "No journal for workflow run $runId."
         val record = runCatching {
             json.parseToJsonElement(journal).jsonObject["runs"]?.jsonArray?.firstOrNull()?.jsonObject
@@ -168,6 +179,40 @@ class DynamicWorkflowRunner(
                 null,
             )
         }
+    }
+
+    suspend fun supersede(runId: String, byRunId: String): Boolean {
+        val view = ensureWebView()
+        val stopped = if (view == null) {
+            false
+        } else {
+            val raw = evaluate(
+                view,
+                "String(window.__DWF_RUNNER.stop(" +
+                    "${JSONObject.quote(runId)},${JSONObject.quote("superseded")},${JSONObject.quote(byRunId)}))",
+            )
+            raw?.contains("true") == true
+        }
+        if (!stopped) {
+            val current = runStore.readSnapshot(runId) ?: return false
+            if (current.status == WorkflowRunStatus.running ||
+                current.status == WorkflowRunStatus.paused ||
+                current.status == WorkflowRunStatus.pending
+            ) {
+                val now = Instant.now().toString()
+                runStore.writeSnapshot(
+                    current.copy(
+                        status = WorkflowRunStatus.cancelled,
+                        updatedAt = now,
+                        completedAt = now,
+                        pauseReason = "superseded",
+                        supersededBy = byRunId,
+                        failure = null,
+                    ),
+                )
+            }
+        }
+        return true
     }
 
     suspend fun fillHole(runId: String, fillJson: String): Pair<Boolean, String?> {
@@ -274,6 +319,7 @@ class DynamicWorkflowRunner(
         lowered: String,
         journalJson: String?,
         conversationId: Long,
+        resumedFrom: String? = null,
     ): String {
         val raw = analysis.raw
         val askSpecs = raw["askSpecs"] as? JsonArray ?: JsonArray(emptyList())
@@ -288,6 +334,7 @@ class DynamicWorkflowRunner(
             put("caps", buildJsonObject { put("maxConcurrency", 4) })
             put("scriptHash", sha256(script))
             put("conversationId", conversationId)
+            resumedFrom?.let { put("resumedFrom", it) }
             journalJson?.let { put("journalJson", it) }
         }.toString()
     }
@@ -363,7 +410,7 @@ class DynamicWorkflowRunner(
     private fun settlementStatus(status: String, stopReason: String?): WorkflowRunStatus = when (status) {
         "completed" -> WorkflowRunStatus.completed
         "errored" -> WorkflowRunStatus.failed
-        "stopped" -> if (stopReason == "user" || stopReason == "model") {
+        "stopped" -> if (stopReason == "user" || stopReason == "model" || stopReason == "superseded") {
             WorkflowRunStatus.cancelled
         } else {
             WorkflowRunStatus.paused
@@ -449,12 +496,13 @@ class DynamicWorkflowRunner(
                 val runId = parsed?.get("runId")?.jsonPrimitive?.contentOrNull.orEmpty()
                 val request = parsed?.get("request")?.toString() ?: requestJson
                 val result = runCatching { host.publishArtifact(runId, request) }
-                result.onSuccess {
+                result.onSuccess { recordJson ->
+                    recordArtifact(runId, recordJson)
                     postJsRaw(
                         "artifactResult",
                         JSONObject.quote(requestId),
                         "true",
-                        JSONObject.quote(it),
+                        JSONObject.quote(recordJson),
                         "null",
                     )
                 }.onFailure {
@@ -473,24 +521,46 @@ class DynamicWorkflowRunner(
         fun settled(runId: String, settlementJson: String) {
             val settlement = runCatching { json.parseToJsonElement(settlementJson).jsonObject }.getOrNull()
             val statusText = settlement?.get("status")?.jsonPrimitive?.contentOrNull.orEmpty()
-            val stopReason = settlement?.get("stopReason")?.jsonPrimitive?.contentOrNull
+            val stopReason = settlement?.get("reason")?.jsonPrimitive?.contentOrNull
+                ?: settlement?.get("stopReason")?.jsonPrimitive?.contentOrNull
             val status = settlementStatus(statusText, stopReason)
-            val failureMessage = settlement?.get("error")
-                ?.let { (it as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull }
-                ?: stopReason
-            updateSnapshot(runId) { snapshot ->
-                snapshot.copy(
-                    status = status,
-                    updatedAt = Instant.now().toString(),
-                    completedAt = if (status == WorkflowRunStatus.running) null else Instant.now().toString(),
-                    failure = failureMessage?.let {
-                        WorkflowFailure(
-                            kind = if (status == WorkflowRunStatus.failed) "workflow" else "interrupted",
-                            message = it,
-                            recoverable = status == WorkflowRunStatus.paused,
-                            retryable = status == WorkflowRunStatus.paused,
-                        )
-                    },
+            val failureMessage = if (
+                statusText == "stopped" &&
+                (stopReason == "user" || stopReason == "model" || stopReason == "superseded")
+            ) {
+                null
+            } else {
+                settlement?.get("error")
+                    ?.let { (it as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull }
+                    ?: stopReason
+            }
+            val supersededBy = settlement?.get("supersededBy")?.jsonPrimitive?.contentOrNull
+            val resultJson = settlement?.get("artifact")
+                ?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.toString()
+                ?.take(64_000)
+            scope.launch {
+                val current = runStore.readSnapshot(runId) ?: return@launch
+                val journalArtifacts = journalArtifacts(runId)
+                val merged = (current.artifacts + journalArtifacts).distinctBy { it.path to it.label }
+                runStore.writeSnapshot(
+                    current.copy(
+                        artifacts = merged,
+                        status = status,
+                        updatedAt = Instant.now().toString(),
+                        completedAt = if (status == WorkflowRunStatus.running) null else Instant.now().toString(),
+                        resultJson = resultJson ?: current.resultJson,
+                        supersededBy = supersededBy ?: current.supersededBy,
+                        pauseReason = if (stopReason == "superseded") "superseded" else current.pauseReason,
+                        failure = failureMessage?.let {
+                            WorkflowFailure(
+                                kind = if (status == WorkflowRunStatus.failed) "workflow" else "interrupted",
+                                message = it,
+                                recoverable = status == WorkflowRunStatus.paused,
+                                retryable = status == WorkflowRunStatus.paused,
+                            )
+                        },
+                    ),
                 )
             }
         }
@@ -499,6 +569,69 @@ class DynamicWorkflowRunner(
         fun log(message: String) {
             android.util.Log.i("DynamicWorkflowRunner", message.take(4_000))
         }
+    }
+
+    private fun recordArtifact(runId: String, recordJson: String) {
+        val obj = runCatching { json.parseToJsonElement(recordJson).jsonObject }.getOrNull() ?: return
+        val artifact = artifactFromRecord(obj) ?: return
+        scope.launch {
+            val current = runStore.readSnapshot(runId) ?: return@launch
+            if (current.artifacts.any { it.path == artifact.path && it.label == artifact.label }) {
+                return@launch
+            }
+            runStore.writeSnapshot(
+                current.copy(
+                    artifacts = current.artifacts + artifact,
+                    updatedAt = Instant.now().toString(),
+                ),
+            )
+        }
+    }
+
+    private suspend fun journalArtifacts(runId: String): List<WorkflowArtifact> {
+        val text = journalStore.load(runId) ?: return emptyList()
+        return runCatching {
+            val buckets = json.parseToJsonElement(text).jsonObject["events"]?.jsonArray
+                ?: return@runCatching emptyList()
+            buckets.flatMap { bucket ->
+                val stored = bucket.jsonArray.getOrNull(1)?.jsonArray ?: return@flatMap emptyList()
+                stored.mapNotNull { entry ->
+                    val event = entry.jsonObject["event"]?.jsonObject ?: return@mapNotNull null
+                    if (event["type"]?.jsonPrimitive?.contentOrNull != "artifact-published") {
+                        return@mapNotNull null
+                    }
+                    (event["artifact"] as? JsonObject)?.let(::artifactFromRecord)
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun artifactFromRecord(record: JsonObject): WorkflowArtifact? {
+        val id = record["id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: return null
+        val version = record["version"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1
+        val kind = record["kind"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val contentType = record["contentType"]?.jsonPrimitive?.contentOrNull
+            ?: when (kind) {
+                "markdown" -> "text/markdown"
+                "file" -> "application/octet-stream"
+                else -> "application/json"
+            }
+        val path = record["uri"]?.jsonPrimitive?.contentOrNull
+            ?: record["sourcePath"]?.jsonPrimitive?.contentOrNull
+            ?: ""
+        val publishedAt = record["publishedAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+        val createdAt = publishedAt?.let { Instant.ofEpochMilli(it).toString() }
+            ?: Instant.now().toString()
+        val title = record["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val label = title ?: if (path.isNotBlank()) "$id v$version" else "$id · $kind v$version"
+        return WorkflowArtifact(
+            contentType = contentType,
+            createdAt = createdAt,
+            label = label,
+            path = path,
+            phase = record["siteId"]?.jsonPrimitive?.contentOrNull,
+        )
     }
 
     private fun parseAsk(runId: String, requestId: String, requestJson: String): DynamicAskRequest? =
