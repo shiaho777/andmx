@@ -400,6 +400,95 @@ class DynamicWorkflowRunnerTest {
     }
 
     @Test
+    fun chainedAmendResolvesAncestorTranscriptSource() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val analyzer = WebViewWorkflowScriptAnalyzer(context)
+        val host = Host()
+        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val journals = WorkflowJournalStore(context)
+        val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
+        val service = WorkflowService(
+            scope = scope,
+            store = store,
+            actorRunner = { error("dynamic runs do not use the phase actor runner") },
+        )
+        val tools = WorkflowTools(
+            service = service,
+            analyzer = analyzer,
+            conversationId = 0L,
+            cwd = { "/root/project" },
+            dynamicRunner = runner,
+        )
+        val amend = tools.all().first { it.name == "AmendWorkflow" }
+
+        suspend fun waitCompleted(runId: String): com.andmx.agent.workflow.WorkflowRunSnapshot {
+            var snapshot = store.readSnapshot(runId)
+            val deadline = System.currentTimeMillis() + 30_000
+            while (snapshot?.status != WorkflowRunStatus.completed &&
+                System.currentTimeMillis() < deadline
+            ) {
+                delay(100)
+                snapshot = store.readSnapshot(runId)
+            }
+            assertEquals(WorkflowRunStatus.completed, snapshot?.status)
+            return snapshot!!
+        }
+
+        suspend fun amendTo(runId: String, script: String): String {
+            val result = amend.execute(
+                buildJsonObject {
+                    put("run_id", runId)
+                    put("script", script)
+                },
+            )
+            assertFalse(result.output, result.isError)
+            return Regex("new run (\\w+)").find(result.output)?.groupValues?.get(1)
+                ?: error("no successor id in: ${result.output}")
+        }
+
+        try {
+            val base = """
+                const worker = agent('worker');
+                const content = await files.read('a.txt');
+                const first = await worker.ask('first');
+                return content + '|' + first;
+            """.trimIndent()
+            val (baseId, error) = runner.start(base, cwd = "/root/project", conversationId = 0L)
+            assertFalse(error.orEmpty(), error != null)
+            waitCompleted(baseId!!)
+
+            val middleId = amendTo(baseId, base)
+            waitCompleted(middleId)
+            assertEquals(baseId, store.readSnapshot(middleId)?.resumedFrom)
+
+            val finalScript = """
+                const worker = agent('worker');
+                const content = await files.read('a.txt');
+                const first = await worker.ask('first');
+                const third = await worker.ask('third');
+                return content + '|' + first + '|' + third;
+            """.trimIndent()
+            val finalId = amendTo(middleId, finalScript)
+            waitCompleted(finalId)
+            assertEquals(middleId, store.readSnapshot(finalId)?.resumedFrom)
+
+            assertEquals(1, host.instructions.count { it == "first" })
+            assertEquals(1, host.instructions.count { it == "third" })
+            assertEquals(1, host.worldReads.get())
+            assertTrue(
+                "successor did not fall back to the ancestor session: ${host.seeds}",
+                host.seeds.any { it.contains(baseId) },
+            )
+            assertNotNull(journals.load(finalId))
+        } finally {
+            runner.close()
+            analyzer.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun typedAskRejectsAndRepairs() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

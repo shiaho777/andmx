@@ -78,7 +78,7 @@ export interface StartConfig {
   args?: Record<string, unknown>;
   scriptHash?: string;
   journalJson?: string;
-  importedJournal?: string;
+  importedJournals?: string[];
   resumedFrom?: string;
   timeoutMs?: number;
 }
@@ -117,19 +117,51 @@ interface JournalActor {
   resolvedModel?: string;
 }
 
-/**
- * 前驱 journal → amend-resume 导入缓存。只导入按 actorSeq 连续完成的 ask 前缀与已完成的
- * world-read/world-run 行；重名 actor 两个都不收（名字是缓存身份键）。
- */
-function importedCacheFromJournal(journalJson: string): ImportedRunCache | undefined {
+interface ParsedJournal {
+  actors: JournalActor[];
+  nodes: JournalNode[];
+}
+
+function parseJournal(journalJson: string): ParsedJournal {
   const data = JSON.parse(journalJson) as {
     actors?: Array<[string, Array<[string, JournalActor]>]>;
     nodes?: Array<[string, Array<[string, JournalNode]>]>;
   };
-  const actors = (data.actors ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
-  const nodes = (data.nodes ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
+  return {
+    actors: (data.actors ?? []).flatMap(([, entries]) => entries.map(([, record]) => record)),
+    nodes: (data.nodes ?? []).flatMap(([, entries]) => entries.map(([, record]) => record)),
+  };
+}
+
+function samePersona(left: JournalActor, right: JournalActor, name: string): boolean {
+  const leftPersona = left.persona ?? { name };
+  const rightPersona = right.persona ?? { name };
+  return (leftPersona.name ?? name) === (rightPersona.name ?? name) &&
+    (leftPersona.system ?? "") === (rightPersona.system ?? "");
+}
+
+/**
+ * 前驱 journal → amend-resume 导入缓存。只导入按 actorSeq 连续完成的 ask 前缀与已完成的
+ * world-read/world-run 行；重名 actor 两个都不收（名字是缓存身份键）。
+ *
+ * 转录源沿 `resumedFrom` 链查找：直接前驱的 actor 若没有 sessionId（它的 ask 全部命中缓存），
+ * 就用最近一个持有同名、同 persona 会话的祖先。这样二级以上 Amend 也能接续转录。
+ */
+function importedCacheFromJournal(journalJsons: string[]): ImportedRunCache | undefined {
+  const journals = journalJsons
+    .map((text) => {
+      try {
+        return parseJournal(text);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((journal): journal is ParsedJournal => journal !== undefined);
+  const primary = journals[0];
+  if (primary === undefined) return undefined;
+  const ancestors = journals.slice(1).flatMap((journal) => journal.actors);
   const byName = new Map<string, JournalActor[]>();
-  for (const actor of actors) {
+  for (const actor of primary.actors) {
     const name = actor.name;
     if (name === undefined || name === "") continue;
     const bucket = byName.get(name);
@@ -140,7 +172,7 @@ function importedCacheFromJournal(journalJson: string): ImportedRunCache | undef
   for (const [name, candidates] of byName) {
     if (candidates.length !== 1) continue;
     const actor = candidates[0]!;
-    const asks = nodes.filter(
+    const asks = primary.nodes.filter(
       (node) =>
         node.kind === "ask" &&
         node.actorSiteId === actor.siteId &&
@@ -158,15 +190,22 @@ function importedCacheFromJournal(journalJson: string): ImportedRunCache | undef
       });
     }
     if (entries.length === 0) continue;
+    const source = [actor, ...ancestors].find(
+      (candidate) =>
+        candidate.name === name &&
+        candidate.sessionId !== undefined &&
+        candidate.sessionId !== "" &&
+        samePersona(candidate, actor, name),
+    );
     cache.set(name, {
       persona: actor.persona ?? { name },
       entries,
-      transcriptSourceSessionId: actor.sessionId ?? "",
-      ...(actor.resolvedModel === undefined ? {} : { resolvedModel: actor.resolvedModel }),
+      transcriptSourceSessionId: source?.sessionId ?? "",
+      ...(source?.resolvedModel === undefined ? {} : { resolvedModel: source.resolvedModel }),
     });
   }
   const world = new Map<string, ImportedWorldEntry[]>();
-  for (const node of nodes) {
+  for (const node of primary.nodes) {
     if (node.status !== "completed") continue;
     if (node.kind !== "world-read" && node.kind !== "world-run") continue;
     const queue = world.get(node.inputHash) ?? [];
@@ -196,9 +235,9 @@ export class WorkflowRunner {
       throw new Error("runner: runId, lowered and cwd are required");
     }
     const importedCache =
-      config.importedJournal === undefined
+      config.importedJournals === undefined || config.importedJournals.length === 0
         ? undefined
-        : importedCacheFromJournal(config.importedJournal);
+        : importedCacheFromJournal(config.importedJournals);
     const journal = config.journalJson
       ? PortableJournal.fromJSON(JSON.parse(config.journalJson), this.env.bridge)
       : new PortableJournal(this.env.bridge);

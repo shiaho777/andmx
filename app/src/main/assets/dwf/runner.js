@@ -4041,12 +4041,33 @@ declare const args: Readonly<Record<string, unknown>>;
   __name(readSupersededBy, "readSupersededBy");
 
   // src/android-runner.ts
-  function importedCacheFromJournal(journalJson) {
+  function parseJournal(journalJson) {
     const data = JSON.parse(journalJson);
-    const actors = (data.actors ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
-    const nodes = (data.nodes ?? []).flatMap(([, entries]) => entries.map(([, record]) => record));
+    return {
+      actors: (data.actors ?? []).flatMap(([, entries]) => entries.map(([, record]) => record)),
+      nodes: (data.nodes ?? []).flatMap(([, entries]) => entries.map(([, record]) => record))
+    };
+  }
+  __name(parseJournal, "parseJournal");
+  function samePersona(left, right, name) {
+    const leftPersona = left.persona ?? { name };
+    const rightPersona = right.persona ?? { name };
+    return (leftPersona.name ?? name) === (rightPersona.name ?? name) && (leftPersona.system ?? "") === (rightPersona.system ?? "");
+  }
+  __name(samePersona, "samePersona");
+  function importedCacheFromJournal(journalJsons) {
+    const journals = journalJsons.map((text) => {
+      try {
+        return parseJournal(text);
+      } catch {
+        return void 0;
+      }
+    }).filter((journal) => journal !== void 0);
+    const primary = journals[0];
+    if (primary === void 0) return void 0;
+    const ancestors = journals.slice(1).flatMap((journal) => journal.actors);
     const byName = /* @__PURE__ */ new Map();
-    for (const actor of actors) {
+    for (const actor of primary.actors) {
       const name = actor.name;
       if (name === void 0 || name === "") continue;
       const bucket = byName.get(name);
@@ -4057,7 +4078,7 @@ declare const args: Readonly<Record<string, unknown>>;
     for (const [name, candidates] of byName) {
       if (candidates.length !== 1) continue;
       const actor = candidates[0];
-      const asks = nodes.filter(
+      const asks = primary.nodes.filter(
         (node) => node.kind === "ask" && node.actorSiteId === actor.siteId && node.actorOrdinal === actor.ordinal
       );
       const entries = [];
@@ -4072,15 +4093,18 @@ declare const args: Readonly<Record<string, unknown>>;
         });
       }
       if (entries.length === 0) continue;
+      const source = [actor, ...ancestors].find(
+        (candidate) => candidate.name === name && candidate.sessionId !== void 0 && candidate.sessionId !== "" && samePersona(candidate, actor, name)
+      );
       cache.set(name, {
         persona: actor.persona ?? { name },
         entries,
-        transcriptSourceSessionId: actor.sessionId ?? "",
-        ...actor.resolvedModel === void 0 ? {} : { resolvedModel: actor.resolvedModel }
+        transcriptSourceSessionId: source?.sessionId ?? "",
+        ...source?.resolvedModel === void 0 ? {} : { resolvedModel: source.resolvedModel }
       });
     }
     const world = /* @__PURE__ */ new Map();
-    for (const node of nodes) {
+    for (const node of primary.nodes) {
       if (node.status !== "completed") continue;
       if (node.kind !== "world-read" && node.kind !== "world-run") continue;
       const queue = world.get(node.inputHash) ?? [];
@@ -4104,7 +4128,7 @@ declare const args: Readonly<Record<string, unknown>>;
       if (!config.runId || !config.lowered || !config.cwd) {
         throw new Error("runner: runId, lowered and cwd are required");
       }
-      const importedCache = config.importedJournal === void 0 ? void 0 : importedCacheFromJournal(config.importedJournal);
+      const importedCache = config.importedJournals === void 0 || config.importedJournals.length === 0 ? void 0 : importedCacheFromJournal(config.importedJournals);
       const journal = config.journalJson ? PortableJournal.fromJSON(JSON.parse(config.journalJson), this.env.bridge) : new PortableJournal(this.env.bridge);
       const driver = new BridgeDriver(
         config.runId,
