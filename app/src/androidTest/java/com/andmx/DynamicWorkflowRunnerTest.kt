@@ -293,9 +293,10 @@ class DynamicWorkflowRunnerTest {
         try {
             val oldScript = """
                 const worker = agent('worker');
+                const content = await files.read('a.txt');
                 const first = await worker.ask('first');
                 const second = await worker.ask('second');
-                return first + '|' + second;
+                return content + '|' + first + '|' + second;
             """.trimIndent()
             val (oldRunId, error) = runner.start(oldScript, cwd = "/root/project", conversationId = 0L)
             assertFalse(error.orEmpty(), error != null)
@@ -317,9 +318,10 @@ class DynamicWorkflowRunnerTest {
                         "script",
                         """
                             const worker = agent('worker');
+                            const content = await files.read('a.txt');
                             const first = await worker.ask('first');
                             const amended = await worker.ask('amended');
-                            return first + '|' + amended;
+                            return content + '|' + first + '|' + amended;
                         """.trimIndent(),
                     )
                 },
@@ -359,6 +361,11 @@ class DynamicWorkflowRunnerTest {
                 host.instructions.count { it == "first" },
             )
             assertTrue("the amended ask never went live", host.instructions.contains("amended"))
+            assertEquals(
+                "the world read should have been imported",
+                1,
+                host.worldReads.get(),
+            )
             assertNotNull(journals.load(successorId))
         } finally {
             runner.close()

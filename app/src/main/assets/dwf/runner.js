@@ -4079,8 +4079,16 @@ declare const args: Readonly<Record<string, unknown>>;
         ...actor.resolvedModel === void 0 ? {} : { resolvedModel: actor.resolvedModel }
       });
     }
-    if (cache.size === 0) return void 0;
-    return { actors: cache, world: /* @__PURE__ */ new Map() };
+    const world = /* @__PURE__ */ new Map();
+    for (const node of nodes) {
+      if (node.status !== "completed") continue;
+      if (node.kind !== "world-read" && node.kind !== "world-run") continue;
+      const queue = world.get(node.inputHash) ?? [];
+      queue.push({ inputHash: node.inputHash, kind: node.kind, result: node.result });
+      world.set(node.inputHash, queue);
+    }
+    if (cache.size === 0 && world.size === 0) return void 0;
+    return { actors: cache, world };
   }
   __name(importedCacheFromJournal, "importedCacheFromJournal");
   var _WorkflowRunner = class _WorkflowRunner {

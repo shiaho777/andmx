@@ -28,6 +28,7 @@ interface RunResult {
   asks: Array<{ siteId: string; instructions: string; typed: boolean }>;
   events: string[];
   actors: number;
+  worldReads: number;
 }
 
 async function runScript(
@@ -44,6 +45,7 @@ async function runScript(
   const events: string[] = [];
   let journal: any = undefined;
   let actors = 0;
+  let worldReads = 0;
   let settle!: (value: any) => void;
   const settled = new Promise<any>((resolve) => { settle = resolve; });
   const bridge: RunnerBridge = {
@@ -64,6 +66,7 @@ async function runScript(
     continueAsk() {},
     cancelAsk() {},
     worldRead(requestId) {
+      worldReads += 1;
       queueMicrotask(() => {
         runner.worldResult(requestId, true, JSON.stringify(worldValue ?? "world-content"));
       });
@@ -121,7 +124,7 @@ async function runScript(
     }
   }
   const settlement = await settled;
-  return { settlement, journal, asks, events, actors };
+  return { settlement, journal, asks, events, actors, worldReads };
 }
 
 async function main(): Promise<void> {
@@ -184,25 +187,32 @@ async function main(): Promise<void> {
 
   const warmBase = await runScript(String.raw`
     const worker = agent('warm');
+    const content = await files.read('a.txt');
     const first = await worker.ask('first');
-    return first;
-  `);
+    return content + '|' + first;
+  `, "warm-world");
   check("warm base completed", warmBase.settlement.status === "completed", warmBase.settlement);
   const warm = await runScript(
     String.raw`
       const worker = agent('warm');
+      const content = await files.read('a.txt');
       const first = await worker.ask('first');
       const second = await worker.ask('second');
-      return first + '|' + second;
+      return content + '|' + first + '|' + second;
     `,
-    undefined,
+    "warm-world",
     undefined,
     JSON.stringify(warmBase.journal),
   );
   check("warm completed", warm.settlement.status === "completed", warm.settlement);
   check("warm reused first ask", warm.asks.length === 1, warm.asks);
   check("warm ran only the new ask", warm.asks[0]?.instructions === "second", warm.asks);
-  check("warm artifact", warm.settlement.artifact === "actor-done|actor-done", warm.settlement.artifact);
+  check("warm reused world read", warm.worldReads === 0, warm.worldReads);
+  check(
+    "warm artifact",
+    warm.settlement.artifact === "warm-world|actor-done|actor-done",
+    warm.settlement.artifact,
+  );
 
   if (failures.length > 0) {
     process.stderr.write(`runner-probe failures:\n${failures.map((f) => `  - ${f}`).join("\n")}\n`);
