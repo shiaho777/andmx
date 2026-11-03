@@ -64,6 +64,9 @@ interface DynamicWorkflowHost {
     fun cancelAsk(requestId: String)
     suspend fun worldRead(op: String, argsJson: String): String
     suspend fun publishArtifact(runId: String, requestJson: String): String
+
+    /** 子代理即将执行改写型工具：关闭 amend 导入缓存，避免复用陈旧结果。 */
+    suspend fun markMutating(runId: String, siteId: String, ordinal: Int) {}
 }
 
 /**
@@ -95,6 +98,7 @@ class DynamicWorkflowRunner(
         conversationId: Long,
         runIdOverride: String? = null,
         resumedFrom: String? = null,
+        importJournalFrom: String? = null,
     ): Pair<String?, String?> {
         val analysis = runCatching { analyzer.analyze(script) }.getOrElse {
             return null to (it.message ?: "workflow analysis failed")
@@ -123,6 +127,7 @@ class DynamicWorkflowRunner(
             definitionId = KIND,
         )
         runStore.writeRunRow(snapshot, conversationId)
+        val importedJournal = importJournalFrom?.let { journalStore.load(it) }
         val config = configJson(
             runId = runId,
             analysis = analysis,
@@ -132,6 +137,7 @@ class DynamicWorkflowRunner(
             journalJson = null,
             conversationId = conversationId,
             resumedFrom = resumedFrom,
+            importedJournal = importedJournal,
         )
         val error = launch(config)
         return if (error == null) runId to null else {
@@ -213,6 +219,16 @@ class DynamicWorkflowRunner(
             }
         }
         return true
+    }
+
+    suspend fun markMutating(runId: String, siteId: String, ordinal: Int): Boolean {
+        val view = ensureWebView() ?: return false
+        val raw = evaluate(
+            view,
+            "String(window.__DWF_RUNNER.markMutating(" +
+                "${JSONObject.quote(runId)},${JSONObject.quote(siteId)},$ordinal))",
+        )
+        return raw?.contains("true") == true
     }
 
     suspend fun fillHole(runId: String, fillJson: String): Pair<Boolean, String?> {
@@ -320,6 +336,7 @@ class DynamicWorkflowRunner(
         journalJson: String?,
         conversationId: Long,
         resumedFrom: String? = null,
+        importedJournal: String? = null,
     ): String {
         val raw = analysis.raw
         val askSpecs = raw["askSpecs"] as? JsonArray ?: JsonArray(emptyList())
@@ -335,6 +352,7 @@ class DynamicWorkflowRunner(
             put("scriptHash", sha256(script))
             put("conversationId", conversationId)
             resumedFrom?.let { put("resumedFrom", it) }
+            importedJournal?.let { put("importedJournal", it) }
             journalJson?.let { put("journalJson", it) }
         }.toString()
     }

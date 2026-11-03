@@ -315,7 +315,12 @@ class DynamicWorkflowRunnerTest {
                     put("run_id", oldRunId)
                     put(
                         "script",
-                        "const worker = agent('worker'); return await worker.ask('amended');",
+                        """
+                            const worker = agent('worker');
+                            const first = await worker.ask('first');
+                            const amended = await worker.ask('amended');
+                            return first + '|' + amended;
+                        """.trimIndent(),
                     )
                 },
             )
@@ -348,6 +353,12 @@ class DynamicWorkflowRunnerTest {
                 successor = store.readSnapshot(successorId)
             }
             assertEquals(WorkflowRunStatus.completed, successor?.status)
+            assertEquals(
+                "the first ask should have been imported, instructions=${host.instructions}",
+                1,
+                host.instructions.count { it == "first" },
+            )
+            assertTrue("the amended ask never went live", host.instructions.contains("amended"))
             assertNotNull(journals.load(successorId))
         } finally {
             runner.close()
