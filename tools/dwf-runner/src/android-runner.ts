@@ -20,7 +20,9 @@ import type {
   ImportedActorCandidate,
   ImportedAskEntry,
   ImportedRunCache,
+  ImportedWorldEntry,
   JournalStorePort,
+  NodeKind,
   PersonaSpec,
   RunEvent,
   SessionRef,
@@ -87,7 +89,7 @@ interface JournalNode {
   runId: string;
   siteId: string;
   ordinal: number;
-  kind: string;
+  kind: NodeKind;
   actorSiteId?: string;
   actorOrdinal?: number;
   actorSeq?: number;
@@ -108,8 +110,8 @@ interface JournalActor {
 }
 
 /**
- * 前驱 journal → amend-resume 导入缓存。只导入按 actorSeq 连续完成的 ask 前缀；
- * 重名 actor 两个都不收（名字是缓存身份键）；world 条目暂不导入。
+ * 前驱 journal → amend-resume 导入缓存。只导入按 actorSeq 连续完成的 ask 前缀与已完成的
+ * world-read/world-run 行；重名 actor 两个都不收（名字是缓存身份键）。
  */
 function importedCacheFromJournal(journalJson: string): ImportedRunCache | undefined {
   const data = JSON.parse(journalJson) as {
@@ -155,8 +157,16 @@ function importedCacheFromJournal(journalJson: string): ImportedRunCache | undef
       ...(actor.resolvedModel === undefined ? {} : { resolvedModel: actor.resolvedModel }),
     });
   }
-  if (cache.size === 0) return undefined;
-  return { actors: cache, world: new Map() };
+  const world = new Map<string, ImportedWorldEntry[]>();
+  for (const node of nodes) {
+    if (node.status !== "completed") continue;
+    if (node.kind !== "world-read" && node.kind !== "world-run") continue;
+    const queue = world.get(node.inputHash) ?? [];
+    queue.push({ inputHash: node.inputHash, kind: node.kind, result: node.result });
+    world.set(node.inputHash, queue);
+  }
+  if (cache.size === 0 && world.size === 0) return undefined;
+  return { actors: cache, world };
 }
 
 export class WorkflowRunner {
