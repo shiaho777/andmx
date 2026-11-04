@@ -389,8 +389,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 
 ## 六、建议补齐顺序
 
-1. ~~**P0｜打开动态工作流**~~（已完成基础设施）：`DYNAMIC_WORKFLOW_TOOLS_ENABLED` 已改为运行时 flag。
-   下一步是把它真正打开：工具桩已全部接完，剩下的是把设置开关放出来。
+1. ~~**P0｜打开动态工作流**~~（已完成）：`DYNAMIC_WORKFLOW_TOOLS_ENABLED` 已改为运行时 flag，
+   设置页「常规 → 动态工作流」已开放开关；默认仍关闭，切换后空闲会话重建工具面。
 2. **P0｜工作流桩接线**（进行中）：已完成 `ListWorkflowRuns` / `GetWorkflowRun` / `ListSavedWorkflows` / `SaveWorkflow` /
    **`CreateWorkflow`**（见 3.6）/ `AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole` / `ResolveWorkflowQuestion` /
    `EvalWorkflowSnippet`（见 3.7）。已完成的前置件：
