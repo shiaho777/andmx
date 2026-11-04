@@ -28,6 +28,10 @@ object AssistantFileCitations {
         """([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s"'}]+))""",
     )
     private val markdownLink = Regex("""(?<!!)\[([^\]]*)\]\(([^)\s]+)\)""")
+    private val plainPath = Regex(
+        """(?<![\w/.-])((?:~|\.{1,2})?/?(?:[\w.-]+/)+[\w.-]+\.(?:pdf|md|markdown|html?|docx|xlsx|pptx|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|opus|flac|weba))(?![\w])""",
+        RegexOption.IGNORE_CASE,
+    )
 
     private val markdownExtensions = setOf("md", "markdown")
     private val webExtensions = setOf("html", "htm")
@@ -53,7 +57,10 @@ object AssistantFileCitations {
             }
             if (index != lines.lastIndex) out.append('\n')
         }
-        return AssistantFileProjection(out.toString(), cards.values.toList().take(MAX_CARDS))
+        return AssistantFileProjection(
+            out.toString(),
+            cards.values.toList().take(MAX_CARDS).reversed(),
+        )
     }
 
     private fun projectOutsideInlineCode(
@@ -88,6 +95,12 @@ object AssistantFileCitations {
         markdownLink.findAll(segment).forEach { match ->
             val target = localPath(match.groupValues[2]) ?: return@forEach
             val card = cardFor(target, null) ?: return@forEach
+            cards.putIfAbsent(card.path, card)
+        }
+        val withoutDirectives = directive.replace(segment, " ")
+        val withoutLinks = markdownLink.replace(withoutDirectives, " ")
+        plainPath.findAll(withoutLinks).forEach { match ->
+            val card = cardFor(match.groupValues[1], null) ?: return@forEach
             cards.putIfAbsent(card.path, card)
         }
         return directive.replace(segment) { match ->

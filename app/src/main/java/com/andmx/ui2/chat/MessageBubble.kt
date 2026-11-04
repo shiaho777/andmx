@@ -61,6 +61,7 @@ fun MessageBubble(
     onQuote: (() -> Unit)? = null,
     onSideChat: (() -> Unit)? = null,
     onFeedback: ((Int) -> Unit)? = null,
+    fileExists: ((String) -> Boolean)? = null,
     isEditing: Boolean = false,
 ) {
     val isUser = message.role == "user"
@@ -83,6 +84,7 @@ fun MessageBubble(
             onQuote = onQuote,
             onSideChat = onSideChat,
             onFeedback = onFeedback,
+            fileExists = fileExists,
         )
     }
 }
@@ -209,6 +211,7 @@ private fun AssistantProcessBlock(
     onQuote: (() -> Unit)? = null,
     onSideChat: (() -> Unit)? = null,
     onFeedback: ((Int) -> Unit)? = null,
+    fileExists: ((String) -> Boolean)? = null,
 ) {
     val process = message.isProcess
     val projection = remember(message.content, message.isStreaming) {
@@ -268,6 +271,7 @@ private fun AssistantProcessBlock(
         if (!process && !message.isStreaming && projection.cards.isNotEmpty()) {
             AssistantFilePreviewCards(
                 cards = projection.cards,
+                fileExists = fileExists,
                 modifier = Modifier.padding(top = 8.dp),
             )
         }

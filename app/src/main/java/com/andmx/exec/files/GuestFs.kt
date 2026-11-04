@@ -13,6 +13,8 @@ class GuestFs(private val runtime: ProotRuntime) {
 
     private val root: File get() = runtime.rootfsDir
 
+    val rootfsRoot: File get() = root
+
     /** Resolve a guest path (absolute or relative to /root) to a host File. */
     fun resolve(guestPath: String): File = GuestPaths.resolve(root, guestPath)
 

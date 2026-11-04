@@ -123,6 +123,8 @@ class ChatViewModel @Inject constructor(
     val hostPath: StateFlow<String?> = projectManager.hostPath
     val workspaceKind: StateFlow<com.andmx.workspace.WorkspaceKind> = projectManager.workspaceKind
     val isRemoteWorkspace: Boolean get() = projectManager.isRemote
+
+    fun previewFileExists(path: String): Boolean = controller.previewFileExists(path)
     val remoteProfiles: StateFlow<List<com.andmx.workspace.RemoteWorkspaceSpec>> = remoteStore.profiles
     val activeRemoteId: StateFlow<String?> = remoteStore.activeRemoteId
 

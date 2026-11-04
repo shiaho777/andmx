@@ -133,6 +133,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val draftStore = remember { DraftStore(context) }
     val scrollMemory = remember { ChatScrollMemory(context) }
+    val previewFileExists = remember(viewModel) { viewModel::previewFileExists }
     val motion = LocalMotion.current
     // 移动端惯例：冷启动不弹权限；首个任务发出（可能后台跑完）时才请求通知权限。
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1136,6 +1137,7 @@ LaunchedEffect(Unit) {
                                     }
                                     MessageBubble(
                                         message = item.message,
+                                        fileExists = previewFileExists,
                                         onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
                                             {
                                                 if (item.message.role == "user") {
