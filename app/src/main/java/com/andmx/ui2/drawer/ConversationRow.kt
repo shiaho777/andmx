@@ -20,6 +20,8 @@ import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.MarkEmailRead
+import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Unarchive
@@ -61,6 +63,7 @@ fun ConversationRow(
     onArchive: () -> Unit,
     onUnarchive: () -> Unit = {},
     onTogglePin: () -> Unit,
+    onToggleUnread: () -> Unit = {},
     onMoveToGroup: () -> Unit = {},
 ) {
     val unread = conversation.unreadAt != null
@@ -241,6 +244,20 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text(tr(if (unread) "标记为已读" else "标记为未读")) },
+                            leadingIcon = {
+                                Icon(
+                                    if (unread) Icons.Outlined.MarkEmailRead
+                                    else Icons.Outlined.MarkEmailUnread,
+                                    null,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onToggleUnread()
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text(tr("删除")) },
                             leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                             onClick = {
@@ -273,6 +290,20 @@ fun ConversationRow(
                             onClick = {
                                 menuOpen = false
                                 onMoveToGroup()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(tr(if (unread) "标记为已读" else "标记为未读")) },
+                            leadingIcon = {
+                                Icon(
+                                    if (unread) Icons.Outlined.MarkEmailRead
+                                    else Icons.Outlined.MarkEmailUnread,
+                                    null,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onToggleUnread()
                             },
                         )
                         DropdownMenuItem(

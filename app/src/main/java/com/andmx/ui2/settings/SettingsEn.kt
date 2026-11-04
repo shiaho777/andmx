@@ -8,6 +8,8 @@ internal val settingsEn: Map<String, String> = mapOf(
     "下拉刷新，或检查网络后重试。官方目录会与 Claude Plugins Official 对齐。" to "Pull to refresh, or check the network and try again. The official catalog matches Claude Plugins Official.",
     "开启后，Agent 提问 5 分钟未回答会自动继续；关闭后，当前和后续提问会一直等待你的回答。" to "When on, a question with no answer for 5 minutes continues on its own. When off, this and later questions wait.",
     "动态工作流" to "Dynamic workflows",
+    "标记为未读" to "Mark as unread",
+    "标记为已读" to "Mark as read",
     "启用动态工作流工具" to "Enable dynamic workflow tools",
     "开放 CreateWorkflow、AmendWorkflow、EvalWorkflowSnippet 等 11 个工作流工具。实验能力：脚本在设备内的 WebView 沙箱执行；切换后空闲会话会重建工具面。" to "Expose the eleven workflow tools, including CreateWorkflow, AmendWorkflow, and EvalWorkflowSnippet. Experimental: scripts run in the on-device WebView sandbox. Toggling rebuilds the tool surface for idle chats.",
     "将连续的 Write、Edit 和 ApplyPatch 调用聚合为 Changes 分组。" to "Consecutive Write, Edit, and ApplyPatch calls are grouped as Changes.",
