@@ -11,6 +11,13 @@ import androidx.compose.animation.slideOutVertically
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1698,6 +1705,7 @@ private fun EmptyConversationState(
 ) {
     // 问候语 + 输入卡片作为同一主体居中。
     // 键盘只依赖父级连续 safeDrawing，不做可见性分支/布局切换，避免收起时回弹闪一下。
+    val markColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.055f)
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -1708,7 +1716,8 @@ private fun EmptyConversationState(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 560.dp),
+                .widthIn(max = 560.dp)
+                .drawBehind { drawEmptyStateMark(markColor) },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -1773,16 +1782,45 @@ private fun EmptyConversationState(
     }
 }
 
+private fun DrawScope.drawEmptyStateMark(color: Color) {
+    val stroke = 2.dp.toPx()
+    val radius = 120.dp.toPx()
+    val c = Offset(size.width / 2f, 30.dp.toPx())
+    val brush = Brush.verticalGradient(
+        colors = listOf(color, color.copy(alpha = 0f)),
+        startY = c.y - radius,
+        endY = c.y + radius * 0.6f,
+    )
+    drawCircle(brush = brush, radius = radius, center = c, style = Stroke(width = stroke))
+    val arm = radius * 0.42f
+    drawLine(
+        brush = brush,
+        start = Offset(c.x - arm, c.y),
+        end = Offset(c.x + arm, c.y),
+        strokeWidth = stroke,
+        cap = StrokeCap.Round,
+    )
+    drawLine(
+        brush = brush,
+        start = Offset(c.x, c.y - arm),
+        end = Offset(c.x, c.y + arm),
+        strokeWidth = stroke,
+        cap = StrokeCap.Round,
+    )
+}
+
 private fun emptyGreeting(): String {
     val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    return when (hour) {
-        in 5..8 -> "早上好呀，新的一天开始啦"
-        in 9..11 -> "上午好呀，有什么想让我帮忙的吗"
-        in 12..13 -> "中午好呀，要不要先休息一下"
-        in 14..17 -> "下午好呀，继续加油，好不好"
-        in 18..22 -> "晚上好呀，今天辛苦啦"
-        else -> "夜深啦，困了也要照顾好自己哦"
-    }
+    return tr(
+        when (hour) {
+            in 5..8 -> "早上好呀，新的一天开始啦"
+            in 9..11 -> "上午好呀，有什么想让我帮忙的吗"
+            in 12..13 -> "中午好呀，要不要先休息一下"
+            in 14..17 -> "下午好呀，接下来交给我吧"
+            in 18..22 -> "晚上好呀，今天辛苦啦"
+            else -> "夜深啦，别忘了照顾好自己哦"
+        },
+    )
 }
 
 /**
