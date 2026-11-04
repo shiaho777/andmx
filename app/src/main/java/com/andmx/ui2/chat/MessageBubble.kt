@@ -211,16 +211,23 @@ private fun AssistantProcessBlock(
     onFeedback: ((Int) -> Unit)? = null,
 ) {
     val process = message.isProcess
-    // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
-    val previewPlan = remember(message.content, message.isStreaming) {
+    val projection = remember(message.content, message.isStreaming) {
         if (message.isStreaming) {
-            MessagePreview.Plan(message.content, message.content.length, false)
+            AssistantFileProjection(message.content, emptyList())
         } else {
-            MessagePreview.plan(message.content)
+            AssistantFileCitations.project(message.content)
+        }
+    }
+    // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
+    val previewPlan = remember(projection.text, message.isStreaming) {
+        if (message.isStreaming) {
+            MessagePreview.Plan(projection.text, projection.text.length, false)
+        } else {
+            MessagePreview.plan(projection.text)
         }
     }
     var showFull by remember(message.id) { mutableStateOf(false) }
-    val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else message.content
+    val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else projection.text
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -257,6 +264,12 @@ private fun AssistantProcessBlock(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+        }
+        if (!process && !message.isStreaming && projection.cards.isNotEmpty()) {
+            AssistantFilePreviewCards(
+                cards = projection.cards,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
         val showActions = !process && !message.isStreaming && message.content.isNotBlank()
         if (showActions && (onCopy != null || onBranch != null || onRegenerate != null || onQuote != null || message.completedAt > 0L || message.createdAt > 0L)) {

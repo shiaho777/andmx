@@ -460,6 +460,9 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
   `ResumeWorkflowRun`/cancel 已接线；设备侧覆盖 sequential/journal、销毁重建后 resume、typed repair、hole/fill、
   Amend supersede + ask/world 前缀导入；actor 多轮历史持久化到 `workflow_actor_messages`；
   详情显示开放留白、可打开产物与返回值。fanout/artifact/hole/warm 有 `runner-probe`。
+- **Assistant 文件引用预览卡**：`::zcode-file-citation{...}` 与本地 Markdown 文件链接投影成卡片，
+  支持 Markdown/HTML/Office/PDF/音视频，点击走 `ChatActionBus.openFile` 打开现有文件查看器；
+  代码块内示例不生成卡片，最多 10 张。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
