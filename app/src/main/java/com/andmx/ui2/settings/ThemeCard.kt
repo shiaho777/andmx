@@ -106,7 +106,7 @@ private fun ThemeSwatchCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                option.label,
+                tr(option.label),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )

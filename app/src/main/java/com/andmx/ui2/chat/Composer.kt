@@ -506,7 +506,7 @@ private fun SteerBar(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            if (pending) "等待引导当前任务…" else "引导当前任务",
+            tr(if (pending) "等待引导当前任务…" else "引导当前任务"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f).padding(start = 8.dp),
@@ -648,9 +648,9 @@ private fun PlusMenuItem(
     DropdownMenuItem(
         text = {
             Column {
-                Text(title, style = MaterialTheme.typography.bodyMedium)
+                Text(tr(title), style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    subtitle,
+                    tr(subtitle),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -812,7 +812,7 @@ private fun ModelPill(
                 .padding(horizontal = 4.dp, vertical = 6.dp),
         ) {
             Text(
-                modelLabel.ifBlank { "选择模型" },
+                tr(modelLabel.ifBlank { "选择模型" }),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (modelLabel.isBlank()) {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -916,7 +916,7 @@ private fun ModelPill(
                                             Spacer(Modifier.width(12.dp))
                                         }
                                         Text(
-                                            p.name.ifBlank { "未命名" },
+                                            tr(p.name.ifBlank { "未命名" }),
                                             style = MaterialTheme.typography.labelMedium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -934,7 +934,7 @@ private fun ModelPill(
                             ) {
                                 if (models.isEmpty()) {
                                     Text(
-                                        if (focus == null) "选择供应商" else "该供应商暂无模型",
+                                        tr(if (focus == null) "选择供应商" else "该供应商暂无模型"),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(12.dp),
@@ -1015,7 +1015,7 @@ private fun ThoughtPill(
         ) {
             Icon(
                 Icons.Outlined.Psychology,
-                contentDescription = "思考级别 $label",
+                contentDescription = "${tr("思考级别")} $label",
                 tint = if (effort.equals("off", true) || effort.isBlank()) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
@@ -1086,7 +1086,7 @@ private fun SendStopButton(
                 },
                 modifier = Modifier.size(36.dp),
             ) {
-                Icon(Icons.Outlined.Stop, contentDescription = "停止生成", modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.Stop, contentDescription = tr("停止生成"), modifier = Modifier.size(20.dp))
             }
         } else {
             FilledIconButton(
@@ -1099,7 +1099,7 @@ private fun SendStopButton(
                 enabled = canSend,
                 modifier = Modifier.size(36.dp),
             ) {
-                Icon(Icons.Outlined.ArrowUpward, contentDescription = "发送", modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.ArrowUpward, contentDescription = tr("发送"), modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -1112,7 +1112,7 @@ private fun CircleIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         Icon(
             icon,
-            contentDescription = desc,
+            contentDescription = tr(desc),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp),
         )
@@ -1154,7 +1154,7 @@ private fun ContextChipView(
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Outlined.Close, "移除", Modifier.size(12.dp))
+            Icon(Icons.Outlined.Close, tr("移除"), Modifier.size(12.dp))
         }
     }
 }
@@ -1236,7 +1236,7 @@ private fun MentionChipView(
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Outlined.Close, "移除", Modifier.size(12.dp), tint = fg.copy(alpha = 0.75f))
+            Icon(Icons.Outlined.Close, tr("移除"), Modifier.size(12.dp), tint = fg.copy(alpha = 0.75f))
         }
     }
 }
