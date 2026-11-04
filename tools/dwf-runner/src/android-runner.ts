@@ -58,6 +58,7 @@ export interface RunnerBridge {
   worldRead(requestId: string, op: string, argsJson: string): void;
   publishArtifact(requestId: string, requestJson: string): void;
   settled(runId: string, settlementJson: string): void;
+  snippetSettled(runId: string, resultJson: string): void;
   log(message: string): void;
 }
 
@@ -81,6 +82,89 @@ export interface StartConfig {
   importedJournals?: string[];
   resumedFrom?: string;
   timeoutMs?: number;
+}
+
+export interface SnippetConfig {
+  runId: string;
+  lowered: string;
+  cwd: string;
+  caps?: Caps;
+  timeoutMs?: number;
+}
+
+export type SnippetResult =
+  | { kind: "completed"; artifact?: unknown; logs: string[]; logsTruncated: boolean }
+  | {
+      kind: "failed";
+      error: { code: string; message: string };
+      logs: string[];
+      logsTruncated: boolean;
+    };
+
+const SNIPPET_MAX_LOGS = 100;
+const SNIPPET_MAX_LOG_CHARS = 2_048;
+const SNIPPET_MAX_ARTIFACT_BYTES = 256 * 1024;
+
+function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+function snippetResult(
+  settlement: {
+    status: string;
+    artifact?: unknown;
+    error?: { code: string; message: string };
+  },
+  logs: string[],
+  logsTruncated: boolean,
+): SnippetResult {
+  if (settlement.status === "completed") {
+    if (settlement.artifact !== undefined) {
+      const bytes = utf8Bytes(JSON.stringify(settlement.artifact));
+      if (bytes > SNIPPET_MAX_ARTIFACT_BYTES) {
+        return {
+          kind: "failed",
+          error: {
+            code: "ArtifactTooLarge",
+            message:
+              `The snippet's return value serializes to ${bytes} bytes, over the cap of ` +
+              `${SNIPPET_MAX_ARTIFACT_BYTES} bytes. Return a summary (a count, the first few items) and ` +
+              `leave the full data to log() or to the real run.`,
+          },
+          logs,
+          logsTruncated,
+        };
+      }
+    }
+    return {
+      kind: "completed",
+      ...(settlement.artifact === undefined ? {} : { artifact: settlement.artifact }),
+      logs,
+      logsTruncated,
+    };
+  }
+  if (settlement.status === "errored" && settlement.error !== undefined) {
+    return {
+      kind: "failed",
+      error: { code: settlement.error.code, message: settlement.error.message },
+      logs,
+      logsTruncated,
+    };
+  }
+  return {
+    kind: "failed",
+    error:
+      settlement.error === undefined
+        ? { code: "Cancelled", message: "snippet evaluation was cancelled" }
+        : { code: settlement.error.code, message: settlement.error.message },
+    logs,
+    logsTruncated,
+  };
 }
 
 interface PendingWorld {
@@ -221,6 +305,7 @@ export class WorkflowRunner {
     string,
     { driver: BridgeDriver; endpoint: DeviceEndpoint; engine: unknown }
   >();
+  private readonly snippets = new Map<string, { driver: SnippetDriver; endpoint: DeviceEndpoint }>();
 
   constructor(private readonly env: RunnerEnv) {
     if (typeof structuredClone === "undefined") {
@@ -313,12 +398,70 @@ export class WorkflowRunner {
     return { runId: config.runId };
   }
 
+  async evalSnippet(configJson: string): Promise<{ runId: string }> {
+    const config = JSON.parse(configJson) as SnippetConfig;
+    if (!config.runId || !config.lowered || !config.cwd) {
+      throw new Error("runner: runId, lowered and cwd are required");
+    }
+    const driver = new SnippetDriver(config.runId, this.env.bridge);
+    const endpoint = new DeviceEndpoint();
+    const realm = await this.env.createRealm();
+    endpoint.bindClose(() => realm.close?.());
+    applyRealmSanitizer(realm);
+    const payload: ChildPayload = { lowered: config.lowered };
+    const handle = startRun({
+      runId: config.runId,
+      endpoint,
+      makeDriver: () => driver,
+      caps: config.caps ?? { maxConcurrency: 4 },
+      askSpecs: new Map(),
+      validate: (schema, value) => validate(schema as never, value),
+      ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
+      cwd: config.cwd,
+    });
+
+    let hostToCell: ((line: string) => void) | undefined;
+    const cellPort: CellPort = {
+      post: (line) => endpoint.receiveFromCell(line),
+      onLine: (handler) => {
+        hostToCell = handler;
+        endpoint.bindCell((line) => hostToCell?.(line));
+      },
+    };
+    const cellDone = startCell({
+      realm,
+      port: cellPort,
+      payload,
+      streamsBootstrap: CELL_STREAMS_BOOTSTRAP,
+    });
+    endpoint.bindCell((line) => hostToCell?.(line));
+    cellDone.then(
+      () => endpoint.finish(),
+      (error: unknown) => endpoint.fail(error),
+    );
+
+    this.snippets.set(config.runId, { driver, endpoint });
+    void handle.settled.then((settlement) => {
+      try {
+        this.env.bridge.snippetSettled(
+          config.runId,
+          JSON.stringify(snippetResult(settlement, driver.logs, driver.logsTruncated)),
+        );
+      } finally {
+        endpoint.close();
+        this.snippets.delete(config.runId);
+      }
+    });
+    return { runId: config.runId };
+  }
+
   askResult(requestId: string, resultJson: string): void {
     this.driverForRequest(requestId)?.askResult(requestId, resultJson);
   }
 
   worldResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void {
-    this.driverForRequest(requestId)?.worldResult(requestId, ok, payloadJson, error);
+    const driver = this.driverForRequest(requestId) ?? this.snippetForRequest(requestId);
+    driver?.worldResult(requestId, ok, payloadJson, error);
   }
 
   artifactResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void {
@@ -367,6 +510,7 @@ export class WorkflowRunner {
     const run = this.runs.get(runId);
     run?.endpoint.close();
     this.runs.delete(runId);
+    this.snippets.get(runId)?.endpoint.close();
   }
 
   stop(runId: string, reason: string, supersededBy?: string): boolean {
@@ -382,6 +526,13 @@ export class WorkflowRunner {
   private driverForRequest(requestId: string): BridgeDriver | undefined {
     for (const run of this.runs.values()) {
       if (run.driver.owns(requestId)) return run.driver;
+    }
+    return undefined;
+  }
+
+  private snippetForRequest(requestId: string): SnippetDriver | undefined {
+    for (const snippet of this.snippets.values()) {
+      if (snippet.driver.owns(requestId)) return snippet.driver;
     }
     return undefined;
   }
@@ -757,6 +908,79 @@ class BridgeDriver implements WorkflowDriver {
       pending.resolve(JSON.parse(payloadJson) as ArtifactVersionRecord);
     } else {
       pending.reject(new WorkflowError("DriverError", error ?? "artifact publish failed"));
+    }
+  }
+}
+
+function snippetAskUnreachable(member: string): WorkflowError {
+  return new WorkflowError(
+    "DriverError",
+    `Snippet driver received ${member}, but the scratch facade has no agent(), so the ask ` +
+      `path must be unreachable. This is a wiring bug.`,
+  );
+}
+
+class SnippetDriver implements WorkflowDriver {
+  private seq = 0;
+  private readonly worlds = new Map<string, PendingWorld>();
+  readonly journal = new InMemoryJournalStore();
+  readonly logs: string[] = [];
+  logsTruncated = false;
+
+  constructor(
+    private readonly runId: string,
+    private readonly bridge: RunnerBridge,
+  ) {}
+
+  owns(requestId: string): boolean {
+    return this.worlds.has(requestId);
+  }
+
+  createActorSession(): Promise<SessionRef> {
+    return Promise.reject(snippetAskUnreachable("createActorSession"));
+  }
+
+  startAsk(): void {
+    throw snippetAskUnreachable("startAsk");
+  }
+
+  respondToSubmit(): void {
+    throw snippetAskUnreachable("respondToSubmit");
+  }
+
+  cancelAsk(): void {}
+
+  executeWorldRead(op: WorldReadOp, args: unknown[]): Promise<unknown> {
+    const requestId = `${this.runId}:world:${++this.seq}`;
+    return new Promise<unknown>((resolve, reject) => {
+      this.worlds.set(requestId, { resolve, reject });
+      this.bridge.worldRead(requestId, op, JSON.stringify(args));
+    });
+  }
+
+  emit(event: RunEvent): void {
+    if (event.type !== "log") return;
+    if (this.logs.length >= SNIPPET_MAX_LOGS) {
+      this.logsTruncated = true;
+      return;
+    }
+    const message = event.message;
+    if (message.length > SNIPPET_MAX_LOG_CHARS) {
+      this.logs.push(message.slice(0, SNIPPET_MAX_LOG_CHARS));
+      this.logsTruncated = true;
+      return;
+    }
+    this.logs.push(message);
+  }
+
+  worldResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void {
+    const pending = this.worlds.get(requestId);
+    if (pending === undefined) return;
+    this.worlds.delete(requestId);
+    if (ok) {
+      pending.resolve(payloadJson === "" ? undefined : JSON.parse(payloadJson));
+    } else {
+      pending.reject(new WorkflowError("DriverError", error ?? "world read failed"));
     }
   }
 }

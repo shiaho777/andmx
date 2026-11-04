@@ -80,8 +80,9 @@ AndMX 现状（2026-11-02）：
 **尚未解决**（2026-11-03 更新）：`CreateWorkflow` / `AmendWorkflow` / `SaveWorkflow` / `ListSavedWorkflows` /
 `ListWorkflowRuns` / `GetWorkflowRun` / `ResumeWorkflowRun` / `FillWorkflowHole` 已接上 `WorkflowService` 与
 `DynamicWorkflowRunner`（无 runner 时返回对应 `*_UNAVAILABLE`）。`ResolveWorkflowQuestion` 已接上升级问答注册表
-（`agent/workflow/dynamic/WorkflowEscalationRegistry.kt`，见 3.7）。仍是桩的只有 `EvalWorkflowSnippet`（只校验来源，
-返回 `SNIPPET_NOT_EXECUTED_NOTE`）。它接完之前仍**不要把开关暴露到 UI**，否则模型会被 `/workflow` 引导去调用必然失败的工具。
+（`agent/workflow/dynamic/WorkflowEscalationRegistry.kt`，见 3.7）。`EvalWorkflowSnippet` 已接上 analyzer 的
+`prepareSnippet`（scratch facade 编译）与 runner 的 `evalSnippet`（内存 journal、只走 world read、同步结算），
+按上游三态（diagnostics / failed / completed）渲染。11 个工具已无桩；开关是否暴露到 UI 另行决定。
 
 ### 3.4 超集（需确认是否有意）
 
@@ -166,8 +167,8 @@ validateSource（三选一 XOR；args 只跟 path 走）
 一个照搬中发现的上游细节：`describeValue` 里那条 `null` 分支说明**显式 `null` 必须走到类型检查**
 （`json` 收它，`string` 拒它并报 `got null`），不能被当作「没给」。参数校验据此实现。
 
-`AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole` / `ResolveWorkflowQuestion` 已随设备侧 runner 接线（见 3.7）；
-仍未接：`EvalWorkflowSnippet`。
+`AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole` / `ResolveWorkflowQuestion` / `EvalWorkflowSnippet`
+已随设备侧 runner 接线（见 3.7）。
 
 ### 3.7 执行引擎：形态由证据定，不是选择题（2026-10-29）
 
@@ -389,10 +390,10 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 ## 六、建议补齐顺序
 
 1. ~~**P0｜打开动态工作流**~~（已完成基础设施）：`DYNAMIC_WORKFLOW_TOOLS_ENABLED` 已改为运行时 flag。
-   下一步是把它真正打开：先接完剩余 1 个工具的桩，再把设置开关放出来。
+   下一步是把它真正打开：工具桩已全部接完，剩下的是把设置开关放出来。
 2. **P0｜工作流桩接线**（进行中）：已完成 `ListWorkflowRuns` / `GetWorkflowRun` / `ListSavedWorkflows` / `SaveWorkflow` /
-   **`CreateWorkflow`**（见 3.6）/ `AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole` / `ResolveWorkflowQuestion`（见 3.7）；
-   `EvalWorkflowSnippet` 仍是桩。已完成的前置件：
+   **`CreateWorkflow`**（见 3.6）/ `AmendWorkflow` / `ResumeWorkflowRun` / `FillWorkflowHole` / `ResolveWorkflowQuestion` /
+   `EvalWorkflowSnippet`（见 3.7）。已完成的前置件：
    - `agent/workflow/WorkflowScriptFrontmatter.kt` —— 文件头编解码（对齐上游 `frontmatter.ts`）。
    - `agent/workflow/YamlSubset.kt` —— 该文件头所需的 YAML 子集解析器，超出子集即带行号报错。
    - `agent/workflow/SavedWorkflowStore.kt` —— 保存库（对齐上游 `store.ts`）：项目/全局双档、
@@ -404,7 +405,9 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
    - 已接：**升级问答**——动态 actor 的 `escalate` 在主会话有进行中回合时停驻到注册表（qid `dwfq-<run 片段>-<seq>`，
      每次 ask 至多 3 次），向主代理注入 `<workflow-escalation>` 通知；主代理用 `ResolveWorkflowQuestion` 作答，
      `GetWorkflowRun` 列出待答问题。主会话空闲或回合结束时回落到用户确认窗，问题随之撤下。
-   - 剩余：`AmendWorkflow` 的三态模型继承、`EvalWorkflowSnippet` 执行。
+   - 已接：**snippet 执行**——`EvalWorkflowSnippet` 经 analyzer `prepareSnippet` 编译、runner `evalSnippet` 同步结算，
+     日志上限 100 条 × 2048 字符，返回值上限 256 KiB；`runner-probe` 覆盖 completed / diagnostics / failed。
+   - 剩余：`AmendWorkflow` 的三态模型继承。
 3. ~~**P0｜ToolSearch / DeferredToolCall**~~（已完成 local 模式，2026-11-02）：`shouldDefer` 已落到
    `Tool` 接口，两个控制工具与 `ToolSearchRegistry` 已接线到主引擎，deferred 工具覆盖见 3.1。
    下一步是把 discovered 集合写进压缩/恢复元数据，并评估子代理是否也接入同一机制。

@@ -96,6 +96,11 @@ const val FILL_WORKFLOW_HOLE_SOURCE_ERROR =
 const val SNIPPET_NOT_EXECUTED_NOTE =
     "NOTE: The snippet was NOT executed — snippet evaluation is not available in this session."
 
+const val SNIPPET_FIX_ERRORS_NOTE =
+    "NOTE: The snippet was NOT executed — fix the errors above and call the tool again."
+
+const val EVAL_WORKFLOW_SNIPPET_DEFAULT_TIMEOUT_MS = 60_000L
+
 const val WORKFLOW_INTROSPECTION_UNAVAILABLE =
     "workflow_introspection_unavailable: this session cannot read workflow runs — workflow execution is not available here, so no run history is reachable. This is a capability gap, not an empty project."
 

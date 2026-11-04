@@ -16,6 +16,8 @@ import com.andmx.agent.workflow.WorkflowService
 import com.andmx.agent.workflow.dynamic.DynamicWorkflowRunner
 import com.andmx.agent.workflow.dynamic.RESOLVE_WORKFLOW_QUESTION_DELIVERED
 import com.andmx.agent.workflow.dynamic.ResolveQuestionResult
+import com.andmx.agent.workflow.dynamic.SnippetEvalOutcome
+import com.andmx.agent.workflow.dynamic.serializeWorkflowArtifact
 import com.andmx.agent.workflow.dynamic.WorkflowEscalationRegistry
 import com.andmx.agent.workflow.script.WorkflowAnalyzerUnavailableException
 import com.andmx.agent.workflow.script.WorkflowScriptAnalyzer
@@ -403,8 +405,63 @@ class WorkflowTools(
             skillRefusal(name)?.let { return it }
             val sources = listOf("code", "path").count { present(args, it) }
             if (sources != 1) return absent(EVAL_WORKFLOW_SNIPPET_SOURCE_ERROR)
-            return ToolResult(SNIPPET_NOT_EXECUTED_NOTE, isError = false)
+            val path = text(args, "path")
+            val code = if (path == null) {
+                rawText(args, "code") ?: return absent("`code` must be a non-empty string")
+            } else {
+                readText(path) ?: return absent("could not read the snippet at `$path`")
+            }
+            val runner = dynamicRunner ?: return ToolResult(SNIPPET_NOT_EXECUTED_NOTE, isError = false)
+            val timeoutMs = (args["timeoutMs"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                ?: EVAL_WORKFLOW_SNIPPET_DEFAULT_TIMEOUT_MS
+            val location = path?.let {
+                ScriptLocation(
+                    kind = ScriptLocation.Kind.PATH,
+                    described = WorkflowScriptNotes.describePath(it, cwd()),
+                    lineOffset = 0,
+                )
+            }
+            val startedAt = System.currentTimeMillis()
+            val outcome = try {
+                runner.evalSnippet(code, cwd(), timeoutMs)
+            } catch (e: WorkflowAnalyzerUnavailableException) {
+                return absent("The snippet could not be typechecked: ${e.message} The snippet was NOT executed.")
+            }
+            val durationMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0)
+            return when (outcome) {
+                is SnippetEvalOutcome.Diagnostics -> ToolResult(
+                    (
+                        listOf("The snippet has errors:") +
+                            WorkflowScriptNotes.formatDiagnosticLines(outcome.diagnostics, location) +
+                            listOf("", SNIPPET_FIX_ERRORS_NOTE)
+                        ).joinToString("\n"),
+                    isError = true,
+                )
+                is SnippetEvalOutcome.Failed -> ToolResult(
+                    (
+                        listOf("The snippet failed (${outcome.code}): ${outcome.message}") +
+                            renderSnippetLogs(outcome.logs, outcome.logsTruncated)
+                        ).joinToString("\n"),
+                    isError = true,
+                )
+                is SnippetEvalOutcome.Completed -> {
+                    val serialized = serializeWorkflowArtifact(outcome.artifact)
+                    ToolResult(
+                        (
+                            listOf(
+                                "The snippet completed in ${durationMs}ms.",
+                                if (serialized == null) "It returned no value." else "Return value:\n$serialized",
+                            ) + renderSnippetLogs(outcome.logs, outcome.logsTruncated)
+                            ).joinToString("\n"),
+                    )
+                }
+            }
         }
+    }
+
+    private fun renderSnippetLogs(logs: List<String>, truncated: Boolean): List<String> {
+        if (logs.isEmpty()) return emptyList()
+        return listOf("", "Logs:") + logs.map { "- $it" } + if (truncated) listOf("- … (logs truncated)") else emptyList()
     }
 
     inner class ListRuns : Declaration(
