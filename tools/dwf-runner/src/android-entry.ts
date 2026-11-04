@@ -7,6 +7,7 @@ declare global {
   interface Window {
     __DWF_RUNNER: {
       start(configJson: string): Promise<{ runId: string }>;
+      evalSnippet(configJson: string): Promise<{ runId: string }>;
       askResult(requestId: string, resultJson: string): void;
       worldResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void;
       artifactResult(requestId: string, ok: boolean, payloadJson: string, error?: string): void;
@@ -60,6 +61,7 @@ const runner = new WorkflowRunner({ createRealm: createIframeRealm, bridge: __an
 
 window.__DWF_RUNNER = {
   start: (configJson) => runner.start(configJson),
+  evalSnippet: (configJson) => runner.evalSnippet(configJson),
   askResult: (requestId, resultJson) => runner.askResult(requestId, resultJson),
   worldResult: (requestId, ok, payloadJson, error) =>
     runner.worldResult(requestId, ok, payloadJson, error),

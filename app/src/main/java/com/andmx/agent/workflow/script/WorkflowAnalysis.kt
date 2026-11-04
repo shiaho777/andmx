@@ -231,6 +231,12 @@ object WorkflowAnalysisCodec {
         diagnostics = root.objects("diagnostics").map(::decodeDiagnostic),
     )
 
+    fun decodeSnippet(root: JsonObject): SnippetPreparation = SnippetPreparation(
+        ok = root.bool("ok") ?: false,
+        diagnostics = root.objects("diagnostics").map(::decodeDiagnostic),
+        lowered = root.string("lowered"),
+    )
+
     private fun decodeDiagnostic(d: JsonObject): CompileDiagnostic = CompileDiagnostic(
         code = d.int("code") ?: 0,
         line = d.int("line") ?: 0,

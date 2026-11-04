@@ -4041,6 +4041,57 @@ declare const args: Readonly<Record<string, unknown>>;
   __name(readSupersededBy, "readSupersededBy");
 
   // src/android-runner.ts
+  var SNIPPET_MAX_LOGS = 100;
+  var SNIPPET_MAX_LOG_CHARS = 2048;
+  var SNIPPET_MAX_ARTIFACT_BYTES = 256 * 1024;
+  function utf8Bytes(text) {
+    let bytes = 0;
+    for (const ch of text) {
+      const code = ch.codePointAt(0) ?? 0;
+      bytes += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4;
+    }
+    return bytes;
+  }
+  __name(utf8Bytes, "utf8Bytes");
+  function snippetResult(settlement, logs, logsTruncated) {
+    if (settlement.status === "completed") {
+      if (settlement.artifact !== void 0) {
+        const bytes = utf8Bytes(JSON.stringify(settlement.artifact));
+        if (bytes > SNIPPET_MAX_ARTIFACT_BYTES) {
+          return {
+            kind: "failed",
+            error: {
+              code: "ArtifactTooLarge",
+              message: `The snippet's return value serializes to ${bytes} bytes, over the cap of ${SNIPPET_MAX_ARTIFACT_BYTES} bytes. Return a summary (a count, the first few items) and leave the full data to log() or to the real run.`
+            },
+            logs,
+            logsTruncated
+          };
+        }
+      }
+      return {
+        kind: "completed",
+        ...settlement.artifact === void 0 ? {} : { artifact: settlement.artifact },
+        logs,
+        logsTruncated
+      };
+    }
+    if (settlement.status === "errored" && settlement.error !== void 0) {
+      return {
+        kind: "failed",
+        error: { code: settlement.error.code, message: settlement.error.message },
+        logs,
+        logsTruncated
+      };
+    }
+    return {
+      kind: "failed",
+      error: settlement.error === void 0 ? { code: "Cancelled", message: "snippet evaluation was cancelled" } : { code: settlement.error.code, message: settlement.error.message },
+      logs,
+      logsTruncated
+    };
+  }
+  __name(snippetResult, "snippetResult");
   function parseJournal(journalJson) {
     const data = JSON.parse(journalJson);
     return {
@@ -4119,6 +4170,7 @@ declare const args: Readonly<Record<string, unknown>>;
     constructor(env) {
       __publicField(this, "env", env);
       __publicField(this, "runs", /* @__PURE__ */ new Map());
+      __publicField(this, "snippets", /* @__PURE__ */ new Map());
       if (typeof structuredClone === "undefined") {
         globalThis.structuredClone = (value) => JSON.parse(JSON.stringify(value));
       }
@@ -4198,11 +4250,66 @@ declare const args: Readonly<Record<string, unknown>>;
       });
       return { runId: config.runId };
     }
+    async evalSnippet(configJson) {
+      const config = JSON.parse(configJson);
+      if (!config.runId || !config.lowered || !config.cwd) {
+        throw new Error("runner: runId, lowered and cwd are required");
+      }
+      const driver = new SnippetDriver(config.runId, this.env.bridge);
+      const endpoint = new DeviceEndpoint();
+      const realm = await this.env.createRealm();
+      endpoint.bindClose(() => realm.close?.());
+      applyRealmSanitizer(realm);
+      const payload = { lowered: config.lowered };
+      const handle = startRun({
+        runId: config.runId,
+        endpoint,
+        makeDriver: /* @__PURE__ */ __name(() => driver, "makeDriver"),
+        caps: config.caps ?? { maxConcurrency: 4 },
+        askSpecs: /* @__PURE__ */ new Map(),
+        validate: /* @__PURE__ */ __name((schema, value) => validate(schema, value), "validate"),
+        ...config.timeoutMs === void 0 ? {} : { timeoutMs: config.timeoutMs },
+        cwd: config.cwd
+      });
+      let hostToCell;
+      const cellPort = {
+        post: /* @__PURE__ */ __name((line) => endpoint.receiveFromCell(line), "post"),
+        onLine: /* @__PURE__ */ __name((handler) => {
+          hostToCell = handler;
+          endpoint.bindCell((line) => hostToCell?.(line));
+        }, "onLine")
+      };
+      const cellDone = startCell({
+        realm,
+        port: cellPort,
+        payload,
+        streamsBootstrap: CELL_STREAMS_BOOTSTRAP
+      });
+      endpoint.bindCell((line) => hostToCell?.(line));
+      cellDone.then(
+        () => endpoint.finish(),
+        (error) => endpoint.fail(error)
+      );
+      this.snippets.set(config.runId, { driver, endpoint });
+      void handle.settled.then((settlement) => {
+        try {
+          this.env.bridge.snippetSettled(
+            config.runId,
+            JSON.stringify(snippetResult(settlement, driver.logs, driver.logsTruncated))
+          );
+        } finally {
+          endpoint.close();
+          this.snippets.delete(config.runId);
+        }
+      });
+      return { runId: config.runId };
+    }
     askResult(requestId, resultJson) {
       this.driverForRequest(requestId)?.askResult(requestId, resultJson);
     }
     worldResult(requestId, ok, payloadJson, error) {
-      this.driverForRequest(requestId)?.worldResult(requestId, ok, payloadJson, error);
+      const driver = this.driverForRequest(requestId) ?? this.snippetForRequest(requestId);
+      driver?.worldResult(requestId, ok, payloadJson, error);
     }
     artifactResult(requestId, ok, payloadJson, error) {
       this.driverForRequest(requestId)?.artifactResult(requestId, ok, payloadJson, error);
@@ -4235,6 +4342,7 @@ declare const args: Readonly<Record<string, unknown>>;
       const run = this.runs.get(runId);
       run?.endpoint.close();
       this.runs.delete(runId);
+      this.snippets.get(runId)?.endpoint.close();
     }
     stop(runId, reason, supersededBy) {
       const run = this.runs.get(runId);
@@ -4246,6 +4354,12 @@ declare const args: Readonly<Record<string, unknown>>;
     driverForRequest(requestId) {
       for (const run of this.runs.values()) {
         if (run.driver.owns(requestId)) return run.driver;
+      }
+      return void 0;
+    }
+    snippetForRequest(requestId) {
+      for (const snippet of this.snippets.values()) {
+        if (snippet.driver.owns(requestId)) return snippet.driver;
       }
       return void 0;
     }
@@ -4555,6 +4669,71 @@ declare const args: Readonly<Record<string, unknown>>;
   };
   __name(_BridgeDriver, "BridgeDriver");
   var BridgeDriver = _BridgeDriver;
+  function snippetAskUnreachable(member) {
+    return new WorkflowError(
+      "DriverError",
+      `Snippet driver received ${member}, but the scratch facade has no agent(), so the ask path must be unreachable. This is a wiring bug.`
+    );
+  }
+  __name(snippetAskUnreachable, "snippetAskUnreachable");
+  var _SnippetDriver = class _SnippetDriver {
+    constructor(runId, bridge2) {
+      __publicField(this, "runId", runId);
+      __publicField(this, "bridge", bridge2);
+      __publicField(this, "seq", 0);
+      __publicField(this, "worlds", /* @__PURE__ */ new Map());
+      __publicField(this, "journal", new InMemoryJournalStore());
+      __publicField(this, "logs", []);
+      __publicField(this, "logsTruncated", false);
+    }
+    owns(requestId) {
+      return this.worlds.has(requestId);
+    }
+    createActorSession() {
+      return Promise.reject(snippetAskUnreachable("createActorSession"));
+    }
+    startAsk() {
+      throw snippetAskUnreachable("startAsk");
+    }
+    respondToSubmit() {
+      throw snippetAskUnreachable("respondToSubmit");
+    }
+    cancelAsk() {
+    }
+    executeWorldRead(op, args) {
+      const requestId = `${this.runId}:world:${++this.seq}`;
+      return new Promise((resolve, reject) => {
+        this.worlds.set(requestId, { resolve, reject });
+        this.bridge.worldRead(requestId, op, JSON.stringify(args));
+      });
+    }
+    emit(event) {
+      if (event.type !== "log") return;
+      if (this.logs.length >= SNIPPET_MAX_LOGS) {
+        this.logsTruncated = true;
+        return;
+      }
+      const message = event.message;
+      if (message.length > SNIPPET_MAX_LOG_CHARS) {
+        this.logs.push(message.slice(0, SNIPPET_MAX_LOG_CHARS));
+        this.logsTruncated = true;
+        return;
+      }
+      this.logs.push(message);
+    }
+    worldResult(requestId, ok, payloadJson, error) {
+      const pending = this.worlds.get(requestId);
+      if (pending === void 0) return;
+      this.worlds.delete(requestId);
+      if (ok) {
+        pending.resolve(payloadJson === "" ? void 0 : JSON.parse(payloadJson));
+      } else {
+        pending.reject(new WorkflowError("DriverError", error ?? "world read failed"));
+      }
+    }
+  };
+  __name(_SnippetDriver, "SnippetDriver");
+  var SnippetDriver = _SnippetDriver;
 
   // src/android-entry.ts
   function ensureSetImmediate() {
@@ -4591,6 +4770,7 @@ declare const args: Readonly<Record<string, unknown>>;
   var runner = new WorkflowRunner({ createRealm: createIframeRealm, bridge: __andmx });
   window.__DWF_RUNNER = {
     start: /* @__PURE__ */ __name((configJson) => runner.start(configJson), "start"),
+    evalSnippet: /* @__PURE__ */ __name((configJson) => runner.evalSnippet(configJson), "evalSnippet"),
     askResult: /* @__PURE__ */ __name((requestId, resultJson) => runner.askResult(requestId, resultJson), "askResult"),
     worldResult: /* @__PURE__ */ __name((requestId, ok, payloadJson, error) => runner.worldResult(requestId, ok, payloadJson, error), "worldResult"),
     artifactResult: /* @__PURE__ */ __name((requestId, ok, payloadJson, error) => runner.artifactResult(requestId, ok, payloadJson, error), "artifactResult"),

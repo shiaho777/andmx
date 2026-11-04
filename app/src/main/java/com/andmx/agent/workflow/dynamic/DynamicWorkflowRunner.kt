@@ -63,6 +63,51 @@ sealed interface DynamicAskResult {
     data class Fail(val message: String) : DynamicAskResult
 }
 
+sealed interface SnippetEvalOutcome {
+    data class Diagnostics(
+        val diagnostics: List<com.andmx.agent.workflow.script.CompileDiagnostic>,
+    ) : SnippetEvalOutcome
+
+    data class Completed(
+        val artifact: kotlinx.serialization.json.JsonElement?,
+        val logs: List<String>,
+        val logsTruncated: Boolean,
+    ) : SnippetEvalOutcome
+
+    data class Failed(
+        val code: String,
+        val message: String,
+        val logs: List<String>,
+        val logsTruncated: Boolean,
+    ) : SnippetEvalOutcome
+}
+
+fun decodeSnippetResult(raw: String): SnippetEvalOutcome {
+    val obj = runCatching { Json.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject }.getOrNull()
+        ?: return SnippetEvalOutcome.Failed("DriverError", "snippet runner returned an unreadable result", emptyList(), false)
+    val logs = (obj["logs"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+    val truncated = (obj["logsTruncated"] as? JsonPrimitive)?.contentOrNull == "true"
+    if ((obj["kind"] as? JsonPrimitive)?.contentOrNull == "completed") {
+        return SnippetEvalOutcome.Completed(obj["artifact"], logs, truncated)
+    }
+    val error = obj["error"] as? kotlinx.serialization.json.JsonObject
+    return SnippetEvalOutcome.Failed(
+        code = (error?.get("code") as? JsonPrimitive)?.contentOrNull ?: "DriverError",
+        message = (error?.get("message") as? JsonPrimitive)?.contentOrNull ?: "snippet evaluation failed",
+        logs = logs,
+        logsTruncated = truncated,
+    )
+}
+
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+private val artifactJson = Json { prettyPrint = true; prettyPrintIndent = "  " }
+
+fun serializeWorkflowArtifact(value: kotlinx.serialization.json.JsonElement?): String? = when {
+    value == null -> null
+    value is JsonPrimitive && value.isString -> value.content
+    else -> artifactJson.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), value)
+}
+
 interface DynamicWorkflowHost {
     suspend fun createActor(
         runId: String,
@@ -100,6 +145,8 @@ class DynamicWorkflowRunner(
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val pendingAsks = java.util.concurrent.ConcurrentHashMap<String, DynamicAskRequest>()
+    private val pendingSnippets =
+        java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<String>>()
     private val actorPersonas = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var webView: WebView? = null
     @Volatile private var ready = false
@@ -202,6 +249,44 @@ class DynamicWorkflowRunner(
         )
         val error = launch(config)
         return if (error == null) true to null else false to error
+    }
+
+    suspend fun evalSnippet(code: String, cwd: String, timeoutMs: Long): SnippetEvalOutcome {
+        val prepared = analyzer.prepareSnippet(code)
+        if (!prepared.ok) return SnippetEvalOutcome.Diagnostics(prepared.diagnostics)
+        val lowered = prepared.lowered
+            ?: return SnippetEvalOutcome.Failed("DriverError", "snippet compilation did not produce a lowered body", emptyList(), false)
+        val view = ensureWebView()
+            ?: return SnippetEvalOutcome.Failed("DriverError", "dynamic workflow WebView is unavailable", emptyList(), false)
+        val runId = "dwfeval-${UUID.randomUUID()}"
+        val settled = kotlinx.coroutines.CompletableDeferred<String>()
+        pendingSnippets[runId] = settled
+        try {
+            val config = buildJsonObject {
+                put("runId", runId)
+                put("lowered", lowered)
+                put("cwd", cwd)
+                put("timeoutMs", timeoutMs)
+            }.toString()
+            withContext(Dispatchers.Main.immediate) {
+                view.evaluateJavascript(
+                    "window.__DWF_RUNNER.evalSnippet(${JSONObject.quote(config)})" +
+                        ".catch(function(e){ __andmx.snippetFailed(${JSONObject.quote(runId)}, String((e&&e.message)||e)); })",
+                    null,
+                )
+            }
+            val raw = kotlinx.coroutines.withTimeoutOrNull(timeoutMs + SNIPPET_SETTLE_GRACE_MS) { settled.await() }
+                ?: return SnippetEvalOutcome.Failed(
+                    "Timeout",
+                    "snippet evaluation did not settle within ${timeoutMs}ms",
+                    emptyList(),
+                    false,
+                )
+            return decodeSnippetResult(raw)
+        } finally {
+            pendingSnippets.remove(runId)
+            if (!settled.isCompleted) scope.launch { cancel(runId) }
+        }
     }
 
     suspend fun cancel(runId: String) {
@@ -808,6 +893,27 @@ class DynamicWorkflowRunner(
         }
 
         @JavascriptInterface
+        fun snippetSettled(runId: String, resultJson: String) {
+            pendingSnippets[runId]?.complete(resultJson)
+        }
+
+        @JavascriptInterface
+        fun snippetFailed(runId: String, message: String) {
+            pendingSnippets[runId]?.complete(
+                buildJsonObject {
+                    put("kind", "failed")
+                    put(
+                        "error",
+                        buildJsonObject {
+                            put("code", "DriverError")
+                            put("message", message)
+                        },
+                    )
+                }.toString(),
+            )
+        }
+
+        @JavascriptInterface
         fun log(message: String) {
             android.util.Log.i("DynamicWorkflowRunner", message.take(4_000))
         }
@@ -915,6 +1021,7 @@ class DynamicWorkflowRunner(
         }.getOrNull()
 
     companion object {
+        const val SNIPPET_SETTLE_GRACE_MS = 30_000L
         const val KIND = "dynamic"
         const val ASSET_URL = "file:///android_asset/dwf/runner.html"
         const val READY_TIMEOUT_MS = 20_000L

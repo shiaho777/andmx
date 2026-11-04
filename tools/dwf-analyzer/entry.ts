@@ -11,11 +11,15 @@
 //
 // 语义保真：返回值的字段名、类型、嵌套形状与上游同名类型逐字一致。
 import {
+  SNIPPET_FACADE_DTS,
   analyzeWorkflowScript,
   buildAskSpecs,
+  collectDiagnostics,
   collectSitePhases,
   collectSites,
+  collectWorldRunCommands,
   createWorkflowProgram,
+  lowerWorkflow,
   lowerWorkflowScript,
   synthesizeAskSchemas,
 } from "@zcode/dynamic-workflow";
@@ -66,6 +70,22 @@ function prepare(script: string) {
   };
 }
 
+function prepareSnippet(script: string) {
+  const workflow = createWorkflowProgram(script, { facadeDts: SNIPPET_FACADE_DTS });
+  const diagnostics = collectDiagnostics(workflow.program);
+  if (diagnostics.length > 0) return { ok: false, diagnostics };
+  const table = collectSites(workflow);
+  const worldRun = collectWorldRunCommands(workflow, table);
+  if (worldRun.diagnostics.length > 0) return { ok: false, diagnostics: worldRun.diagnostics };
+  const lowered = lowerWorkflow(workflow, table);
+  return {
+    ok: true,
+    diagnostics: [],
+    lowered: lowered.code,
+    askSpecs: [...buildAskSpecs(table, {}).entries()],
+  };
+}
+
 const host = {
   /** 完整结果（含 core）。桥接代价高，只在需要重新投影时用。 */
   analyzeFull(script: string): AnalyzeResult {
@@ -86,6 +106,7 @@ const host = {
   },
   /** 执行前的全部输入：lowered + ask 规格 + 站点阶段 + 产物与模型清单。 */
   prepare,
+  prepareSnippet,
 };
 
 (globalThis as unknown as { __DWF: typeof host }).__DWF = host;

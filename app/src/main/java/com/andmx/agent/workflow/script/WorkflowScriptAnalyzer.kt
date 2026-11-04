@@ -29,10 +29,19 @@ interface WorkflowScriptAnalyzer {
 
     /** 只问「编不编得过」。上游 `compileWorkflowScript`。 */
     suspend fun compile(script: String): CompileOutcome
+
+    suspend fun prepareSnippet(script: String): SnippetPreparation =
+        throw WorkflowAnalyzerUnavailableException("snippet compilation is not available")
 }
 
 /** 上游 `CompileResult`。 */
 data class CompileOutcome(val ok: Boolean, val diagnostics: List<CompileDiagnostic>)
+
+data class SnippetPreparation(
+    val ok: Boolean,
+    val diagnostics: List<CompileDiagnostic>,
+    val lowered: String?,
+)
 
 /**
  * 分析器不可用（没有 WebView、assets 里没有 analyzer.js、脚本执行超时……）。
@@ -81,6 +90,8 @@ class MemoizedWorkflowScriptAnalyzer(
         }
         CompileOutcome(ok = analysis.ok, diagnostics = analysis.diagnostics)
     }
+
+    override suspend fun prepareSnippet(script: String): SnippetPreparation = inner.prepareSnippet(script)
 }
 
 /**
@@ -105,6 +116,10 @@ class WebViewWorkflowScriptAnalyzer(
     override suspend fun analyze(script: String): WorkflowAnalysis = lock.withLock {
         val root = call("prepare", script)
         WorkflowAnalysisCodec.decode(root)
+    }
+
+    override suspend fun prepareSnippet(script: String): SnippetPreparation = lock.withLock {
+        WorkflowAnalysisCodec.decodeSnippet(call("prepareSnippet", script))
     }
 
     override suspend fun compile(script: String): CompileOutcome = lock.withLock {

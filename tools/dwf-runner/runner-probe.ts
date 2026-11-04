@@ -90,6 +90,7 @@ async function runScript(
       });
     },
     settled(_runId, json) { settle(JSON.parse(json)); },
+    snippetSettled() {},
     log() {},
   };
   runner = new WorkflowRunner({ createRealm: async () => nodeRealm(), bridge });
@@ -128,7 +129,85 @@ async function runScript(
   return { settlement, journal, asks, events, actors, worldReads };
 }
 
+interface SnippetRun {
+  prepared: any;
+  result: any;
+  worldReads: number;
+}
+
+async function runSnippet(code: string, worldValue?: unknown): Promise<SnippetRun> {
+  const analyzer = loadAnalyzer();
+  const prepared = analyzer.prepareSnippet(code);
+  if (!prepared.ok) return { prepared, result: undefined, worldReads: 0 };
+  let runner!: WorkflowRunner;
+  let worldReads = 0;
+  let settle!: (value: any) => void;
+  const settled = new Promise<any>((resolve) => { settle = resolve; });
+  const unexpected = (member: string) => () => { throw new Error(`snippet bridge received ${member}`); };
+  const bridge: RunnerBridge = {
+    saveJournal: unexpected("saveJournal"),
+    emit() {},
+    createActor: unexpected("createActor"),
+    actorMessageCount: () => 0,
+    startAsk: unexpected("startAsk"),
+    continueAsk: unexpected("continueAsk"),
+    cancelAsk() {},
+    worldRead(requestId) {
+      worldReads += 1;
+      queueMicrotask(() => {
+        runner.worldResult(requestId, true, JSON.stringify(worldValue ?? "world-content"));
+      });
+    },
+    publishArtifact: unexpected("publishArtifact"),
+    settled: unexpected("settled"),
+    snippetSettled(_runId, json) { settle(JSON.parse(json)); },
+    log() {},
+  };
+  runner = new WorkflowRunner({ createRealm: async () => nodeRealm(), bridge });
+  await runner.evalSnippet(JSON.stringify({
+    runId: `dwfeval-probe-${Date.now()}`,
+    lowered: prepared.lowered,
+    cwd: "/tmp/andmx-dwf-runner",
+    timeoutMs: 30_000,
+  }));
+  return { prepared, result: await settled, worldReads };
+}
+
 async function main(): Promise<void> {
+  const snippet = await runSnippet(String.raw`
+    const body = await files.read('a.txt');
+    log('read ' + body.length);
+    return { body };
+  `, "snippet-world");
+  check("snippet completed", snippet.result?.kind === "completed", snippet.result);
+  check("snippet artifact", snippet.result?.artifact?.body === "snippet-world", snippet.result);
+  check("snippet logs", snippet.result?.logs?.[0] === "read 13", snippet.result);
+  check("snippet world read", snippet.worldReads === 1, snippet.worldReads);
+
+  const snippetThrows = await runSnippet(String.raw`
+    log('before');
+    throw new Error('snippet boom');
+  `);
+  check("snippet failed", snippetThrows.result?.kind === "failed", snippetThrows.result);
+  check("snippet failure keeps logs", snippetThrows.result?.logs?.[0] === "before", snippetThrows.result);
+
+  const snippetAgent = await runSnippet(String.raw`
+    const a = agent('x');
+    return await a.ask('hi');
+  `);
+  check("snippet rejects agent()", snippetAgent.prepared.ok === false, snippetAgent.prepared);
+
+  const snippetLogs = await runSnippet(String.raw`
+    for (let i = 0; i < 120; i++) log('line ' + i);
+    return 'x'.repeat(10);
+  `);
+  check("snippet log cap", snippetLogs.result?.logs?.length === 100 && snippetLogs.result?.logsTruncated === true, snippetLogs.result?.logs?.length);
+
+  const snippetLarge = await runSnippet(String.raw`
+    return 'x'.repeat(300 * 1024);
+  `);
+  check("snippet oversize", snippetLarge.result?.kind === "failed" && snippetLarge.result?.error?.code === "ArtifactTooLarge", snippetLarge.result?.error);
+
   const sequential = await runScript(String.raw`
     const a = agent('one');
     log('start');
@@ -219,7 +298,7 @@ async function main(): Promise<void> {
     process.stderr.write(`runner-probe failures:\n${failures.map((f) => `  - ${f}`).join("\n")}\n`);
     process.exit(1);
   }
-  process.stdout.write("runner-probe: sequential/worldread/errored/fanout/artifact/hole/warm passed\n");
+  process.stdout.write("runner-probe: snippet/sequential/worldread/errored/fanout/artifact/hole/warm passed\n");
 }
 
 void main();
