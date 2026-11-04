@@ -144,6 +144,15 @@ fun ConversationDrawer(
         fileTreePath = null
     }
 
+    fun toggleUnread(conversation: ConversationEntity) {
+        scope.launch {
+            dao.setUnreadAt(
+                conversation.id,
+                if (conversation.unreadAt == null) System.currentTimeMillis() else null,
+            )
+        }
+    }
+
     LaunchedEffect(fileTreeRequestKey) {
         if (fileTreeRequestKey > 0) {
             openFileTree(fileTreeRequestPath)
@@ -354,6 +363,7 @@ fun ConversationDrawer(
                                     onTogglePin = {
                                         scope.launch { dao.setPinned(conv.id, !conv.pinned) }
                                     },
+                                    onToggleUnread = { toggleUnread(conv) },
                                 )
                             }
                             if (filtered.size > VISIBLE_LIMIT) {
@@ -395,6 +405,7 @@ fun ConversationDrawer(
                             onTogglePin = {
                                 scope.launch { dao.setPinned(it.id, !it.pinned) }
                             },
+                            onToggleUnread = ::toggleUnread,
                             onMoveToGroup = { moveTarget = it },
                             onCreateGroup = { createGroupOpen = true },
                             onOpenFiles = { project ->
@@ -507,6 +518,7 @@ private fun TaskList(
     onDelete: (ConversationEntity) -> Unit,
     onArchive: (ConversationEntity) -> Unit,
     onTogglePin: (ConversationEntity) -> Unit,
+    onToggleUnread: (ConversationEntity) -> Unit,
     onMoveToGroup: (ConversationEntity) -> Unit,
     onCreateGroup: () -> Unit,
     onOpenFiles: (project: String) -> Unit = {},
@@ -544,6 +556,7 @@ private fun TaskList(
                     onDelete = { onDelete(conv) },
                     onArchive = { onArchive(conv) },
                     onTogglePin = { onTogglePin(conv) },
+                    onToggleUnread = { onToggleUnread(conv) },
                     onMoveToGroup = { onMoveToGroup(conv) },
                 )
             }
@@ -601,6 +614,7 @@ private fun TaskList(
                                 onDelete = { onDelete(conv) },
                                 onArchive = { onArchive(conv) },
                                 onTogglePin = { onTogglePin(conv) },
+                                onToggleUnread = { onToggleUnread(conv) },
                                 onMoveToGroup = { onMoveToGroup(conv) },
                             )
                         }
@@ -657,6 +671,7 @@ private fun TaskList(
                                 onDelete = { onDelete(conv) },
                                 onArchive = { onArchive(conv) },
                                 onTogglePin = { onTogglePin(conv) },
+                                onToggleUnread = { onToggleUnread(conv) },
                                 onMoveToGroup = { onMoveToGroup(conv) },
                             )
                         }
@@ -735,6 +750,7 @@ private fun TaskList(
                                 onDelete = { onDelete(conv) },
                                 onArchive = { onArchive(conv) },
                                 onTogglePin = { onTogglePin(conv) },
+                                onToggleUnread = { onToggleUnread(conv) },
                                 onMoveToGroup = { onMoveToGroup(conv) },
                             )
                         }
