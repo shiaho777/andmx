@@ -224,7 +224,14 @@ fun MarkdownText(
             modifier = modifier,
             onClick = { offset ->
                 annotated.getStringAnnotations(InlineParser.UrlAnnotationTag, offset, offset)
-                    .firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
+                    .firstOrNull()?.let { annotation ->
+                        val local = localFilePath(annotation.item)
+                        if (local != null) {
+                            com.andmx.ui2.chat.ChatActionBus.openFile(local)
+                        } else {
+                            runCatching { uriHandler.openUri(annotation.item) }
+                        }
+                    }
             },
         )
     } else {
@@ -536,5 +543,28 @@ fun CodeBlockThemed(
                 Box(Modifier.horizontalScroll(rememberScrollState())) { inner() }
             }
         }
+    }
+}
+
+private fun localFilePath(target: String): String? {
+    if (target.startsWith("#") || target.startsWith("mailto:")) return null
+    if (target.startsWith("file://")) return decodePercentPath(target.removePrefix("file://"))
+    if (target.contains("://")) return null
+    return decodePercentPath(target)
+}
+
+private fun decodePercentPath(value: String): String = buildString {
+    var i = 0
+    while (i < value.length) {
+        if (value[i] == '%' && i + 2 < value.length) {
+            val code = value.substring(i + 1, i + 3).toIntOrNull(16)
+            if (code != null) {
+                append(code.toChar())
+                i += 3
+                continue
+            }
+        }
+        append(value[i])
+        i++
     }
 }
