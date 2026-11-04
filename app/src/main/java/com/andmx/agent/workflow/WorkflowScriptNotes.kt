@@ -121,4 +121,9 @@ object WorkflowScriptNotes {
         val suffix = if (limit == defaultConcurrency) " (the default)" else ""
         return " At most $subject at once$suffix."
     }
+
+    fun subagentModelSentence(model: String?): String {
+        if (model.isNullOrBlank()) return ""
+        return " Subagents run on $model (the main agent stays on the session model)."
+    }
 }

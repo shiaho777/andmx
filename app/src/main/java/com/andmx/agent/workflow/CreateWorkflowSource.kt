@@ -32,7 +32,12 @@ class CreateWorkflowSource(
     }
 
     fun interface SubagentModelCatalog {
-        fun canonicalize(requested: String): Canonicalization
+        suspend fun canonicalize(requested: String): Canonicalization
+    }
+
+    sealed interface AmendModelResult {
+        data class Ok(val canonical: String?) : AmendModelResult
+        data class Failure(val inherited: Boolean, val message: String) : AmendModelResult
     }
 
     /** 归一化之后 `script` 一定在场，下游对三条来源是同一段代码。 */
@@ -101,6 +106,40 @@ class CreateWorkflowSource(
      * 就是 40 个；真正替 provider 把关的是 429 反馈，而不是机器核数。
      */
     fun normalizeMaxConcurrency(value: Int): Int = maxOf(1, value)
+
+    /**
+     * `AmendWorkflow` 的子代理模型三态：`null` 解除、缺席沿用并重新解析、字符串解析新值。
+     *
+     * 沿用的那一个失败时要让调用方知道它是**继承来的**，否则模型会以为自己传错了参数。
+     */
+    suspend fun resolveAmendSubagentModel(
+        requested: JsonElement?,
+        inherited: String?,
+    ): AmendModelResult {
+        if (requested is JsonNull) return AmendModelResult.Ok(null)
+        val explicit = (requested as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val text = explicit ?: inherited ?: return AmendModelResult.Ok(null)
+
+        val catalogPort = catalog
+        if (catalogPort == null) {
+            return if (explicit != null) {
+                AmendModelResult.Failure(inherited = false, message = SUBAGENT_MODEL_UNAVAILABLE)
+            } else {
+                AmendModelResult.Ok(text)
+            }
+        }
+        return when (val resolved = catalogPort.canonicalize(text)) {
+            is Canonicalization.Ok -> AmendModelResult.Ok(resolved.canonical)
+            is Canonicalization.Failed -> AmendModelResult.Failure(
+                inherited = explicit == null,
+                message = resolved.message,
+            )
+        }
+    }
 
     /**
      * 把入参归一化成执行事实。

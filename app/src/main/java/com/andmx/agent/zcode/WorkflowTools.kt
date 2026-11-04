@@ -46,6 +46,8 @@ class WorkflowTools(
     private val readText: suspend (String) -> String? = { null },
     /** 脚本静态分析器。为 null 时 `CreateWorkflow` 拒绝执行——编不过的检查不能省。 */
     private val analyzer: WorkflowScriptAnalyzer? = null,
+    /** 宿主模型目录。为 null 时 `subagent_model` 一律拒绝。 */
+    private val subagentModelCatalog: CreateWorkflowSource.SubagentModelCatalog? = null,
     private val conversationId: Long = 0L,
     private val cwd: () -> String = { "/" },
     private val dynamicRunner: DynamicWorkflowRunner? = null,
@@ -78,7 +80,12 @@ class WorkflowTools(
      * 所以它必须是单一入口：放回 handler 里，确认窗迟早会开始展示与将要执行的东西不同的字节。
      */
     private val createSource: CreateWorkflowSource by lazy {
-        CreateWorkflowSource(store = savedWorkflows, readText = readText, cwd = cwd)
+        CreateWorkflowSource(
+            store = savedWorkflows,
+            readText = readText,
+            cwd = cwd,
+            catalog = subagentModelCatalog,
+        )
     }
 
     private suspend fun automationBlocked(toolName: String): ToolResult? {
@@ -181,6 +188,8 @@ class WorkflowTools(
                     script = input.script,
                     cwd = cwd(),
                     conversationId = conversationId,
+                    subagentModel = input.subagentModel,
+                    maxConcurrency = input.maxConcurrency,
                 )
                 if (error != null) {
                     return ToolResult("The workflow compiled but could not start: $error", isError = true)
@@ -194,6 +203,13 @@ class WorkflowTools(
                             append("Sites: ").append(graph.nodes.size).append(" node(s) across ")
                             append(graph.actors.size).append(" actor(s).\n")
                         }
+                        append(
+                            WorkflowScriptNotes.concurrencyLimitSentence(
+                                input.maxConcurrency,
+                                DynamicWorkflowRunner.DEFAULT_MAX_CONCURRENCY,
+                            ),
+                        )
+                        append(WorkflowScriptNotes.subagentModelSentence(input.subagentModel))
                     },
                 )
             }
@@ -208,7 +224,13 @@ class WorkflowTools(
                             else -> " Source: inline script."
                         },
                     )
-                    append(WorkflowScriptNotes.concurrencyLimitSentence(input.maxConcurrency, null))
+                    append(
+                        WorkflowScriptNotes.concurrencyLimitSentence(
+                            input.maxConcurrency,
+                            DynamicWorkflowRunner.DEFAULT_MAX_CONCURRENCY,
+                        ),
+                    )
+                    append(WorkflowScriptNotes.subagentModelSentence(input.subagentModel))
                     analysis.declaredArtifacts.takeIf { it.isNotEmpty() }?.let { artifacts ->
                         append("\nArtifacts declared: ")
                         append(artifacts.joinToString(", ") { "${it.id} (${it.kind})" })
@@ -254,10 +276,38 @@ class WorkflowTools(
             if (existing.kind != "dynamic") {
                 return absent("AmendWorkflow currently supports dynamic script runs, not phase workflows.")
             }
-            createSource.validateSource(args)?.let { return absent(it) }
-            val input = when (val resolved = createSource.resolve(args)) {
+            val subagentModel = when (
+                val choice = createSource.resolveAmendSubagentModel(
+                    args["subagent_model"],
+                    existing.subagentModel,
+                )
+            ) {
+                is CreateWorkflowSource.AmendModelResult.Failure -> {
+                    val message = if (choice.inherited) {
+                        "This amend inherited the predecessor run's subagent model " +
+                            "(`${existing.subagentModel.orEmpty()}`), which is no longer usable. " +
+                            "${choice.message}\n\nPass `subagent_model: null` to run the revision on the session model instead."
+                    } else {
+                        choice.message
+                    }
+                    return absent("workflow_subagent_model_unresolved: $message Nothing was stopped or created.")
+                }
+                is CreateWorkflowSource.AmendModelResult.Ok -> choice.canonical
+            }
+            val sourceArgs = if (args.containsKey("subagent_model")) {
+                JsonObject(args - "subagent_model")
+            } else {
+                args
+            }
+            createSource.validateSource(sourceArgs)?.let { return absent(it) }
+            val input = when (val resolved = createSource.resolve(sourceArgs)) {
                 is CreateWorkflowSource.Result.Failure -> return absent(resolved.message)
                 is CreateWorkflowSource.Result.Ok -> resolved.input
+            }
+            val maxConcurrency = if (args.containsKey("max_concurrency")) {
+                input.maxConcurrency
+            } else {
+                existing.maxConcurrency
             }
             val analysis = runCatching { analyzer?.analyze(input.script) }.getOrNull()
                 ?: return absent("This session has no workflow script analyzer.")
@@ -295,6 +345,8 @@ class WorkflowTools(
                 runIdOverride = newRunId,
                 resumedFrom = runId,
                 importJournalFrom = runId,
+                subagentModel = subagentModel,
+                maxConcurrency = maxConcurrency,
             )
             if (error != null || started == null) {
                 return ToolResult("Amend failed to start a new run: ${error ?: "unknown"}", isError = true)
@@ -305,6 +357,13 @@ class WorkflowTools(
                     append(newRunId).append(".\n")
                     if (predecessorLive) append("The previous run was marked superseded. ")
                     append("Use GetWorkflowRun to follow the new run.")
+                    append(
+                        WorkflowScriptNotes.concurrencyLimitSentence(
+                            maxConcurrency,
+                            DynamicWorkflowRunner.DEFAULT_MAX_CONCURRENCY,
+                        ),
+                    )
+                    append(WorkflowScriptNotes.subagentModelSentence(subagentModel))
                 },
             )
         }
@@ -699,6 +758,8 @@ class WorkflowTools(
         append("Kind: ${s.kind}\n")
         append("Task: ${s.task}\n")
         append("Directory: ${s.cwd}\n")
+        s.maxConcurrency?.let { append("Max concurrency: $it\n") }
+        s.subagentModel?.let { append("Subagents: $it (the main agent stays on the session model)\n") }
         s.definitionId?.let { append("Definition: $it${s.definitionVersion?.let { v -> " (v$v)" } ?: ""}\n") }
         s.currentPhase?.let { append("Current phase: $it\n") }
         append("Updated: ${s.updatedAt}\n")

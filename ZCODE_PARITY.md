@@ -407,7 +407,10 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
      `GetWorkflowRun` 列出待答问题。主会话空闲或回合结束时回落到用户确认窗，问题随之撤下。
    - 已接：**snippet 执行**——`EvalWorkflowSnippet` 经 analyzer `prepareSnippet` 编译、runner `evalSnippet` 同步结算，
      日志上限 100 条 × 2048 字符，返回值上限 256 KiB；`runner-probe` 覆盖 completed / diagnostics / failed。
-   - 剩余：`AmendWorkflow` 的三态模型继承。
+   - 已接：**子代理模型与并发**——`CreateWorkflowSource` 的模型目录改为活的 provider 注册表，移植上游
+     `resolveModelReference` 的三档匹配、`$level` 校验与失败文案；`subagent_model` / `max_concurrency` 随 run
+     快照持久化，动态 actor 按快照模型运行，runner 的 `caps.maxConcurrency` 不再写死。`AmendWorkflow` 补齐
+     三态：省略沿用前驱并重新解析、`null` 解除、字符串解析新值；并发上界同形。
 3. ~~**P0｜ToolSearch / DeferredToolCall**~~（已完成 local 模式，2026-11-02）：`shouldDefer` 已落到
    `Tool` 接口，两个控制工具与 `ToolSearchRegistry` 已接线到主引擎，deferred 工具覆盖见 3.1。
    下一步是把 discovered 集合写进压缩/恢复元数据，并评估子代理是否也接入同一机制。

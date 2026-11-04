@@ -2,6 +2,7 @@ package com.andmx.agent.workflow
 
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -169,6 +170,69 @@ class CreateWorkflowSourceTest {
             CreateWorkflowSource.Result.Failure("The model \"nope\" cannot be used."),
             result,
         )
+    }
+
+    @Test
+    fun `Amend 的 subagent_model 为 null 时解除继承`() = runTest {
+        val catalog = CreateWorkflowSource.SubagentModelCatalog {
+            CreateWorkflowSource.Canonicalization.Ok("anthropic/$it")
+        }
+        val result = source(catalog = catalog)
+            .resolveAmendSubagentModel(JsonNull, "openai/gpt-5")
+
+        assertEquals(CreateWorkflowSource.AmendModelResult.Ok(null), result)
+    }
+
+    @Test
+    fun `Amend 省略 subagent_model 时沿用并重新解析`() = runTest {
+        val catalog = CreateWorkflowSource.SubagentModelCatalog {
+            CreateWorkflowSource.Canonicalization.Ok("anthropic/canonical-$it")
+        }
+        val result = source(catalog = catalog)
+            .resolveAmendSubagentModel(null, "openai/gpt-5")
+
+        assertEquals(
+            CreateWorkflowSource.AmendModelResult.Ok("anthropic/canonical-openai/gpt-5"),
+            result,
+        )
+    }
+
+    @Test
+    fun `Amend 沿用的模型失效时标记为继承失败`() = runTest {
+        val catalog = CreateWorkflowSource.SubagentModelCatalog {
+            CreateWorkflowSource.Canonicalization.Failed("No configured model matches `$it`.")
+        }
+        val result = source(catalog = catalog)
+            .resolveAmendSubagentModel(null, "openai/gpt-5")
+
+        assertEquals(
+            CreateWorkflowSource.AmendModelResult.Failure(
+                inherited = true,
+                message = "No configured model matches `openai/gpt-5`.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun `Amend 显式指定的模型失效时不算继承失败`() = runTest {
+        val catalog = CreateWorkflowSource.SubagentModelCatalog {
+            CreateWorkflowSource.Canonicalization.Failed("nope")
+        }
+        val result = source(catalog = catalog)
+            .resolveAmendSubagentModel(JsonPrimitive("openai/gpt-5"), "anthropic/claude-x")
+
+        assertEquals(
+            CreateWorkflowSource.AmendModelResult.Failure(inherited = false, message = "nope"),
+            result,
+        )
+    }
+
+    @Test
+    fun `宿主没有模型目录时 Amend 原样沿用前驱的模型`() = runTest {
+        val result = source().resolveAmendSubagentModel(null, "openai/gpt-5")
+
+        assertEquals(CreateWorkflowSource.AmendModelResult.Ok("openai/gpt-5"), result)
     }
 
     // —— saved ——

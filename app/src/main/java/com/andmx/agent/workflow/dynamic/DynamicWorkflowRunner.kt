@@ -55,6 +55,7 @@ data class DynamicAskRequest(
     val conversationId: Long,
     val personaJson: String? = null,
     val seedJson: String? = null,
+    val subagentModel: String? = null,
 )
 
 sealed interface DynamicAskResult {
@@ -160,6 +161,8 @@ class DynamicWorkflowRunner(
         runIdOverride: String? = null,
         resumedFrom: String? = null,
         importJournalFrom: String? = null,
+        subagentModel: String? = null,
+        maxConcurrency: Int? = null,
     ): Pair<String?, String?> {
         val analysis = runCatching { analyzer.analyze(script) }.getOrElse {
             return null to (it.message ?: "workflow analysis failed")
@@ -189,12 +192,14 @@ class DynamicWorkflowRunner(
                 )
             } ?: WorkflowGraph(edges = emptyList(), nodes = emptyList()),
             kind = KIND,
+            maxConcurrency = maxConcurrency,
             phaseOrder = emptyList(),
             phases = emptyList(),
             runId = runId,
             resumedFrom = resumedFrom,
             status = WorkflowRunStatus.running,
             strategy = WorkflowStrategy.DEFAULT,
+            subagentModel = subagentModel,
             task = script.lineSequence().firstOrNull()?.trim()?.take(200).orEmpty().ifBlank { "dynamic workflow" },
             updatedAt = now,
             definitionId = KIND,
@@ -211,6 +216,7 @@ class DynamicWorkflowRunner(
             conversationId = conversationId,
             resumedFrom = resumedFrom,
             importedJournals = importedJournals,
+            maxConcurrency = maxConcurrency,
         )
         val error = launch(config)
         return if (error == null) runId to null else {
@@ -246,6 +252,7 @@ class DynamicWorkflowRunner(
             lowered = lowered,
             journalJson = journal,
             conversationId = runStore.conversationId(runId),
+            maxConcurrency = existing?.maxConcurrency,
         )
         val error = launch(config)
         return if (error == null) true to null else false to error
@@ -448,6 +455,7 @@ class DynamicWorkflowRunner(
         conversationId: Long,
         resumedFrom: String? = null,
         importedJournals: List<String>? = null,
+        maxConcurrency: Int? = null,
     ): String {
         val raw = analysis.raw
         val askSpecs = raw["askSpecs"] as? JsonArray ?: JsonArray(emptyList())
@@ -459,7 +467,7 @@ class DynamicWorkflowRunner(
             put("cwd", cwd)
             put("askSpecs", askSpecs)
             put("sitePhases", sitePhases)
-            put("caps", buildJsonObject { put("maxConcurrency", 4) })
+            put("caps", buildJsonObject { put("maxConcurrency", maxConcurrency ?: DEFAULT_MAX_CONCURRENCY) })
             put("scriptHash", sha256(script))
             put("conversationId", conversationId)
             resumedFrom?.let { put("resumedFrom", it) }
@@ -760,9 +768,9 @@ class DynamicWorkflowRunner(
 
         @JavascriptInterface
         fun startAsk(runId: String, requestId: String, requestJson: String) {
-            val request = parseAsk(runId, requestId, requestJson) ?: return
-            pendingAsks[requestId] = request
             scope.launch {
+                val request = parseAsk(runId, requestId, requestJson) ?: return@launch
+                pendingAsks[requestId] = request
                 val result = runCatching { host.ask(request) }
                     .getOrElse { DynamicAskResult.Fail(it.message ?: "agent failed") }
                 postJs("askResult", requestId, askResultJson(result))
@@ -1000,12 +1008,13 @@ class DynamicWorkflowRunner(
         )
     }
 
-    private fun parseAsk(runId: String, requestId: String, requestJson: String): DynamicAskRequest? =
+    private suspend fun parseAsk(runId: String, requestId: String, requestJson: String): DynamicAskRequest? =
         runCatching {
             val obj = json.parseToJsonElement(requestJson).jsonObject
             val siteId = obj["siteId"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val ordinal = obj["ordinal"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1
             DynamicAskRequest(
+                subagentModel = runStore.readSnapshot(runId)?.subagentModel,
                 runId = runId,
                 requestId = requestId,
                 sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull.orEmpty(),
@@ -1021,6 +1030,7 @@ class DynamicWorkflowRunner(
         }.getOrNull()
 
     companion object {
+        const val DEFAULT_MAX_CONCURRENCY = 4
         const val SNIPPET_SETTLE_GRACE_MS = 30_000L
         const val KIND = "dynamic"
         const val ASSET_URL = "file:///android_asset/dwf/runner.html"

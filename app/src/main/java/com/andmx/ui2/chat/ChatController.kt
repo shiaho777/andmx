@@ -54,6 +54,9 @@ import com.andmx.agent.WebFetchPolicy
 import com.andmx.agent.WebSearchTool
 import com.andmx.agent.WriteFileTool
 import com.andmx.agent.hooks.HookSystem
+import com.andmx.agent.workflow.CreateWorkflowSource
+import com.andmx.agent.workflow.ModelReferenceResolution
+import com.andmx.agent.workflow.ModelReferenceResolver
 import com.andmx.agent.workflow.dynamic.DynamicAskRequest
 import com.andmx.agent.workflow.dynamic.DynamicAskResult
 import com.andmx.agent.workflow.dynamic.DynamicWorkflowHost
@@ -801,6 +804,15 @@ class ChatController private constructor(private val context: Context) {
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
             ?: return DynamicAskResult.Fail("no provider")
+        val (client, turnContext) =
+            if (com.andmx.agent.multi.SubagentModelCatalog.isInherit(request.subagentModel)) {
+                TracedLlm(
+                    LlmClient(provider, trackerFor(convId)),
+                    ModelCallTrace.Source.WORKFLOW,
+                ) to TurnContext(provider, settings.model)
+            } else {
+                resolveSubAgentRun(request.subagentModel.orEmpty(), provider, convId)
+            }
         val persona = runCatching {
             Json.parseToJsonElement(
                 request.personaJson ?: dynamicActorPersonas[request.sessionId].orEmpty(),
@@ -846,10 +858,7 @@ class ChatController private constructor(private val context: Context) {
         }
         val engine = AgentEngine(
             tools = tools,
-            client = TracedLlm(
-                LlmClient(provider, trackerFor(convId)),
-                ModelCallTrace.Source.WORKFLOW,
-            ),
+            client = client,
             systemPrompt = systemPrompt,
             maxSteps = 24,
             approve = { tool, args ->
@@ -864,7 +873,7 @@ class ChatController private constructor(private val context: Context) {
         var finalText = ""
         var failure: String? = null
         try {
-            engine.runTurn(settings, TurnContext(provider, settings.model), request.instructions)
+            engine.runTurn(settings, turnContext, request.instructions)
                 .collect { ev ->
                     when (ev) {
                         is AgentEvent.Assistant -> finalText = ev.text
@@ -2394,6 +2403,20 @@ class ChatController private constructor(private val context: Context) {
                 savedWorkflows = savedWorkflowStore,
                 readText = { path -> runCatching { guestFs.readText(path) }.getOrNull() },
                 analyzer = workflowAnalyzer,
+                subagentModelCatalog = CreateWorkflowSource.SubagentModelCatalog { requested ->
+                    val current = settingsStore.settings.firstOrNull()
+                    val entries = ModelReferenceResolver.catalogEntries(
+                        providers = providerStore.providers.firstOrNull().orEmpty(),
+                        currentProviderId = current?.activeProviderId.orEmpty(),
+                        currentModelId = current?.model.orEmpty(),
+                    )
+                    when (val resolution = ModelReferenceResolver.resolve(requested, entries)) {
+                        is ModelReferenceResolution.Ok ->
+                            CreateWorkflowSource.Canonicalization.Ok(resolution.canonical)
+                        is ModelReferenceResolution.Failed ->
+                            CreateWorkflowSource.Canonicalization.Failed(resolution.message)
+                    }
+                },
                 conversationId = conversationId,
                 cwd = cwd,
                 dynamicRunner = dynamicWorkflowRunner,
