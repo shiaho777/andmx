@@ -791,8 +791,10 @@ private fun ModelPill(
     androidx.compose.runtime.LaunchedEffect(modelMenuToken) {
         if (modelMenuToken > 0) expanded = true
     }
+    val enabledProviders = providers.filter { it.enabled }
+    val showProviderRail = enabledProviders.size > 1
     var focusProviderId by remember(activeProviderId, providers) {
-        mutableStateOf(activeProviderId.ifBlank { providers.firstOrNull()?.id.orEmpty() })
+        mutableStateOf(activeProviderId.ifBlank { enabledProviders.firstOrNull()?.id.orEmpty() })
     }
     var query by remember { mutableStateOf("") }
     val panelShape = RoundedCornerShape(16.dp)
@@ -806,7 +808,7 @@ private fun ModelPill(
                 .clip(RoundedCornerShape(16.dp))
                 .clickable {
                     expanded = true
-                    focusProviderId = activeProviderId.ifBlank { providers.firstOrNull()?.id.orEmpty() }
+                    focusProviderId = activeProviderId.ifBlank { enabledProviders.firstOrNull()?.id.orEmpty() }
                     query = ""
                 }
                 .padding(horizontal = 4.dp, vertical = 6.dp),
@@ -871,60 +873,60 @@ private fun ModelPill(
                         }
                         HorizontalDivider()
                         Row(Modifier.heightIn(max = 260.dp)) {
-                            Column(
-                                Modifier
-                                    .widthIn(min = 100.dp, max = 112.dp)
-                                    .verticalScroll(rememberScrollState())
-                                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                            ) {
-                                if (providers.isEmpty()) {
-                                    Text(tr("暂无供应商"),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(12.dp),
-                                    )
-                                }
-                                providers.filter { it.enabled }.forEach { p ->
-                                    val selected = p.id == focusProviderId
-                                    val active = p.id == activeProviderId
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(
-                                                if (selected) {
-                                                    MaterialTheme.colorScheme.surfaceContainerHighest
-                                                } else {
-                                                    MaterialTheme.colorScheme.surfaceContainerLow
-                                                },
-                                            )
-                                            .clickable {
-                                                focusProviderId = p.id
-                                                query = ""
+                            if (showProviderRail) {
+                                Column(
+                                    Modifier
+                                        .widthIn(min = 100.dp, max = 112.dp)
+                                        .verticalScroll(rememberScrollState())
+                                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                                ) {
+                                    enabledProviders.forEach { p ->
+                                        val selected = p.id == focusProviderId
+                                        val active = p.id == activeProviderId
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(
+                                                    if (selected) {
+                                                        MaterialTheme.colorScheme.surfaceContainerHighest
+                                                    } else {
+                                                        MaterialTheme.colorScheme.surfaceContainerLow
+                                                    },
+                                                )
+                                                .clickable {
+                                                    focusProviderId = p.id
+                                                    query = ""
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                                        ) {
+                                            if (active) {
+                                                Box(
+                                                    Modifier
+                                                        .size(6.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.primary),
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                            } else {
+                                                Spacer(Modifier.width(12.dp))
                                             }
-                                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                                    ) {
-                                        if (active) {
-                                            Box(
-                                                Modifier
-                                                    .size(6.dp)
-                                                    .clip(CircleShape)
-                                                    .background(MaterialTheme.colorScheme.primary),
+                                            Text(
+                                                tr(p.name.ifBlank { "未命名" }),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
-                                            Spacer(Modifier.width(6.dp))
-                                        } else {
-                                            Spacer(Modifier.width(12.dp))
                                         }
-                                        Text(
-                                            tr(p.name.ifBlank { "未命名" }),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
                                     }
                                 }
                             }
-                            val focus = providers.firstOrNull { it.id == focusProviderId }
+                            val focus = if (showProviderRail) {
+                                enabledProviders.firstOrNull { it.id == focusProviderId }
+                                    ?: enabledProviders.firstOrNull()
+                            } else {
+                                enabledProviders.firstOrNull()
+                            }
                             val models = (focus?.models?.keys?.toList() ?: emptyList())
                                 .filter { query.isBlank() || it.contains(query, ignoreCase = true) }
                             Column(
@@ -934,7 +936,13 @@ private fun ModelPill(
                             ) {
                                 if (models.isEmpty()) {
                                     Text(
-                                        tr(if (focus == null) "选择供应商" else "该供应商暂无模型"),
+                                        tr(
+                                            when {
+                                                focus == null && enabledProviders.isEmpty() -> "暂无供应商"
+                                                focus == null -> "选择供应商"
+                                                else -> "该供应商暂无模型"
+                                            },
+                                        ),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(12.dp),
