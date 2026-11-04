@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.settings.UiLang
 
 data class StarterSuggestion(val title: String, val prompt: String)
 
@@ -35,32 +36,68 @@ fun starterSuggestions(
     dirtyFileCount: Int,
     ahead: Int,
 ): List<StarterSuggestion> {
+    val english = UiLang.tag == "en"
     if (!hasWorkspace) {
-        return listOf(
-            StarterSuggestion("认识一下", "介绍一下你能帮我做哪些事，用中文回答"),
-            StarterSuggestion("写段代码", "用 Kotlin 写一个带取消支持的防抖函数，并逐行解释"),
-            StarterSuggestion("学点东西", "用通俗的方式讲讲 Jetpack Compose 的重组机制"),
-        )
+        return if (english) {
+            listOf(
+                StarterSuggestion("Introduce yourself", "Tell me what you can help me with."),
+                StarterSuggestion(
+                    "Write some code",
+                    "Write a Kotlin debounce function with cancellation support, and explain it line by line.",
+                ),
+                StarterSuggestion(
+                    "Learn something",
+                    "Explain Jetpack Compose recomposition in simple terms.",
+                ),
+            )
+        } else {
+            listOf(
+                StarterSuggestion("认识一下", "介绍一下你能帮我做哪些事，用中文回答"),
+                StarterSuggestion("写段代码", "用 Kotlin 写一个带取消支持的防抖函数，并逐行解释"),
+                StarterSuggestion("学点东西", "用通俗的方式讲讲 Jetpack Compose 的重组机制"),
+            )
+        }
     }
-    val project = projectName.ifBlank { "当前工作区" }
+    val project = projectName.ifBlank { if (english) "this workspace" else "当前工作区" }
     val out = ArrayList<StarterSuggestion>(3)
     if (isGitRepo && hasChanges && dirtyFileCount > 0) {
-        out += StarterSuggestion(
-            "Review 未提交改动",
-            "看一下工作区里未提交的 $dirtyFileCount 个文件的改动，逐个点评风险，最后给出 commit 信息建议",
-        )
+        out += if (english) {
+            StarterSuggestion(
+                "Review uncommitted changes",
+                "Review the changes in $dirtyFileCount uncommitted files, call out risks one by one, and suggest a commit message.",
+            )
+        } else {
+            StarterSuggestion(
+                "Review 未提交改动",
+                "看一下工作区里未提交的 $dirtyFileCount 个文件的改动，逐个点评风险，最后给出 commit 信息建议",
+            )
+        }
     }
     if (isGitRepo && ahead > 0) {
-        out += StarterSuggestion(
-            "推送前检查",
-            "当前分支领先远端 $ahead 个提交，帮我检查这些提交是否适合 push，有没有明显问题",
-        )
+        out += if (english) {
+            StarterSuggestion(
+                "Pre-push check",
+                "This branch is $ahead commits ahead of the remote. Check whether these commits are ready to push and flag any obvious issues.",
+            )
+        } else {
+            StarterSuggestion(
+                "推送前检查",
+                "当前分支领先远端 $ahead 个提交，帮我检查这些提交是否适合 push，有没有明显问题",
+            )
+        }
     }
     if (out.size < 3) {
-        out += StarterSuggestion(
-            "讲解这个项目",
-            "介绍一下 $project 的整体结构和关键模块，指出新人最应该先看的三个地方，用中文回答",
-        )
+        out += if (english) {
+            StarterSuggestion(
+                "Explain this project",
+                "Introduce the overall structure and key modules of $project, and point out the three places a newcomer should read first.",
+            )
+        } else {
+            StarterSuggestion(
+                "讲解这个项目",
+                "介绍一下 $project 的整体结构和关键模块，指出新人最应该先看的三个地方，用中文回答",
+            )
+        }
     }
     return out.take(3)
 }
