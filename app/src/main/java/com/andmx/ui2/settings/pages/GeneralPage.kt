@@ -183,6 +183,15 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
+            SettingsGroup("动态工作流") {
+                SwitchRow(
+                    title = "启用动态工作流工具",
+                    description = "开放 CreateWorkflow、AmendWorkflow、EvalWorkflowSnippet 等 11 个工作流工具。实验能力：脚本在设备内的 WebView 沙箱执行；切换后空闲会话会重建工具面。",
+                    checked = s.dynamicWorkflowToolsEnabled,
+                    onCheckedChange = { save(s.copy(dynamicWorkflowToolsEnabled = it)) },
+                )
+            }
+
             SettingsGroup("通知") {
                 SwitchRow(
                     title = "任务通知",
