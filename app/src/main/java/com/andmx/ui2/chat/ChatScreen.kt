@@ -1,5 +1,6 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.UiLang
 import com.andmx.ui2.settings.tr
 
 import androidx.activity.compose.BackHandler
@@ -1016,6 +1017,7 @@ LaunchedEffect(Unit) {
                     gitInfo?.hasChanges,
                     gitInfo?.dirtyFileCount,
                     gitInfo?.ahead,
+                    UiLang.tag,
                 ) {
                     starterSuggestions(
                         hasWorkspace = hostPath != null,
@@ -1730,11 +1732,13 @@ private fun EmptyConversationState(
             )
             if (hasWorkspace) {
                 Text(
-                    buildString {
-                        append("开始在 ")
-                        append(projectName)
-                        append(" 项目新建任务")
-                    },
+                    tr(
+                        buildString {
+                            append("开始在 ")
+                            append(projectName)
+                            append(" 项目新建任务")
+                        },
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 20.dp),
