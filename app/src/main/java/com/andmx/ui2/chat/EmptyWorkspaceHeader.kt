@@ -158,7 +158,7 @@ private fun WorkspacePill(
                 val q = query.trim()
                 candidates
                     .filter { q.isEmpty() || it.contains(q, true) || ProjectManager.displayName(it).contains(q, true) }
-                    .take(12)
+                    .take(5)
             }
 
             Column(
