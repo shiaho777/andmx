@@ -225,6 +225,21 @@ class ChatController private constructor(private val context: Context) {
             }
         }
 
+    fun previewFileExists(path: String): Boolean {
+        if (projectManager.isRemote) return true
+        if (path.startsWith("/storage/") || path.startsWith("/sdcard/")) return true
+        if (runCatching { java.io.File(path).isFile }.getOrDefault(false)) return true
+        val host = projectManager.hostPath.value ?: return false
+        val target = com.andmx.ui2.files.resolveLocalBrowseTarget(
+            initialPath = path,
+            rootPath = host,
+            hostPath = host,
+            guestMount = projectManager.guestMountPath,
+            rootfsRoot = guestFs.rootfsRoot.absolutePath,
+        )
+        return target.file != null
+    }
+
     fun backgroundTasks(conversationId: Long): kotlinx.coroutines.flow.StateFlow<List<com.andmx.agent.BackgroundTasks.Snapshot>> =
         backgroundTasksFor(conversationId).taskList
 

@@ -75,7 +75,33 @@ class AssistantFileCitationsTest {
         val projection = AssistantFileCitations.project(raw)
 
         assertEquals(10, projection.cards.size)
-        assertEquals((1..10).map { "docs/$it.pdf" }, projection.cards.map { it.path })
+        assertEquals((1..10).map { "docs/$it.pdf" }.reversed(), projection.cards.map { it.path })
+    }
+
+    @Test
+    fun plainPreviewPathsBecomeCardsButUrlsDoNot() {
+        val projection = AssistantFileCitations.project(
+            "Look at docs/report.pdf, /root/project/clip.mp4 and https://example.com/site.pdf.",
+        )
+
+        assertEquals(
+            listOf("/root/project/clip.mp4", "docs/report.pdf"),
+            projection.cards.map { it.path },
+        )
+    }
+
+    @Test
+    fun plainPathsInsideCodeBlocksAreIgnored() {
+        val raw = """
+            ```
+            docs/report.pdf
+            ```
+            docs/notes.md
+        """.trimIndent()
+
+        val projection = AssistantFileCitations.project(raw)
+
+        assertEquals(listOf("docs/notes.md"), projection.cards.map { it.path })
     }
 
     @Test

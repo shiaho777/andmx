@@ -26,24 +26,45 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AssistantFilePreviewCards(
     cards: List<AssistantFileCard>,
+    fileExists: ((String) -> Boolean)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (cards.isEmpty()) return
+    val visible by produceState(
+        initialValue = if (fileExists == null) cards else emptyList(),
+        key1 = cards,
+        key2 = fileExists,
+    ) {
+        value = if (fileExists == null) {
+            cards
+        } else {
+            withContext(Dispatchers.IO) {
+                cards.filter { card ->
+                    runCatching { fileExists(card.path) }.getOrDefault(true)
+                }
+            }
+        }
+    }
+    if (visible.isEmpty()) return
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        cards.forEach { card ->
+        visible.forEach { card ->
             val shape = RoundedCornerShape(12.dp)
             Row(
                 Modifier
