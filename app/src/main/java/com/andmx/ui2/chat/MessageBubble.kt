@@ -214,23 +214,30 @@ private fun AssistantProcessBlock(
     fileExists: ((String) -> Boolean)? = null,
 ) {
     val process = message.isProcess
-    val projection = remember(message.content, message.isStreaming) {
+    val fileProjection = remember(message.content, message.isStreaming) {
         if (message.isStreaming) {
             AssistantFileProjection(message.content, emptyList())
         } else {
             AssistantFileCitations.project(message.content)
         }
     }
-    // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
-    val previewPlan = remember(projection.text, message.isStreaming) {
+    val commentProjection = remember(fileProjection.text, message.isStreaming) {
         if (message.isStreaming) {
-            MessagePreview.Plan(projection.text, projection.text.length, false)
+            AssistantCodeCommentProjection(fileProjection.text, emptyList())
         } else {
-            MessagePreview.plan(projection.text)
+            AssistantCodeComments.project(fileProjection.text)
+        }
+    }
+    // 长回复渐进预览（ZCode bodyPreview 对齐）：非流式超阈值先渲染预览 + 展开按钮
+    val previewPlan = remember(commentProjection.text, message.isStreaming) {
+        if (message.isStreaming) {
+            MessagePreview.Plan(commentProjection.text, commentProjection.text.length, false)
+        } else {
+            MessagePreview.plan(commentProjection.text)
         }
     }
     var showFull by remember(message.id) { mutableStateOf(false) }
-    val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else projection.text
+    val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else commentProjection.text
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -268,10 +275,16 @@ private fun AssistantProcessBlock(
                 )
             }
         }
-        if (!process && !message.isStreaming && projection.cards.isNotEmpty()) {
+        if (!process && !message.isStreaming && fileProjection.cards.isNotEmpty()) {
             AssistantFilePreviewCards(
-                cards = projection.cards,
+                cards = fileProjection.cards,
                 fileExists = fileExists,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        if (!process && !message.isStreaming && commentProjection.comments.isNotEmpty()) {
+            AssistantCodeCommentCards(
+                comments = commentProjection.comments,
                 modifier = Modifier.padding(top = 8.dp),
             )
         }

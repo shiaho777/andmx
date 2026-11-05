@@ -463,6 +463,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - **Assistant 文件引用预览卡**：`::zcode-file-citation{...}`、本地 Markdown 文件链接与 plain path
   投影成卡片，支持 Markdown/HTML/Office/PDF/音视频，点击走 `ChatActionBus.openFile` 打开现有文件查看器；
   本地文件存在性校验（远程 fail-open），代码块内示例不生成卡片，按正文逆序最多 10 张。
+- **Assistant 代码评论卡（第一批）**：`::code-comment{...}` 投影成默认折叠的审查卡组，
+  展开显示 priority / 标题 / `path:range`，点击打开文件；行号定位与只读评论渲染待下一批。
 - **文档附件**：Composer 分开「添加图片」「添加文档」；可读文本/代码/JSON 正文真正内联进模型上下文。
 - **定时任务**：`AndmxApp` 安装冷启动 `AutomationWake.onDue`，闹钟/BOOT_COMPLETED 拉起进程后能继续执行到期任务。
 - **文件树变更**：宿主工作区路径映射到 guest 路径，changedOnly 与变更徽标不再按文件名误判。
