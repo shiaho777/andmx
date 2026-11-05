@@ -87,7 +87,7 @@ fun AssistantCodeCommentCards(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { ChatActionBus.openFile(comment.file) }
+                            .clickable { ChatActionBus.openCodeReview(comment) }
                             .padding(horizontal = 12.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

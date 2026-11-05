@@ -4,15 +4,17 @@ import com.andmx.ui2.settings.tr
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,12 +47,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -65,6 +72,15 @@ import java.io.File
 
 private const val CHUNK = 256 * 1024
 private const val MAX_PDF_PAGES = 10
+
+data class FileReviewAnchor(
+    val path: String? = null,
+    val startLine: Int? = null,
+    val endLine: Int? = null,
+    val title: String? = null,
+    val body: String? = null,
+    val priority: Int? = null,
+)
 
 private enum class FileKind { TEXT, MARKDOWN, IMAGE, PDF, AUDIO, VIDEO, OFFICE, BINARY }
 
@@ -86,10 +102,17 @@ private fun kindOf(name: String): FileKind {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileViewerScreen(path: String, onBack: () -> Unit) {
+fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor? = null) {
     val context = LocalContext.current
     val file = remember(path) { File(path) }
     val kind = remember(path) { kindOf(file.name) }
+    val activeReview = remember(review, path) {
+        review?.takeIf { anchor ->
+            anchor.path == null ||
+                file.absolutePath == anchor.path ||
+                file.name == File(anchor.path).name
+        }
+    }
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
@@ -188,6 +211,25 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
     val totalLines = fullContent?.count { it == '\n' }?.plus(1) ?: 0
     val shownStart = fullContent?.let { it.substring(0, safeChunk * CHUNK).count { c -> c == '\n' } + 1 } ?: 0
     val shownEnd = viewContent?.count { it == '\n' }?.plus(shownStart) ?: 0
+    val reviewRange = activeReview?.startLine?.let { start ->
+        val end = activeReview.endLine ?: start
+        if (end >= start) start..end else null
+    }
+    val reviewScrollLine = reviewRange?.first
+    val localReviewRange = reviewRange?.let { range ->
+        val start = (range.first - shownStart + 1).coerceAtLeast(1)
+        val end = (range.last - shownStart + 1).coerceAtMost(shownEnd - shownStart + 1)
+        if (start <= end) start..end else null
+    }
+    val reviewScrollLocal = reviewScrollLine?.let { (it - shownStart + 1).coerceAtLeast(1) }
+
+    LaunchedEffect(fullContent, reviewScrollLine) {
+        val content = fullContent ?: return@LaunchedEffect
+        val line = reviewScrollLine ?: return@LaunchedEffect
+        if (content.length <= CHUNK) return@LaunchedEffect
+        val offset = lineStartOffset(content, line)
+        chunkIndex = (offset / CHUNK).coerceIn(0, chunkCount - 1)
+    }
 
     Scaffold(
         topBar = {
@@ -259,6 +301,12 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                 )
             }
 
+            if (activeReview != null &&
+                (!activeReview.title.isNullOrBlank() || !activeReview.body.isNullOrBlank())
+            ) {
+                ReviewAnnotationCard(activeReview)
+            }
+
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     kind == FileKind.AUDIO || kind == FileKind.VIDEO ->
@@ -321,7 +369,9 @@ fun FileViewerScreen(path: String, onBack: () -> Unit) {
                         code = viewContent ?: "",
                         wrap = wrap,
                         showLineNumbers = config.showLineNumbers,
-                        startLine = shownStart
+                        startLine = shownStart,
+                        highlightRange = localReviewRange,
+                        scrollToLine = reviewScrollLocal,
                     )
                 }
             }
@@ -426,15 +476,28 @@ private fun ChunkBar(
 }
 
 @Composable
-private fun CodeView(code: String, wrap: Boolean, showLineNumbers: Boolean, startLine: Int) {
+private fun CodeView(
+    code: String,
+    wrap: Boolean,
+    showLineNumbers: Boolean,
+    startLine: Int,
+    highlightRange: IntRange? = null,
+    scrollToLine: Int? = null,
+) {
     val theme = if (isSystemInDarkTheme()) CodeThemes.OneDarkPro else CodeThemes.GithubLight
     val content = if (wrap) code else code
+    val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+    LaunchedEffect(scrollToLine, code) {
+        val line = scrollToLine ?: return@LaunchedEffect
+        val lineHeight = with(density) { 19.5.sp.toPx() }
+        scrollState.scrollTo(((line - 1) * lineHeight).toInt().coerceAtLeast(0))
+    }
     Box(
         Modifier
             .fillMaxSize()
             .background(theme.background)
-            .let { if (wrap) it else it.horizontalScroll(rememberScrollState()) }
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(12.dp)
     ) {
         CodeBlockThemed(
@@ -442,9 +505,73 @@ private fun CodeView(code: String, wrap: Boolean, showLineNumbers: Boolean, star
             theme = theme,
             showLineNumbers = showLineNumbers,
             wrapLongLines = wrap,
-            fontSize = 13
+            fontSize = 13,
+            lineNumberStart = startLine,
+            highlightRange = highlightRange,
         )
     }
+}
+
+@Composable
+private fun ReviewAnnotationCard(review: FileReviewAnchor) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            review.priority?.let { priority ->
+                val color = when (priority) {
+                    0 -> Color(0xFFE03131)
+                    1 -> Color(0xFFFF8A30)
+                    2 -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Text(
+                    "P$priority",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = color,
+                    modifier = Modifier
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                        .background(color.copy(alpha = 0.12f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                review.title?.takeIf { it.isNotBlank() } ?: tr("代码评论"),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        review.body?.takeIf { it.isNotBlank() }?.let { body ->
+            Text(
+                body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+private fun lineStartOffset(text: String, line: Int): Int {
+    if (line <= 1) return 0
+    var current = 1
+    for (index in text.indices) {
+        if (text[index] == '\n') {
+            current++
+            if (current == line) return index + 1
+        }
+    }
+    return text.length
 }
 
 @Composable

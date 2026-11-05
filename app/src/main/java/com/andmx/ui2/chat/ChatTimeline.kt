@@ -178,7 +178,10 @@ private fun shouldDropTool(tool: ToolCall): Boolean =
 
 object ChatActionBus {
     sealed class Action {
-        data class OpenFile(val path: String) : Action()
+        data class OpenFile(
+            val path: String,
+            val review: com.andmx.ui2.files.FileReviewAnchor? = null,
+        ) : Action()
         data object OpenTerminal : Action()
         data class OpenUrl(val url: String) : Action()
         data object OpenSettings : Action()
@@ -193,6 +196,23 @@ object ChatActionBus {
 
     fun openFile(path: String) {
         if (path.isNotBlank()) _actions.tryEmit(Action.OpenFile(path))
+    }
+
+    fun openCodeReview(comment: AssistantCodeComment) {
+        if (comment.file.isBlank()) return
+        _actions.tryEmit(
+            Action.OpenFile(
+                path = comment.file,
+                review = com.andmx.ui2.files.FileReviewAnchor(
+                    path = comment.file,
+                    startLine = comment.startLine,
+                    endLine = comment.endLine,
+                    title = comment.displayTitle,
+                    body = comment.body,
+                    priority = comment.priority,
+                ),
+            ),
+        )
     }
 
     fun openDrawer() = _actions.tryEmit(Action.OpenDrawer)

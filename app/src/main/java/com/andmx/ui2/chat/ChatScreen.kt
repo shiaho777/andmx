@@ -243,6 +243,7 @@ fun ChatScreen(
     var sideChatExcerpt by remember { mutableStateOf<String?>(null) }
     var showFiles by remember { mutableStateOf(false) }
     var filesInitialPath by remember { mutableStateOf<String?>(null) }
+    var fileReview by remember { mutableStateOf<com.andmx.ui2.files.FileReviewAnchor?>(null) }
     var fileTreeRequestKey by remember { mutableStateOf(0) }
     var fileTreeRequestPath by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
@@ -266,6 +267,7 @@ fun ChatScreen(
             showFiles -> {
                 showFiles = false
                 filesInitialPath = null
+                fileReview = null
             }
             showSettings -> showSettings = false
         }
@@ -355,6 +357,7 @@ LaunchedEffect(Unit) {
                     val path = action.path
                     viewModel.addFileContext(path)
                     filesInitialPath = path
+                    fileReview = action.review
                     showFiles = true
                 }
                 ChatActionBus.Action.OpenTerminal -> showTerminal = true
@@ -1525,6 +1528,7 @@ LaunchedEffect(Unit) {
                 FilesScreen(
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                     initialPath = filesInitialPath,
+                    review = fileReview,
                     conversationId = currentConversationId,
                 )
             }
