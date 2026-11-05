@@ -455,15 +455,35 @@ fun CodeBlockThemed(
     fontSize: Int,
     lightweight: Boolean = false,
     language: String = "",
+    lineNumberStart: Int = 1,
+    highlightRange: IntRange? = null,
 ) {
     var wrapOverride by remember(code) { mutableStateOf<Boolean?>(null) }
     val wrap = wrapOverride ?: wrapLongLines
     val clipboard = LocalClipboardManager.current
-    val highlighted = remember(code, theme, lightweight) {
-        if (lightweight) {
+    val highlighted = remember(code, theme, lightweight, highlightRange) {
+        val base = if (lightweight) {
             AnnotatedString(code)
         } else {
             CodeHighlight.highlight(code, theme)
+        }
+        if (highlightRange == null) {
+            base
+        } else {
+            androidx.compose.ui.text.buildAnnotatedString {
+                append(base)
+                var offset = 0
+                code.split('\n').forEachIndexed { index, line ->
+                    if (index + 1 in highlightRange) {
+                        addStyle(
+                            androidx.compose.ui.text.SpanStyle(background = theme.keyword.copy(alpha = 0.14f)),
+                            offset,
+                            offset + line.length,
+                        )
+                    }
+                    offset += line.length + 1
+                }
+            }
         }
     }
     val lineCount = remember(code) { code.count { it == '\n' } + 1 }
@@ -516,7 +536,7 @@ fun CodeBlockThemed(
                 Row(Modifier.padding(horizontal = 12.dp)) {
                     if (showLineNumbers) {
                         Text(
-                            text = (1..lineCount).joinToString("\n"),
+                            text = (lineNumberStart until lineNumberStart + lineCount).joinToString("\n"),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = fontSize.sp,

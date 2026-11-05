@@ -54,6 +54,7 @@ import kotlinx.coroutines.withContext
 fun FilesScreen(
     modifier: Modifier = Modifier,
     initialPath: String? = null,
+    review: FileReviewAnchor? = null,
     conversationId: Long = 0L,
 ) {
     val context = LocalContext.current
@@ -101,7 +102,7 @@ fun FilesScreen(
         modifier = modifier,
     ) { target ->
         if (target != null) {
-            FileViewerScreen(path = target, onBack = { openFile = null })
+            FileViewerScreen(path = target, onBack = { openFile = null }, review = review)
         } else StoragePermissionGate {
             FileBrowser(
                 rootPath = rootPath,
