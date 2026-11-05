@@ -9,6 +9,7 @@ internal val phraseTemplates: List<PhraseTemplate> = listOf(
     "已整理：{*} → {*} 条" to "Dreamed: {} → {} entries",
     "撤回 {*} 项文件改动 · +{*}/-{*}" to "Undo {} file changes · +{}/-{}",
     "{*} 个文件 · +{*}/-{*}" to "{} files · +{}/-{}",
+    "{*} 条评论" to "{} comments",
     "开始在 {*} 项目新建任务" to "Start a new task in {}",
     "{*} · +{*}/-{*} · {*}" to "{} · +{}/-{} · {}",
     "{*}年{*}月{*}日 {*}" to "{}/{}/{} {}",
