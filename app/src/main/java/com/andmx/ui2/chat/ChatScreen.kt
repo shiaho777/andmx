@@ -165,6 +165,7 @@ fun ChatScreen(
         }
     }
     val pendingApproval by viewModel.pendingApproval.collectAsState()
+    val pendingYoloConfirmation by viewModel.pendingYoloConfirmation.collectAsState()
     val timeline = remember(
         messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications,
         isLoading, pendingApproval, appSettings.toolGroupingExplore, appSettings.toolGroupingTerminal,
@@ -1429,6 +1430,12 @@ LaunchedEffect(Unit) {
                             viewModel.startSideChat(excerpt, q)
                         },
                         onDismiss = { sideChatExcerpt = null },
+                    )
+                }
+                if (pendingYoloConfirmation) {
+                    YoloModeConfirmDialog(
+                        onConfirm = { viewModel.confirmYoloMode() },
+                        onDismiss = { viewModel.cancelYoloMode() },
                     )
                 }
                 if (fileRewindOpen) {
