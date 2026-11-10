@@ -158,6 +158,13 @@ class CronStore(context: android.content.Context) {
 
     suspend fun delete(id: String): Boolean = dao.deleteAutomation(id) > 0
 
+    suspend fun pause(id: String): Boolean {
+        val cur = dao.automation(id) ?: return false
+        if (!cur.enabled) return false
+        dao.upsertAutomation(cur.copy(enabled = false))
+        return true
+    }
+
     suspend fun due(now: Long): List<CronAutomationEntity> = dao.dueAutomations(now)
 
     /** 触发一次后推进 runCount/nextRunAt；到限自动 completed。 */

@@ -54,6 +54,7 @@ class AgentTaskCronToolsTest {
         val list = tools.single { it.name == "CronList" }
         val update = tools.single { it.name == "CronUpdate" }
         val delete = tools.single { it.name == "CronDelete" }
+        val pause = tools.single { it.name == "CronPauseSelf" }
 
         assertEquals(AGENT_PROVIDER_DESCRIPTION, agent.description)
         assertEquals(TASK_PROVIDER_DESCRIPTION, task.description)
@@ -65,6 +66,8 @@ class AgentTaskCronToolsTest {
         assertEquals(CRON_LIST_DESCRIPTION, list.description)
         assertEquals(CRON_UPDATE_DESCRIPTION, update.description)
         assertEquals(CRON_DELETE_DESCRIPTION, delete.description)
+        assertTrue(pause.description.contains("only targets the automation of this run"))
+        assertSchema(pause, emptyList(), false)
         assertTrue(create.description.contains("\n\nUsage:\n- "))
         assertTrue(create.description.contains("8分钟后"))
         assertTrue(update.description.contains("\n\nUsage:\n- "))
@@ -275,6 +278,19 @@ class AgentTaskCronToolsTest {
     }
 
     @Test
+    fun cronPauseSelfRequiresAutomationTurnAndStore() = runTest {
+        val noContext = cron().PauseSelf().execute(buildJsonObject {})
+        assertTrue(noContext.isError)
+        assertEquals(
+            "CronPauseSelf is only available while running a scheduled automation.",
+            noContext.output,
+        )
+        val noStore = cron(automation = true, automationId = "auto_1").PauseSelf().execute(buildJsonObject {})
+        assertTrue(noStore.isError)
+        assertEquals("AutomationPort is not configured for CronPauseSelf", noStore.output)
+    }
+
+    @Test
     fun defaultToolListDoesNotClaimNodeRepl() {
         val surface = buildZCodeToolSurface(
             context = context,
@@ -304,11 +320,12 @@ class AgentTaskCronToolsTest {
         return orch.createTaskTools() + cron().all()
     }
 
-    private fun cron(automation: Boolean = false) = CronTools(
+    private fun cron(automation: Boolean = false, automationId: String? = null) = CronTools(
         store = null,
         conversationId = { 1L },
         currentModel = { "model" },
         isAutomationTurn = { automation },
+        automationId = { automationId },
     )
 
     private fun orchestrator(): SubAgentOrchestrator {

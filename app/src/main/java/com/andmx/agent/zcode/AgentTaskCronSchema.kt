@@ -115,6 +115,7 @@ private val CRON_CREATE_INSTRUCTIONS = listOf(
     "Always set title and preserve the user's natural-language schedule phrase verbatim in it. The title may be concise, but must not omit timing such as '每20分钟', '每天早上9点', or 'every Friday'.",
     "Write prompt as a complete instruction that can run later without relying on unstated conversation context.",
     "Write the final work directly in prompt. Never ask the scheduled run to create, schedule, or configure another automation, and never ask it to call CronCreate.",
+    "If the user describes a condition under which the automation should stop, write that stop condition into prompt and tell the run to call CronPauseSelf once the condition is met. The run cannot edit or delete the automation itself.",
 )
 
 private val CRON_UPDATE_INSTRUCTIONS = listOf(
@@ -343,6 +344,8 @@ internal val CRON_DELETE_PARAMETERS = strictToolObject(required = listOf("id")) 
         put("description", "Automation id returned by CronCreate or CronList")
     }
 }
+
+internal val CRON_PAUSE_SELF_PARAMETERS = strictToolObject {}
 
 internal fun toolUseError(tool: String, issues: List<String>): String {
     val noun = if (issues.size > 1) "issues" else "issue"
