@@ -28,7 +28,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.util.Calendar
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
@@ -48,9 +47,6 @@ class WebSearchToolTest {
 
     @Test
     fun schemaCapabilitiesAndSingleRegistration() {
-        val now = Calendar.getInstance()
-        val month = MONTHS[now.get(Calendar.MONTH)]
-        val year = now.get(Calendar.YEAR)
         for (legacy in listOf(true, false)) {
             val tools = surface(legacy)
             assertEquals(1, tools.count { it.name == "WebSearch" })
@@ -62,9 +58,9 @@ class WebSearchToolTest {
         assertTrue(direct.none { it.name == "web_search" })
         val search = legacy.single { it.name == "WebSearch" }
         assertTrue(search is WebSearchTool)
-        assertEquals(description(month, year), search.description)
+        assertEquals(description(), search.description)
         assertTrue(search.description.contains("Search the web. Returns result blocks with titles and URLs. US-only."))
-        assertTrue(search.description.contains("$month $year"))
+        assertTrue(search.description.contains("provided in the conversation below"))
         assertTrue(search.description.contains("`allowed_domains` / `blocked_domains` filter results."))
         assertTrue(search.description.contains("Sources:"))
         assertFalse(search.description.contains("provider-native", ignoreCase = true))
@@ -113,16 +109,10 @@ class WebSearchToolTest {
     }
 
     @Test
-    fun descriptionReadsTheClockAndDoesNotClaimProviderNativeSearch() {
-        val clock = Calendar.getInstance().apply {
-            set(Calendar.YEAR, 2031)
-            set(Calendar.MONTH, Calendar.JANUARY)
-            set(Calendar.DAY_OF_MONTH, 15)
-        }
-        val tool = WebSearchTool(now = { clock })
-        val text = tool.description
-        assertEquals(description("January", 2031), text)
-        assertTrue(text.contains("January 2031"))
+    fun descriptionIsStableAndDoesNotClaimProviderNativeSearch() {
+        val text = WebSearchTool().description
+        assertEquals(description(), text)
+        assertTrue(text.contains("provided in the conversation below"))
         assertTrue(text.contains("Search the web. Returns result blocks with titles and URLs. US-only."))
         assertTrue(text.contains("`allowed_domains` / `blocked_domains` filter results."))
         assertTrue(text.contains("Sources:"))
@@ -329,10 +319,10 @@ class WebSearchToolTest {
         "REMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks.",
     ).joinToString("\n")
 
-    private fun description(month: String, year: Int) = listOf(
+    private fun description() = listOf(
         "Search the web. Returns result blocks with titles and URLs. US-only.",
         "",
-        "- The current month is $month $year — use this when searching for recent information.",
+        "- The current month is (provided in the conversation below) — use this when searching for recent information.",
         "- `allowed_domains` / `blocked_domains` filter results.",
         "- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links.",
     ).joinToString("\n")
@@ -343,22 +333,5 @@ class WebSearchToolTest {
             urls += url
             return html
         }
-    }
-
-    private companion object {
-        val MONTHS = listOf(
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-        )
     }
 }
