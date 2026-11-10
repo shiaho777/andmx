@@ -63,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -155,6 +156,15 @@ fun Composer(
     val shape = RoundedCornerShape(20.dp)
     val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
     val cardBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    var historyBrowse by remember { mutableStateOf<HistoryBrowseState?>(null) }
+    val suggestionsOpen = slashSuggestions.isNotEmpty() ||
+        mentionSuggestions.isNotEmpty() ||
+        skillSuggestions.isNotEmpty()
+
+    LaunchedEffect(inputHistory) { historyBrowse = null }
+    LaunchedEffect(value) {
+        if (value.isEmpty() && historyBrowse != null) historyBrowse = null
+    }
 
     // ZCode 快捷键：Shift+Tab 循环切换执行模式
     fun cycleExecMode() {
@@ -173,9 +183,7 @@ fun Composer(
                         event,
                         isLoading = isLoading,
                         inputEmpty = value.isBlank(),
-                        suggestionsEmpty = slashSuggestions.isEmpty() &&
-                            mentionSuggestions.isEmpty() &&
-                            skillSuggestions.isEmpty(),
+                        suggestionsEmpty = !suggestionsOpen,
                     )
                 ) {
                     SessionShortcuts.CYCLE_MODE -> {
@@ -187,14 +195,51 @@ fun Composer(
                         true
                     }
                     SessionShortcuts.SEND -> {
+                        historyBrowse = null
                         if (canSend) onSend()
                         true
                     }
                     SessionShortcuts.NEWLINE -> {
+                        historyBrowse = null
                         onValueChange(value + "\n")
                         true
                     }
-                    else -> false
+                    else -> {
+                        if (suggestionsOpen || event.type != KeyEventType.KeyDown) {
+                            false
+                        } else {
+                            when (event.key) {
+                                Key.DirectionUp -> {
+                                    val next = historyUp(
+                                        inputHistory.map { it.text },
+                                        historyBrowse,
+                                        value,
+                                    )
+                                    if (next == null) {
+                                        false
+                                    } else {
+                                        historyBrowse = next.first
+                                        onValueChange(next.second)
+                                        true
+                                    }
+                                }
+                                Key.DirectionDown -> {
+                                    val next = historyDown(
+                                        inputHistory.map { it.text },
+                                        historyBrowse,
+                                    )
+                                    if (next == null) {
+                                        false
+                                    } else {
+                                        historyBrowse = next.first
+                                        onValueChange(next.second)
+                                        true
+                                    }
+                                }
+                                else -> false
+                            }
+                        }
+                    }
                 }
             },
     ) {
@@ -407,7 +452,10 @@ fun Composer(
                         }
                         BasicTextField(
                             value = value,
-                            onValueChange = onValueChange,
+                            onValueChange = {
+                                historyBrowse = null
+                                onValueChange(it)
+                            },
                             textStyle = MaterialTheme.typography.bodyLarge.copy(
                                 color = MaterialTheme.colorScheme.onSurface,
                             ),
