@@ -1413,3 +1413,10 @@ data class MentionSuggestion(
 /** ZCode 对齐占位符。 */
 internal const val DEFAULT_PLACEHOLDER =
     "向 AndMX 提问，@ 提及文件，/ 使用命令或子智能体，\$ 使用技能，# 关联对话"
+
+internal fun composerPlaceholder(flat: Boolean, isLoading: Boolean, guide: Boolean): String = when {
+    isLoading && guide -> "继续输入，发送后引导当前这一轮"
+    isLoading -> "继续输入，发送后加入队列，本轮结束后再跑"
+    flat -> DEFAULT_PLACEHOLDER
+    else -> "继续这个任务，@ 提及文件，/ 使用命令，\$ 使用技能"
+}
