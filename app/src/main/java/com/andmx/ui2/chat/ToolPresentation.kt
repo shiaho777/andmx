@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
@@ -65,6 +66,7 @@ object ToolPresentation {
         "todo" -> Family("待办", Icons.AutoMirrored.Outlined.ListAlt)
         "skill" -> Family("技能", Icons.Outlined.AutoAwesome)
         "agent" -> Family("子代理", Icons.Outlined.Build)
+        "send" -> Family("消息", Icons.Outlined.ChatBubbleOutline)
         "taskoutput" -> Family("任务输出", Icons.Outlined.Build)
         "taskstop" -> Family("停止任务", Icons.Outlined.Build)
         "enterplan", "exitplan" -> Family("计划", Icons.AutoMirrored.Outlined.ListAlt)
@@ -102,6 +104,7 @@ object ToolPresentation {
             "todo" -> if (running) "更新待办" else "已更新待办"
             "skill" -> if (running) "运行技能" else "已运行技能"
             "agent" -> if (running) "子代理运行中" else "子代理完成"
+            "send" -> if (running) "发送中" else "已发送"
             "taskoutput" -> if (running) "获取输出中" else "已获取输出"
             "taskstop" -> if (running) "停止中" else "已停止"
             "enterplan" -> if (running) "进入计划" else "已进入计划"

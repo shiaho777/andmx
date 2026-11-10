@@ -131,6 +131,24 @@ class ToolPresentationTest {
     }
 
     @Test
+    fun sendMessageShowsSummaryAndTarget() {
+        val sent = tc(
+            name = "SendMessage",
+            args = """{"to":"agent_1","summary":"检查构建","message":"请检查构建结果"}""",
+        )
+        assertEquals("消息", ToolPresentation.family(sent.name).label)
+        assertEquals("已发送", ToolPresentation.kindLabel(sent))
+        assertEquals("检查构建 → agent_1", ToolPresentation.summary(sent))
+        val running = sent.copy(isRunning = true)
+        assertEquals("发送中", ToolPresentation.kindLabel(running))
+        val fallback = tc(
+            name = "SendMessage",
+            args = """{"to":"agent_2","summary":"  ","message":"第一行\n第二行"}""",
+        )
+        assertEquals("第一行 → agent_2", ToolPresentation.summary(fallback))
+    }
+
+    @Test
     fun editToolsExpandByDefaultWhenCompleted() {
         assertTrue(ToolPresentation.defaultExpanded(tc(name = "Edit")))
         assertTrue(ToolPresentation.defaultExpanded(tc(name = "ApplyPatch")))
