@@ -919,6 +919,8 @@ internal val settingsEn: Map<String, String> = mapOf(
     "当前分支" to "Current branch",
     "恢复运行" to "Resume",
     "打开文件" to "Open file",
+    "在浏览器中打开" to "Open in browser",
+    "复制链接" to "Copy link",
     "打开链接" to "Open link",
     "执行中…" to "Running…",
     "执行失败" to "Run failed",

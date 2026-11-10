@@ -21,11 +21,14 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.WrapText
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,8 +43,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -217,22 +222,11 @@ fun MarkdownText(
         annotated.getStringAnnotations(InlineParser.UrlAnnotationTag, 0, annotated.length).any()
     }
     if (hasLink) {
-        val uriHandler = LocalUriHandler.current
-        ClickableText(
-            text = annotated,
-            style = style.copy(color = color),
+        LinkAwareText(
+            annotated = annotated,
+            style = style,
+            color = color,
             modifier = modifier,
-            onClick = { offset ->
-                annotated.getStringAnnotations(InlineParser.UrlAnnotationTag, offset, offset)
-                    .firstOrNull()?.let { annotation ->
-                        val local = localFilePath(annotation.item)
-                        if (local != null) {
-                            com.andmx.ui2.chat.ChatActionBus.openFile(local)
-                        } else {
-                            runCatching { uriHandler.openUri(annotation.item) }
-                        }
-                    }
-            },
         )
     } else {
         Text(
@@ -241,6 +235,80 @@ fun MarkdownText(
             color = color,
             modifier = modifier,
         )
+    }
+}
+
+@Composable
+private fun LinkAwareText(
+    annotated: AnnotatedString,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val uriHandler = LocalUriHandler.current
+    val clipboard = LocalClipboardManager.current
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var menuUrl by remember { mutableStateOf<String?>(null) }
+
+    fun open(url: String) {
+        val local = localFilePath(url)
+        if (local != null) {
+            com.andmx.ui2.chat.ChatActionBus.openFile(local)
+        } else {
+            runCatching { uriHandler.openUri(url) }
+        }
+    }
+
+    Box {
+        BasicText(
+            text = annotated,
+            style = style.copy(color = color),
+            modifier = modifier.pointerInput(annotated) {
+                detectTapGestures(
+                    onTap = { position ->
+                        val textLayout = layout ?: return@detectTapGestures
+                        val offset = textLayout.getOffsetForPosition(position)
+                        annotated.getStringAnnotations(
+                            InlineParser.UrlAnnotationTag,
+                            offset,
+                            offset,
+                        ).firstOrNull()?.let { open(it.item) }
+                    },
+                    onLongPress = { position ->
+                        val textLayout = layout ?: return@detectTapGestures
+                        val offset = textLayout.getOffsetForPosition(position)
+                        menuUrl = annotated.getStringAnnotations(
+                            InlineParser.UrlAnnotationTag,
+                            offset,
+                            offset,
+                        ).firstOrNull()?.item
+                    },
+                )
+            },
+            onTextLayout = { layout = it },
+        )
+        DropdownMenu(
+            expanded = menuUrl != null,
+            onDismissRequest = { menuUrl = null },
+        ) {
+            val url = menuUrl ?: return@DropdownMenu
+            DropdownMenuItem(
+                text = {
+                    Text(tr(if (localFilePath(url) != null) "打开文件" else "在浏览器中打开"))
+                },
+                onClick = {
+                    menuUrl = null
+                    open(url)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(tr("复制链接")) },
+                onClick = {
+                    menuUrl = null
+                    clipboard.setText(AnnotatedString(url))
+                },
+            )
+        }
     }
 }
 
