@@ -18,7 +18,6 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
-import java.util.Calendar
 
 private const val TOOL_JSON_SCHEMA = "https://json-schema.org/draft/2020-12/schema"
 private const val DEFAULT_TIMEOUT_MS = 60_000L
@@ -26,20 +25,13 @@ private const val MAX_OUTPUT_BYTES = 20_000
 private const val MAX_SOURCE_LINKS = 20
 private const val SEARCH_ENDPOINT = "https://html.duckduckgo.com/html/?q="
 
-private val WEBSEARCH_MONTHS = listOf(
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-)
+private val WEBSEARCH_PROVIDER_DESCRIPTION = listOf(
+    "Search the web. Returns result blocks with titles and URLs. US-only.",
+    "",
+    "- The current month is (provided in the conversation below) — use this when searching for recent information.",
+    "- `allowed_domains` / `blocked_domains` filter results.",
+    "- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links.",
+).joinToString("\n")
 
 private val WEBSEARCH_PARAMETERS = buildJsonObject {
     put("\$schema", TOOL_JSON_SCHEMA)
@@ -63,17 +55,6 @@ private val WEBSEARCH_PARAMETERS = buildJsonObject {
         }
     }
     putJsonArray("required") { add("query") }
-}
-
-private fun buildWebSearchProviderDescription(now: Calendar): String {
-    val currentMonth = "${WEBSEARCH_MONTHS[now.get(Calendar.MONTH)]} ${now.get(Calendar.YEAR)}"
-    return listOf(
-        "Search the web. Returns result blocks with titles and URLs. US-only.",
-        "",
-        "- The current month is $currentMonth — use this when searching for recent information.",
-        "- `allowed_domains` / `blocked_domains` filter results.",
-        "- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links.",
-    ).joinToString("\n")
 }
 
 fun formatWebSearchModelContent(query: String, results: List<WebSearch.Result>): String {
@@ -122,12 +103,11 @@ class HttpWebSearchClient : WebSearchClient {
 class WebSearchTool(
     private val networkPolicy: NetworkPolicy = NetworkPolicy.PERMISSIVE,
     private val client: WebSearchClient = HttpWebSearchClient(),
-    private val now: () -> Calendar = { Calendar.getInstance() },
 ) : Tool {
     override val name = "WebSearch"
     override val shouldDefer = true
     override val description: String
-        get() = buildWebSearchProviderDescription(now())
+        get() = WEBSEARCH_PROVIDER_DESCRIPTION
     override val parameters = WEBSEARCH_PARAMETERS
     override val risk = ToolRisk.NETWORK
     override val readOnly = true
