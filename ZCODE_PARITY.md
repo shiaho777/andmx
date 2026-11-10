@@ -23,7 +23,7 @@
 | UI 新规范 | `message-link-context-menu` | **已移植**：正文链接长按菜单（打开 / 复制链接） |
 | UI 更新 | 预览卡整卡点击、右键菜单、Finder/Explorer reveal、localhost→HTML sourcePath | 部分：移动端已有整卡点击与文件/website 卡；reveal 属桌面文件管理器，N/A |
 | UI 更新 | Composer placeholder 首发/切换会话投影等待、DeferredToolCall 不渲染半截包装、turn navigator/find 细节 | 待下一批：AndMX 已有 optimistic 发送与 turn navigator，需逐条核对 |
-| Provider 目录 | Kimi K3.1 Pro、MiniMax M3.1 Flash、11 个新模板、revision 35–38 | 未移植：AndMX 的模型目录是内嵌 JSON 资产，需按新 revision 同步并补测试 |
+| Provider 目录 | Kimi K3.1 Pro、MiniMax M3.1 Flash、11 个新模板、revision 35–38 | **已移植**：资产重生成到 revision 43，并把 Android 无模板概念的精确成员规则并入 `modelRules`/`providerSiteRules` |
 | 工具语义 | `read`/`read-text` 状态与行号、bash cwd/readonly policy、websearch provider、`SendMessage` display、cron、Eval snippet | 待逐项核对；多数已有对应实现，优先补行为差异而不是整段复制 |
 | 运行时/协议 | session features header、local TTFT、stale revision 恢复、MCP node fallback/isolation、project config scope、official command endpoint | 待评估：stale revision 与 MCP isolation 对 Android 有实际价值 |
 | Desktop/远程/Electron | Electron 44、remote daemon lifecycle、remote tickets、数据同步、发布链 | N/A：桌面/远程宿主专属，不进入 Android 移植 |
@@ -433,8 +433,8 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 5. **P1｜subagent 分层**：至少补 `tool-policy`（子代理工具裁剪）与 `message-steering`（运行中插话，`AgentEngineSteerTest` 已覆盖引擎侧，需核对编排侧是否等价）。
 6. ~~**P2｜hooks 工作区审核流**~~（已完成，2026-11-02）：`.zcode/hooks.json` 发现、SHA-256 信任固定、HooksPage 审查/撤销、远程 SSH 执行。
    ~~**memory recall/dream**~~（已完成，2026-11-02）：query-aware recall 与 Dream 去重/限流。
-7. **P1｜provider catalog 3.17.2**：同步 revision 35–38 的模板/成员（Kimi K3.1 Pro、MiniMax M3.1 Flash、
-   11 个新模板、旧型号启停），并补目录 identity/请求档位测试；AndMX 当前仍是内嵌静态 JSON。
+7. ~~**P1｜provider catalog 3.17.2**~~（已完成，2026-11-10）：资产重生成到 revision 43（`modelRules` 84、
+   `modelApiRules` 73、`providerSiteRules` 60），补 Kimi K3.1 Pro / MiniMax M3.1 Flash 精确规则与资产测试。
 8. **P2｜3.17 UI 剩余细节**：预览卡 reveal/右键菜单（桌面专属 N/A 部分除外）、Composer 首发投影等待、
    DeferredToolCall 半截包装不渲染、turn navigator/find 的新边界。
 
