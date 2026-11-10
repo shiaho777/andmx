@@ -125,6 +125,40 @@ class AssistantFileCitationsTest {
     }
 
     @Test
+    fun localhostUrlBecomesWebsiteCard() {
+        val projection = AssistantFileCitations.project(
+            "Open http://localhost:3000/dashboard?tab=1 for the preview.",
+        )
+
+        val card = projection.cards.single()
+        assertEquals(AssistantFileKind.WEB, card.kind)
+        assertEquals("http://localhost:3000/dashboard?tab=1", card.url)
+        assertEquals("localhost:3000/dashboard", card.name)
+    }
+
+    @Test
+    fun loopbackMarkdownLinkBecomesWebsiteCard() {
+        val projection = AssistantFileCitations.project(
+            "[preview](http://127.0.0.1:5173/)",
+        )
+
+        val card = projection.cards.single()
+        assertEquals(AssistantFileKind.WEB, card.kind)
+        assertEquals("http://127.0.0.1:5173/", card.url)
+        assertEquals("127.0.0.1:5173", card.name)
+    }
+
+    @Test
+    fun externalHttpsUrlDoesNotBecomeCard() {
+        val projection = AssistantFileCitations.project(
+            "Docs at https://example.com/guide.pdf and http://localhost:8080/app.",
+        )
+
+        assertEquals(1, projection.cards.size)
+        assertEquals("http://localhost:8080/app", projection.cards.single().url)
+    }
+
+    @Test
     fun nonPreviewableCitationStillLinksWithoutCard() {
         val projection = AssistantFileCitations.project(
             """::zcode-file-citation{path="src/Main.kt"}""",

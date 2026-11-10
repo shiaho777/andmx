@@ -13,6 +13,7 @@ data class AssistantFileCard(
     val path: String,
     val name: String,
     val kind: AssistantFileKind,
+    val url: String? = null,
 )
 
 data class AssistantFileProjection(
@@ -28,6 +29,10 @@ object AssistantFileCitations {
         """([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s"'}]+))""",
     )
     private val markdownLink = Regex("""(?<!!)\[([^\]]*)\]\(([^)\s]+)\)""")
+    private val websiteUrl = Regex(
+        """https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?[^\s<>"'`)]*""",
+        RegexOption.IGNORE_CASE,
+    )
     private val plainPath = Regex(
         """(?<![\w/.-])((?:~|\.{1,2})?/?(?:[\w.-]+/)+[\w.-]+\.(?:pdf|md|markdown|html?|docx|xlsx|pptx|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|opus|flac|weba))(?![\w])""",
         RegexOption.IGNORE_CASE,
@@ -93,12 +98,20 @@ object AssistantFileCitations {
         cards: MutableMap<String, AssistantFileCard>,
     ): String {
         markdownLink.findAll(segment).forEach { match ->
-            val target = localPath(match.groupValues[2]) ?: return@forEach
-            val card = cardFor(target, null) ?: return@forEach
+            val target = match.groupValues[2]
+            websiteCard(target)?.let {
+                cards.putIfAbsent(it.path, it)
+                return@forEach
+            }
+            val local = localPath(target) ?: return@forEach
+            val card = cardFor(local, null) ?: return@forEach
             cards.putIfAbsent(card.path, card)
         }
         val withoutDirectives = directive.replace(segment, " ")
         val withoutLinks = markdownLink.replace(withoutDirectives, " ")
+        websiteUrl.findAll(withoutLinks).forEach { match ->
+            websiteCard(match.value)?.let { cards.putIfAbsent(it.path, it) }
+        }
         plainPath.findAll(withoutLinks).forEach { match ->
             val card = cardFor(match.groupValues[1], null) ?: return@forEach
             cards.putIfAbsent(card.path, card)
@@ -131,6 +144,16 @@ object AssistantFileCitations {
         .replace("\\\"", "\"")
         .replace("\\'", "'")
         .replace("\\\\", "\\")
+
+    private fun websiteCard(raw: String): AssistantFileCard? {
+        val url = raw.trim().trimEnd('.', ',', ';', ':')
+        if (!websiteUrl.matches(url)) return null
+        val parsed = runCatching { java.net.URI(url) }.getOrNull() ?: return null
+        val host = parsed.rawAuthority ?: parsed.host ?: return null
+        val path = parsed.path.orEmpty()
+        val name = if (path.isBlank() || path == "/") host else host + path
+        return AssistantFileCard(path = url, name = name, kind = AssistantFileKind.WEB, url = url)
+    }
 
     private fun cardFor(path: String, artifactKind: String?): AssistantFileCard? {
         val clean = decodePercent(path).trim()
