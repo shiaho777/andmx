@@ -127,10 +127,13 @@ class AgentEngineToolSearchTest {
             .joinToString("\n") { it.content.orEmpty() }
         assertTrue(announcement.contains("Echo"))
 
+        val started = events.filterIsInstance<AgentEvent.ToolStarted>().single { it.id == "d1" }
+        assertEquals("Echo", started.name)
+        assertEquals("""{"value":"hi"}""", started.arguments)
         assertTrue(
             events.any {
                 it is AgentEvent.ToolFinished &&
-                    it.name == "DeferredToolCall" &&
+                    it.name == "Echo" &&
                     it.output == "echo:hi" &&
                     !it.isError
             },

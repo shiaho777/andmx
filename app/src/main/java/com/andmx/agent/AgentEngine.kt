@@ -983,9 +983,11 @@ class AgentEngine(
                 com.andmx.data.session.SessionEventType.TOOL_CALL_SCHEDULED,
                 buildJsonObject { put("count", calls.size) },
             )
+            val displayCalls = calls.associate { it.id to displayToolCall(it) }
             calls.forEach { call ->
                 if (call.id !in streamedStarted) {
-                    emit(AgentEvent.ToolStarted(call.id, call.function.name, call.function.arguments))
+                    val display = displayCalls.getValue(call.id)
+                    emit(AgentEvent.ToolStarted(call.id, display.function.name, display.function.arguments))
                     sessionEvents?.invoke(
                         com.andmx.data.session.SessionEventType.TOOL_CALL_STARTED,
                         buildJsonObject { put("id", call.id); put("name", call.function.name) },
@@ -1032,6 +1034,7 @@ class AgentEngine(
             val relayImagesToUser = turn.provider.kind == ProviderKind.OPENAI
             for ((call, timed) in results) {
                 val result = timed.first
+                val displayName = displayCalls[call.id]?.function?.name ?: call.function.name
                 machine.completeTool(call.id, success = !result.isError)
                 sessionEvents?.invoke(
                     if (result.isError) {
@@ -1061,7 +1064,7 @@ class AgentEngine(
                         )
                     }
                 }
-                emit(AgentEvent.ToolFinished(call.id, call.function.name, result.output, result.isError, result.imageUrls, timed.second))
+                emit(AgentEvent.ToolFinished(call.id, displayName, result.output, result.isError, result.imageUrls, timed.second))
                 history += ApiMessage(
                     role = "tool",
                     content = trimToolOutput(resolvedToolName(call), result.output),
@@ -1425,6 +1428,14 @@ class AgentEngine(
         val args = parseArgs(call.function.arguments)
         return (args["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
             ?: call.function.name
+    }
+
+    private fun displayToolCall(call: com.andmx.llm.ApiToolCall): com.andmx.llm.ApiToolCall {
+        if (call.function.name != ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME) return call
+        return when (val target = resolveCallTarget(call)) {
+            is CallTarget.Resolved -> target.call
+            else -> call
+        }
     }
 
     private suspend fun timedExecuteToolCall(
