@@ -22,6 +22,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Search
@@ -53,6 +54,7 @@ import com.andmx.ui2.settings.pages.AboutPage
 import com.andmx.ui2.settings.pages.CodePreviewPage
 import com.andmx.ui2.settings.pages.CommandPage
 import com.andmx.ui2.settings.pages.GeneralPage
+import com.andmx.ui2.settings.pages.PersonalizationPage
 import com.andmx.ui2.settings.pages.IndexPage
 import com.andmx.ui2.settings.pages.McpPage
 import com.andmx.ui2.settings.pages.MemoryViewerPage
@@ -72,6 +74,7 @@ import com.andmx.ui2.settings.pages.UsagePage
 enum class SettingsPage(val title: String, val icon: ImageVector) {
     HOME("设置", Icons.Outlined.Tune),
     GENERAL("常规", Icons.Outlined.Tune),
+    PERSONALIZATION("个性化", Icons.Outlined.Person),
     CODE_PREVIEW("代码预览", Icons.Outlined.Code),
     MODEL("模型设置", Icons.Outlined.Dns),
     SKILLS("技能", Icons.Outlined.Bolt),
@@ -119,6 +122,7 @@ fun SettingsScreen(
         when (target) {
             SettingsPage.HOME -> SettingsHome(onOpen = { page = it }, onClose = onClose)
             SettingsPage.GENERAL -> GeneralPage(backToHome)
+            SettingsPage.PERSONALIZATION -> PersonalizationPage(backToHome)
             SettingsPage.CODE_PREVIEW -> CodePreviewPage(backToHome)
             SettingsPage.MODEL -> ModelPage(backToHome)
             SettingsPage.SKILLS -> SkillsPage(onBack = backToHome, onCloseSettings = onClose)
@@ -155,7 +159,7 @@ private fun SettingsHome(
             SettingsPage.WORKSPACE_SEARCH,
         ),
         "Agent 能力" to listOf(
-            SettingsPage.MEMORY, SettingsPage.SUBAGENT, SettingsPage.PLUGIN,
+            SettingsPage.PERSONALIZATION, SettingsPage.MEMORY, SettingsPage.SUBAGENT, SettingsPage.PLUGIN,
             SettingsPage.MCP, SettingsPage.SKILLS, SettingsPage.COMMAND,
             SettingsPage.AUTOMATIONS, SettingsPage.HOOKS,
         ),
@@ -166,6 +170,7 @@ private fun SettingsHome(
     )
     val descriptions = mapOf(
         SettingsPage.GENERAL to "语言与当前窗口体验",
+        SettingsPage.PERSONALIZATION to "写一段全局指令，应用到本机 Agent 的后续会话。",
         SettingsPage.CODE_PREVIEW to "设置代码内容的主题、字号和显示方式，不受界面字号影响。",
         SettingsPage.MODEL to "模型供应商与默认模型",
         SettingsPage.SKILLS to "管理项目级与用户级技能。启用后可在聊天里通过 \$skill-name 使用。",

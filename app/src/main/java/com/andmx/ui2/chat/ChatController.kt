@@ -3006,9 +3006,15 @@ private fun PermissionModes.Effect.toDecision(): Decision = when (this) {
             gitStatus = gitStatus,
             deviceNote = deviceNote,
         )
+        val userInstructions = runCatching {
+            guestFs.readText("/root/.zcode/AGENTS.md", 100 * 1024)
+        }.getOrNull().orEmpty()
+        val customInstructions = listOf(settings.customInstructions.trim(), userInstructions.trim())
+            .filter { it.isNotEmpty() }
+            .joinToString("\n\n")
         val system = ZCodePrompts.assembleBlocks(
             env = env,
-            customInstructions = settings.customInstructions,
+            customInstructions = customInstructions,
             persona = settings.persona,
             extra = extra,
             hasSkills = skillEntries.isNotEmpty(),
@@ -3116,7 +3122,11 @@ private fun PermissionModes.Effect.toDecision(): Decision = when (this) {
         val sid = writer.startSession(
             cwd = access.displayCwd(),
             modelProvider = provider.id,
-            baseInstructions = settings.customInstructions,
+            baseInstructions = listOf(
+                settings.customInstructions.trim(),
+                runCatching { guestFs.readText("/root/.zcode/AGENTS.md", 100 * 1024) }
+                    .getOrNull().orEmpty().trim(),
+            ).filter { it.isNotEmpty() }.joinToString("\n\n"),
             cliVersion = "andmx-ui2",
         )
         persistRolloutMeta(conversationId, writer, sid, settings, conv.memoryMode, conv.firstUserMessage)
