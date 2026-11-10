@@ -907,15 +907,12 @@ LaunchedEffect(Unit) {
                         viewModel.addSkillByName(skill.name, skill.path)
                     },
                     inputHistory = inputHistory,
-                    // ZCode 对齐：placeholder 随状态变化——运行中提示排队。
                     placeholder = tr(
-                        when {
-                            flat -> DEFAULT_PLACEHOLDER
-                            isLoading && appSettings.interactionBehavior == "guide" ->
-                                "继续输入，发送后引导当前这一轮"
-                            isLoading -> "继续输入，发送后加入队列，本轮结束后再跑"
-                            else -> "继续这个任务，@ 提及文件，/ 使用命令，\$ 使用技能"
-                        },
+                        composerPlaceholder(
+                            flat = flat,
+                            isLoading = isLoading,
+                            guide = appSettings.interactionBehavior == "guide",
+                        ),
                     ),
                     onPickHistory = { pendingHistoryJump = it.messageId },
                     mentionSuggestions = mentionSuggestions,
