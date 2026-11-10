@@ -132,6 +132,9 @@ class ChatViewModel @Inject constructor(
     private val _gitInfo = MutableStateFlow<com.andmx.workspace.GitBaseline.GitInfo?>(null)
     val gitInfo: StateFlow<com.andmx.workspace.GitBaseline.GitInfo?> = _gitInfo.asStateFlow()
 
+    private val _pendingYoloConfirmation = MutableStateFlow(false)
+    val pendingYoloConfirmation: StateFlow<Boolean> = _pendingYoloConfirmation.asStateFlow()
+
     private val _queue = MutableStateFlow<List<String>>(emptyList())
     val queue: StateFlow<List<String>> = _queue.asStateFlow()
 
@@ -2642,6 +2645,29 @@ class ChatViewModel @Inject constructor(
 
     fun setExecMode(mode: ExecMode) {
         val id = _currentConversationId.value
+        val current = if (id > 0L) {
+            controller.currentExecMode(id) ?: ExecMode.from(composerConfig.value.settings.approvalMode)
+        } else {
+            ExecMode.from(composerConfig.value.settings.approvalMode)
+        }
+        if (requiresYoloConfirmation(current, mode)) {
+            _pendingYoloConfirmation.value = true
+            return
+        }
+        applyExecMode(mode, id)
+    }
+
+    fun confirmYoloMode() {
+        if (!_pendingYoloConfirmation.value) return
+        _pendingYoloConfirmation.value = false
+        applyExecMode(ExecMode.YOLO, _currentConversationId.value)
+    }
+
+    fun cancelYoloMode() {
+        _pendingYoloConfirmation.value = false
+    }
+
+    private fun applyExecMode(mode: ExecMode, id: Long) {
         if (id > 0L) {
             controller.applyExecMode(mode, id)
         } else if (mode != ExecMode.PLAN) {

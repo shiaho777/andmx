@@ -63,6 +63,9 @@ enum class ExecMode(
     }
 }
 
+fun requiresYoloConfirmation(current: ExecMode, target: ExecMode): Boolean =
+    target == ExecMode.YOLO && current != ExecMode.YOLO
+
 /** 输入框上方的上下文 chip（@ 文件 / # 会话 等）。 */
 data class ContextChip(
     val id: String,

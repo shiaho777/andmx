@@ -342,6 +342,8 @@ class ChatController private constructor(private val context: Context) {
     }
 
     /** PLAN is a session collaboration mode. Non-plan selections replace it. */
+    fun currentExecMode(conversationId: Long): ExecMode? = sessions[conversationId]?.approvalMode
+
     fun applyExecMode(mode: ExecMode, conversationId: Long) {
         val session = sessions[conversationId]
         val state = session?.planModeState
