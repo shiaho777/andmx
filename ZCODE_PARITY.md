@@ -24,7 +24,7 @@
 | UI 更新 | 预览卡整卡点击、右键菜单、Finder/Explorer reveal、localhost→HTML sourcePath | **部分移植 / N/A**：整卡点击已有；reveal 与 sourcePath 只服务桌面文件管理器，Android 无对应选择语义 |
 | UI 更新 | Composer placeholder 首发/切换会话投影等待、DeferredToolCall 不渲染半截包装、turn navigator/find 细节 | **已移植 / N/A**：Composer 处理态优先（#221/#222）；DeferredToolCall 按目标渲染（#219/#220）；turn navigator 为 React 性能优化，Android N/A |
 | Provider 目录 | Kimi K3.1 Pro、MiniMax M3.1 Flash、11 个新模板、revision 35–38 | **已移植**：资产重生成到 revision 43，并把 Android 无模板概念的精确成员规则并入 `modelRules`/`providerSiteRules` |
-| 工具语义 | `read`/`read-text` 状态与行号、bash cwd/readonly policy、websearch provider、`SendMessage` display、cron、Eval snippet | **已移植**：Read 去重/代理对（#223/#224）、sed 只读收紧（#225/#226）、WebSearch 稳定描述（#227/#228）、CronPauseSelf（#229/#230）、Bash 失败尾保留（#231/#232）、Read PDF pages（#233/#234）；cwd policy N/A（Android 固定 guest cwd） |
+| 工具语义 | `read`/`read-text` 状态与行号、bash cwd/readonly policy、websearch provider、`SendMessage` display、cron、Eval snippet | **已移植**：Read 去重/代理对（#223/#224）、sed 只读收紧（#225/#226）、WebSearch 稳定描述（#227/#228）、CronPauseSelf（#229/#230）、Bash 失败尾保留（#231/#232）、Read PDF pages（#233/#234）、SendMessage 摘要/目标（#237/#238）；cwd policy N/A（Android 固定 guest cwd） |
 | 运行时/协议 | session features header、local TTFT、stale revision 恢复、MCP node fallback/isolation、project config scope、official command endpoint | **评估后 N/A / 暂缓**：前几项属桌面/服务端统计或投影协议；MCP isolation 需 per-session 连接池，AndMX 全局 MCP manager 暂不改造 |
 | Desktop/远程/Electron | Electron 44、remote daemon lifecycle、remote tickets、数据同步、发布链 | N/A：桌面/远程宿主专属，不进入 Android 移植 |
 
