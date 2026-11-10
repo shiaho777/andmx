@@ -21,11 +21,11 @@
 | UI 新规范 | `yolo-mode-confirmation` | **已移植**：非 YOLO → YOLO 前风险确认 + 勾选，覆盖菜单/快捷键/`/mode` |
 | UI 新规范 | `settings-personalization` | **已移植**：设置页「个性化」编辑用户级 `AGENTS.md`，注入后续会话 |
 | UI 新规范 | `message-link-context-menu` | **已移植**：正文链接长按菜单（打开 / 复制链接） |
-| UI 更新 | 预览卡整卡点击、右键菜单、Finder/Explorer reveal、localhost→HTML sourcePath | 部分：移动端已有整卡点击与文件/website 卡；reveal 属桌面文件管理器，N/A |
-| UI 更新 | Composer placeholder 首发/切换会话投影等待、DeferredToolCall 不渲染半截包装、turn navigator/find 细节 | 待下一批：AndMX 已有 optimistic 发送与 turn navigator，需逐条核对 |
+| UI 更新 | 预览卡整卡点击、右键菜单、Finder/Explorer reveal、localhost→HTML sourcePath | **部分移植 / N/A**：整卡点击已有；reveal 与 sourcePath 只服务桌面文件管理器，Android 无对应选择语义 |
+| UI 更新 | Composer placeholder 首发/切换会话投影等待、DeferredToolCall 不渲染半截包装、turn navigator/find 细节 | **已移植 / N/A**：Composer 处理态优先（#221/#222）；DeferredToolCall 按目标渲染（#219/#220）；turn navigator 为 React 性能优化，Android N/A |
 | Provider 目录 | Kimi K3.1 Pro、MiniMax M3.1 Flash、11 个新模板、revision 35–38 | **已移植**：资产重生成到 revision 43，并把 Android 无模板概念的精确成员规则并入 `modelRules`/`providerSiteRules` |
-| 工具语义 | `read`/`read-text` 状态与行号、bash cwd/readonly policy、websearch provider、`SendMessage` display、cron、Eval snippet | 待逐项核对；多数已有对应实现，优先补行为差异而不是整段复制 |
-| 运行时/协议 | session features header、local TTFT、stale revision 恢复、MCP node fallback/isolation、project config scope、official command endpoint | 待评估：stale revision 与 MCP isolation 对 Android 有实际价值 |
+| 工具语义 | `read`/`read-text` 状态与行号、bash cwd/readonly policy、websearch provider、`SendMessage` display、cron、Eval snippet | **已移植**：Read 去重/代理对（#223/#224）、sed 只读收紧（#225/#226）、WebSearch 稳定描述（#227/#228）、CronPauseSelf（#229/#230）、Bash 失败尾保留（#231/#232）、Read PDF pages（#233/#234）、SendMessage 摘要/目标（#237/#238）；cwd policy N/A（Android 固定 guest cwd） |
+| 运行时/协议 | session features header、local TTFT、stale revision 恢复、MCP node fallback/isolation、project config scope、official command endpoint | **评估后 N/A / 暂缓**：前几项属桌面/服务端统计或投影协议；MCP isolation 需 per-session 连接池，AndMX 全局 MCP manager 暂不改造 |
 | Desktop/远程/Electron | Electron 44、remote daemon lifecycle、remote tickets、数据同步、发布链 | N/A：桌面/远程宿主专属，不进入 Android 移植 |
 
 后续对标仍以 `ZCode-main/` 的 `a9fe401e` 为准；新移植项在上表更新状态并附 Issue/PR。
@@ -435,8 +435,11 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
    ~~**memory recall/dream**~~（已完成，2026-11-02）：query-aware recall 与 Dream 去重/限流。
 7. ~~**P1｜provider catalog 3.17.2**~~（已完成，2026-11-10）：资产重生成到 revision 43（`modelRules` 84、
    `modelApiRules` 73、`providerSiteRules` 60），补 Kimi K3.1 Pro / MiniMax M3.1 Flash 精确规则与资产测试。
-8. **P2｜3.17 UI 剩余细节**：预览卡 reveal/右键菜单（桌面专属 N/A 部分除外）、Composer 首发投影等待、
-   DeferredToolCall 半截包装不渲染、turn navigator/find 的新边界。
+8. ~~**P2｜3.17 UI 剩余细节**~~（已完成，2026-11-10）：预览卡 reveal 属桌面文件管理器，N/A；
+   Composer 首发投影等待已改为处理态优先（#221/#222）；DeferredToolCall 按目标工具渲染（#219/#220）；
+   turn navigator/find 的 3.17 差异是 React 性能与桌面回放，Android N/A。
+9. **P2｜MCP 连接隔离**：上游 `isolation: session|workspace` 需要 per-session/per-workspace 连接池；
+   AndMX 的 `McpManager` 目前全局共享，改造前先确认有状态 MCP server 的实际需求。
 
 ## 七、待核对项
 
