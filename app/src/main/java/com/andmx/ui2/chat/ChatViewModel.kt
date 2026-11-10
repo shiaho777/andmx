@@ -2994,7 +2994,7 @@ class ChatViewModel @Inject constructor(
                         isRunning = true,
                     )
                     _toolCalls.value = current
-                } else if (!event.name.isNullOrBlank() || event.args.isNotBlank()) {
+                } else if (ToolPresentation.showStreamingPlaceholder(event.name)) {
                     _toolCalls.value = current + ToolCall(
                         id = event.id ?: "stream-tool-${event.index}",
                         name = event.name ?: "tool",

@@ -35,6 +35,9 @@ object ToolPresentation {
         else -> Status.COMPLETED
     }
 
+    fun showStreamingPlaceholder(name: String?): Boolean =
+        !name.isNullOrBlank() && ToolArgs.canonical(name) != "deferred"
+
     private fun deniedOrStopped(output: String?): ToolPresentation.Status? {
         if (output.isNullOrBlank()) return null
         return when {

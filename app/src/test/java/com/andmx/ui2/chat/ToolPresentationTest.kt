@@ -122,6 +122,15 @@ class ToolPresentationTest {
     }
 
     @Test
+    fun streamingPlaceholderNeedsConfirmedNonDeferredName() {
+        assertFalse(ToolPresentation.showStreamingPlaceholder(null))
+        assertFalse(ToolPresentation.showStreamingPlaceholder(""))
+        assertFalse(ToolPresentation.showStreamingPlaceholder("DeferredToolCall"))
+        assertTrue(ToolPresentation.showStreamingPlaceholder("Read"))
+        assertTrue(ToolPresentation.showStreamingPlaceholder("TodoWrite"))
+    }
+
+    @Test
     fun editToolsExpandByDefaultWhenCompleted() {
         assertTrue(ToolPresentation.defaultExpanded(tc(name = "Edit")))
         assertTrue(ToolPresentation.defaultExpanded(tc(name = "ApplyPatch")))
