@@ -121,7 +121,7 @@ object ReadTextFormatter {
                 isError = true,
             )
         }
-        val content = lines.first().take(chars)
+        val content = dropTrailingHighSurrogate(lines.first().take(chars))
         val notice = warn(
             "The file is too large to display in full ($tokens estimated tokens, limit $MAX_OUTPUT_TOKENS). " +
                 "Showing a partial view of the first line because the first line alone exceeds the token budget. " +
@@ -136,6 +136,9 @@ object ReadTextFormatter {
 
     private fun number(lines: List<String>, offsetZeroBased: Int): String =
         lines.mapIndexed { i, line -> "${offsetZeroBased + i + 1}\t$line" }.joinToString("\n")
+
+    internal fun dropTrailingHighSurrogate(text: String): String =
+        if (text.isNotEmpty() && text.last().isHighSurrogate()) text.dropLast(1) else text
 
     private fun warn(body: String): String =
         SystemReminder.wrap(SystemReminder.Source.TOOL_RESULT_WARNING, body)

@@ -48,4 +48,10 @@ class ReadTextFormatterTest {
         assertTrue(view.output.contains("offset "))
         assertFalse(view.isError)
     }
+
+    @Test
+    fun characterFallbackDropsTrailingHighSurrogate() {
+        assertEquals("abc", ReadTextFormatter.dropTrailingHighSurrogate("abc\uD83D"))
+        assertEquals("abc\uD83D\uDE00", ReadTextFormatter.dropTrailingHighSurrogate("abc\uD83D\uDE00"))
+    }
 }

@@ -54,6 +54,7 @@ class ReadFileState {
     @Synchronized
     fun unchangedFullRead(path: String, currentMtimeMs: Long?, currentSizeBytes: Long?): Boolean {
         val entry = map[normalizePath(path)] ?: return false
+        if (entry.sourceTool != READ_TOOL) return false
         if (entry.isPartialView) return false
         if (entry.mtimeMs != null && currentMtimeMs != null) {
             return entry.mtimeMs == currentMtimeMs &&
