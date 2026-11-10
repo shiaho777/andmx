@@ -29,6 +29,7 @@ class CronTools(
     private val conversationId: suspend () -> Long,
     private val currentModel: suspend () -> String,
     private val isAutomationTurn: suspend () -> Boolean,
+    private val automationId: suspend () -> String? = { null },
     /** 闲时窗口起始小时（本地 0-23）——上游 off-peak 窗口由套餐侧给定，AndMX 由设置决定。 */
     private val offPeakStartHour: suspend () -> Int = { 0 },
 ) {
@@ -289,6 +290,44 @@ class CronTools(
         }
     }
 
+    inner class PauseSelf : Tool {
+        override val name = "CronPauseSelf"
+        override val shouldDefer = true
+        override val description =
+            "Pause the scheduled automation that triggered the current run so it stops running on schedule until the user resumes it. It only targets the automation of this run, takes no input, and cannot change the automation definition."
+        override val risk = ToolRisk.WRITE
+        override val readOnly = false
+        override val destructive = false
+        override val concurrentSafe = false
+        override val needsApproval = false
+        override val timeoutMs = CRON_TIMEOUT_MS
+        override val maxOutputBytes = CRON_MODEL_BYTES
+        override val sideEffectScope = "workspace"
+        override val riskLevel = "low"
+        override val permissionName = "automation.pause"
+        override val parameters: JsonObject = CRON_PAUSE_SELF_PARAMETERS
+
+        override suspend fun execute(args: JsonObject): ToolResult {
+            cronIssues(name, args, emptyList(), emptyList())?.let { return it }
+            val id = automationId()?.trim().orEmpty()
+            if (id.isEmpty()) {
+                return ToolResult(
+                    "CronPauseSelf is only available while running a scheduled automation.",
+                    isError = true,
+                )
+            }
+            val s = store ?: return ToolResult(automationPortMissing(name), isError = true)
+            val paused = s.pause(id)
+            return ToolResult(
+                if (paused) {
+                    "Paused automation $id. It will not run on schedule until the user resumes it."
+                } else {
+                    "Automation $id is not active (already paused, completed, failed, or deleted), so nothing changed."
+                },
+            )
+        }
+    }
+
     /** 上游 OffPeakCreate：把任务排进下一个闲时窗口（local offPeakStartHour:00）。 */
     inner class OffPeakCreate : Tool {
         override val name = "OffPeakCreate"
@@ -368,7 +407,7 @@ class CronTools(
         }
     }
 
-    fun all(): List<Tool> = listOf(Create(), ListAll(), Update(), Delete(), OffPeakCreate(), OffPeakList())
+    fun all(): List<Tool> = listOf(Create(), ListAll(), Update(), Delete(), PauseSelf(), OffPeakCreate(), OffPeakList())
 
     private fun cronIssues(tool: String, args: JsonObject, allowed: List<String>, required: List<String>): ToolResult? {
         val issues = strictIssues(args, allowed, required) { key, value ->

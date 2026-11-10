@@ -462,6 +462,7 @@ class ChatController private constructor(private val context: Context) {
     }
     private val automationTurnIds = ConcurrentHashMap.newKeySet<Long>()
     private val offPeakTurnIds = ConcurrentHashMap.newKeySet<Long>()
+    private val automationIdsByConversation = ConcurrentHashMap<Long, String>()
     private val workflowStore = com.andmx.data.WorkflowStore(context, guestFs)
     val workflowService = com.andmx.agent.workflow.WorkflowService(
         scope = controllerScope,
@@ -711,10 +712,12 @@ class ChatController private constructor(private val context: Context) {
         val offPeak = auto.title.startsWith("[闲时]")
         val bucket = if (offPeak) offPeakTurnIds else automationTurnIds
         bucket += auto.conversationId
+        automationIdsByConversation[auto.conversationId] = auto.id
         try {
             launchTurn(auto.conversationId, auto.prompt).join()
         } finally {
             bucket -= auto.conversationId
+            automationIdsByConversation.remove(auto.conversationId, auto.id)
             runCatching { cronStore.markRan(auto.id) }
             runCatching { scheduleAutomationWake() }
             runCatching {
@@ -2552,6 +2555,7 @@ class ChatController private constructor(private val context: Context) {
             conversationId = { conversationId },
             currentModel = { settingsStore.settings.firstOrNull()?.model.orEmpty() },
             isAutomationTurn = { automationTurnIds.contains(conversationId) },
+            automationId = { automationIdsByConversation[conversationId] },
             offPeakStartHour = { settingsStore.settings.firstOrNull()?.offPeakStartHour ?: 0 },
         ).all() + dynamicWorkflow + com.andmx.agent.JsReplTool(context, "conv-$conversationId"),
             enabled = dynamicWorkflowEnabled,

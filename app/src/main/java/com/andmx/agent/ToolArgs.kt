@@ -70,7 +70,7 @@ object ToolArgs {
             "submit_result", "SubmitResult" -> "submit"
             "escalate", "Escalate" -> "escalate"
             "SendMessage" -> "send"
-            "CronCreate", "CronList", "CronUpdate", "CronDelete" -> "cron"
+            "CronCreate", "CronList", "CronUpdate", "CronDelete", "CronPauseSelf" -> "cron"
             "OffPeakCreate", "OffPeakList" -> "offpeak"
             "CreateWorkflow", "AmendWorkflow", "SaveWorkflow", "ListSavedWorkflows",
             "ListWorkflowRuns", "GetWorkflowRun", "GetWorkflowRunRoster",
