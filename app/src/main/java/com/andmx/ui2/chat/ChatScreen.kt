@@ -1390,9 +1390,14 @@ LaunchedEffect(Unit) {
                 if (compactNotice?.running == true) {
                     CompactMarkerRow(compactNotice?.text ?: "正在压缩上下文")
                 }
+                LaunchedEffect(currentConversationId, isLoading) {
+                    viewModel.refreshWorkflowRuns()
+                }
                 StatusCapsule(
                     goal = goal,
                     planSteps = planSteps,
+                    workflows = workflowRuns,
+                    onOpenWorkflows = { viewModel.openWorkflows() },
                     subAgents = subAgentItems,
                     gitInfo = gitInfo,
                     contextTokens = contextTokens,
