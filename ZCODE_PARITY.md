@@ -1,19 +1,34 @@
 # AndMX ↔ ZCode 1:1 对标报告
 
-对标时间：2026-10-29
+对标时间：2026-11-10
 上游基线：`github.com/zai-org/ZCode`
 
-## 一、上游同步结论：没有落后
+## 一、上游同步结论：已同步到 3.17.2
 
 | 项 | 值 |
 |----|-----|
-| 本地快照 | `ZCode-main/`，commit `3c5b227`（2026-10-20 `chore: sync ZCode source`） |
-| 上游 `origin/main` | `3c5b227` —— **与本地完全一致** |
-| 根版本号 | `package.json` → `3.16.2` |
-| 最新 tag | `v3.15.1`（3.16.2 尚未打 tag） |
-| 旁支 | `feat/ui-plugin` @ `662c30b`，未合入 main |
+| 本地快照 | `ZCode-main/`，commit `a9fe401e`（2026-11-03 `chore: sync ZCode source v3.17.2`） |
+| 上一轮基线 | `3c5b227`（2026-10-20，`3.16.2`） |
+| 根版本号 | `package.json` → `3.17.2` |
+| 中间同步 | `a60ba6a7`（2026-10-30）、`a9fe401e`（2026-11-03） |
 
-结论：无需重新爬取，`ZCode-main/` 就是当前上游 main。后续对标以此为准。
+### 3.16.2 → 3.17.2 更新审计
+
+上游这两个同步提交合并了约 5000 个文件，绝大多数是 Desktop / Electron / 远程 / 发布链路。与 Android 相关、已确认的更新分成以下几类：
+
+| 类别 | 上游更新 | AndMX 状态 |
+|------|----------|-----------|
+| UI 新规范 | `yolo-mode-confirmation` | **已移植**：非 YOLO → YOLO 前风险确认 + 勾选，覆盖菜单/快捷键/`/mode` |
+| UI 新规范 | `settings-personalization` | **已移植**：设置页「个性化」编辑用户级 `AGENTS.md`，注入后续会话 |
+| UI 新规范 | `message-link-context-menu` | **已移植**：正文链接长按菜单（打开 / 复制链接） |
+| UI 更新 | 预览卡整卡点击、右键菜单、Finder/Explorer reveal、localhost→HTML sourcePath | 部分：移动端已有整卡点击与文件/website 卡；reveal 属桌面文件管理器，N/A |
+| UI 更新 | Composer placeholder 首发/切换会话投影等待、DeferredToolCall 不渲染半截包装、turn navigator/find 细节 | 待下一批：AndMX 已有 optimistic 发送与 turn navigator，需逐条核对 |
+| Provider 目录 | Kimi K3.1 Pro、MiniMax M3.1 Flash、11 个新模板、revision 35–38 | 未移植：AndMX 的模型目录是内嵌 JSON 资产，需按新 revision 同步并补测试 |
+| 工具语义 | `read`/`read-text` 状态与行号、bash cwd/readonly policy、websearch provider、`SendMessage` display、cron、Eval snippet | 待逐项核对；多数已有对应实现，优先补行为差异而不是整段复制 |
+| 运行时/协议 | session features header、local TTFT、stale revision 恢复、MCP node fallback/isolation、project config scope、official command endpoint | 待评估：stale revision 与 MCP isolation 对 Android 有实际价值 |
+| Desktop/远程/Electron | Electron 44、remote daemon lifecycle、remote tickets、数据同步、发布链 | N/A：桌面/远程宿主专属，不进入 Android 移植 |
+
+后续对标仍以 `ZCode-main/` 的 `a9fe401e` 为准；新移植项在上表更新状态并附 Issue/PR。
 
 ## 二、判定口径
 
@@ -418,6 +433,10 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 5. **P1｜subagent 分层**：至少补 `tool-policy`（子代理工具裁剪）与 `message-steering`（运行中插话，`AgentEngineSteerTest` 已覆盖引擎侧，需核对编排侧是否等价）。
 6. ~~**P2｜hooks 工作区审核流**~~（已完成，2026-11-02）：`.zcode/hooks.json` 发现、SHA-256 信任固定、HooksPage 审查/撤销、远程 SSH 执行。
    ~~**memory recall/dream**~~（已完成，2026-11-02）：query-aware recall 与 Dream 去重/限流。
+7. **P1｜provider catalog 3.17.2**：同步 revision 35–38 的模板/成员（Kimi K3.1 Pro、MiniMax M3.1 Flash、
+   11 个新模板、旧型号启停），并补目录 identity/请求档位测试；AndMX 当前仍是内嵌静态 JSON。
+8. **P2｜3.17 UI 剩余细节**：预览卡 reveal/右键菜单（桌面专属 N/A 部分除外）、Composer 首发投影等待、
+   DeferredToolCall 半截包装不渲染、turn navigator/find 的新边界。
 
 ## 七、待核对项
 
