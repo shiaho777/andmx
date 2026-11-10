@@ -26,6 +26,16 @@ object ToolArgs {
     fun firstValue(args: String, vararg keys: String): String =
         keys.firstNotNullOfOrNull { value(args, it).takeIf { v -> v.isNotBlank() } }.orEmpty()
 
+    private fun sendSummary(args: String): String {
+        val summary = firstValue(args, "summary").ifBlank {
+            value(args, "message").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
+        }
+        val to = firstValue(args, "to")
+        return listOf(summary, if (to.isNotBlank()) "→ $to" else "")
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+    }
+
     fun arraySize(args: String, keyName: String): Int =
         runCatching {
             ((json.parseToJsonElement(args).jsonObject[keyName]) as? JsonArray)?.size ?: 0
@@ -99,6 +109,7 @@ object ToolArgs {
             "todoread" -> "读取待办"
             "skill" -> firstValue(args, "skill", "name")
             "agent" -> firstValue(args, "subagent_type", "description", "prompt", "task")
+            "send" -> sendSummary(args)
             "taskoutput" -> firstValue(args, "task_id", "id")
             "taskstop" -> firstValue(args, "task_id", "id")
             "ask" -> "${arraySize(args, "questions")} 个问题"
