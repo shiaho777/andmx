@@ -41,7 +41,7 @@ object BashReadonlyPolicy {
         val c = cmd.lowercase()
         if (c in ALWAYS_READ) return true
         if (c == "find") return args.none { it in FIND_WRITE_FLAGS }
-        if (c == "sed") return args.none { it == "--in-place" || it.matches(SED_IN_PLACE) }
+        if (c == "sed") return sedReadOnly(args)
         if (c == "awk" || c == "gawk" || c == "mawk" || c == "nawk") {
             return !raw.contains("system(") && args.none { it.startsWith("-i") || it.startsWith("--inplace") }
         }
@@ -66,6 +66,51 @@ object BashReadonlyPolicy {
         ) return false
         if (c in VERSION_ONLY) return args.isEmpty() || args.all { it in SAFE_META_FLAGS }
         return false
+    }
+
+    private fun sedReadOnly(args: List<String>): Boolean {
+        var index = 0
+        var quiet = false
+        var zeroTerminated = false
+        while (index < args.size) {
+            val arg = args[index]
+            if (arg == "--") {
+                index++
+                break
+            }
+            if (!arg.startsWith("-")) break
+            val flags = if (arg.startsWith("--")) listOf(arg) else arg.drop(1).map { "-$it" }
+            if (flags.isEmpty() || flags.any { it !in SED_SAFE_FLAGS }) return false
+            quiet = quiet || flags.any { it in SED_QUIET_FLAGS }
+            zeroTerminated = zeroTerminated || flags.any { it in SED_ZERO_TERMINATED_FLAGS }
+            index++
+        }
+        val script = args.getOrNull(index) ?: return false
+        if (SED_UNSUPPORTED_SCRIPT_CHARACTERS.containsMatchIn(script)) return false
+        val files = args.drop(index + 1)
+        if (files.any { it.startsWith("-") && it != "-" }) return false
+        if (quiet && script.split(";").all { SED_PRINT_COMMAND.matches(it.trim()) }) return true
+        return !quiet && !zeroTerminated && files.isEmpty() && sedSubstitutionReadOnly(script)
+    }
+
+    private fun sedSubstitutionReadOnly(script: String): Boolean {
+        if (!script.startsWith(SED_SUBSTITUTION_PREFIX) || script.contains(';')) return false
+        var delimiters = 0
+        var lastDelimiter = -1
+        var index = SED_SUBSTITUTION_PREFIX.length
+        while (index < script.length) {
+            val character = script[index]
+            if (character == '\\') {
+                index++
+                if (index >= script.length || script[index] !in SED_SUBSTITUTION_ESCAPES) return false
+            } else if (character == '/') {
+                delimiters++
+                lastDelimiter = index
+            }
+            index++
+        }
+        return delimiters == SED_SUBSTITUTION_DELIMITERS &&
+            SED_SUBSTITUTION_FLAGS.matches(script.substring(lastDelimiter + 1))
     }
 
     private fun gitReadOnly(args: List<String>): Boolean {
@@ -207,7 +252,21 @@ object BashReadonlyPolicy {
         "zcat", "zless", "zgrep", "bzcat", "xzcat", "ip",
     )
 
-    private val SED_IN_PLACE = Regex("^-[a-zA-Z]*i[a-zA-Z]*(\\..*)?$|^-[a-zA-Z]*i\\..*")
+    private val SED_SAFE_FLAGS = setOf(
+        "-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended", "--posix",
+        "-z", "--zero-terminated",
+    )
+    private val SED_QUIET_FLAGS = setOf("-n", "--quiet", "--silent")
+    private val SED_ZERO_TERMINATED_FLAGS = setOf("-z", "--zero-terminated")
+    private val SED_PRINT_COMMAND = Regex("^(?:[1-9]\\d*(?:,[1-9]\\d*)?)?p$")
+    private val SED_UNSUPPORTED_SCRIPT_CHARACTERS = Regex("[\\p{Cc}\\p{Zl}\\p{Zp}]")
+    private const val SED_SUBSTITUTION_PREFIX = "s/"
+    private val SED_SUBSTITUTION_FLAGS = Regex("^[gpimIM]*[1-9]?[gpimIM]*$")
+    private val SED_SUBSTITUTION_ESCAPES = setOf(
+        '/', '\\', '&', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '^', '$', '*', '+', '?',
+        '(', ')', '[', ']', '{', '}', '|',
+    )
+    private const val SED_SUBSTITUTION_DELIMITERS = 2
 
     private val FIND_WRITE_FLAGS = setOf(
         "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls",

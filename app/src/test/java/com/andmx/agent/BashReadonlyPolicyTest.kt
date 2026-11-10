@@ -30,6 +30,20 @@ class BashReadonlyPolicyTest {
     }
 
     @Test
+    fun sedReadOnlyOnlyAcceptsPrintAndPlainSubstitution() {
+        for (cmd in listOf(
+            "sed -n '1,5p' file", "sed -n 'p' file", "sed -n '1p;2p' file",
+            "sed 's/a/b/'", "sed -E 's/a/b/g'",
+        )) assertTrue("expected readonly: $cmd", ro(cmd))
+        for (cmd in listOf(
+            "sed 's/a/b/' file", "sed -z 's/a/b/'", "sed -e 's/a/b/'",
+            "sed -n 'w /tmp/x' file", "sed '1w /tmp/x' file",
+            "sed 's/a/b/w /tmp/x' file", "sed -n '1p;2w /tmp/x' file",
+            "sed -n '1p' -e 'w /tmp/x' file",
+        )) assertFalse("expected denied: $cmd", ro(cmd))
+    }
+
+    @Test
     fun writeCommandsRejected() {
         for (cmd in listOf(
             "rm -rf /", "rm x", "mv a b", "cp a b", "mkdir d", "touch f",
