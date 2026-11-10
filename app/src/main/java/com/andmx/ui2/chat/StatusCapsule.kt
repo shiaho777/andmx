@@ -293,12 +293,61 @@ private fun GoalSection(goal: ConversationGoal) {
     }
 }
 
+internal data class PlanFocusWindow(
+    val before: List<UpdatePlanTool.PlanStep>,
+    val visible: List<UpdatePlanTool.PlanStep>,
+    val after: List<UpdatePlanTool.PlanStep>,
+) {
+    val beforeLabel: String?
+        get() = when {
+            before.isEmpty() -> null
+            before.all { it.status == UpdatePlanTool.StepStatus.COMPLETED } ->
+                "已完成 ${before.size} 项"
+            else -> "前面 ${before.size} 项"
+        }
+
+    val afterLabel: String?
+        get() = when {
+            after.isEmpty() -> null
+            after.all { it.status == UpdatePlanTool.StepStatus.PENDING } ->
+                "待处理 ${after.size} 项"
+            else -> "后面 ${after.size} 项"
+        }
+}
+
+internal fun planFocusWindow(
+    steps: List<UpdatePlanTool.PlanStep>,
+    maxVisible: Int = 3,
+): PlanFocusWindow {
+    if (steps.size <= maxVisible * 2) {
+        return PlanFocusWindow(emptyList(), steps, emptyList())
+    }
+    val anchor = steps.indexOfFirst {
+        it.status == UpdatePlanTool.StepStatus.IN_PROGRESS
+    }.takeIf { it >= 0 }
+        ?: steps.indexOfFirst {
+            it.status != UpdatePlanTool.StepStatus.COMPLETED
+        }.takeIf { it >= 0 }
+        ?: steps.lastIndex
+    val start = (anchor - maxVisible / 2).coerceIn(0, steps.size - maxVisible)
+    val end = start + maxVisible
+    return PlanFocusWindow(
+        before = steps.take(start),
+        visible = steps.subList(start, end),
+        after = steps.drop(end),
+    )
+}
+
 @Composable
 private fun ProgressSection(steps: List<UpdatePlanTool.PlanStep>) {
+    val focus = remember(steps) { planFocusWindow(steps) }
     Column {
         SectionLabel("进度")
         Spacer(Modifier.height(4.dp))
-        steps.forEach { step ->
+        focus.beforeLabel?.let { label ->
+            BucketRow(tr(label))
+        }
+        focus.visible.forEach { step ->
             Row(
                 Modifier.padding(vertical = 2.dp),
                 verticalAlignment = Alignment.Top,
@@ -324,7 +373,20 @@ private fun ProgressSection(steps: List<UpdatePlanTool.PlanStep>) {
                 )
             }
         }
+        focus.afterLabel?.let { label ->
+            BucketRow(tr(label))
+        }
     }
+}
+
+@Composable
+private fun BucketRow(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        modifier = Modifier.padding(vertical = 3.dp),
+    )
 }
 
 @Composable
