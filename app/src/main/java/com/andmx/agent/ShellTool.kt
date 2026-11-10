@@ -42,6 +42,15 @@ import kotlinx.serialization.json.longOrNull
 private const val DEFAULT_TIMEOUT_MS = 120_000L
 private const val MAX_TIMEOUT_MS = 600_000L
 
+internal fun truncateShellOutput(rendered: String, limit: Int, marker: String, keepTail: Boolean): String {
+    if (rendered.length <= limit) return rendered
+    val budget = (limit - marker.length).coerceAtLeast(0)
+    if (!keepTail) return rendered.take(budget) + marker
+    val head = budget / 2
+    val tail = budget - head
+    return rendered.take(head) + marker + rendered.takeLast(tail)
+}
+
 private val BASH_DESCRIPTION_FIELD_PROMPT = listOf(
     "Clear, concise description of what this command does in active voice. Never use words like \"complex\" or \"risk\" in the description - just describe what it does.",
     "",
@@ -210,7 +219,7 @@ class ShellTool(
                     ShellEvent.Finished(callId, command, res.exitCode, isError = res.exitCode != 0),
                 )
             }
-            return ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0)
+            return ToolResult(withPersistedOverflow(res.stdout, out, 16_000, res.exitCode != 0), isError = res.exitCode != 0)
         }
 
         val noSandbox = (args["dangerouslyDisableSandbox"] as? JsonPrimitive)?.booleanOrNull == true
@@ -231,7 +240,7 @@ class ShellTool(
                     append("\n[exit=${res.exitCode}]")
                 }
                 return withImageOutput(
-                    ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0),
+                    ToolResult(withPersistedOverflow(res.stdout, out, 16_000, res.exitCode != 0), isError = res.exitCode != 0),
                 )
             }
             // Persistent shell failed — fall through to fork+exec
@@ -247,12 +256,17 @@ class ShellTool(
             append("\n[exit=${res.exitCode}]")
         }
         return withImageOutput(
-            ToolResult(withPersistedOverflow(res.stdout, out, 16_000), isError = res.exitCode != 0),
+            ToolResult(withPersistedOverflow(res.stdout, out, 16_000, res.exitCode != 0), isError = res.exitCode != 0),
         )
     }
 
     /** 上游 persistOutput=on_truncate 等价：超限时完整 stdout 落 .andmx/outputs/ 并把路径回给模型。 */
-    private suspend fun withPersistedOverflow(rawStdout: String, rendered: String, limit: Int): String {
+    private suspend fun withPersistedOverflow(
+        rawStdout: String,
+        rendered: String,
+        limit: Int,
+        keepTail: Boolean,
+    ): String {
         if (rendered.length <= limit) return rendered
         val guest = "${cwdProvider().trimEnd('/')}/.andmx/outputs/shell-${System.currentTimeMillis()}.log"
         val saved = runCatching {
@@ -260,7 +274,7 @@ class ShellTool(
             guest
         }.getOrNull()
         val marker = "\n…[截断]${saved?.let { " 完整输出: $it" }.orEmpty()}"
-        return rendered.take((limit - marker.length).coerceAtLeast(0)) + marker
+        return truncateShellOutput(rendered, limit, marker, keepTail)
     }
 
     private suspend fun executeBounded(
