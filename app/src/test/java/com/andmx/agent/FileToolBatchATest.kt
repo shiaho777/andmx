@@ -52,7 +52,7 @@ class FileToolBatchATest {
 
         val read = tools.single { it.name == "Read" }
         assertEquals(listOf("file_path"), required(read))
-        assertEquals(setOf("file_path", "offset", "limit"), props(read).keys)
+        assertEquals(setOf("file_path", "offset", "limit", "pages"), props(read).keys)
         assertTrue(read.description.contains("`file_path` must be an absolute path."))
         assertTrue(read.description.contains("Reads up to 2000 lines by default."))
         assertTrue(read.description.contains("substitution"))
@@ -125,6 +125,17 @@ class FileToolBatchATest {
         assertEquals("none", read.sideEffectScope)
         val mutate = bashRuntimeCapability("rm x", base)
         assertEquals(base, mutate)
+    }
+
+    @Test
+    fun readSchemaExposesPdfPages() {
+        val read = ReadFileTool(context, ReadFileState())
+        val pages = read.parameters["properties"]!!.jsonObject["pages"]!!.jsonObject
+        assertEquals("string", pages["type"]!!.jsonPrimitive.content)
+        val description = pages["description"]!!.jsonPrimitive.content
+        assertTrue(description.contains("1-5"))
+        assertTrue(description.contains("20"))
+        assertTrue(read.description.contains("`pages`"))
     }
 
     @Test

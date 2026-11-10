@@ -106,7 +106,7 @@ private val READ_PROVIDER_DESCRIPTION = listOf(
     "- Reads up to 2000 lines by default.",
     "- When you already know which part of the file you need, only read that part. This can be important for larger files.",
     "- Results are returned using cat -n format, with line numbers starting at 1",
-    "- Reads images (PNG, JPG, …) and presents them visually.",
+    "- Reads images (PNG, JPG, …) and presents them visually. Reads PDFs via the `pages` parameter (e.g. \"1-5\", max 20 pages/request; defaults to the first 20 pages).",
     "- Reads videos (MP4, MOV, WEBM, …). This Android build has no video input block, so videos are sampled as frames. That is a substitution, not the upstream video block.",
     "- Reading a directory, a missing file, or an empty file returns an error or system reminder rather than content.",
     "- Do NOT re-read a file you just edited to verify — Edit/Write would have errored if the change failed, and the harness tracks file state for you.",
@@ -148,6 +148,13 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
             putJsonObject("limit") {
                 put("type", "integer")
                 put("description", "The number of lines to read. Only provide if the file is too large to read at once.")
+            }
+            putJsonObject("pages") {
+                put("type", "string")
+                put(
+                    "description",
+                    "PDF page range such as \"1-5\", \"3\", or \"10-20\". Pages are 1-indexed; at most 20 pages per request. Defaults to the first 20 pages.",
+                )
             }
         }
         putJsonArray("required") { add("file_path") }
