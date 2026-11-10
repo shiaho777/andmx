@@ -2008,6 +2008,12 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun refreshWorkflowRuns() {
+        viewModelScope.launch {
+            _workflowRuns.value = controller.workflowService.listRuns()
+        }
+    }
+
     /** 时间线 workflow 卡的实时状态行（上游 workflow-card 等价）。 */
     suspend fun workflowStatusLine(runId: String): String? {
         val snap = controller.workflowService.getRun(runId) ?: return null

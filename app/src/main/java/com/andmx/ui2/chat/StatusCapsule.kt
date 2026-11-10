@@ -57,13 +57,23 @@ import androidx.compose.ui.unit.sp
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.ConversationGoal
 import com.andmx.agent.GoalStatus
+import com.andmx.agent.workflow.WorkflowRunStatus
+import com.andmx.data.WorkflowStore
 import com.andmx.ui2.theme.LocalMotion
 import com.andmx.workspace.GitBaseline
+
+internal fun activeWorkflowRuns(
+    runs: List<WorkflowStore.RunListItem>,
+): List<WorkflowStore.RunListItem> = runs.filter {
+    it.status == WorkflowRunStatus.running || it.status == WorkflowRunStatus.pending
+}
 
 @Composable
 fun StatusCapsule(
     goal: ConversationGoal,
     planSteps: List<UpdatePlanTool.PlanStep>,
+    workflows: List<WorkflowStore.RunListItem> = emptyList(),
+    onOpenWorkflows: () -> Unit = {},
     subAgents: List<SubAgentItem>,
     gitInfo: GitBaseline.GitInfo?,
     contextTokens: Int,
@@ -77,6 +87,7 @@ fun StatusCapsule(
     modifier: Modifier = Modifier,
 ) {
     val hasSteps = planSteps.isNotEmpty()
+    val activeWorkflows = activeWorkflowRuns(workflows)
     val runningAgents = subAgents.count { it.state.equals("running", true) || it.state.equals("streaming", true) }
     val doneAgents = subAgents.count { it.state.equals("completed", true) || it.state.equals("done", true) }
     val contextPct = if (contextWindow > 0) (contextTokens.toFloat() / contextWindow).coerceIn(0f, 1f) else 0f
@@ -88,8 +99,9 @@ fun StatusCapsule(
         null
     }
     val summary = listOfNotNull(contextLabel, ttftLabel).joinToString(" · ")
-    val anythingToShow = goal.hasGoal || hasSteps || subAgents.isNotEmpty() ||
-        (gitInfo?.branch?.isNotBlank() == true) || contextPct > 0.001f || summary.isNotEmpty()
+    val anythingToShow = goal.hasGoal || hasSteps || activeWorkflows.isNotEmpty() ||
+        subAgents.isNotEmpty() || (gitInfo?.branch?.isNotBlank() == true) ||
+        contextPct > 0.001f || summary.isNotEmpty()
     if (!anythingToShow) return
 
     // ZCode summaryPanel.displayMode 对齐：auto 默认收起（用户可手动展开），
@@ -120,50 +132,75 @@ fun StatusCapsule(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val done = planSteps.count { it.status == UpdatePlanTool.StepStatus.COMPLETED }
-            val total = planSteps.size
-            if (goal.hasGoal) StatusDot(Icons.Outlined.Flag, MaterialTheme.colorScheme.tertiary)
-            if (hasSteps) {
-                StatusDot(Icons.Outlined.CheckCircle, MaterialTheme.colorScheme.primary)
+            if (activeWorkflows.isNotEmpty()) {
+                val first = activeWorkflows.first()
+                StatusDot(Icons.Outlined.AccountTree, MaterialTheme.colorScheme.tertiary)
                 Text(
-                    "$done/$total",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (runningAgents > 0) {
-                StatusDot(Icons.Outlined.AccountTree, MaterialTheme.colorScheme.secondary)
-                Text(tr("$runningAgents 代理"),
+                    first.task.ifBlank { first.runId },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            val branch = gitInfo?.branch.orEmpty()
-            if (branch.isNotBlank()) {
-                StatusDot(Icons.Outlined.Commit, MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    branch,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 120.dp),
+                    modifier = Modifier.widthIn(max = 180.dp),
                 )
-                if ((gitInfo?.dirtyFileCount ?: 0) > 0) {
+                Text(
+                    first.status.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                )
+                if (activeWorkflows.size > 1) {
                     Text(
-                        "●${gitInfo?.dirtyFileCount}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                        "+${activeWorkflows.size - 1}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                val ahead = gitInfo?.ahead ?: 0
-                val behind = gitInfo?.behind ?: 0
-                if (ahead > 0 || behind > 0) {
+            } else {
+                val done = planSteps.count { it.status == UpdatePlanTool.StepStatus.COMPLETED }
+                val total = planSteps.size
+                if (goal.hasGoal) StatusDot(Icons.Outlined.Flag, MaterialTheme.colorScheme.tertiary)
+                if (hasSteps) {
+                    StatusDot(Icons.Outlined.CheckCircle, MaterialTheme.colorScheme.primary)
                     Text(
-                        (if (ahead > 0) "↑$ahead " else "") + (if (behind > 0) "↓$behind" else ""),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        "$done/$total",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (runningAgents > 0) {
+                    StatusDot(Icons.Outlined.AccountTree, MaterialTheme.colorScheme.secondary)
+                    Text(tr("$runningAgents 代理"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val branch = gitInfo?.branch.orEmpty()
+                if (branch.isNotBlank()) {
+                    StatusDot(Icons.Outlined.Commit, MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        branch,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 120.dp),
+                    )
+                    if ((gitInfo?.dirtyFileCount ?: 0) > 0) {
+                        Text(
+                            "●${gitInfo?.dirtyFileCount}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                        )
+                    }
+                    val ahead = gitInfo?.ahead ?: 0
+                    val behind = gitInfo?.behind ?: 0
+                    if (ahead > 0 || behind > 0) {
+                        Text(
+                            (if (ahead > 0) "↑$ahead " else "") + (if (behind > 0) "↓$behind" else ""),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
                 }
             }
             if (summary.isNotEmpty()) {
@@ -210,6 +247,9 @@ fun StatusCapsule(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (activeWorkflows.isNotEmpty()) {
+                    WorkflowSection(activeWorkflows, onOpenWorkflows)
+                }
                 if (goal.hasGoal) GoalSection(goal)
                 if (hasSteps) ProgressSection(planSteps)
                 if (subAgents.isNotEmpty()) AgentsSection(runningAgents, doneAgents, subAgents)
@@ -421,6 +461,44 @@ private fun AgentsSection(running: Int, done: Int, agents: List<SubAgentItem>) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
+        }
+    }
+}
+
+@Composable
+private fun WorkflowSection(
+    workflows: List<WorkflowStore.RunListItem>,
+    onOpen: () -> Unit,
+) {
+    Column(Modifier.clickable(onClick = onOpen)) {
+        SectionLabel("工作流")
+        Spacer(Modifier.height(4.dp))
+        workflows.forEach { run ->
+            Row(
+                Modifier.padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.AccountTree,
+                    null,
+                    Modifier.size(13.dp),
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    run.task.ifBlank { run.runId },
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    run.status.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                )
+            }
         }
     }
 }
