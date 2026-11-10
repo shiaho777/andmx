@@ -72,7 +72,10 @@ fun AssistantFilePreviewCards(
                     .clip(shape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-                    .clickable { ChatActionBus.openFile(card.path) }
+                    .clickable {
+                        val url = card.url
+                        if (url != null) ChatActionBus.openUrl(url) else ChatActionBus.openFile(card.path)
+                    }
                     .padding(horizontal = 10.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
