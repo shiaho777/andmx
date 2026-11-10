@@ -62,6 +62,7 @@ fun MessageBubble(
     onSideChat: (() -> Unit)? = null,
     onFeedback: ((Int) -> Unit)? = null,
     fileExists: ((String) -> Boolean)? = null,
+    mergedCodeComments: List<AssistantCodeComment>? = null,
     isEditing: Boolean = false,
 ) {
     val isUser = message.role == "user"
@@ -85,6 +86,7 @@ fun MessageBubble(
             onSideChat = onSideChat,
             onFeedback = onFeedback,
             fileExists = fileExists,
+            mergedCodeComments = mergedCodeComments,
         )
     }
 }
@@ -212,6 +214,7 @@ private fun AssistantProcessBlock(
     onSideChat: (() -> Unit)? = null,
     onFeedback: ((Int) -> Unit)? = null,
     fileExists: ((String) -> Boolean)? = null,
+    mergedCodeComments: List<AssistantCodeComment>? = null,
 ) {
     val process = message.isProcess
     val fileProjection = remember(message.content, message.isStreaming) {
@@ -282,9 +285,9 @@ private fun AssistantProcessBlock(
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
-        if (!process && !message.isStreaming && commentProjection.comments.isNotEmpty()) {
+        if (!process && !message.isStreaming && !mergedCodeComments.isNullOrEmpty()) {
             AssistantCodeCommentCards(
-                comments = commentProjection.comments,
+                comments = mergedCodeComments,
                 modifier = Modifier.padding(top = 8.dp),
             )
         }

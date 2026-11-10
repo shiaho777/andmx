@@ -156,6 +156,7 @@ fun ChatScreen(
         if (appSettings.showReasoning) reasonings
         else firstReasoningPerTurn(messages, reasonings)
     }
+    val turnCodeComments = remember(messages) { assistantCodeCommentsByTail(messages) }
     val visibleTools = remember(toolCalls, appSettings.showTodos) {
         if (appSettings.showTodos) toolCalls
         else toolCalls.filterNot { tool ->
@@ -1141,6 +1142,7 @@ LaunchedEffect(Unit) {
                                     MessageBubble(
                                         message = item.message,
                                         fileExists = previewFileExists,
+                                        mergedCodeComments = turnCodeComments[item.message.id],
                                         onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
                                             {
                                                 if (item.message.role == "user") {
