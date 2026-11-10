@@ -127,6 +127,15 @@ class ReadFileStateTest {
     }
 
     @Test
+    fun writeRecordDoesNotShortCircuitRead() {
+        val state = ReadFileState()
+        state.record("/w/a.kt", "v1", sourceTool = ReadFileState.WRITE_TOOL, mtimeMs = 1000L, sizeBytes = 2L)
+        assertTrue(!state.unchangedFullRead("/w/a.kt", 1000L, 2L))
+        state.record("/w/a.kt", "v1", mtimeMs = 1000L, sizeBytes = 2L)
+        assertTrue(state.unchangedFullRead("/w/a.kt", 1000L, 2L))
+    }
+
+    @Test
     fun writeThenEditRefreshesState() {
         val state = ReadFileState()
         state.record("/w/a.kt", "v1", sourceTool = ReadFileState.WRITE_TOOL, mtimeMs = 500L, sizeBytes = 2L)

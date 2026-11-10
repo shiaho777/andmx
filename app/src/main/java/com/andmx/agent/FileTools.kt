@@ -104,7 +104,7 @@ private val READ_PROVIDER_DESCRIPTION = listOf(
     "",
     "- `file_path` must be an absolute path.",
     "- Reads up to 2000 lines by default.",
-    "- You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters",
+    "- When you already know which part of the file you need, only read that part. This can be important for larger files.",
     "- Results are returned using cat -n format, with line numbers starting at 1",
     "- Reads images (PNG, JPG, …) and presents them visually.",
     "- Reads videos (MP4, MOV, WEBM, …). This Android build has no video input block, so videos are sampled as frames. That is a substitution, not the upstream video block.",
