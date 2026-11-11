@@ -302,7 +302,7 @@ object UsageChartLogic {
     }
 
     /** `yyyy-MM` → `M月` / `Sep`, UTC — same shape as ZCode's month row. */
-    fun monthShort(yearMonth: String, zh: Boolean = Locale.getDefault().language == "zh"): String {
+    fun monthShort(yearMonth: String, zh: Boolean = com.andmx.ui2.settings.UiLang.tag != "en"): String {
         val month = yearMonth.getOrNull(5)?.digitToIntOrNull()?.times(10)
             ?.plus((yearMonth.getOrNull(6)?.digitToIntOrNull() ?: 0)) ?: return ""
         return if (zh) "${month}月"

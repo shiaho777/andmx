@@ -290,7 +290,7 @@ fun McpEditPage(
             if (editorMode == "json") {
                 SettingsGroup("完整配置") {
                     Text(
-                        "可以粘贴 {\"server-name\": {...}}，或 {\"mcpServers\": {\"server-name\": {...}}}。一次只编辑一个服务器。",
+                        tr("可以粘贴 {\"server-name\": {...}}，或 {\"mcpServers\": {\"server-name\": {...}}}。一次只编辑一个服务器。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

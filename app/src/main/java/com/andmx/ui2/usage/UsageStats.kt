@@ -268,8 +268,23 @@ object UsageCalculator {
         return current to longest
     }
 
-    fun formatCount(n: Long): String {
+    fun formatCount(n: Long, zh: Boolean = com.andmx.ui2.settings.UiLang.tag != "en"): String {
         if (n < 0) return "0"
+        if (!zh) {
+            if (n >= 1_000_000_000L) {
+                val v = n / 1_000_000_000.0
+                return if (abs(v - v.roundToInt()) < 0.05) "${v.roundToInt()}B" else trimDecimal(v) + "B"
+            }
+            if (n >= 1_000_000L) {
+                val v = n / 1_000_000.0
+                return if (abs(v - v.roundToInt()) < 0.05) "${v.roundToInt()}M" else trimDecimal(v) + "M"
+            }
+            if (n >= 1_000L) {
+                val v = n / 1_000.0
+                return if (abs(v - v.roundToInt()) < 0.05 && v < 100) "${v.roundToInt()}K" else trimDecimal(v) + "K"
+            }
+            return n.toString()
+        }
         if (n >= 100_000_000L) {
             val v = n / 100_000_000.0
             return if (abs(v - v.roundToInt()) < 0.05) "${v.roundToInt()}亿" else trimDecimal(v) + "亿"
@@ -291,10 +306,17 @@ object UsageCalculator {
         }
     }
 
-    /** `M月d日` axis label for a local day-start timestamp. */
-    fun formatDayLabel(dayStartMs: Long): String {
+    /** `M月d日` / `MMM d` axis label for a local day-start timestamp. */
+    fun formatDayLabel(
+        dayStartMs: Long,
+        zh: Boolean = com.andmx.ui2.settings.UiLang.tag != "en",
+    ): String {
         val c = Calendar.getInstance().apply { timeInMillis = dayStartMs }
-        return "${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日"
+        return if (zh) {
+            "${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日"
+        } else {
+            java.text.SimpleDateFormat("MMM d", java.util.Locale.US).format(c.time)
+        }
     }
 
     private fun trimDecimal(v: Double): String {

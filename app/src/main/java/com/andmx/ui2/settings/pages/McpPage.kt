@@ -457,9 +457,9 @@ private fun McpCard(
                     is ConnState.Testing -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     is ConnState.Ok -> StatusPill(
                         buildString {
-                            append("已连接 · ").append(state.tools).append(" 工具")
-                            if (state.resources > 0) append(" · ").append(state.resources).append(" 资源")
-                            if (state.prompts > 0) append(" · ").append(state.prompts).append(" 提示")
+                            append(tr("已连接")).append(" · ").append(state.tools).append(" ").append(tr("工具"))
+                            if (state.resources > 0) append(" · ").append(state.resources).append(" ").append(tr("资源"))
+                            if (state.prompts > 0) append(" · ").append(state.prompts).append(" ").append(tr("提示"))
                         },
                     )
                     is ConnState.Fail -> StatusPill(state.reason, error = true)

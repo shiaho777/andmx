@@ -216,9 +216,17 @@ private fun TracePreviewBlock(label: String, content: String) {
 }
 
 private fun formatTokens(n: Int): String =
-    when {
-        n >= 10_000 -> "%.1f万".format(n / 10_000.0)
-        else -> n.toString()
+    if (com.andmx.ui2.settings.UiLang.tag == "en") {
+        when {
+            n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
+            n >= 1_000 -> "%.1fK".format(n / 1_000.0)
+            else -> n.toString()
+        }
+    } else {
+        when {
+            n >= 10_000 -> "%.1f万".format(n / 10_000.0)
+            else -> n.toString()
+        }
     }
 
 private fun formatDuration(ms: Long): String =
