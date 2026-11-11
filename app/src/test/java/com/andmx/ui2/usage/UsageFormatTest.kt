@@ -27,6 +27,14 @@ class UsageFormatTest {
     }
 
     @Test
+    fun formatCountEnglishUnits() {
+        assertEquals("1K", UsageCalculator.formatCount(1_000L, zh = false))
+        assertEquals("1.5K", UsageCalculator.formatCount(1_500L, zh = false))
+        assertEquals("1M", UsageCalculator.formatCount(1_000_000L, zh = false))
+        assertEquals("2.5B", UsageCalculator.formatCount(2_500_000_000L, zh = false))
+    }
+
+    @Test
     fun formatCountNegativeIsZero() {
         assertEquals("0", UsageCalculator.formatCount(-5L))
     }

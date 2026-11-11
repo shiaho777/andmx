@@ -314,13 +314,13 @@ private fun SkillListView(
             Column(Modifier.padding(padding).fillMaxSize()) {
                 statusMessage?.let { ResourceStatusBanner(it, onDismissStatus) }
                 ResourcePageDescription(
-                    "管理项目级与用户级技能。启用后可在聊天里通过 \$skill-name 使用。",
+                    tr("管理项目级与用户级技能。启用后可在聊天里通过 \$skill-name 使用。"),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 EmptyState(
                     icon = Icons.Outlined.Bolt,
-                    title = "没有可用技能",
-                    message = "可新建技能，或从 Git 安装。聊天中通过 \$skill-name 使用。",
+                    title = tr("没有可用技能"),
+                    message = tr("可新建技能，或从 Git 安装。聊天中通过 \$skill-name 使用。"),
                     modifier = Modifier.fillMaxSize()
                 )
             }

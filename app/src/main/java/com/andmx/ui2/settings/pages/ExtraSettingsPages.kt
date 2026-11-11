@@ -376,7 +376,7 @@ fun HooksPage(onBack: () -> Unit) {
                 OutlinedTextField(
                     value = draft.timeoutMs,
                     onValueChange = { next -> drafts = drafts.replaceAt(index, draft.copy(timeoutMs = next.filter { it.isDigit() })) },
-                    label = { Text("超时（秒）") },
+                    label = { Text(tr("超时（秒）")) },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     singleLine = true,
                 )
@@ -597,7 +597,7 @@ fun BrowserSettingsPage(onBack: () -> Unit) {
             }
             SettingsGroup("浏览器数据") {
                 Text(
-                    "当前记住了 ${WebFetchCache.count()} 条网页正文，15 分钟后过期。",
+                    tr("当前记住了 ${WebFetchCache.count()} 条网页正文，15 分钟后过期。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -695,9 +695,9 @@ fun ShortcutsPage(onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { recording = item.id }) { Text(if (recording == item.id) "录制中" else "改键") }
+                    TextButton(onClick = { recording = item.id }) { Text(tr(if (recording == item.id) "录制中" else "改键")) }
                     if (custom) {
-                        TextButton(onClick = { save(overrides - item.id) }) { Text("恢复") }
+                        TextButton(onClick = { save(overrides - item.id) }) { Text(tr("恢复")) }
                     }
                 }
             }
