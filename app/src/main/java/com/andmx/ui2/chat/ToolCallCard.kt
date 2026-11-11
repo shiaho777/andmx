@@ -568,7 +568,7 @@ private fun StructuredToolCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "run $runId · $it",
+                            "${tr("运行")} $runId · $it",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,

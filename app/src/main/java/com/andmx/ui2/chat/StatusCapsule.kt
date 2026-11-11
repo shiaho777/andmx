@@ -325,7 +325,7 @@ private fun GoalSection(goal: ConversationGoal) {
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
             Text(
-                "${goal.tokensUsed}/${goal.tokenBudget} tokens",
+                "${goal.tokensUsed}/${goal.tokenBudget} ${tr("Token")}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )

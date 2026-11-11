@@ -97,7 +97,7 @@ fun FileBrowser(
             androidx.compose.material3.TopAppBar(
                 title = {
                     Column {
-                        Text("Workspace", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        Text(tr("工作区"), style = MaterialTheme.typography.titleMedium, maxLines = 1)
                         Text(
                             relPath, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
