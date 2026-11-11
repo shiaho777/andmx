@@ -1429,12 +1429,6 @@ LaunchedEffect(Unit) {
                         onDismiss = { sideChatExcerpt = null },
                     )
                 }
-                if (pendingYoloConfirmation) {
-                    YoloModeConfirmDialog(
-                        onConfirm = { viewModel.confirmYoloMode() },
-                        onDismiss = { viewModel.cancelYoloMode() },
-                    )
-                }
                 if (fileRewindOpen) {
                     FileRewindDialog(
                         changes = fileChanges,
@@ -1533,6 +1527,13 @@ LaunchedEffect(Unit) {
                 ComposerBlock()
             }
         } // end Column
+
+            if (pendingYoloConfirmation) {
+                YoloModeConfirmDialog(
+                    onConfirm = { viewModel.confirmYoloMode() },
+                    onDismiss = { viewModel.cancelYoloMode() },
+                )
+            }
 
             // ── 浮层：文件 / 设置（全屏）；终端用底部 sheet，见下方 ──
             if (showFiles) {
