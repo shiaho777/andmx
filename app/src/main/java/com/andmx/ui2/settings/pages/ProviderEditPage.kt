@@ -740,7 +740,7 @@ private fun SelectedModelsEditor(
                         onPatch(id) { it.copy(contextWindow = value) }
                     },
                     placeholder = { Text(tr("默认 128000")) },
-                    suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                    suffix = { Text(tr("Token"), style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
@@ -792,7 +792,7 @@ private fun SelectedModelsEditor(
                         onPatch(id) { it.copy(maxOutputTokens = value) }
                     },
                     placeholder = { Text(tr("可选，0 表示不限制")) },
-                    suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                    suffix = { Text(tr("Token"), style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
@@ -1233,7 +1233,7 @@ private fun ReasoningEditor(
                 },
                 label = { Text(tr("默认思考预算")) },
                 placeholder = { Text(DEFAULT_THINKING_BUDGET_TEXT) },
-                suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                suffix = { Text(tr("Token"), style = MaterialTheme.typography.labelSmall) },
                 supportingText = {
                     Text(tr("不少于 ${AnthropicMessagesAdapter.MIN_THINKING_BUDGET}"))
                 },
@@ -1338,7 +1338,7 @@ private fun AddModelDialog(
                     value = contextWindow,
                     onValueChange = { raw -> contextWindow = raw.filter { it.isDigit() }.take(9) },
                     label = { Text(tr("上下文窗口")) },
-                    suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                    suffix = { Text(tr("Token"), style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     isError = problem == AddModelProblem.INVALID_CONTEXT,
@@ -1356,7 +1356,7 @@ private fun AddModelDialog(
                     onValueChange = { raw -> maxOutput = raw.filter { it.isDigit() }.take(8) },
                     label = { Text(tr("最大输出 Token")) },
                     placeholder = { Text(tr("可选，0 表示不限制")) },
-                    suffix = { Text("tokens", style = MaterialTheme.typography.labelSmall) },
+                    suffix = { Text(tr("Token"), style = MaterialTheme.typography.labelSmall) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(

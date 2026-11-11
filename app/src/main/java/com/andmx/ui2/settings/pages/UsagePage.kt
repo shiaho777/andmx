@@ -713,7 +713,7 @@ private fun ModelUsageCard(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 18.sp,
                     )
-                    Text("tokens", color = muted, style = MaterialTheme.typography.labelSmall)
+                    Text(tr("Token"), color = muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
             Spacer(Modifier.width(12.dp))
@@ -743,7 +743,7 @@ private fun ModelUsageCard(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                "${UsageCalculator.formatCount(m.tokens)} tokens",
+                                "${UsageCalculator.formatCount(m.tokens)} ${tr("Token")}",
                                 color = muted,
                                 style = MaterialTheme.typography.labelSmall,
                             )

@@ -424,7 +424,7 @@ private fun OtherRow(enabled: Boolean, onClick: () -> Unit) {
             tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.width(8.dp))
-        Text("Other", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Text(tr("其他"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 

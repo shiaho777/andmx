@@ -58,7 +58,7 @@ fun WorkflowsDialog(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "${def.kind} · ${def.phaseOrder.size} phases · ${def.description.orEmpty()}",
+                            "${def.kind} · ${def.phaseOrder.size} ${tr("个阶段")} · ${def.description.orEmpty()}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2,
