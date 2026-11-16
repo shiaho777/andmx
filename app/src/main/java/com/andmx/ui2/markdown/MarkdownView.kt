@@ -2,6 +2,10 @@ package com.andmx.ui2.markdown
 
 import com.andmx.ui2.settings.tr
 
+import android.net.Uri
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -34,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,8 +47,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -53,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.theme.AndMXType
+import com.andmx.ui2.theme.LocalMotion
 
 @Composable
 fun MarkdownView(
@@ -115,12 +127,17 @@ fun MarkdownView(
                         }
 
                         is MdBlock.Paragraph -> {
-                            MarkdownText(
-                                raw = block.text,
-                                style = bodyStyle,
-                                color = textColor,
-                                linkColor = linkColor,
-                            )
+                            val images = remember(block.text) { MarkdownImages.parseImageOnlyParagraph(block.text) }
+                            if (images != null) {
+                                MarkdownImageParagraph(images, bodyStyle, textColor, linkColor)
+                            } else {
+                                MarkdownText(
+                                    raw = block.text,
+                                    style = bodyStyle,
+                                    color = textColor,
+                                    linkColor = linkColor,
+                                )
+                            }
                         }
 
                         is MdBlock.Code -> {
@@ -182,10 +199,104 @@ fun MarkdownView(
                         }
 
                         is MdBlock.Table -> MarkdownTable(block, bodyStyle, textColor, linkColor)
+
+                        is MdBlock.Math -> MathBlock(block.tex, block.display)
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MarkdownImageParagraph(
+    images: List<MarkdownImages.ImageRef>,
+    bodyStyle: TextStyle,
+    textColor: Color,
+    linkColor: Color,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        images.forEachIndexed { i, ref ->
+            if (i > 0) Spacer(Modifier.height(6.dp))
+            androidx.compose.runtime.key(ref.url) {
+                MarkdownImageCard(ref, bodyStyle, textColor, linkColor)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarkdownImageCard(
+    ref: MarkdownImages.ImageRef,
+    bodyStyle: TextStyle,
+    textColor: Color,
+    linkColor: Color,
+) {
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    var bitmap by remember(ref.url) { mutableStateOf<ImageBitmap?>(null) }
+    var failed by remember(ref.url) { mutableStateOf(false) }
+    LaunchedEffect(ref.url) {
+        failed = false
+        bitmap = MarkdownImageLoader.load(context, ref.url)
+        if (bitmap == null) failed = true
+    }
+    val onClick = { openImageTarget(ref.url, uriHandler) }
+    val current = bitmap
+    when {
+        current != null -> Image(
+            bitmap = current,
+            contentDescription = ref.alt,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 320.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick),
+        )
+        failed -> MarkdownText(
+            raw = "![${ref.alt}](${ref.url})",
+            style = bodyStyle,
+            color = textColor,
+            linkColor = linkColor,
+        )
+        else -> ImageShimmerPlaceholder(onClick)
+    }
+}
+
+@Composable
+private fun ImageShimmerPlaceholder(onClick: () -> Unit) {
+    val infinite = rememberInfiniteTransition(label = "md-image")
+    val shift by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = LocalMotion.current.shimmerSweep,
+        label = "md-image-shift",
+    )
+    val base = MaterialTheme.colorScheme.surfaceContainerHighest
+    val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(base, highlight, base),
+                    start = Offset(shift * 1400f - 400f, 0f),
+                    end = Offset(shift * 1400f, 160f),
+                ),
+            )
+            .clickable(onClick = onClick),
+    )
+}
+
+private fun openImageTarget(url: String, uriHandler: androidx.compose.ui.platform.UriHandler) {
+    val local = localFilePath(url)
+    if (local != null) {
+        com.andmx.ui2.chat.ChatActionBus.openFile(local)
+    } else {
+        runCatching { uriHandler.openUri(if (url.contains("://")) url else Uri.fromFile(java.io.File(url)).toString()) }
     }
 }
 

@@ -16,6 +16,7 @@ class IncrementalMarkdownTest {
                 is MdBlock.List -> b.items.joinToString("\n")
                 is MdBlock.Quote -> "> " + b.text
                 is MdBlock.Table -> b.rows.joinToString("\n") { it.joinToString("|") }
+                is MdBlock.Math -> b.tex
             }
         }
 

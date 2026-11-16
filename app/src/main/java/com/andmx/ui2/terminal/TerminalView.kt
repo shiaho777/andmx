@@ -6,9 +6,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,8 +25,16 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.term.StyledSpan
+import com.andmx.term.TerminalEmulator
+
+internal fun splitTerminalLines(screen: String): List<String> =
+    if (screen.isEmpty()) listOf(" ") else screen.split("\n")
 
 @Composable
 fun TerminalView(
@@ -33,18 +43,22 @@ fun TerminalView(
     modifier: Modifier = Modifier,
     colors: TerminalColors = rememberTerminalColors(),
     fontFamily: FontFamily = FontFamily.Monospace,
+    styledLines: List<List<StyledSpan>> = emptyList(),
 ) {
-    val vScroll = rememberScrollState()
+    val listState = rememberLazyListState()
     val hScroll = rememberScrollState()
     var fontSize by remember { mutableFloatStateOf(12f) }
 
-    LaunchedEffect(screen) {
-        vScroll.animateScrollTo(vScroll.maxValue)
+    val lines: List<AnnotatedString> = remember(styledLines, coloredLines, screen, colors) {
+        when {
+            styledLines.isNotEmpty() -> styledLines.map { buildStyledLine(it, colors) }
+            coloredLines.isNotEmpty() -> coloredLines.map { buildColoredLine(it, colors) }
+            else -> splitTerminalLines(screen).map { AnnotatedString(it) }
+        }
     }
 
-    val annotated = remember(coloredLines, screen, colors) {
-        if (coloredLines.isEmpty()) AnnotatedString(screen.ifEmpty { " " })
-        else buildColored(coloredLines, colors)
+    LaunchedEffect(screen, lines.size) {
+        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
     }
 
     Box(
@@ -56,42 +70,83 @@ fun TerminalView(
                     fontSize = (fontSize * zoom).coerceIn(7f, 22f)
                 }
             }
-            .verticalScroll(vScroll)
             .horizontalScroll(hScroll)
             .padding(12.dp)
     ) {
         SelectionContainer {
-            Text(
-                text = annotated,
-                fontFamily = fontFamily,
-                fontSize = fontSize.sp,
-                lineHeight = (fontSize * 1.3f).sp,
-                color = colors.foreground,
-                softWrap = false
-            )
-        }
-    }
-}
-
-private fun buildColored(
-    lines: List<List<Pair<String, Int>>>,
-    colors: TerminalColors,
-): AnnotatedString =
-    buildAnnotatedString {
-        lines.forEachIndexed { idx, spans ->
-            if (idx > 0) append('\n')
-            if (spans.isEmpty()) {
-                append(' ')
-                return@forEachIndexed
-            }
-            spans.forEach { (text, colorIndex) ->
-                if (colorIndex == 0) {
-                    append(text)
-                } else {
-                    pushStyle(SpanStyle(color = Color(colors.colorArgb(colorIndex))))
-                    append(text)
-                    pop()
+            LazyColumn(state = listState) {
+                itemsIndexed(lines, key = { index, _ -> index }) { _, line ->
+                    Text(
+                        text = line,
+                        fontFamily = fontFamily,
+                        fontSize = fontSize.sp,
+                        lineHeight = (fontSize * 1.3f).sp,
+                        color = colors.foreground,
+                        softWrap = false
+                    )
                 }
             }
         }
     }
+}
+
+private fun buildColoredLine(
+    spans: List<Pair<String, Int>>,
+    colors: TerminalColors,
+): AnnotatedString =
+    buildAnnotatedString {
+        if (spans.isEmpty()) {
+            append(' ')
+            return@buildAnnotatedString
+        }
+        spans.forEach { (text, colorIndex) ->
+            if (colorIndex == 0) {
+                append(text)
+            } else {
+                pushStyle(SpanStyle(color = Color(colors.colorArgb(colorIndex))))
+                append(text)
+                pop()
+            }
+        }
+    }
+
+private fun buildStyledLine(
+    spans: List<StyledSpan>,
+    colors: TerminalColors,
+): AnnotatedString =
+    buildAnnotatedString {
+        if (spans.isEmpty()) {
+            append(' ')
+            return@buildAnnotatedString
+        }
+        spans.forEach { span ->
+            pushStyle(span.toSpanStyle(colors))
+            append(span.text)
+            pop()
+        }
+    }
+
+private fun StyledSpan.toSpanStyle(colors: TerminalColors): SpanStyle {
+    var fgColor = resolveColor(fg, colors.foreground, colors)
+    var bgColor = resolveColor(bg, colors.background, colors)
+    if (inverse) {
+        val tmp = fgColor
+        fgColor = bgColor
+        bgColor = tmp
+    }
+    if (dim) fgColor = fgColor.copy(alpha = fgColor.alpha * 0.6f)
+    return SpanStyle(
+        color = fgColor,
+        background = if (bg != 0 || inverse) bgColor else Color.Unspecified,
+        fontWeight = if (bold) FontWeight.Bold else null,
+        fontStyle = if (italic) FontStyle.Italic else null,
+        textDecoration = if (underline) TextDecoration.Underline else null,
+    )
+}
+
+private fun resolveColor(index: Int, default: Color, colors: TerminalColors): Color = when {
+    index == 0 -> default
+    index <= 16 -> Color(colors.colorArgb(index))
+    index >= TerminalEmulator.TRUECOLOR_FLAG -> Color(0xFF000000.toInt() or (index - TerminalEmulator.TRUECOLOR_FLAG))
+    else -> Color(TerminalEmulator.colorArgb256(index - 17))
+}
