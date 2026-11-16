@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -1065,25 +1066,11 @@ private fun prettyArgs(raw: String): String {
 
 
 
-private val DiffAddColor = Color(0xFF1E8A3E)
-private val DiffDelColor = Color(0xFFE03131)
-private val DiffAddColorDark = Color(0xFF46BF72)
-private val DiffDelColorDark = Color(0xFFFF5C5C)
+@Composable
+private fun diffAddColor(): Color = MaterialTheme.colorScheme.primary
 
 @Composable
-private fun diffAddColor(): Color =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) DiffAddColorDark else DiffAddColor
-
-@Composable
-private fun diffDelColor(): Color =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) DiffDelColorDark else DiffDelColor
-
-private fun Color.luminance(): Float {
-    val r = red
-    val g = green
-    val b = blue
-    return 0.2126f * r + 0.7152f * g + 0.0722f * b
-}
+private fun diffDelColor(): Color = MaterialTheme.colorScheme.error
 
 private fun fileNameOf(path: String): String =
     path.trimEnd('/').substringAfterLast('/').ifBlank { path }
@@ -1212,7 +1199,10 @@ private fun InlineEditDiffPreview(
     isRunning: Boolean,
     onOpen: () -> Unit,
 ) {
-    val lines = remember(preview.lines) { ToolEditDiff.focusedPreview(preview.lines, limit = 56) }
+    val hunks = remember(preview.lines) {
+        DiffRender.focusHunks(DiffRender.hunks(preview.lines), limit = 56)
+    }
+    val shownCount = hunks.sumOf { it.lines.size }
     val scroll = rememberScrollState()
     LaunchedEffect(preview.lines.size, isRunning) {
         if (isRunning && preview.lines.isNotEmpty()) {
@@ -1273,12 +1263,15 @@ private fun InlineEditDiffPreview(
                 .heightIn(max = 240.dp)
                 .verticalScroll(scroll),
         ) {
-            lines.forEach { line ->
-                DiffPreviewLine(line)
+            hunks.forEach { hunk ->
+                DiffHunkHeader(hunk.header)
+                hunk.lines.forEach { line ->
+                    DiffPreviewLine(line)
+                }
             }
-            if (preview.lines.size > lines.size) {
+            if (preview.lines.size > shownCount) {
                 Text(
-                    text = "… 另有 ${preview.lines.size - lines.size} 行",
+                    text = "… 另有 ${preview.lines.size - shownCount} 行",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -1289,30 +1282,54 @@ private fun InlineEditDiffPreview(
 }
 
 @Composable
-private fun DiffPreviewLine(line: DiffLine) {
+private fun DiffHunkHeader(header: String) {
+    Text(
+        text = header,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontFamily = FontFamily.Monospace,
+            fontSize = AndMXType.cardMeta.fontSize,
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f))
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun DiffPreviewLine(line: DiffRender.Line) {
     val preview = com.andmx.ui2.markdown.LocalCodePreviewConfig.current
     val codeSize = preview.fontSize.sp
     val add = diffAddColor()
     val del = diffDelColor()
-    val (bg, fg, gutter, sign) = when (line.kind) {
+    val diff = line.diff
+    val (bg, fg, gutter, sign) = when (diff.kind) {
         DiffLine.Kind.ADD -> Quad(
-            add.copy(alpha = 0.14f),
+            add.copy(alpha = 0.10f),
             add,
-            add.copy(alpha = 0.18f),
+            add.copy(alpha = 0.16f),
             "+",
         )
         DiffLine.Kind.REMOVE -> Quad(
-            del.copy(alpha = 0.14f),
+            del.copy(alpha = 0.10f),
             del,
-            del.copy(alpha = 0.18f),
+            del.copy(alpha = 0.16f),
             "-",
         )
         DiffLine.Kind.CONTEXT -> Quad(
             Color.Transparent,
             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
-            MaterialTheme.colorScheme.surface,
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f),
             " ",
         )
+    }
+    val emphasisBg = when (diff.kind) {
+        DiffLine.Kind.ADD -> add.copy(alpha = 0.30f)
+        DiffLine.Kind.REMOVE -> del.copy(alpha = 0.30f)
+        DiffLine.Kind.CONTEXT -> Color.Transparent
     }
     Row(
         Modifier
@@ -1324,16 +1341,16 @@ private fun DiffPreviewLine(line: DiffLine) {
             Modifier
                 .width(3.dp)
                 .height(18.dp)
-                .background(if (line.kind == DiffLine.Kind.CONTEXT) Color.Transparent else fg),
+                .background(if (diff.kind == DiffLine.Kind.CONTEXT) Color.Transparent else fg),
         )
         if (preview.showLineNumbers) {
             Text(
-                text = (line.oldNo?.toString() ?: "").padStart(3),
+                text = (diff.oldNo?.toString() ?: "").padStart(3),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = (codeSize.value - 1).sp,
                     fontFamily = FontFamily.Monospace,
                 ),
-                color = if (line.kind == DiffLine.Kind.REMOVE) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                color = if (diff.kind == DiffLine.Kind.REMOVE) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                 textAlign = TextAlign.End,
                 modifier = Modifier
                     .width(28.dp)
@@ -1341,12 +1358,12 @@ private fun DiffPreviewLine(line: DiffLine) {
                     .padding(end = 4.dp),
             )
             Text(
-                text = (line.newNo?.toString() ?: "").padStart(3),
+                text = (diff.newNo?.toString() ?: "").padStart(3),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = (codeSize.value - 1).sp,
                     fontFamily = FontFamily.Monospace,
                 ),
-                color = if (line.kind == DiffLine.Kind.ADD) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                color = if (diff.kind == DiffLine.Kind.ADD) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                 textAlign = TextAlign.End,
                 modifier = Modifier
                     .width(28.dp)
@@ -1363,14 +1380,33 @@ private fun DiffPreviewLine(line: DiffLine) {
             color = fg,
             modifier = Modifier.padding(start = 4.dp),
         )
+        val content = diff.text.ifEmpty { " " }
+        val annotated = line.emphasis?.let { range ->
+            val r = range.first.coerceIn(0, content.length)..
+                (range.last + 1).coerceIn(range.first.coerceIn(0, content.length), content.length)
+            if (r.first < r.last) {
+                AnnotatedString(
+                    text = content,
+                    spanStyles = listOf(
+                        AnnotatedString.Range(
+                            SpanStyle(background = emphasisBg),
+                            r.first,
+                            r.last,
+                        ),
+                    ),
+                )
+            } else {
+                AnnotatedString(content)
+            }
+        } ?: AnnotatedString(content)
         Text(
-            text = line.text.ifEmpty { " " },
+            text = annotated,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontSize = codeSize,
                 fontFamily = FontFamily.Monospace,
                 lineHeight = (codeSize.value + 4).sp,
             ),
-            color = if (line.kind == DiffLine.Kind.CONTEXT) {
+            color = if (diff.kind == DiffLine.Kind.CONTEXT) {
                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f)
             } else {
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f)

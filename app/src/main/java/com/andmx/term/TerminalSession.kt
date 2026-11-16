@@ -46,6 +46,7 @@ class TerminalSession(
         val status: String = "",
         val screenText: String = "",
         val coloredLines: List<List<Pair<String, Int>>> = emptyList(),
+        val styledLines: List<List<StyledSpan>> = emptyList(),
     )
 
     val screen: String get() = _state.value.screenText
@@ -205,7 +206,8 @@ class TerminalSession(
         _state.value = _state.value.copy(
             revision = buffer.revision,
             screenText = buffer.render(),
-            coloredLines = buffer.renderColored()
+            coloredLines = buffer.renderColored(),
+            styledLines = buffer.renderStyled()
         )
     }
 
@@ -213,7 +215,8 @@ class TerminalSession(
         _state.value = _state.value.copy(
             running = running, exitCode = exitCode, status = status,
             revision = buffer.revision, screenText = buffer.render(),
-            coloredLines = buffer.renderColored()
+            coloredLines = buffer.renderColored(),
+            styledLines = buffer.renderStyled()
         )
     }
 

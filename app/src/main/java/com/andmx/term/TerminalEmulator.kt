@@ -16,9 +16,9 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
     private var screen = blank(rows, cols)
     private var colors = blankColors(rows, cols)
     private var alt: Array<CharArray>? = null
-    private var altColors: Array<IntArray>? = null
+    private var altColors: Array<LongArray>? = null
     private val scrollback = ArrayList<CharArray>()
-    private val scrollbackColors = ArrayList<IntArray>()
+    private val scrollbackColors = ArrayList<LongArray>()
     private val maxScrollback = 4000
 
     private var cr = 0
@@ -29,7 +29,10 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
     private var bottom = rows - 1
 
     /** Current SGR color index (0=default, 1-8 standard, 9-16 bright). */
-    private var curColor = 0
+    private var curFg = 0
+    private var curBg = 0
+    private var curAttrs = 0
+    private var curStyle = 0L
 
     private enum class State { NORMAL, ESC, CSI, OSC }
     private var state = State.NORMAL
@@ -89,7 +92,7 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
     private fun put(c: Char) {
         if (cc >= cols) { cc = 0; lineFeed() }
         screen[cr][cc] = c
-        colors[cr][cc] = curColor
+        colors[cr][cc] = curStyle
         cc++
     }
 
@@ -108,12 +111,12 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
             while (scrollback.size > maxScrollback) { scrollback.removeAt(0); scrollbackColors.removeAt(0) }
         }
         for (r in top until bottom) { screen[r] = screen[r + 1]; colors[r] = colors[r + 1] }
-        screen[bottom] = CharArray(cols) { ' ' }; colors[bottom] = IntArray(cols) { 0 }
+        screen[bottom] = CharArray(cols) { ' ' }; colors[bottom] = LongArray(cols)
     }
 
     private fun scrollDown() {
         for (r in bottom downTo top + 1) { screen[r] = screen[r - 1]; colors[r] = colors[r - 1] }
-        screen[top] = CharArray(cols) { ' ' }; colors[top] = IntArray(cols) { 0 }
+        screen[top] = CharArray(cols) { ' ' }; colors[top] = LongArray(cols)
     }
 
     // ---- CSI ----
@@ -151,23 +154,53 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
     }
 
     private fun applySgr(p: List<Int>) {
-        if (p.isEmpty()) { curColor = 0; return }
+        if (p.isEmpty()) { curFg = 0; curBg = 0; curAttrs = 0; curStyle = packStyle(curFg, curBg, curAttrs); return }
         var i = 0
         while (i < p.size) {
             when (val code = p[i]) {
-                0 -> curColor = 0
-                1 -> {}
-                in 30..37 -> curColor = code - 29
-                in 90..97 -> curColor = code - 90 + 8
-                38 -> {
-                    if (i + 1 < p.size && p[i + 1] == 5 && i + 2 < p.size) {
-                        curColor = map256(p[i + 2]); i += 2
-                    }
-                }
-                39 -> curColor = 0
+                0 -> { curFg = 0; curBg = 0; curAttrs = 0 }
+                1 -> curAttrs = curAttrs or ATTR_BOLD
+                2 -> curAttrs = curAttrs or ATTR_DIM
+                3 -> curAttrs = curAttrs or ATTR_ITALIC
+                4 -> curAttrs = curAttrs or ATTR_UNDERLINE
+                7 -> curAttrs = curAttrs or ATTR_INVERSE
+                22 -> curAttrs = curAttrs and (ATTR_BOLD or ATTR_DIM).inv()
+                23 -> curAttrs = curAttrs and ATTR_ITALIC.inv()
+                24 -> curAttrs = curAttrs and ATTR_UNDERLINE.inv()
+                27 -> curAttrs = curAttrs and ATTR_INVERSE.inv()
+                in 30..37 -> curFg = code - 29
+                in 40..47 -> curBg = code - 39
+                in 90..97 -> curFg = code - 90 + 8
+                in 100..107 -> curBg = code - 100 + 8
+                38 -> { val (v, adv) = extendedColor(p, i); if (v != null) curFg = v; i += adv }
+                48 -> { val (v, adv) = extendedColor(p, i); if (v != null) curBg = v; i += adv }
+                39 -> curFg = 0
+                49 -> curBg = 0
                 else -> {}
             }
             i++
+        }
+        curStyle = packStyle(curFg, curBg, curAttrs)
+    }
+
+    private fun extendedColor(p: List<Int>, i: Int): Pair<Int?, Int> {
+        return when (p.getOrNull(i + 1)) {
+            5 -> {
+                val n = p.getOrNull(i + 2) ?: return null to 1
+                val v = when {
+                    n < 0 -> null
+                    n < 16 -> map256(n)
+                    n <= 255 -> 17 + n
+                    else -> null
+                }
+                v to 2
+            }
+            2 -> {
+                val r = p.getOrNull(i + 2); val g = p.getOrNull(i + 3); val b = p.getOrNull(i + 4)
+                if (r == null || g == null || b == null) null to 1
+                else (TRUECOLOR_FLAG or (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)) to 4
+            }
+            else -> null to 1
         }
     }
 
@@ -190,26 +223,26 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
 
     private fun eraseDisplay(mode: Int) {
         when (mode) {
-            0 -> { eraseLine(0); for (r in cr + 1 until rows) { screen[r] = CharArray(cols) { ' ' }; colors[r] = IntArray(cols) { 0 } } }
-            1 -> { for (r in 0 until cr) { screen[r] = CharArray(cols) { ' ' }; colors[r] = IntArray(cols) { 0 } }; eraseLine(1) }
-            2, 3 -> { for (r in 0 until rows) { screen[r] = CharArray(cols) { ' ' }; colors[r] = IntArray(cols) { 0 } }; if (mode == 3) { scrollback.clear(); scrollbackColors.clear() } }
+            0 -> { eraseLine(0); for (r in cr + 1 until rows) { screen[r] = CharArray(cols) { ' ' }; colors[r] = LongArray(cols) } }
+            1 -> { for (r in 0 until cr) { screen[r] = CharArray(cols) { ' ' }; colors[r] = LongArray(cols) }; eraseLine(1) }
+            2, 3 -> { for (r in 0 until rows) { screen[r] = CharArray(cols) { ' ' }; colors[r] = LongArray(cols) }; if (mode == 3) { scrollback.clear(); scrollbackColors.clear() } }
         }
     }
 
     private fun eraseLine(mode: Int) {
         val row = screen[cr]; val rowC = colors[cr]
         when (mode) {
-            0 -> for (c in cc until cols) { row[c] = ' '; rowC[c] = 0 }
-            1 -> for (c in 0..cc.coerceAtMost(cols - 1)) { row[c] = ' '; rowC[c] = 0 }
-            2 -> for (c in 0 until cols) { row[c] = ' '; rowC[c] = 0 }
+            0 -> for (c in cc until cols) { row[c] = ' '; rowC[c] = 0L }
+            1 -> for (c in 0..cc.coerceAtMost(cols - 1)) { row[c] = ' '; rowC[c] = 0L }
+            2 -> for (c in 0 until cols) { row[c] = ' '; rowC[c] = 0L }
         }
     }
 
-    private fun insertLine() { for (r in bottom downTo cr + 1) { screen[r] = screen[r - 1]; colors[r] = colors[r - 1] }; screen[cr] = CharArray(cols) { ' ' }; colors[cr] = IntArray(cols) { 0 } }
-    private fun deleteLine() { for (r in cr until bottom) { screen[r] = screen[r + 1]; colors[r] = colors[r + 1] }; screen[bottom] = CharArray(cols) { ' ' }; colors[bottom] = IntArray(cols) { 0 } }
-    private fun deleteChars(n: Int) { val row = screen[cr]; val rowC = colors[cr]; for (c in cc until cols) { row[c] = if (c + n < cols) row[c + n] else ' '; rowC[c] = if (c + n < cols) rowC[c + n] else 0 } }
-    private fun insertChars(n: Int) { val row = screen[cr]; val rowC = colors[cr]; for (c in cols - 1 downTo cc) { row[c] = if (c - n >= cc) row[c - n] else ' '; rowC[c] = if (c - n >= cc) rowC[c - n] else 0 } }
-    private fun eraseChars(n: Int) { val row = screen[cr]; val rowC = colors[cr]; for (c in cc until (cc + n).coerceAtMost(cols)) { row[c] = ' '; rowC[c] = 0 } }
+    private fun insertLine() { for (r in bottom downTo cr + 1) { screen[r] = screen[r - 1]; colors[r] = colors[r - 1] }; screen[cr] = CharArray(cols) { ' ' }; colors[cr] = LongArray(cols) }
+    private fun deleteLine() { for (r in cr until bottom) { screen[r] = screen[r + 1]; colors[r] = colors[r + 1] }; screen[bottom] = CharArray(cols) { ' ' }; colors[bottom] = LongArray(cols) }
+    private fun deleteChars(n: Int) { val row = screen[cr]; val rowC = colors[cr]; for (c in cc until cols) { row[c] = if (c + n < cols) row[c + n] else ' '; rowC[c] = if (c + n < cols) rowC[c + n] else 0L } }
+    private fun insertChars(n: Int) { val row = screen[cr]; val rowC = colors[cr]; for (c in cols - 1 downTo cc) { row[c] = if (c - n >= cc) row[c - n] else ' '; rowC[c] = if (c - n >= cc) rowC[c - n] else 0L } }
+    private fun eraseChars(n: Int) { val row = screen[cr]; val rowC = colors[cr]; for (c in cc until (cc + n).coerceAtMost(cols)) { row[c] = ' '; rowC[c] = 0L } }
 
     // ---- render ----
     fun render(): String = buildString {
@@ -227,16 +260,16 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
     fun renderColored(): List<List<Pair<String, Int>>> {
         val result = ArrayList<List<Pair<String, Int>>>()
         val allRows = ArrayList<CharArray>(scrollback.size + rows).apply { addAll(scrollback); for (r in 0 until rows) add(screen[r]) }
-        val allColors = ArrayList<IntArray>(scrollbackColors.size + rows).apply { addAll(scrollbackColors); for (r in 0 until rows) add(colors[r]) }
+        val allColors = ArrayList<LongArray>(scrollbackColors.size + rows).apply { addAll(scrollbackColors); for (r in 0 until rows) add(colors[r]) }
         for (idx in allRows.indices) {
             val row = allRows[idx]; val rowC = allColors[idx]
             val end = lastNonBlank(row)
             if (end < 0) { result.add(emptyList()); continue }
             val spans = ArrayList<Pair<String, Int>>()
             var sb = StringBuilder()
-            var prevColor = rowC[0]
+            var prevColor = legacyIndex(fgOf(rowC[0]))
             for (c in 0..end) {
-                val col = rowC[c]
+                val col = legacyIndex(fgOf(rowC[c]))
                 if (col != prevColor && sb.isNotEmpty()) {
                     spans.add(sb.toString() to prevColor)
                     sb = StringBuilder()
@@ -250,6 +283,52 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
         return result
     }
 
+    fun renderStyled(): List<List<StyledSpan>> {
+        val result = ArrayList<List<StyledSpan>>()
+        val allRows = ArrayList<CharArray>(scrollback.size + rows).apply { addAll(scrollback); for (r in 0 until rows) add(screen[r]) }
+        val allStyles = ArrayList<LongArray>(scrollbackColors.size + rows).apply { addAll(scrollbackColors); for (r in 0 until rows) add(colors[r]) }
+        for (idx in allRows.indices) {
+            val row = allRows[idx]; val rowS = allStyles[idx]
+            val end = lastNonBlank(row)
+            if (end < 0) { result.add(emptyList()); continue }
+            val spans = ArrayList<StyledSpan>()
+            var sb = StringBuilder()
+            var prev = rowS[0]
+            for (c in 0..end) {
+                val st = rowS[c]
+                if (st != prev && sb.isNotEmpty()) {
+                    spans.add(spanOf(sb.toString(), prev))
+                    sb = StringBuilder()
+                }
+                sb.append(row[c])
+                prev = st
+            }
+            if (sb.isNotEmpty()) spans.add(spanOf(sb.toString(), prev))
+            result.add(spans)
+        }
+        return result
+    }
+
+    private fun spanOf(text: String, style: Long): StyledSpan {
+        val attrs = attrsOf(style)
+        return StyledSpan(
+            text = text,
+            fg = fgOf(style),
+            bg = bgOf(style),
+            bold = attrs and ATTR_BOLD != 0,
+            dim = attrs and ATTR_DIM != 0,
+            italic = attrs and ATTR_ITALIC != 0,
+            underline = attrs and ATTR_UNDERLINE != 0,
+            inverse = attrs and ATTR_INVERSE != 0,
+        )
+    }
+
+    private fun legacyIndex(fg: Int): Int = when {
+        fg <= 16 -> fg
+        fg >= TRUECOLOR_FLAG -> 0
+        else -> ((fg - 17) % 8) + 1
+    }
+
     private fun lastNonBlank(row: CharArray): Int {
         var i = row.size - 1
         while (i >= 0 && row[i] == ' ') i--
@@ -257,8 +336,24 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
     }
 
     companion object {
+        const val TRUECOLOR_FLAG = 0x1000000
+
+        private const val ATTR_BOLD = 1
+        private const val ATTR_DIM = 2
+        private const val ATTR_ITALIC = 4
+        private const val ATTR_UNDERLINE = 8
+        private const val ATTR_INVERSE = 16
+        private const val COLOR_MASK = 0x3FFFFFFL
+
         private fun blank(r: Int, c: Int) = Array(r) { CharArray(c) { ' ' } }
-        private fun blankColors(r: Int, c: Int) = Array(r) { IntArray(c) { 0 } }
+        private fun blankColors(r: Int, c: Int) = Array(r) { LongArray(c) }
+
+        private fun packStyle(fg: Int, bg: Int, attrs: Int): Long =
+            (fg.toLong() and COLOR_MASK) or ((bg.toLong() and COLOR_MASK) shl 26) or ((attrs.toLong() and 0x3FL) shl 52)
+
+        private fun fgOf(style: Long): Int = (style and COLOR_MASK).toInt()
+        private fun bgOf(style: Long): Int = ((style ushr 26) and COLOR_MASK).toInt()
+        private fun attrsOf(style: Long): Int = ((style ushr 52) and 0x3FL).toInt()
 
         /** Map color index to ARGB. 0=default fg, 1-7 standard, 8-15 bright. */
         val palette = intArrayOf(
@@ -270,5 +365,29 @@ class TerminalEmulator(rows: Int = 24, cols: Int = 80) {
 
         fun colorArgb(index: Int): Int =
             if (index in 0 until palette.size) palette[index] else palette[0]
+
+        private val cubeLevels = intArrayOf(0, 95, 135, 175, 215, 255)
+
+        fun colorArgb256(n: Int): Int {
+            val v = n.coerceIn(0, 255)
+            if (v < 16) return palette[if (v < 8) v else v - 8]
+            if (v < 232) {
+                val i = v - 16
+                return 0xFF000000.toInt() or (cubeLevels[i / 36] shl 16) or (cubeLevels[(i / 6) % 6] shl 8) or cubeLevels[i % 6]
+            }
+            val g = 8 + (v - 232) * 10
+            return 0xFF000000.toInt() or (g shl 16) or (g shl 8) or g
+        }
     }
 }
+
+data class StyledSpan(
+    val text: String,
+    val fg: Int = 0,
+    val bg: Int = 0,
+    val bold: Boolean = false,
+    val dim: Boolean = false,
+    val italic: Boolean = false,
+    val underline: Boolean = false,
+    val inverse: Boolean = false,
+)

@@ -18,6 +18,8 @@ sealed class MdBlock {
 
     /** GFM 管道表格（ZCode markdownTable 对齐）。 */
     data class Table(val header: kotlin.collections.List<String>, val rows: kotlin.collections.List<kotlin.collections.List<String>>) : MdBlock()
+
+    data class Math(val tex: String, val display: Boolean) : MdBlock()
 }
 
 /** 一个顶层块及其源码偏移，供增量解析冻结使用。 */
@@ -79,8 +81,15 @@ object MarkdownEngine {
             val lineEnd = if (nl >= 0) nl + 1 else len
             val line = markdown.substring(lineStart, lineEnd).trimEnd('\r', '\n')
             val lineLen = lineEnd - lineStart
+            val math = if (line.trimStart().startsWith("$$")) parseDisplayMath(markdown, lineStart) else null
 
             when {
+                math != null -> {
+                    blocks.add(
+                        PositionedParsedBlock(MdBlock.Math(math.tex, display = true), lineStart, math.endOffset),
+                    )
+                    lineStart = math.endOffset
+                }
                 line.startsWith("```") -> {
                     val lang = line.substring(3).trim()
                     val code = StringBuilder()
@@ -185,6 +194,7 @@ object MarkdownEngine {
                         val e = lineEndOf(markdown, i)
                         if (
                             l.isBlank() ||
+                            l.trimStart().startsWith("$$") ||
                             heading.matches(l) ||
                             l.startsWith(">") ||
                             l.startsWith("```") ||
@@ -206,6 +216,46 @@ object MarkdownEngine {
         }
 
         return blocks
+    }
+
+    data class MathSpan(val tex: String, val endOffset: Int)
+
+    fun parseDisplayMath(markdown: String, start: Int): MathSpan? {
+        val firstLineEnd = lineEndOf(markdown, start)
+        val firstLine = markdown.substring(start, firstLineEnd).trimEnd('\r', '\n').trimStart()
+        if (!firstLine.startsWith("$$")) return null
+        val afterOpen = firstLine.substring(2)
+        val sameLineClose = afterOpen.indexOf("$$")
+        if (sameLineClose >= 0) {
+            if (afterOpen.substring(sameLineClose + 2).isNotBlank()) return null
+            val tex = afterOpen.substring(0, sameLineClose).trim()
+            if (tex.isEmpty()) return null
+            return MathSpan(tex, firstLineEnd)
+        }
+        val tex = StringBuilder()
+        if (afterOpen.isNotBlank()) tex.append(afterOpen.trim())
+        var i = firstLineEnd
+        while (i < markdown.length) {
+            val e = lineEndOf(markdown, i)
+            val l = markdown.substring(i, e).trimEnd('\r', '\n')
+            if (l.startsWith("```")) return null
+            val t = l.trim()
+            val close = t.indexOf("$$")
+            if (close >= 0) {
+                if (t.substring(close + 2).isNotBlank()) return null
+                val head = t.substring(0, close).trim()
+                if (head.isNotEmpty()) {
+                    if (tex.isNotEmpty()) tex.append('\n')
+                    tex.append(head)
+                }
+                if (tex.isEmpty()) return null
+                return MathSpan(tex.toString(), e)
+            }
+            if (tex.isNotEmpty()) tex.append('\n')
+            tex.append(l)
+            i = e
+        }
+        return null
     }
 
     private fun lineAt(text: String, start: Int): String {

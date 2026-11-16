@@ -193,6 +193,7 @@ fun TerminalScreen(
         TerminalView(
             screen = state.screenText,
             coloredLines = state.coloredLines,
+            styledLines = state.styledLines,
             colors = colors,
             fontFamily = terminalFontFamily,
             modifier = Modifier.weight(1f),
