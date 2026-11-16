@@ -126,7 +126,7 @@ private val EDIT_PROVIDER_DESCRIPTION = listOf(
     "- `replace_all: true` replaces every occurrence instead.",
 ).joinToString("\n")
 
-class ReadFileTool(context: Context, private val readFileState: ReadFileState? = null) : Tool {
+class ReadFileTool(private val context: Context, private val readFileState: ReadFileState? = null) : Tool {
     private val access = WorkspaceAccess(context)
     override val name = "Read"
     override val description = READ_PROVIDER_DESCRIPTION
@@ -220,14 +220,20 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
                 imageUrls = listOf(dataUrl),
             )
         }
-        // PDF → PdfRenderer 逐页渲染为 PNG（本地访客路径；远端不支持）。
+        // PDF → PdfRenderer 逐页渲染为 PNG（本地访客路径；远端先拉取缓存）。
         if (ext == "pdf") {
-            return readPdf(resolved, args["pages"]?.jsonPrimitive?.contentOrNull)
+            val host = mediaHostFile(resolved).getOrElse {
+                return ToolResult(it.message ?: "远程文件拉取失败: $resolved", isError = true)
+            }
+            return readPdf(resolved, args["pages"]?.jsonPrimitive?.contentOrNull, host)
         }
         // 视频 → MediaMetadataRetriever 抽帧（上游 read-video 等价；无 provider
         // video block，用 3 帧截图代替）。
         if (ext in VIDEO_EXTS) {
-            return readVideo(resolved)
+            val host = mediaHostFile(resolved).getOrElse {
+                return ToolResult(it.message ?: "远程文件拉取失败: $resolved", isError = true)
+            }
+            return readVideo(resolved, host)
         }
         return readTextFile(path, resolved, offset, limit)
     }
@@ -283,6 +289,15 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
         }
     }
 
+    private suspend fun mediaHostFile(resolved: String): Result<java.io.File> {
+        if (!access.isRemote) {
+            val host = access.hostFile(resolved)
+                ?: return Result.failure(IllegalStateException("无法定位本地文件: $resolved"))
+            return Result.success(host)
+        }
+        return access.fetchRemoteFile(resolved, WorkspaceAccess.REMOTE_FETCH_MAX_BYTES)
+    }
+
     private fun readHostWindow(file: java.io.File, offset: Int, limit: Int): Pair<List<String>, Int> {
         val out = ArrayList<String>(limit.coerceAtMost(4096))
         var total = 0
@@ -299,9 +314,7 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
      * 本地 PDF 逐页渲染（android.graphics.pdf.PdfRenderer，无三方依赖）。
      * `pages` 对齐上游契约："1-5" / "3" / "10-20"，1-indexed，单次 ≤20 页。
      */
-    private fun readPdf(resolved: String, pagesSpec: String?): ToolResult {
-        val host = access.hostFile(resolved)
-            ?: return ToolResult("远端工作区暂不支持 PDF 读取", isError = true)
+    private fun readPdf(resolved: String, pagesSpec: String?, host: java.io.File): ToolResult {
         if (!host.exists()) return ToolResult("文件不存在: $resolved", isError = true)
         return runCatching {
             val pfd = android.os.ParcelFileDescriptor.open(host, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
@@ -357,9 +370,7 @@ class ReadFileTool(context: Context, private val readFileState: ReadFileState? =
     }
 
     /** 本地视频抽 3 帧（头/中/尾）为 PNG——上游 read-video 的移动端等价。 */
-    private fun readVideo(resolved: String): ToolResult {
-        val host = access.hostFile(resolved)
-            ?: return ToolResult("远端工作区暂不支持视频读取", isError = true)
+    private fun readVideo(resolved: String, host: java.io.File): ToolResult {
         if (!host.exists()) return ToolResult("文件不存在: $resolved", isError = true)
         return runCatching {
             val mmr = android.media.MediaMetadataRetriever()

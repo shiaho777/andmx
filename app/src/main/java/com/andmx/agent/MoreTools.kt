@@ -121,17 +121,27 @@ object WebSearch {
 
     private val anchor = Regex("(?is)<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>")
     private val snippet = Regex("(?is)<a[^>]*class=\"result__snippet\"[^>]*>(.*?)</a>")
+    private val blockAnchor = Regex("(?is)<h2[^>]*class=\"result__title\"[^>]*>\\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>")
+    private val blockSnippet = Regex("(?is)<div[^>]*class=\"result__snippet\"[^>]*>(.*?)</div>")
+    private val genericAnchor = Regex("(?is)<a[^>]*href=\"((?:https?:)?//duckduckgo\\.com/l/\\?[^\"]*uddg=[^\"]+)\"[^>]*>(.*?)</a>")
 
     fun parse(html: String): List<Result> {
-        val titles = anchor.findAll(html).toList()
-        val snippets = snippet.findAll(html).map { strip(it.groupValues[1]) }.toList()
+        val primary = parsePairs(anchor.findAll(html), snippet.findAll(html))
+        if (primary.isNotEmpty()) return primary
+        val blocks = parsePairs(blockAnchor.findAll(html), blockSnippet.findAll(html))
+        if (blocks.isNotEmpty()) return blocks
+        return WebSearchApis.normalize(parsePairs(genericAnchor.findAll(html), emptySequence()), 20)
+    }
+
+    private fun parsePairs(titles: Sequence<MatchResult>, snippets: Sequence<MatchResult>): List<Result> {
+        val texts = snippets.map { strip(it.groupValues[1]) }.toList()
         return titles.mapIndexed { i, m ->
             Result(
                 title = strip(m.groupValues[2]),
                 url = decodeDdg(m.groupValues[1]),
-                snippet = snippets.getOrElse(i) { "" },
+                snippet = texts.getOrElse(i) { "" },
             )
-        }.filter { it.title.isNotBlank() }
+        }.filter { it.title.isNotBlank() }.toList()
     }
 
     private fun strip(s: String) = HtmlExtractor.toText(s).replace("\n", " ").trim()

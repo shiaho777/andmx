@@ -38,11 +38,15 @@ class WorkspaceAccess(context: Context) {
         }
     }
 
-    fun environment(): ExecutionEnvironment {
+    fun environment(timeoutMs: Long? = null): ExecutionEnvironment {
         if (isRemote) {
             val spec = projectManager.currentRemoteSpec()
             if (spec != null) {
-                return RemoteSshEnvironment(appContext, spec, guestCwd())
+                return if (timeoutMs != null) {
+                    RemoteSshEnvironment(appContext, spec, guestCwd(), timeoutMs)
+                } else {
+                    RemoteSshEnvironment(appContext, spec, guestCwd())
+                }
             }
         }
         return localEnv
@@ -72,8 +76,8 @@ class WorkspaceAccess(context: Context) {
         return "$base/${raw.trimStart('/')}"
     }
 
-    suspend fun executeShell(command: String, cwd: String? = null): ProcessResult {
-        val env = environment()
+    suspend fun executeShell(command: String, cwd: String? = null, timeoutMs: Long? = null): ProcessResult {
+        val env = environment(timeoutMs)
         val work = cwd?.takeIf { it.isNotBlank() } ?: guestCwd()
         val sh = shellBinary()
         val script = "cd ${q(work)} 2>/dev/null || cd ~ 2>/dev/null || true; $command"
@@ -157,6 +161,53 @@ class WorkspaceAccess(context: Context) {
         } else {
             runCatching { localFs.resolve(toGuestPath(p)).readBytes() }
                 .getOrNull()?.takeIf { it.size <= maxBytes }
+        }
+    }
+
+    suspend fun fetchRemoteFile(path: String, maxBytes: Int = REMOTE_FETCH_MAX_BYTES): Result<java.io.File> {
+        val resolved = resolvePath(path)
+        if (!isRemote) {
+            val host = hostFile(resolved)
+                ?: return Result.failure(IllegalStateException("无法定位本地文件: $resolved"))
+            return if (host.isFile) Result.success(host)
+            else Result.failure(IllegalStateException("文件不存在: $resolved"))
+        }
+        val spec = projectManager.currentRemoteSpec()
+            ?: return Result.failure(IllegalStateException("未打开远程工作区"))
+        val size = statSize(resolved)
+        checkRemoteFetchSize(size, maxBytes)?.let { return Result.failure(IllegalStateException(it)) }
+        val client = RemoteFsClient(appContext, spec, commandTimeoutMs = REMOTE_FETCH_TIMEOUT_MS)
+        val bytes = client.readBytes(resolved, maxBytes).getOrElse { t ->
+            val msg = t.message.orEmpty()
+            return Result.failure(
+                IllegalStateException(
+                    if (msg.startsWith("too_large")) {
+                        "远程文件超过大小上限（${maxBytes / (1024 * 1024)}MB）: $resolved"
+                    } else {
+                        "远程文件拉取失败: $resolved（$msg）"
+                    },
+                ),
+            )
+        }
+        return runCatching {
+            val dir = java.io.File(appContext.cacheDir, "remote-files").apply { mkdirs() }
+            val name = Integer.toHexString(resolved.hashCode()) + "-" +
+                resolved.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val target = java.io.File(dir, name)
+            target.writeBytes(bytes)
+            target
+        }.recoverCatching { throw IllegalStateException("远程文件缓存写入失败: ${it.message}") }
+    }
+
+    companion object {
+        const val REMOTE_FETCH_MAX_BYTES = 50 * 1024 * 1024
+        const val REMOTE_FETCH_TIMEOUT_MS = 300_000L
+
+        fun checkRemoteFetchSize(size: Long?, maxBytes: Int): String? {
+            if (size != null && size > maxBytes) {
+                return "远程文件超过大小上限（${maxBytes / (1024 * 1024)}MB，实际 ${size}B）"
+            }
+            return null
         }
     }
 

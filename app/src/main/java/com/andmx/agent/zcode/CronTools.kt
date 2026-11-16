@@ -344,6 +344,14 @@ class CronTools(
                     put("type", "string")
                     put("description", "Optional model id for the deferred run")
                 }
+                putJsonObject("maxConcurrent") {
+                    put("type", "integer")
+                    put("description", "闲时窗口内最大并发数，默认 1；超限任务排到下一窗口")
+                }
+                putJsonObject("dailyLimit") {
+                    put("type", "integer")
+                    put("description", "单个闲时窗口（每日）任务上限，默认 8；超限任务排到下一窗口")
+                }
             }
             putJsonArray("required") { add("title"); add("prompt") }
         }
@@ -356,25 +364,39 @@ class CronTools(
             if (title.isEmpty() || prompt.isEmpty()) {
                 return ToolResult("title and prompt are required", isError = true)
             }
-            val hour = offPeakStartHour().coerceIn(0, 23)
-            val cal = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, hour)
-                set(java.util.Calendar.MINUTE, 0)
-                set(java.util.Calendar.SECOND, 0)
-                set(java.util.Calendar.MILLISECOND, 0)
-                if (timeInMillis <= System.currentTimeMillis()) {
-                    add(java.util.Calendar.DAY_OF_YEAR, 1)
-                }
+            val maxConcurrent = args["maxConcurrent"]?.jsonPrimitive?.intOrNull
+            val dailyLimit = args["dailyLimit"]?.jsonPrimitive?.intOrNull
+            if ((maxConcurrent != null && maxConcurrent < 1) || (dailyLimit != null && dailyLimit < 1)) {
+                return ToolResult("maxConcurrent and dailyLimit must be >= 1", isError = true)
             }
+            val hour = offPeakStartHour().coerceIn(0, 23)
+            val pendingRunAts = s.list()
+                .filter {
+                    OffPeakSchedule.isOffPeak(it.kind, it.title) &&
+                        it.enabled && it.lifecycleStatus == "active" && it.nextRunAt > 0L
+                }
+                .map { it.nextRunAt }
+            val slot = OffPeakSchedule.planSlot(
+                nowMs = System.currentTimeMillis(),
+                startHour = hour,
+                existingRunAts = pendingRunAts,
+                maxConcurrent = maxConcurrent ?: OffPeakSchedule.DEFAULT_MAX_CONCURRENT,
+                dailyLimit = dailyLimit ?: OffPeakSchedule.DEFAULT_DAILY_LIMIT,
+            )
             val entity = s.createDeferred(
                 conversationId = conversationId(),
                 title = title,
                 prompt = prompt,
                 model = args["model"]?.jsonPrimitive?.contentOrNull ?: currentModel(),
-                runAtMs = cal.timeInMillis,
+                runAtMs = slot.runAtMs,
             )
+            val note = if (slot.deferredWindows > 0) {
+                ",\"note\":\"当前窗口并发/每日配额已满，已排到第 ${slot.deferredWindows} 个后续闲时窗口\""
+            } else ""
             return ToolResult(
-                "{\"status\":\"queued\",\"id\":\"${entity.id}\",\"runAt\":${entity.nextRunAt},\"title\":\"${title.replace("\"", "'")}\"}",
+                "{\"status\":\"queued\",\"id\":\"${entity.id}\",\"runAt\":${entity.nextRunAt}," +
+                    "\"deferredWindows\":${slot.deferredWindows},\"dayCount\":${slot.dayCountAfter}," +
+                    "\"title\":\"${title.replace("\"", "'")}\"$note}",
             )
         }
     }
@@ -392,7 +414,7 @@ class CronTools(
 
         override suspend fun execute(args: JsonObject): ToolResult {
             val s = store ?: return noStore()
-            val tasks = s.list().filter { it.title.startsWith("[闲时]") }
+            val tasks = s.list().filter { OffPeakSchedule.isOffPeak(it.kind, it.title) }
             if (tasks.isEmpty()) return ToolResult("{\"tasks\":[]}")
             val items = tasks.joinToString(",") { a ->
                 val status = when {
@@ -401,7 +423,8 @@ class CronTools(
                     !a.enabled -> "paused"
                     else -> "queued"
                 }
-                "{\"id\":\"${a.id}\",\"status\":\"$status\",\"title\":\"${a.title.removePrefix("[闲时] ").replace("\"", "'")}\",\"createdAt\":${a.anchorAt},\"runAt\":${a.nextRunAt}}"
+                val title = a.title.removePrefix("${OffPeakSchedule.LEGACY_TITLE_PREFIX} ").replace("\"", "'")
+                "{\"id\":\"${a.id}\",\"status\":\"$status\",\"title\":\"$title\",\"createdAt\":${a.anchorAt},\"runAt\":${a.nextRunAt}}"
             }
             return ToolResult("{\"tasks\":[$items]}")
         }

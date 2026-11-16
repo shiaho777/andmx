@@ -253,7 +253,7 @@ class OnDeviceAndroidBackend(private val context: Context) {
         else ToolResult(r.exceptionOrNull()?.message ?: "type failed", isError = true)
     }
 
-    fun uiKey(key: String): ToolResult {
+    suspend fun uiKey(key: String): ToolResult {
         val mapped = when (key.trim().uppercase()) {
             "BACK" -> "back"
             "HOME" -> "home"

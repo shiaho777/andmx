@@ -86,6 +86,16 @@ class MainActivity2 : ComponentActivity() {
             androidx.compose.runtime.SideEffect {
                 com.andmx.ui2.settings.UiLang.apply(localeTag)
             }
+            val providerStore = remember { com.andmx.settings.ProviderStore(context) }
+            val providers by providerStore.providers.collectAsState(initial = emptyList())
+            androidx.compose.runtime.SideEffect {
+                com.andmx.agent.WebSearchConfig.apiProvider = settings.searchApiProvider
+                com.andmx.agent.WebSearchConfig.apiKey = settings.searchApiKey
+                val active = providers.firstOrNull { it.id == settings.activeProviderId }
+                    ?: providers.firstOrNull { it.isUsable }
+                com.andmx.agent.NativeSearchConfig.provider = active
+                com.andmx.agent.NativeSearchConfig.model = settings.model
+            }
             AndMX2Theme(themeMode = settings.themeMode, dynamicColor = settings.dynamicColor) {
                 val density = LocalDensity.current
                 val fontScale = density.fontScale * (settings.uiFontSizePx.coerceIn(12, 20) / 14f)

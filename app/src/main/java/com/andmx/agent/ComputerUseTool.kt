@@ -38,7 +38,7 @@ import kotlinx.serialization.json.putJsonObject
 class ComputerUseTool(context: Context) : Tool {
     override val name = "computer"
     override val description =
-        "Android Use：操作这台设备的屏幕。先 screenshot 看画面，再用截图像素做 click/type/scroll/swipe/key。" +
+        "Android Use：操作这台设备的屏幕。先 screenshot 看画面，再用截图像素做 click/long_press/double_tap/type/scroll/swipe/key。" +
             "截图会作为图像跟在工具结果后面，直接看图，不要用 shell 找 png。" +
             "guest shell 没有 adb、screencap、input。输入文字如果失败就改用点击，不要把成功回执当成字已经进了输入框。" +
             "需要屏幕录制和无障碍权限。"
@@ -48,58 +48,23 @@ class ComputerUseTool(context: Context) : Tool {
     private val controller = AccessibilityController(context)
     private val appContext = context.applicationContext
 
-    override val parameters: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("action") {
-                put("type", "string")
-                put("description", "要执行的动作")
-                putJsonArray("enum") {
-                    add("screenshot"); add("click"); add("type"); add("scroll")
-                    add("key"); add("wait"); add("swipe")
-                }
-            }
-            putJsonObject("coordinate") {
-                put("type", "array")
-                put("description", "基于上次截图的坐标：click/scroll 为 [x,y]，swipe 为 [x1,y1,x2,y2]")
-                putJsonObject("items") { put("type", "integer") }
-                put("minItems", 2)
-                put("maxItems", 4)
-            }
-            putJsonObject("text") {
-                put("type", "string")
-                put("description", "(type) 要输入的文本")
-            }
-            putJsonObject("key") {
-                put("type", "string")
-                put("description", "(key) 按键: back/home/recents/lock_screen 等")
-            }
-            putJsonObject("scroll_direction") {
-                put("type", "string")
-                put("description", "(scroll) 方向")
-                putJsonArray("enum") { add("up"); add("down"); add("left"); add("right") }
-            }
-            putJsonObject("duration") {
-                put("type", "integer")
-                put("description", "(wait) 等待毫秒数,默认 1000")
-            }
-        }
-        putJsonArray("required") { add("action") }
-    }
+    override val parameters: JsonObject = computerUseParameters()
 
     override suspend fun execute(args: JsonObject): ToolResult {
         val action = args["action"]?.jsonPrimitive?.content?.lowercase()
             ?: return ToolResult("缺少参数 action", isError = true)
 
-        return when (action) {
-            "screenshot" -> doScreenshot()
-            "click" -> doClick(args)
-            "type" -> doType(args)
-            "scroll" -> doScroll(args)
-            "swipe" -> doSwipe(args)
-            "key" -> doKey(args)
-            "wait" -> doWait(args)
-            else -> ToolResult("未知 action: $action", isError = true)
+        return when (routeComputerAction(action)) {
+            ComputerAction.SCREENSHOT -> doScreenshot()
+            ComputerAction.CLICK -> doClick(args)
+            ComputerAction.LONG_PRESS -> doLongPress(args)
+            ComputerAction.DOUBLE_TAP -> doDoubleTap(args)
+            ComputerAction.TYPE -> doType(args)
+            ComputerAction.SCROLL -> doScroll(args)
+            ComputerAction.SWIPE -> doSwipe(args)
+            ComputerAction.KEY -> doKey(args)
+            ComputerAction.WAIT -> doWait(args)
+            null -> ToolResult("未知 action: $action", isError = true)
         }
     }
 
@@ -155,16 +120,38 @@ class ComputerUseTool(context: Context) : Tool {
         return withPostScreenshot(r, "swipe", "[$sx1,$sy1]→[$sx2,$sy2]")
     }
 
-    private fun doKey(args: JsonObject): ToolResult {
-        val key = args["key"]?.jsonPrimitive?.content
-            ?: return ToolResult("缺少 key 参数", isError = true)
-        val r = controller.sendKey(key)
-        return ToolResult(if (r.isSuccess) "已发送按键: $key" else "按键失败: ${r.exceptionOrNull()?.message}", isError = r.isFailure)
+    private suspend fun doLongPress(args: JsonObject): ToolResult {
+        val (sx, sy) = readCoordinate(args) ?: return ToolResult("缺少/无效 coordinate 参数", isError = true)
+        val (rx, ry) = scaleToScreen(sx, sy)
+        val r = controller.longPress(rx, ry)
+        return withPostScreenshot(r, "long_press", "[$sx,$sy]→[$rx,$ry]")
     }
 
-    private fun doWait(args: JsonObject): ToolResult {
+    private suspend fun doDoubleTap(args: JsonObject): ToolResult {
+        val (sx, sy) = readCoordinate(args) ?: return ToolResult("缺少/无效 coordinate 参数", isError = true)
+        val (rx, ry) = scaleToScreen(sx, sy)
+        val r = controller.doubleTap(rx, ry)
+        return withPostScreenshot(r, "double_tap", "[$sx,$sy]→[$rx,$ry]")
+    }
+
+    private suspend fun doKey(args: JsonObject): ToolResult {
+        val key = args["key"]?.jsonPrimitive?.content
+            ?: return ToolResult("缺少 key 参数", isError = true)
+        val normalized = key.trim().lowercase()
+        if (normalized == "notifications_clear" || normalized == "清除通知") {
+            val r = controller.clearNotifications()
+            val base = r.getOrNull() ?: "清除通知失败: ${r.exceptionOrNull()?.message}"
+            if (r.isFailure) return ToolResult(base, isError = true)
+            val url = if (screenCaptor.isActive) screenCaptor.capture() else null
+            return if (url != null) ToolResult(base, imageUrls = listOf(url)) else ToolResult(base)
+        }
+        val r = controller.sendKey(key)
+        return withPostScreenshot(r, "key", key)
+    }
+
+    private suspend fun doWait(args: JsonObject): ToolResult {
         val ms = args["duration"]?.jsonPrimitive?.intOrNull ?: 1000
-        Thread.sleep(ms.coerceIn(100, 10_000).toLong())
+        kotlinx.coroutines.delay(ms.coerceIn(100, 10_000).toLong())
         return ToolResult("已等待 ${ms}ms")
     }
 
@@ -226,3 +213,59 @@ private fun ScreenCaptor.snapshotSize(): String {
 }
 private fun ScreenCaptor.snapshotWidth(): Int = snapshotDims().first
 private fun ScreenCaptor.snapshotHeight(): Int = snapshotDims().second
+
+internal enum class ComputerAction {
+    SCREENSHOT, CLICK, LONG_PRESS, DOUBLE_TAP, TYPE, SCROLL, SWIPE, KEY, WAIT
+}
+
+internal fun routeComputerAction(action: String): ComputerAction? = when (action.trim().lowercase()) {
+    "screenshot" -> ComputerAction.SCREENSHOT
+    "click" -> ComputerAction.CLICK
+    "long_press" -> ComputerAction.LONG_PRESS
+    "double_tap" -> ComputerAction.DOUBLE_TAP
+    "type" -> ComputerAction.TYPE
+    "scroll" -> ComputerAction.SCROLL
+    "swipe" -> ComputerAction.SWIPE
+    "key" -> ComputerAction.KEY
+    "wait" -> ComputerAction.WAIT
+    else -> null
+}
+
+internal fun computerUseParameters(): JsonObject = buildJsonObject {
+    put("type", "object")
+    putJsonObject("properties") {
+        putJsonObject("action") {
+            put("type", "string")
+            put("description", "要执行的动作")
+            putJsonArray("enum") {
+                add("screenshot"); add("click"); add("long_press"); add("double_tap")
+                add("type"); add("scroll"); add("key"); add("wait"); add("swipe")
+            }
+        }
+        putJsonObject("coordinate") {
+            put("type", "array")
+            put("description", "基于上次截图的坐标：click/long_press/double_tap/scroll 为 [x,y]，swipe 为 [x1,y1,x2,y2]")
+            putJsonObject("items") { put("type", "integer") }
+            put("minItems", 2)
+            put("maxItems", 4)
+        }
+        putJsonObject("text") {
+            put("type", "string")
+            put("description", "(type) 要输入的文本")
+        }
+        putJsonObject("key") {
+            put("type", "string")
+            put("description", "(key) 按键: back/home/recents/lock_screen/notifications_clear 等")
+        }
+        putJsonObject("scroll_direction") {
+            put("type", "string")
+            put("description", "(scroll) 方向")
+            putJsonArray("enum") { add("up"); add("down"); add("left"); add("right") }
+        }
+        putJsonObject("duration") {
+            put("type", "integer")
+            put("description", "(wait) 等待毫秒数,默认 1000")
+        }
+    }
+    putJsonArray("required") { add("action") }
+}

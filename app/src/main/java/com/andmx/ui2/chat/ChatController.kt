@@ -650,7 +650,8 @@ class ChatController private constructor(private val context: Context) {
         controllerScope.launch {
             settingsStore.settings.collect { s ->
                 val dynamicWorkflowChanged =
-                    s.dynamicWorkflowToolsEnabled != settingsSnapshot.dynamicWorkflowToolsEnabled
+                    s.dynamicWorkflowToolsEnabled != settingsSnapshot.dynamicWorkflowToolsEnabled ||
+                        s.embeddedSearch != settingsSnapshot.embeddedSearch
                 settingsSnapshot = s
                 if (dynamicWorkflowChanged) {
                     // 工具面在会话建立时装配，切换开关后必须重建空闲会话才能生效。
@@ -2464,6 +2465,8 @@ class ChatController private constructor(private val context: Context) {
             todo = todo,
             planMode = planMode,
             cwdProvider = cwd,
+            embeddedSearch = settingsSnapshot.embeddedSearch,
+            shellRuntime = { settingsSnapshot.bashShellRuntime },
             onPlanModeChange = { mode -> applyExecMode(mode, conversationId) },
             currentMode = { sessions[conversationId]?.approvalMode ?: planMode.mode },
             askUser = ask@{ questions, rawArgs ->

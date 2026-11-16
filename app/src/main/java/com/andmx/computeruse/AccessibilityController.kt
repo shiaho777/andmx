@@ -56,6 +56,31 @@ class AccessibilityController(private val context: Context) {
         return if (ok) Result.success(Unit) else Result.failure(RuntimeException("点击被取消"))
     }
 
+    suspend fun longPress(x: Int, y: Int, durationMs: Long = 600L): Result<Unit> {
+        val service = AndmxAccessibilityService.instance ?: return notConnected()
+        if (!inBounds(x, y)) return Result.failure(IllegalArgumentException("坐标越界: ($x,$y)"))
+        val ok = service.tap(x.toFloat(), y.toFloat(), durationMs)
+        return if (ok) Result.success(Unit) else Result.failure(RuntimeException("长按被取消"))
+    }
+
+    suspend fun doubleTap(x: Int, y: Int, gapMs: Long = 80L): Result<Unit> {
+        val service = AndmxAccessibilityService.instance ?: return notConnected()
+        if (!inBounds(x, y)) return Result.failure(IllegalArgumentException("坐标越界: ($x,$y)"))
+        if (!service.tap(x.toFloat(), y.toFloat())) {
+            return Result.failure(RuntimeException("双击第一次点击被取消"))
+        }
+        kotlinx.coroutines.delay(gapMs)
+        val ok = service.tap(x.toFloat(), y.toFloat())
+        return if (ok) Result.success(Unit) else Result.failure(RuntimeException("双击第二次点击被取消"))
+    }
+
+    suspend fun clearNotifications(): Result<String> {
+        val service = AndmxAccessibilityService.instance ?: return notConnectedResult()
+        val report = service.clearNotifications()
+        return if (report.ok) Result.success(report.detail)
+        else Result.failure(RuntimeException(report.detail))
+    }
+
     suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 250L): Result<Unit> {
         val service = AndmxAccessibilityService.instance ?: return notConnected()
         val ok = service.swipe(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), durationMs)
@@ -68,10 +93,14 @@ class AccessibilityController(private val context: Context) {
         return if (ok) Result.success(Unit) else Result.failure(RuntimeException("找不到可输入的焦点"))
     }
 
-    fun sendKey(key: String): Result<Unit> {
+    suspend fun sendKey(key: String): Result<Unit> {
         val service = AndmxAccessibilityService.instance ?: return notConnected()
         hostNavigationBlock(key, service.foregroundPackage(), context.packageName)?.let {
             return Result.failure(IllegalStateException(it))
+        }
+        val normalized = key.trim().lowercase()
+        if (normalized == "notifications_clear" || normalized == "清除通知") {
+            return clearNotifications().map { }
         }
         val ok = service.sendKey(key)
         return if (ok) Result.success(Unit) else Result.failure(RuntimeException("按键失败: $key"))

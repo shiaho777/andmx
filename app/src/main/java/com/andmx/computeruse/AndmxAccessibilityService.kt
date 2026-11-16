@@ -145,13 +145,104 @@ class AndmxAccessibilityService : AccessibilityService() {
         "home", "主页" -> performGlobalAction(GLOBAL_ACTION_HOME)
         "recents", "recent", "最近" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
         "notifications" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
-        "notifications_clear", "清除通知" ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) else false
         "split_screen", "分屏" ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN) else false
         "lock_screen", "锁屏" ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) else false
         else -> false
+    }
+
+    data class NotificationClearReport(val ok: Boolean, val detail: String)
+
+    suspend fun clearNotifications(): NotificationClearReport {
+        if (!performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)) {
+            return NotificationClearReport(false, "无法打开通知栏，未清除任何通知")
+        }
+        kotlinx.coroutines.delay(600)
+        val before = countNotificationNodes()
+        val button = findClearAllNode()
+        if (button == null) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return NotificationClearReport(
+                false,
+                "已打开通知栏但未找到\"清除全部\"按钮，未清除任何通知（当前可见通知约 $before 条）",
+            )
+        }
+        val clicked = try {
+            clickNodeOrAncestor(button)
+        } finally {
+            button.recycle()
+        }
+        if (!clicked) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return NotificationClearReport(false, "找到\"清除全部\"按钮但点击失败，未清除任何通知")
+        }
+        kotlinx.coroutines.delay(500)
+        val after = countNotificationNodes()
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        val cleared = (before - after).coerceAtLeast(0)
+        return NotificationClearReport(
+            true,
+            "已点击\"清除全部\"：清除前可见通知约 $before 条，清除后约 $after 条（估计清除 $cleared 条；系统不保证全部通知可被清除）",
+        )
+    }
+
+    private fun countNotificationNodes(): Int {
+        val root = rootInActiveWindow ?: return 0
+        var count = 0
+        fun walk(node: AccessibilityNodeInfo) {
+            val id = node.viewIdResourceName.orEmpty()
+            if (id.endsWith("status_bar_latest_event_content") || id.endsWith("notification_content")) count++
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                walk(child)
+                child.recycle()
+            }
+        }
+        try {
+            walk(root)
+        } finally {
+            root.recycle()
+        }
+        return count
+    }
+
+    private fun findClearAllNode(): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        fun walk(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (isClearAllNode(
+                    node.text?.toString().orEmpty(),
+                    node.contentDescription?.toString().orEmpty(),
+                    node.viewIdResourceName.orEmpty(),
+                )
+            ) {
+                return AccessibilityNodeInfo.obtain(node)
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                val hit = walk(child)
+                child.recycle()
+                if (hit != null) return hit
+            }
+            return null
+        }
+        val found = walk(root)
+        root.recycle()
+        return found
+    }
+
+    private fun clickNodeOrAncestor(node: AccessibilityNodeInfo): Boolean {
+        if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        var parent = node.parent
+        while (parent != null) {
+            val clickable = parent.isClickable
+            val ok = clickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            val next = if (ok) null else parent.parent
+            parent.recycle()
+            if (ok) return true
+            parent = next
+        }
+        return false
     }
 
     private suspend fun dispatchGestureAwait(gesture: GestureDescription): Boolean {
@@ -252,4 +343,10 @@ class AndmxAccessibilityService : AccessibilityService() {
         return hits
     }
 
+}
+
+internal fun isClearAllNode(text: String, desc: String, id: String): Boolean {
+    val label = (text + " " + desc).lowercase()
+    if (id.endsWith("dismiss_all") || id.endsWith("clear_all") || id.endsWith("clear_all_notifications")) return true
+    return listOf("清除全部", "全部清除", "清除所有", "清空通知", "clear all", "dismiss all").any { label.contains(it) }
 }

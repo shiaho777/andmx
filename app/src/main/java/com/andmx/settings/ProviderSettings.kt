@@ -109,6 +109,10 @@ data class ProviderSettings(
     val androidUseEnabled: Boolean = true,
     /** 快捷键覆盖，一行 `命令|Ctrl+K`。空着的命令用默认键。 */
     val shortcutBindings: String = "",
+    val searchApiProvider: String = "",
+    val searchApiKey: String = "",
+    val embeddedSearch: Boolean = false,
+    val bashShellRuntime: String = "",
 ) {
     /**
      * Whether the agent can take a turn. Provider readiness (key present etc.)
@@ -167,6 +171,10 @@ class SettingsStore(
     private val allowInsecureCertificatesKey = androidx.datastore.preferences.core.booleanPreferencesKey("allow_insecure_certificates")
     private val androidUseEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("android_use_enabled")
     private val shortcutBindingsKey = stringPreferencesKey("shortcut_bindings")
+    private val searchApiProviderKey = stringPreferencesKey("search_api_provider")
+    private val searchApiKeyKey = stringPreferencesKey("search_api_key")
+    private val embeddedSearchKey = androidx.datastore.preferences.core.booleanPreferencesKey("embedded_search")
+    private val bashShellRuntimeKey = stringPreferencesKey("bash_shell_runtime")
 
     // Legacy keys retained only for one-time migration into the providers table.
     internal val legacyBaseUrlKey = stringPreferencesKey("base_url")
@@ -219,6 +227,10 @@ class SettingsStore(
             allowInsecureCertificates = p[allowInsecureCertificatesKey] ?: def.allowInsecureCertificates,
             androidUseEnabled = p[androidUseEnabledKey] ?: def.androidUseEnabled,
             shortcutBindings = p[shortcutBindingsKey] ?: def.shortcutBindings,
+            searchApiProvider = p[searchApiProviderKey] ?: def.searchApiProvider,
+            searchApiKey = p[searchApiKeyKey] ?: def.searchApiKey,
+            embeddedSearch = p[embeddedSearchKey] ?: def.embeddedSearch,
+            bashShellRuntime = p[bashShellRuntimeKey] ?: def.bashShellRuntime,
         )
     }
 
@@ -266,6 +278,10 @@ class SettingsStore(
             p[allowInsecureCertificatesKey] = settings.allowInsecureCertificates
             p[androidUseEnabledKey] = settings.androidUseEnabled
             p[shortcutBindingsKey] = settings.shortcutBindings
+            p[searchApiProviderKey] = settings.searchApiProvider
+            p[searchApiKeyKey] = settings.searchApiKey
+            p[embeddedSearchKey] = settings.embeddedSearch
+            p[bashShellRuntimeKey] = settings.bashShellRuntime
         }
     }
 

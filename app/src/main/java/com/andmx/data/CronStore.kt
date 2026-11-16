@@ -54,17 +54,19 @@ class CronStore(context: android.content.Context) {
         prompt: String,
         model: String,
         runAtMs: Long,
+        kind: String = com.andmx.agent.zcode.OffPeakSchedule.KIND,
     ): CronAutomationEntity {
         val entity = CronAutomationEntity(
             id = "auto_${UUID.randomUUID().toString().take(12)}",
             conversationId = conversationId,
-            title = "[闲时] $title",
+            title = title,
             prompt = prompt,
             cronExpr = "",
             recurring = false,
             maxRuns = 1,
             nextRunAt = runAtMs,
             model = model,
+            kind = kind,
         )
         dao.upsertAutomation(entity)
         return entity

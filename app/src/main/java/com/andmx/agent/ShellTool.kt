@@ -90,6 +90,7 @@ class ShellTool(
     private val context: Context,
     private val cwdProvider: () -> String = { WorkspaceAccess(context).guestCwd() },
     private val backgroundTasks: BackgroundTasks? = null,
+    private val shellRuntime: () -> String = { "" },
 ) : Tool, ExecutionAwareTool {
     private val access = WorkspaceAccess(context)
     private val runtime = ProotRuntime(context)
@@ -185,11 +186,15 @@ class ShellTool(
 
         val runBackground = (args["run_in_background"] as? JsonPrimitive)?.booleanOrNull == true
         if (runBackground) {
+            if (access.isRemote) {
+                return ToolResult(
+                    "执行失败: 远程工作区不支持后台任务（后台任务依赖本地常驻进程，SSH 会话无法保持）。" +
+                        "请前台执行，必要时增大 timeout（上限 ${MAX_TIMEOUT_MS}ms）",
+                    isError = true,
+                )
+            }
             val tasks = backgroundTasks
                 ?: return ToolResult("执行失败: 后台任务不可用", isError = true)
-            if (access.isRemote) {
-                return ToolResult("执行失败: 远程工作区暂不支持后台执行", isError = true)
-            }
             val task = tasks.startShell(cdCommand, cwd)
             return ToolResult(
                 "Command started in background task_id=${task.id} output=${task.outputPath}",
@@ -197,18 +202,23 @@ class ShellTool(
         }
 
         if (access.isRemote) {
-            if (bounded) {
-                return ToolResult("执行失败: 远程工作区不支持带超时的验证命令执行", isError = true)
-            }
             if (callId.isNotBlank()) {
                 _events.tryEmit(ShellEvent.Started(callId, command, cwd))
             }
-            val res = access.executeShell(prepared, cwd = cwd)
+            val res = access.executeShell(prepared, cwd = cwd, timeoutMs = timeoutMs)
             if (res.error != null) {
                 if (callId.isNotBlank()) {
                     _events.tryEmit(ShellEvent.Failed(callId, command, res.error ?: "error"))
                 }
-                return ToolResult("执行失败: ${res.error}", isError = true)
+                val rendered = if (res.exitCode == 124) {
+                    buildString {
+                        append(res.stdout.ifBlank { "(无输出)" })
+                        append("\n(超时,已终止)\n[exit=124]")
+                    }
+                } else {
+                    "执行失败: ${res.error}"
+                }
+                return ToolResult(rendered.takeLast(16_000), isError = true)
             }
             val out = buildString {
                 append(res.stdout.ifBlank { "(无输出)" })
@@ -219,7 +229,8 @@ class ShellTool(
                     ShellEvent.Finished(callId, command, res.exitCode, isError = res.exitCode != 0),
                 )
             }
-            return ToolResult(withPersistedOverflow(res.stdout, out, 16_000, res.exitCode != 0), isError = res.exitCode != 0)
+            val limit = if (bounded) maxOutputChars else 16_000
+            return ToolResult(withPersistedOverflow(res.stdout, out, limit, res.exitCode != 0), isError = res.exitCode != 0)
         }
 
         val noSandbox = (args["dangerouslyDisableSandbox"] as? JsonPrimitive)?.booleanOrNull == true
@@ -247,7 +258,7 @@ class ShellTool(
         }
 
         // Fallback: fork+exec per command
-        val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
+        val sh = ShellResolver.resolve(shellRuntime(), runtime.rootfsDir.exists())
         val res = env.execute(ProcessSpec(argv = listOf(sh, "-lc", cdCommand)))
         if (res.error != null) return ToolResult("执行失败: ${res.error}", isError = true)
 
@@ -288,7 +299,7 @@ class ShellTool(
             return ToolResult("执行失败: ${install.message}", isError = true)
         }
         val rootfs = runtime.rootfsDir.takeIf { it.exists() && !noSandbox }
-        val sh = if (rootfs != null) "/bin/sh" else "/system/bin/sh"
+        val sh = ShellResolver.resolve(shellRuntime(), rootfs != null)
         val argv = if (noSandbox) {
             listOf(sh, "-lc", cdCommand)
         } else {
@@ -405,7 +416,7 @@ class ShellTool(
             }
         }
 
-        val sh = if (runtime.rootfsDir.exists() && !noSandbox) "/bin/sh" else "/system/bin/sh"
+        val sh = ShellResolver.resolve(shellRuntime(), runtime.rootfsDir.exists() && !noSandbox)
         val argv = if (noSandbox) {
             listOf(sh, "-lc", cdCommand)
         } else {
