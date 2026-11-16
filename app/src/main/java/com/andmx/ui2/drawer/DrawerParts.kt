@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.data.TaskGroupEntity
+import com.andmx.ui2.theme.AndMXType
 
 @Composable
 fun NewTaskButton(onClick: () -> Unit) {
@@ -87,7 +88,7 @@ fun NewTaskButton(onClick: () -> Unit) {
         }
         Spacer(Modifier.width(12.dp))
         Text(tr("新建任务"),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -120,7 +121,7 @@ fun DrawerQuickAction(
         Spacer(Modifier.width(12.dp))
         Text(
             label,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -190,7 +191,6 @@ private fun SegmentedChip(
         Text(
             label,
             style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             ),
             color = fg,
@@ -231,7 +231,7 @@ fun TaskToolbar(
             Spacer(Modifier.width(4.dp))
             Text(tr("归档任务"),
                 style = MaterialTheme.typography.titleSmall.copy(
-                    fontSize = 15.sp,
+                    fontSize = AndMXType.chatBody.fontSize,
                     fontWeight = FontWeight.SemiBold,
                 ),
                 color = MaterialTheme.colorScheme.onSurface,
@@ -372,8 +372,8 @@ fun SearchField(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
-        textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-        placeholder = { Text(placeholder, fontSize = 14.sp) },
+        textStyle = MaterialTheme.typography.bodyMedium,
+        placeholder = { Text(placeholder, fontSize = AndMXType.input.fontSize) },
         leadingIcon = {
             Icon(Icons.Outlined.Search, null, Modifier.size(18.dp))
         },
@@ -432,7 +432,7 @@ fun SectionHeader(
         Text(
             title,
             style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 13.sp,
+                fontSize = AndMXType.cardTitle.fontSize,
                 fontWeight = FontWeight.SemiBold,
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,

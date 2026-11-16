@@ -53,7 +53,6 @@ fun TurnProcessRow(
         Text(
             text = fold.label(),
             style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
             ),
             color = MaterialTheme.colorScheme.primary,

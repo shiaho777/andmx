@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import com.andmx.ui2.settings.tr
 
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -278,7 +279,6 @@ private fun SectionLabel(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelSmall.copy(
-            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = 0.6.sp,
         ),
@@ -403,7 +403,7 @@ private fun ProgressSection(steps: List<UpdatePlanTool.PlanStep>) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     step.content,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = if (step.status == UpdatePlanTool.StepStatus.COMPLETED) {
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     } else {
@@ -448,7 +448,7 @@ private fun AgentsSection(running: Int, done: Int, agents: List<SubAgentItem>) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     a.task.ifBlank { a.id },
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -487,7 +487,7 @@ private fun WorkflowSection(
                 Spacer(Modifier.width(6.dp))
                 Text(
                     run.task.ifBlank { run.runId },
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -574,7 +574,7 @@ private fun ContextSection(
         if (breakdown.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(tr("上下文来源"),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(4.dp))

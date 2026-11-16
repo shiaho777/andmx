@@ -86,7 +86,7 @@ class MainActivity2 : ComponentActivity() {
             androidx.compose.runtime.SideEffect {
                 com.andmx.ui2.settings.UiLang.apply(localeTag)
             }
-            AndMX2Theme(themeMode = settings.themeMode) {
+            AndMX2Theme(themeMode = settings.themeMode, dynamicColor = settings.dynamicColor) {
                 val density = LocalDensity.current
                 val fontScale = density.fontScale * (settings.uiFontSizePx.coerceIn(12, 20) / 14f)
                 androidx.compose.runtime.CompositionLocalProvider(

@@ -64,6 +64,7 @@ import com.andmx.ui2.markdown.CodeBlockThemed
 import com.andmx.ui2.markdown.CodeThemes
 import com.andmx.ui2.markdown.LocalCodePreviewConfig
 import com.andmx.ui2.markdown.MarkdownView
+import com.andmx.ui2.theme.AndMXType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -581,7 +582,7 @@ private fun EditView(draft: String, onChange: (String) -> Unit) {
         onValueChange = onChange,
         textStyle = MaterialTheme.typography.bodyMedium.copy(
             fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp,
+            fontSize = AndMXType.cardTitle.fontSize,
             lineHeight = 19.sp,
             color = MaterialTheme.colorScheme.onSurface
         ),

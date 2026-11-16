@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.AndMXType
 
 @Composable
 fun MarkdownView(
@@ -217,7 +218,10 @@ fun MarkdownText(
     linkColor: Color,
     modifier: Modifier = Modifier,
 ) {
-    val annotated = remember(raw, color, linkColor) { InlineParser.parse(raw, color, linkColor) }
+    val codeBackground = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    val annotated = remember(raw, color, linkColor, codeBackground) {
+        InlineParser.parse(raw, color, linkColor, codeBackground)
+    }
     val hasLink = remember(annotated) {
         annotated.getStringAnnotations(InlineParser.UrlAnnotationTag, 0, annotated.length).any()
     }
@@ -404,7 +408,7 @@ private fun MermaidBlock(code: String) {
             code,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+                fontSize = AndMXType.micro.fontSize,
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -428,7 +432,7 @@ private fun MermaidDiagramDialog(code: String, onDismiss: () -> Unit) {
                     Spacer(Modifier.padding(6.dp))
                     Text(
                         code,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AndMXType.micro.fontSize),
                         modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
                     )
                 }

@@ -1,13 +1,9 @@
 package com.andmx.ui2.chat
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
@@ -46,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import kotlinx.coroutines.delay
@@ -156,7 +153,6 @@ fun ReasoningCard(item: ReasoningItem) {
                 Text(
                     text = reasoningTriggerLabel(item.isStreaming, expanded, shownDuration),
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
@@ -166,14 +162,14 @@ fun ReasoningCard(item: ReasoningItem) {
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = "·",
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = tail,
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     maxLines = 1,
                     softWrap = false,
@@ -229,10 +225,7 @@ private fun ThinkingLabel() {
     val shift by infinite.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
+        animationSpec = LocalMotion.current.thinkSweep,
         label = "think-shift",
     )
     val c1 = MaterialTheme.colorScheme.primary
@@ -247,7 +240,7 @@ private fun ThinkingLabel() {
         text = "正在思考",
         style = TextStyle(
             brush = brush,
-            fontSize = 13.sp,
+            fontSize = AndMXType.cardTitle.fontSize,
             fontWeight = FontWeight.Medium,
         ),
     )

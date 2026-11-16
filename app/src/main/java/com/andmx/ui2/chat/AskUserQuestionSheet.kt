@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import com.andmx.ui2.settings.tr
 
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -155,7 +156,7 @@ fun AskUserQuestionPanel(
                             Text(q.question, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
                                 ans ?: "（未作答）",
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                style = MaterialTheme.typography.bodySmall,
                                 fontWeight = if (ans != null) FontWeight.Medium else FontWeight.Normal,
                             )
                             annotations[q.question]?.second?.let {
@@ -288,7 +289,7 @@ private fun QuestionBlock(
         }
         Text(
             question.question,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+            style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
         )
@@ -318,7 +319,7 @@ private fun QuestionBlock(
                             modifier = Modifier.padding(10.dp),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
+                                fontSize = AndMXType.micro.fontSize,
                             ),
                         )
                     }
@@ -470,7 +471,7 @@ fun ExitPlanApprovalPanel(
                     modifier = Modifier
                         .padding(10.dp)
                         .verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 )
             }
             Row(

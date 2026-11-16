@@ -157,7 +157,7 @@ fun ConversationRow(
                 Column(Modifier.weight(1f)) {
                     Text(
                         title,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                        style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = titleColor,
@@ -168,7 +168,7 @@ fun ConversationRow(
                     ) {
                         Text(
                             ProjectManager.displayName(conversation.project),
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 13.sp),
+                            style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             color = metaColor,
@@ -176,12 +176,12 @@ fun ConversationRow(
                         )
                         Text(
                             " · ",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 13.sp),
+                            style = MaterialTheme.typography.bodySmall,
                             color = metaColor.copy(alpha = 0.55f),
                         )
                         Text(
                             timeText,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 13.sp),
+                            style = MaterialTheme.typography.bodySmall,
                             color = metaColor,
                         )
                     }
@@ -189,7 +189,7 @@ fun ConversationRow(
             } else {
                 Text(
                     title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = titleColor,
@@ -197,7 +197,7 @@ fun ConversationRow(
                 )
                 Text(
                     timeText,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall,
                     color = metaColor,
                     modifier = Modifier.padding(start = 8.dp, end = 2.dp),
                 )

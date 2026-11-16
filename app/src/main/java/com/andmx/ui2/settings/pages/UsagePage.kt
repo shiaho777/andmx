@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.settings.backAppBar
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.usage.DayBucket
 import com.andmx.ui2.usage.ModelUsage
 import com.andmx.ui2.usage.UsageCalculator
@@ -86,13 +87,6 @@ private val ModelPalette = listOf(
     Color(0xFF0891B2),
 )
 
-private val CardBg = Color(0xFF1C1C1C)
-private val CardBgAlt = Color(0xFF202020)
-private val ChipBg = Color(0xFF2A2A2A)
-private val ChipSelectedBg = Color(0xFF3A3A3A)
-private val Muted = Color(0xFF9A9A9A)
-private val Subtle = Color(0xFF6E6E6E)
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun UsagePage(onBack: () -> Unit) {
@@ -108,16 +102,14 @@ fun UsagePage(onBack: () -> Unit) {
             .getOrDefault(UsageStats(loaded = true))
     }
     val loading = !stats.loaded
-    val surface = MaterialTheme.colorScheme.surface
-    val isDark = (0.299f * surface.red + 0.587f * surface.green + 0.114f * surface.blue) < 0.5f
-    val pageBg = if (isDark) Color(0xFF141414) else MaterialTheme.colorScheme.surface
-    val cardBg = if (isDark) CardBg else MaterialTheme.colorScheme.surfaceContainerHigh
-    val cardBgAlt = if (isDark) CardBgAlt else MaterialTheme.colorScheme.surfaceContainer
-    val muted = if (isDark) Muted else MaterialTheme.colorScheme.onSurfaceVariant
-    val subtle = if (isDark) Subtle else MaterialTheme.colorScheme.outline
+    val pageBg = MaterialTheme.colorScheme.surfaceContainerLow
+    val cardBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    val cardBgAlt = MaterialTheme.colorScheme.surfaceContainer
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val subtle = MaterialTheme.colorScheme.outline
     val onSurface = MaterialTheme.colorScheme.onSurface
-    val chipBg = if (isDark) ChipBg else MaterialTheme.colorScheme.surfaceVariant
-    val chipSelected = if (isDark) ChipSelectedBg else MaterialTheme.colorScheme.secondaryContainer
+    val chipBg = MaterialTheme.colorScheme.surfaceVariant
+    val chipSelected = MaterialTheme.colorScheme.secondaryContainer
 
     Scaffold(
         containerColor = pageBg,
@@ -162,7 +154,7 @@ fun UsagePage(onBack: () -> Unit) {
                 stats = stats,
                 muted = muted,
                 onSurface = onSurface,
-                divider = if (isDark) Color(0xFF2E2E2E) else MaterialTheme.colorScheme.outlineVariant,
+                divider = MaterialTheme.colorScheme.outlineVariant,
             )
 
             Spacer(Modifier.height(16.dp))
@@ -331,7 +323,7 @@ private fun SummaryRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (muted == Muted) CardBg else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -353,7 +345,7 @@ private fun SummaryRow(
                 Text(
                     item.value,
                     color = onSurface,
-                    fontSize = 17.sp,
+                    fontSize = AndMXType.stat.fontSize,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -385,7 +377,6 @@ private fun HeatmapCard(
     subtle: Color,
     onSurface: Color,
 ) {
-    val isDark = (0.299f * onSurface.red + 0.587f * onSurface.green + 0.114f * onSurface.blue) > 0.5f
     var mode by remember { mutableStateOf(UsageChartLogic.HeatMode.DAILY) }
     val baseGrid = remember(stats.heatmapDayTokens) {
         UsageChartLogic.heatGrid(
@@ -411,7 +402,7 @@ private fun HeatmapCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(
-                    if (isDark) Color(0xFF2A2A2A) else MaterialTheme.colorScheme.surfaceVariant,
+                    MaterialTheme.colorScheme.surfaceVariant,
                 ).padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
                 val modes = listOf(
@@ -428,10 +419,10 @@ private fun HeatmapCard(
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
                             .background(
-                                when {
-                                    !selected -> Color.Transparent
-                                    isDark -> Color(0xFF141414)
-                                    else -> MaterialTheme.colorScheme.surface
+                                if (selected) {
+                                    MaterialTheme.colorScheme.surface
+                                } else {
+                                    Color.Transparent
                                 },
                             )
                             .clickable { mode = m }
@@ -442,13 +433,8 @@ private fun HeatmapCard(
         }
         Spacer(Modifier.height(12.dp))
 
-        val surface = MaterialTheme.colorScheme.surface
-        val heatBase = if ((0.299f * surface.red + 0.587f * surface.green + 0.114f * surface.blue) < 0.5f) {
-            Color(0xFF0D0D0D)
-        } else {
-            Color(0xFFF1F5F9)
-        }
-        val accent = if (isDark) Color(0xFF38BDF8) else Color(0xFF0284C7)
+        val heatBase = MaterialTheme.colorScheme.surfaceContainerHighest
+        val accent = MaterialTheme.colorScheme.primary
         Column(
             Modifier
                 .fillMaxWidth()
@@ -464,7 +450,7 @@ private fun HeatmapCard(
                                     .clip(RoundedCornerShape(2.dp))
                                     .background(
                                         if (level == 0) {
-                                            heatBase.copy(alpha = if (isDark) 0.6f else 1f)
+                                            heatBase
                                         } else {
                                             mixHeat(accent, heatBase, UsageChartLogic.heatLevelRatios[level])
                                         },
@@ -502,7 +488,7 @@ private fun HeatmapCard(
                     Modifier
                         .size(9.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(if (i == 0) heatBase.copy(alpha = if (isDark) 0.6f else 1f) else mixHeat(accent, heatBase, ratio)),
+                        .background(if (i == 0) heatBase else mixHeat(accent, heatBase, ratio)),
                 )
                 Spacer(Modifier.width(3.dp))
             }
@@ -581,7 +567,7 @@ private fun DailyTrendCard(
             Spacer(Modifier.height(10.dp))
         }
 
-        val guide = if (subtle == Subtle) Color(0xFF3A3A3A) else MaterialTheme.colorScheme.outlineVariant
+        val guide = MaterialTheme.colorScheme.outlineVariant
         Canvas(
             Modifier
                 .fillMaxWidth()
@@ -711,7 +697,7 @@ private fun ModelUsageCard(
                         UsageCalculator.formatCount(stats.totalTokens),
                         color = onSurface,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 18.sp,
+                        fontSize = AndMXType.statLarge.fontSize,
                     )
                     Text(tr("Token"), color = muted, style = MaterialTheme.typography.labelSmall)
                 }
@@ -772,6 +758,7 @@ private fun ModelUsageCard(
 @Composable
 private fun DonutChart(models: List<ModelUsage>, total: Long) {
     val safeTotal = max(total, 1L)
+    val emptyRing = MaterialTheme.colorScheme.surfaceContainerHighest
     Canvas(Modifier.fillMaxSize()) {
         val stroke = size.minDimension * 0.18f
         val diameter = size.minDimension - stroke
@@ -779,7 +766,7 @@ private fun DonutChart(models: List<ModelUsage>, total: Long) {
         val arcSize = Size(diameter, diameter)
         if (models.isEmpty() || total <= 0L) {
             drawArc(
-                color = Color(0xFF3A3A3A),
+                color = emptyRing,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,

@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.settings.UiLang
+import com.andmx.ui2.theme.AndMXType
 
 data class StarterSuggestion(val title: String, val prompt: String)
 
@@ -133,7 +134,7 @@ fun StarterSuggestions(
                     )
                     Text(
                         suggestion.prompt,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

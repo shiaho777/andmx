@@ -113,7 +113,7 @@ private val DarkColors = darkColorScheme(
 @Composable
 fun AndMX2Theme(
     themeMode: String = "system",
-    dynamicColor: Boolean = false,
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -147,6 +147,7 @@ fun AndMX2Theme(
     CompositionLocalProvider(LocalMotion provides rememberMotion()) {
         MaterialTheme(
             colorScheme = colorScheme,
+            typography = AndMXTypography,
             content = content,
         )
     }

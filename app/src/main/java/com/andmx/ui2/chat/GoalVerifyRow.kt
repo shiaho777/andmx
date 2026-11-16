@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 
@@ -83,7 +84,6 @@ fun GoalVerifyRow(item: GoalVerifyItem) {
             Text(
                 text = "目标验证 #${item.iteration} · $statusText",
                 style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 ),
                 color = statusColor.copy(alpha = if (running) 0.72f else 0.9f),
@@ -113,7 +113,7 @@ fun GoalVerifyRow(item: GoalVerifyItem) {
                 if (item.reason.isNotBlank()) {
                     Text(
                         text = item.reason,
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
@@ -123,7 +123,7 @@ fun GoalVerifyRow(item: GoalVerifyItem) {
                     Text(
                         text = "下一步：${item.nextAction}",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 12.sp,
+                            fontSize = AndMXType.cardMeta.fontSize,
                             fontWeight = FontWeight.Medium,
                         ),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),

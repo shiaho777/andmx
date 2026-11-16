@@ -3,6 +3,7 @@ package com.andmx.ui2.settings.pages
 import com.andmx.ui2.settings.tr
 
 import androidx.compose.animation.AnimatedContent
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -354,7 +355,7 @@ private fun McpSearchField(
                 singleLine = true,
                 textStyle = TextStyle(
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 14.sp,
+                    fontSize = AndMXType.input.fontSize,
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.fillMaxWidth(),
