@@ -5,7 +5,6 @@ import androidx.test.core.app.ApplicationProvider
 import com.andmx.agent.zcode.PlanModeState
 import com.andmx.agent.zcode.TodoState
 import com.andmx.agent.zcode.buildZCodeToolSurface
-import com.andmx.agent.zcode.isPlanModeAllowed
 import com.andmx.exec.policy.NetworkPolicy
 import android.app.Application
 import org.junit.Assert.assertEquals
@@ -33,13 +32,33 @@ class ComputerToolSurfaceTest {
 
     @Test
     fun computerToolDefaultsToExecuteRiskAndIsGatedOutOfPlanMode() {
-        val computer = surface().single { it.name == "computer" }
+        val tools = surface()
+        val computer = tools.single { it.name == "computer" }
         assertEquals(ToolRisk.EXECUTE, computer.risk)
-        assertFalse(isPlanModeAllowed("computer"))
-        assertTrue(isPlanModeAllowed("read"))
-        assertTrue(isPlanModeAllowed("mcp_anything"))
-        assertFalse(isPlanModeAllowed("bash"))
-        assertFalse(isPlanModeAllowed("write"))
+        val service = com.andmx.agent.permission.PermissionService()
+        fun planDecision(tool: Tool): String = service.checkPermission(
+            com.andmx.agent.permission.PermissionContext(
+                toolName = tool.name,
+                mode = com.andmx.agent.permission.CollaborationMode.PLAN,
+                riskLevel = tool.riskLevel,
+            ),
+            com.andmx.agent.permission.PermissionToolCapability(
+                userApprovalRule = tool.userApprovalRule,
+                allowedInPlanMode = tool.allowedInPlanMode,
+                alwaysAsk = tool.alwaysAsk,
+                readOnly = tool.readOnly,
+                destructive = tool.destructive,
+                requiresUserInteraction = tool.requiresUserInteraction,
+                sideEffectScope = tool.sideEffectScope,
+                riskLevel = tool.riskLevel,
+                needsApproval = tool.needsApproval,
+                permissionName = tool.permissionName,
+            ),
+        ).decision
+        assertEquals("deny", planDecision(computer))
+        assertEquals("allow", planDecision(tools.first { it.name == "Read" }))
+        assertEquals("deny", planDecision(tools.first { it.name == "Bash" }))
+        assertEquals("deny", planDecision(tools.first { it.name == "Write" }))
     }
 
     @Test

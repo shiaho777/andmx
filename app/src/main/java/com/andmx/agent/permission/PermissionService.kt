@@ -361,11 +361,9 @@ class PermissionService(
             val url = jsonString(context.input, "url") ?: return emptyList()
             return WebFetchPreapproved.domainSubject(url)?.let { listOf(it) } ?: emptyList()
         }
-        for (key in listOf("command", "url", "file_path", "path", "pattern", "patch_text")) {
-            val value = jsonString(context.input, key)
-            if (value != null) return listOf(value)
-        }
-        return emptyList()
+        return listOf("command", "url", "file_path", "path", "pattern", "patch_text")
+            .mapNotNull { jsonString(context.input, it) }
+            .distinct()
     }
 
     private fun matchesContent(subject: String, ruleContent: String): Boolean {

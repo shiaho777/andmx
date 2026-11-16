@@ -3,7 +3,6 @@ package com.andmx.agent
 import com.andmx.agent.multi.SubagentCatalog
 import com.andmx.agent.zcode.AskUserQuestionParser
 import com.andmx.agent.zcode.ZCodePrompts
-import com.andmx.agent.zcode.isPlanModeAllowed
 import com.andmx.llm.ApiFunctionCall
 import com.andmx.llm.ApiMessage
 import com.andmx.llm.ApiToolCall
@@ -47,18 +46,39 @@ class ZCodeAlignmentTest {
 
     @Test
     fun planModeAllowsReadsAndTodosBlocksWrites() {
-        assertTrue(isPlanModeAllowed("Read"))
-        assertTrue(isPlanModeAllowed("read_file"))
-        assertTrue(isPlanModeAllowed("Grep"))
-        assertTrue(isPlanModeAllowed("TodoWrite"))
-        assertTrue(isPlanModeAllowed("EnterPlanMode"))
-        assertTrue(isPlanModeAllowed("ExitPlanMode"))
-        assertTrue(isPlanModeAllowed("AskUserQuestion"))
-        assertTrue(isPlanModeAllowed("Skill"))
-        assertFalse(isPlanModeAllowed("Write"))
-        assertFalse(isPlanModeAllowed("Edit"))
-        assertFalse(isPlanModeAllowed("Bash"))
-        assertFalse(isPlanModeAllowed("write_file"))
+        val service = com.andmx.agent.permission.PermissionService()
+        fun decide(tool: Tool): String = service.checkPermission(
+            com.andmx.agent.permission.PermissionContext(
+                toolName = tool.name,
+                mode = com.andmx.agent.permission.CollaborationMode.PLAN,
+                riskLevel = tool.riskLevel,
+            ),
+            com.andmx.agent.permission.PermissionToolCapability(
+                userApprovalRule = tool.userApprovalRule,
+                allowedInPlanMode = tool.allowedInPlanMode,
+                alwaysAsk = tool.alwaysAsk,
+                readOnly = tool.readOnly,
+                destructive = tool.destructive,
+                requiresUserInteraction = tool.requiresUserInteraction,
+                sideEffectScope = tool.sideEffectScope,
+                riskLevel = tool.riskLevel,
+                needsApproval = tool.needsApproval,
+                permissionName = tool.permissionName,
+            ),
+        ).decision
+        fun fakeTool(toolName: String, toolRisk: ToolRisk, destructive: Boolean = false) = object : Tool {
+            override val name = toolName
+            override val description = ""
+            override val parameters = buildJsonObject { }
+            override val risk = toolRisk
+            override val destructive = destructive
+            override suspend fun execute(args: JsonObject) = ToolResult("ok")
+        }
+        assertEquals("allow", decide(fakeTool("Read", ToolRisk.READ)))
+        assertEquals("allow", decide(fakeTool("Grep", ToolRisk.READ)))
+        assertEquals("allow", decide(UpdatePlanTool()))
+        assertEquals("deny", decide(fakeTool("Edit", ToolRisk.WRITE)))
+        assertEquals("deny", decide(fakeTool("Bash", ToolRisk.EXECUTE, destructive = true)))
     }
 
     @Test

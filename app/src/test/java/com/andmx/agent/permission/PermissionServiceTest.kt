@@ -186,6 +186,32 @@ class PermissionServiceTest {
     }
 
     @Test
+    fun multiKeyInputMatchesAnySubject() {
+        val input = mapOf(
+            "command" to "echo hello",
+            "file_path" to "/root/project/secrets.txt",
+        )
+        val byPath = PermissionService().checkPermission(
+            ctx("Bash", CollaborationMode.BUILD, input = input),
+            bashCap,
+            PermissionRuleset(allow = listOf(PermissionRuleValue("Bash", "/root/project/*"))),
+        )
+        assertEquals("allow", byPath.decision)
+        val byCommand = PermissionService().checkPermission(
+            ctx("Bash", CollaborationMode.BUILD, input = input),
+            bashCap,
+            PermissionRuleset(allow = listOf(PermissionRuleValue("Bash", "echo:*"))),
+        )
+        assertEquals("allow", byCommand.decision)
+        val denied = PermissionService().checkPermission(
+            ctx("Bash", CollaborationMode.BUILD, input = input),
+            bashCap,
+            PermissionRuleset(deny = listOf(PermissionRuleValue("Bash", "/root/project/secrets.txt"))),
+        )
+        assertEquals("deny", denied.decision)
+    }
+
+    @Test
     fun webFetchPreapproveAndDomainDeny() {
         val fetch = PermissionToolCapability(
             readOnly = true,
