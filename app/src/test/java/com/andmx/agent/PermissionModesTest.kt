@@ -1,49 +1,56 @@
 package com.andmx.agent
 
+import com.andmx.agent.permission.CollaborationMode
+import com.andmx.agent.permission.PermissionContext
+import com.andmx.agent.permission.PermissionService
+import com.andmx.agent.permission.PermissionToolCapability
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PermissionModesTest {
+    private fun decide(mode: CollaborationMode, tool: Tool) =
+        PermissionService().checkPermission(
+            PermissionContext(toolName = tool.name, mode = mode, riskLevel = tool.riskLevel),
+            PermissionToolCapability(
+                userApprovalRule = tool.userApprovalRule,
+                allowedInPlanMode = tool.allowedInPlanMode,
+                alwaysAsk = tool.alwaysAsk,
+                readOnly = tool.readOnly,
+                destructive = tool.destructive,
+                requiresUserInteraction = tool.requiresUserInteraction,
+                sideEffectScope = tool.sideEffectScope,
+                riskLevel = tool.riskLevel,
+                needsApproval = tool.needsApproval,
+                permissionName = tool.permissionName,
+            ),
+        )
+
     @Test
     fun autoAllowsLowRiskAndAsksForDestructive() {
-        val read = PermissionModes.decide(PermissionModes.Kind.AUTO, readTool())
-        val bash = PermissionModes.decide(PermissionModes.Kind.AUTO, bashTool())
-        assertEquals(PermissionModes.Effect.ALLOW, read.effect)
-        assertEquals(PermissionModes.Effect.ASK, bash.effect)
+        val read = decide(CollaborationMode.AUTO, readTool())
+        val bash = decide(CollaborationMode.AUTO, bashTool())
+        assertEquals("allow", read.decision)
+        assertEquals("ask", bash.decision)
         assertEquals("mode.auto.destructive", bash.ruleId)
     }
 
     @Test
     fun editAllowsFileEditsAndAsksForBash() {
-        val edit = PermissionModes.decide(PermissionModes.Kind.EDIT, editTool())
-        val bash = PermissionModes.decide(PermissionModes.Kind.EDIT, bashTool())
-        assertEquals(PermissionModes.Effect.ALLOW, edit.effect)
-        assertEquals(PermissionModes.Effect.ASK, bash.effect)
+        assertEquals("allow", decide(CollaborationMode.EDIT, editTool()).decision)
+        assertEquals("ask", decide(CollaborationMode.EDIT, bashTool()).decision)
     }
 
     @Test
     fun buildAllowsReadOnlyAndAsksForSideEffects() {
-        assertEquals(
-            PermissionModes.Effect.ALLOW,
-            PermissionModes.decide(PermissionModes.Kind.BUILD, readTool()).effect,
-        )
-        assertEquals(
-            PermissionModes.Effect.ASK,
-            PermissionModes.decide(PermissionModes.Kind.BUILD, editTool()).effect,
-        )
+        assertEquals("allow", decide(CollaborationMode.BUILD, readTool()).decision)
+        assertEquals("ask", decide(CollaborationMode.BUILD, editTool()).decision)
     }
 
     @Test
     fun planAllowsReadOnlyOnly() {
-        assertEquals(
-            PermissionModes.Effect.ALLOW,
-            PermissionModes.decide(PermissionModes.Kind.PLAN, readTool()).effect,
-        )
-        assertEquals(
-            PermissionModes.Effect.DENY,
-            PermissionModes.decide(PermissionModes.Kind.PLAN, editTool()).effect,
-        )
+        assertEquals("allow", decide(CollaborationMode.PLAN, readTool()).decision)
+        assertEquals("deny", decide(CollaborationMode.PLAN, editTool()).decision)
     }
 
     private fun readTool() = object : Tool {

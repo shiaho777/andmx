@@ -642,12 +642,6 @@ class ReadSessionContextTool(
                 )
                 return ToolResult(formatReadSessionContextModelContent(failed, sessionId), isError = true)
             }
-            val missing = SessionContextRead(
-                status = "not_found",
-                source = "local",
-                content = TOPIC_ARCHIVE_EMPTY_CONTENT,
-            )
-            return ToolResult(formatReadSessionContextModelContent(missing, sessionId))
         }
         val maxTokens = args.int("maxTokens") ?: READ_SESSION_CONTEXT_DEFAULT_MAX_TOKENS
         if (maxTokens !in 1..READ_SESSION_CONTEXT_MAX_TOKENS) {
@@ -808,28 +802,4 @@ fun buildZCodeToolSurface(
     return zcode
 }
 
-/** Plan-mode write gate: only allow read-like tools while plan mode is active. */
-fun isPlanModeAllowed(toolName: String): Boolean {
-    val n = toolName.lowercase()
-    if (n.startsWith("mcp_")) return true
-    if (n in setOf(
-        "read", "read_file", "grep", "glob", "list_dir", "listdir",
-        "webfetch", "browse", "websearch", "web_search",
-        "todoread", "todowrite", "update_plan",
-        "enterplanmode", "exitplanmode", "askuserquestion",
-        "readsessioncontext", "skill", "agent", "task", "taskoutput", "taskstop", "spawn_agent", "multi_agent",
-        "listmodels", "cronlist", "toolsearch", "deferredtoolcall",
-        "listsavedworkflows", "listworkflowruns", "getworkflowrun",
-        "getworkflowrunroster", "evalworkflowsnippet",
-        "get_goal", "create_goal", "update_goal",
-        "android_preflight", "android_discover_project", "android_list_devices",
-        "android_list_avds", "android_ui_status", "android_ui_describe", "android_ui_resolve",
-        "android_logs", "storage_overview", "storage_scan", "storage_find_large",
-        "storage_find_junk", "storage_find_duplicates", "storage_app_usage",
-        "storage_preview_delete", "storage_compare",
-        "html_video_workspace_scan", "html_video_deliver",
-        "forge_env_scan", "forge_list_profiles", "forge_recipe_recommend",
-        "forge_recipe_plan", "forge_check_step", "forge_project_status",
-    )) return true
-    return false
-}
+

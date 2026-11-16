@@ -211,19 +211,36 @@ class SessionControlToolsTest {
     }
 
     @Test
-    fun topicStrategyDoesNotReportArchivedSuccess() = runTest {
-        val tool = ReadSessionContextTool { _, _, _, _ ->
-            error("topic must not read the keyword dump")
+    fun topicStrategyResolvesArchiveAndReportsEmptyAsNotFound() = runTest {
+        var resolvedStrategy = ""
+        val empty = ReadSessionContextTool { _, _, strategy, _ ->
+            resolvedStrategy = strategy
+            SessionContextRead(status = "not_found", source = "local", content = TOPIC_ARCHIVE_EMPTY_CONTENT)
         }
-        val topic = tool.execute(buildJsonObject {
+        val topic = empty.execute(buildJsonObject {
             put("query", "hello")
             put("strategy", "topic")
         })
+        assertEquals("topic", resolvedStrategy)
         assertFalse(topic.isError)
         assertEquals("Session current was not found.", topic.output)
-        assertFalse(topic.output.contains("returned"))
-        assertFalse(topic.output.contains("keyword"))
-        val other = tool.execute(buildJsonObject {
+
+        val populated = ReadSessionContextTool { _, _, _, _ ->
+            SessionContextRead(
+                status = "success",
+                source = "local",
+                content = """{"coverage":"1/1","records":[{"id":"m1","text":"hello"}]}""",
+            )
+        }
+        val hit = populated.execute(buildJsonObject {
+            put("query", "hello")
+            put("strategy", "topic")
+        })
+        assertFalse(hit.isError)
+        assertTrue(hit.output.contains("returned local context"))
+        assertTrue(hit.output.contains("m1"))
+
+        val other = empty.execute(buildJsonObject {
             put("query", "hello")
             put("strategy", "topic")
             put("sessionId", "sess_other")

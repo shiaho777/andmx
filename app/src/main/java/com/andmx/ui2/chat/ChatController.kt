@@ -18,7 +18,6 @@ import com.andmx.agent.ContextBreakdown
 import com.andmx.agent.ToolArgs
 import com.andmx.agent.TracedLlm
 import com.andmx.agent.ModelCallTrace
-import com.andmx.agent.PermissionModes
 import com.andmx.agent.Decision
 import com.andmx.agent.EditFileTool
 import com.andmx.agent.GitTool
@@ -31,7 +30,6 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolRisk
 import com.andmx.agent.TurnContext
 import com.andmx.agent.UpdatePlanTool
-import com.andmx.agent.zcode.isPlanModeAllowed
 import com.andmx.agent.zcode.WorkflowTools
 import com.andmx.agent.zcode.applyDynamicWorkflowGate
 import com.andmx.agent.zcode.buildZCodeToolSurface
@@ -152,6 +150,7 @@ class ChatController private constructor(private val context: Context) {
     private val settingsStore = SettingsStore(context)
     private val providerStore = ProviderStore(context)
     private val repo = ConversationRepository(context)
+    private val topicArchive = com.andmx.data.TopicArchive(context)
     private val projectManager = com.andmx.workspace.ProjectManager(context)
     private val access = WorkspaceAccess(context)
     private val networkPolicy = NetworkPolicy.PERMISSIVE
@@ -1557,6 +1556,17 @@ class ChatController private constructor(private val context: Context) {
     ): Flow<ChatEvent> = flow {
         emit(ChatEvent.UserMessage(text, images))
         repo.addMessage(conversationId, "user", text, imageUrls = images)
+        runCatching {
+            topicArchive.append(
+                conversationId.toString(),
+                com.andmx.data.TopicRecord(
+                    id = "msg-${System.currentTimeMillis()}",
+                    text = text,
+                    senderType = "user",
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+        }
         var firstUserMessage = false
         runCatching {
             val conv = repo.conversation(conversationId)
@@ -2615,11 +2625,34 @@ class ChatController private constructor(private val context: Context) {
         }
         if (strategy == "topic") {
             val id = if (sessionId == "current") conversationId.toString() else sessionId
+            val result = topicArchive.read(id, query, cursor = 0, maxTokens = maxTokens)
+            if (result.records.isEmpty()) {
+                return com.andmx.agent.zcode.SessionContextRead(
+                    status = "not_found",
+                    source = "local",
+                    sessionId = id,
+                    content = com.andmx.agent.zcode.TOPIC_ARCHIVE_EMPTY_CONTENT,
+                )
+            }
+            val content = kotlinx.serialization.json.buildJsonObject {
+                put("coverage", kotlinx.serialization.json.JsonPrimitive("${result.records.size}/${result.total}"))
+                put("records", kotlinx.serialization.json.JsonArray(result.records.map { rec ->
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("id", kotlinx.serialization.json.JsonPrimitive(rec.id))
+                        put("text", kotlinx.serialization.json.JsonPrimitive(rec.text))
+                        put("senderType", kotlinx.serialization.json.JsonPrimitive(rec.senderType))
+                        put("createdAt", kotlinx.serialization.json.JsonPrimitive(rec.createdAt))
+                        if (rec.clipped) put("clipped", kotlinx.serialization.json.JsonPrimitive(true))
+                    }
+                }))
+            }.toString()
             return com.andmx.agent.zcode.SessionContextRead(
-                status = "not_found",
+                status = "success",
                 source = "local",
                 sessionId = id,
-                content = com.andmx.agent.zcode.TOPIC_ARCHIVE_EMPTY_CONTENT,
+                content = content,
+                truncated = result.truncated,
+                nextCursor = result.nextCursor,
             )
         }
         val lookupId = if (sessionId == "current") conversationId.toString() else sessionId
@@ -2881,12 +2914,6 @@ class ChatController private constructor(private val context: Context) {
         }
         return if (deferred.await()) ApprovalOutcome.AllowedOnce else ApprovalOutcome.Rejected()
     }
-
-private fun PermissionModes.Effect.toDecision(): Decision = when (this) {
-    PermissionModes.Effect.ALLOW -> Decision.AUTO
-    PermissionModes.Effect.ASK -> Decision.PROMPT
-    PermissionModes.Effect.DENY -> Decision.DENY
-}
 
 /** 权限规则的匹配主体：命令原文 / 文件路径 / url，与 ruleContent 对齐比较。 */
     private fun ruleSubject(toolName: String, args: JsonObject): String {

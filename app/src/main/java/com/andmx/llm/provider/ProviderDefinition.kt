@@ -174,7 +174,7 @@ data class ProviderDefinition(
     val kind: ProviderKind = ProviderKind.OPENAI,
     /** Base URL, no trailing slash (e.g. "https://api.openai.com/v1"). */
     val baseUrl: String,
-    /** API key, stored in plaintext for now (encryption can be layered later). */
+    /** API key; persisted AES-GCM encrypted via ProviderStore/CredentialCipher (Keystore-backed). */
     val apiKey: String = "",
     /** Whether a non-blank apiKey is required to consider this provider usable. */
     val apiKeyRequired: Boolean = true,
