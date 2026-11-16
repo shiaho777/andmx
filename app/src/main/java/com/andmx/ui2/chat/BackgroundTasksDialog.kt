@@ -112,6 +112,7 @@ private fun TaskRow(
                             BackgroundTasks.TaskState.COMPLETED -> MaterialTheme.colorScheme.tertiary
                             BackgroundTasks.TaskState.KILLED -> MaterialTheme.colorScheme.outline
                             BackgroundTasks.TaskState.FAILED -> MaterialTheme.colorScheme.error
+                            BackgroundTasks.TaskState.INTERRUPTED -> MaterialTheme.colorScheme.outlineVariant
                         },
                     ),
             )
@@ -164,4 +165,5 @@ private fun statusLabel(task: BackgroundTasks.Snapshot): String = when (task.sta
     BackgroundTasks.TaskState.COMPLETED -> tr("已完成") + (task.exitCode?.let { " · exit=$it" } ?: "")
     BackgroundTasks.TaskState.FAILED -> tr("失败") + (task.exitCode?.let { " · exit=$it" } ?: "")
     BackgroundTasks.TaskState.KILLED -> tr("已停止")
+    BackgroundTasks.TaskState.INTERRUPTED -> tr("已中断")
 }

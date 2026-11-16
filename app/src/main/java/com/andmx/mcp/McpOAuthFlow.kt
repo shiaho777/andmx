@@ -42,19 +42,31 @@ object McpOAuthFlow {
     private val _lastResult = MutableStateFlow<Result?>(null)
     val lastResult: StateFlow<Result?> = _lastResult.asStateFlow()
 
-    fun start(context: Context, server: McpServerConfig): Result {
+    suspend fun start(context: Context, server: McpServerConfig): Result {
+        if (server.transport == McpTransport.STDIO) return fail("仅 HTTP/SSE MCP 服务器支持 OAuth 授权")
+        if (server.oauthJson.isNotBlank() && McpOAuthConfig.parse(server.oauthJson) == null) {
+            return fail("OAuth 配置不是有效 JSON")
+        }
+        val oauth = McpOAuth(context)
         val config = McpOAuthConfig.parse(server.oauthJson)
-            ?: return fail("OAuth 配置不是有效 JSON")
-        if (config.authorizationUrl.isBlank()) return fail("OAuth 配置缺少 authorizationUrl")
-        if (config.tokenUrl.isBlank()) return fail("OAuth 配置缺少 tokenUrl")
-        if (config.clientId.isBlank()) return fail("OAuth 配置缺少 clientId")
+        val stored = McpOAuthStore(context).load(server)
+        val clientId = config?.clientId?.takeIf { it.isNotBlank() }
+            ?: stored?.clientId?.takeIf { it.isNotBlank() }
+        if (clientId.isNullOrBlank()) {
+            val registered = McpDynamicRegistration.register(context, server)
+            if (!registered.ok) {
+                return fail("${registered.message}；也可手动填写 clientId 后重试")
+            }
+        }
 
         val verifier = randomToken(32)
         val state = randomToken(16)
-        val redirectUri = config.redirectUri.ifBlank { REDIRECT_URI }
+        val redirectUri = config?.redirectUri?.takeIf { it.isNotBlank() }
+            ?: stored?.redirectUri?.takeIf { it.isNotBlank() }
+            ?: REDIRECT_URI
         val challenge = codeChallenge(verifier)
-        val url = McpOAuth(context).authorizationUrl(server, state, challenge, redirectUri)
-            ?: return fail("无法生成授权地址")
+        val url = oauth.authorizationUrl(server, state, challenge, redirectUri)
+            ?: return fail("无法生成授权地址：请填写 authorizationUrl / tokenUrl，或确认服务器提供 OAuth 元数据")
         val pending = Pending(
             serverLine = server.toLine(),
             verifier = verifier,
@@ -97,7 +109,7 @@ object McpOAuthFlow {
         val server = McpServerConfig.parse(pending.serverLine).firstOrNull()
             ?: return fail("无法恢复 MCP 服务器配置")
         val token = oauth.exchangeCode(server, code, pending.verifier, pending.redirectUri)
-            ?: return fail("换取 access token 失败")
+            ?: return fail("换取 access token 失败：请检查 tokenUrl 与客户端凭据（clientId/clientSecret）")
         val result = Result(true, "MCP 授权成功，已保存 token")
         _lastResult.value = result
         return result

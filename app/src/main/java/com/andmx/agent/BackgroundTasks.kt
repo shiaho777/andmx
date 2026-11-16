@@ -23,14 +23,41 @@ import kotlinx.coroutines.launch
  * queued_system_notification 回到主代理。状态词对齐上游：
  * 正常退出 → completed（含非零 exit），被停止 → killed，启动失败 → failed。
  */
-class BackgroundTasks(context: Context) {
+class BackgroundTasks(
+    context: Context,
+    private val conversationId: Long = 0L,
+    private val persistTask: (suspend (TaskRecord) -> Unit)? = null,
+    private val loadTasks: (suspend (Long) -> List<TaskRecord>)? = null,
+) {
     private val appContext = context.applicationContext
     private val runtime = ProotRuntime(appContext)
     private val guestFs = GuestFs(runtime)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val tasks = ConcurrentHashMap<String, BgTask>()
 
-    enum class TaskState { RUNNING, COMPLETED, FAILED, KILLED }
+    enum class TaskState { RUNNING, COMPLETED, FAILED, KILLED, INTERRUPTED }
+
+    data class TaskRecord(
+        val id: String,
+        val conversationId: Long,
+        val command: String,
+        val cwd: String,
+        val status: String,
+        val outputPath: String,
+        val startedAt: Long,
+        val finishedAt: Long? = null,
+        val exitCode: Int? = null,
+    )
+
+    companion object {
+        fun interruptRunning(records: List<TaskRecord>, now: Long): List<TaskRecord> =
+            records.map { record ->
+                if (record.status == "running") record.copy(status = "interrupted", finishedAt = now) else record
+            }
+
+        fun stateFromStatus(status: String): TaskState =
+            TaskState.entries.firstOrNull { it.name.equals(status, ignoreCase = true) } ?: TaskState.INTERRUPTED
+    }
 
     class BgTask(
         val id: String,
@@ -42,6 +69,8 @@ class BackgroundTasks(context: Context) {
         @Volatile var exitCode: Int? = null,
         @Volatile internal var process: Process? = null,
         internal var job: Job? = null,
+        val conversationId: Long = 0L,
+        @Volatile var finishedAt: Long? = null,
     ) {
         val statusWord: String
             get() = when (state) {
@@ -49,7 +78,20 @@ class BackgroundTasks(context: Context) {
                 TaskState.COMPLETED -> "completed"
                 TaskState.FAILED -> "failed"
                 TaskState.KILLED -> "killed"
+                TaskState.INTERRUPTED -> "interrupted"
             }
+
+        fun toRecord(): TaskRecord = TaskRecord(
+            id = id,
+            conversationId = conversationId,
+            command = command,
+            cwd = cwd,
+            status = statusWord,
+            outputPath = outputPath,
+            startedAt = startedAt,
+            finishedAt = finishedAt,
+            exitCode = exitCode,
+        )
     }
 
     /** UI 快照：不暴露 Process/Job，且每次刷新都会产生新对象，StateFlow 才会发值。 */
@@ -93,15 +135,47 @@ class BackgroundTasks(context: Context) {
 
     fun get(id: String): BgTask? = tasks[id]
 
+    private fun persist(task: BgTask) {
+        val writer = persistTask ?: return
+        scope.launch { runCatching { writer(task.toRecord()) } }
+    }
+
+    suspend fun restore(): List<TaskRecord> {
+        val loader = loadTasks ?: return emptyList()
+        val stored = runCatching { loader(conversationId) }.getOrDefault(emptyList())
+        val now = System.currentTimeMillis()
+        val records = interruptRunning(stored.filter { !tasks.containsKey(it.id) }, now)
+        val writer = persistTask
+        records.forEach { record ->
+            tasks[record.id] = BgTask(
+                id = record.id,
+                command = record.command,
+                cwd = record.cwd,
+                outputPath = record.outputPath,
+                startedAt = record.startedAt,
+                state = stateFromStatus(record.status),
+                exitCode = record.exitCode,
+                conversationId = record.conversationId,
+                finishedAt = record.finishedAt,
+            )
+            if (writer != null && record.status == "interrupted") {
+                runCatching { writer(record) }
+            }
+        }
+        refresh()
+        return records
+    }
+
     fun startShell(command: String, cwd: String): BgTask {
         val id = "bash-${System.currentTimeMillis()}-${(1000..9999).random()}"
         val guestOut = "/root/.andmx/tasks/$id.output"
         val hostFile = runCatching { guestFs.resolve(guestOut) }
             .getOrElse { File(appContext.filesDir, "background_tasks/$id.output") }
         hostFile.parentFile?.mkdirs()
-        val task = BgTask(id = id, command = command, cwd = cwd, outputPath = guestOut)
+        val task = BgTask(id = id, command = command, cwd = cwd, outputPath = guestOut, conversationId = conversationId)
         tasks[id] = task
         refresh()
+        persist(task)
         task.job = scope.launch { runTask(task, hostFile) }
         return task
     }
@@ -126,7 +200,9 @@ class BackgroundTasks(context: Context) {
         }.getOrElse {
             hostFile.appendText("执行失败: ${it.message}\n[exit=-1]\n")
             task.state = TaskState.FAILED
+            task.finishedAt = System.currentTimeMillis()
             refresh()
+            persist(task)
             _events.tryEmit(Event.Terminated(task))
             return
         }
@@ -151,7 +227,9 @@ class BackgroundTasks(context: Context) {
             task.process = null
             runCatching { if (process.isAlive) process.destroyForcibly() }
             runCatching { process.inputStream.close() }
+            if (task.finishedAt == null) task.finishedAt = System.currentTimeMillis()
             refresh()
+            persist(task)
         }
         _events.tryEmit(Event.Terminated(task))
     }
@@ -160,9 +238,11 @@ class BackgroundTasks(context: Context) {
         val task = tasks[id] ?: return false
         if (task.state != TaskState.RUNNING) return false
         task.state = TaskState.KILLED
+        task.finishedAt = System.currentTimeMillis()
         runCatching { task.process?.destroyForcibly() }
         task.job?.cancel()
         refresh()
+        persist(task)
         return true
     }
 

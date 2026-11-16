@@ -48,7 +48,7 @@ class McpOAuthFlowTest {
     }
 
     @Test
-    fun authorizationUrlCarriesPkceAndState() {
+    fun authorizationUrlCarriesPkceAndState() = runBlocking {
         val url = McpOAuth(context = context).authorizationUrl(
             server = server(),
             state = "state-1",

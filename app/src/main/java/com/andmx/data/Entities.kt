@@ -323,6 +323,33 @@ data class WorkspaceChangeEntity(
     val timestamp: Long,
 )
 
+@Entity(
+    tableName = "discovered_tools",
+    primaryKeys = ["conversationId", "toolName"],
+    indices = [Index("conversationId")],
+)
+data class DiscoveredToolEntity(
+    val conversationId: Long,
+    val toolName: String,
+    val discoveredAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "background_tasks",
+    indices = [Index("conversationId"), Index("status")],
+)
+data class BackgroundTaskEntity(
+    @PrimaryKey val id: String,
+    val conversationId: Long,
+    val command: String,
+    val cwd: String,
+    val status: String,
+    val outputPath: String,
+    val startedAt: Long,
+    val finishedAt: Long? = null,
+    val exitCode: Int? = null,
+)
+
 @Entity(tableName = "providers", indices = [Index("isPrimary")])
 data class ProviderEntity(
     /** Stable id: "openai" for presets, a UUID for user-created providers. */

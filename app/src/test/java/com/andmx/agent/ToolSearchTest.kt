@@ -143,4 +143,79 @@ class ToolSearchTest {
         assertEquals("No matching deferred tools found", result.output)
         assertTrue(f.registry.discoveredNames().isEmpty())
     }
+
+    @Test
+    fun deferredModeReturnsToolReferencesWithoutSchemas() = runTest {
+        val registry = ToolSearchRegistry(mode = ToolSearchRegistry.MODE_DEFERRED)
+        val todo = FakeTool("TodoWrite", "update the todo list", shouldDefer = true)
+        val tools = listOf(
+            FakeTool("Read", "read a file"),
+            todo,
+            ToolSearchTool(registry),
+            DeferredToolCallTool(registry),
+        )
+        registry.attach({ tools }, { emptySet() })
+
+        val result = ToolSearchTool(registry).execute(buildJsonObject {
+            put("query", "select:TodoWrite")
+            put("max_results", 5)
+        })
+
+        assertFalse(result.isError)
+        assertTrue(result.output.contains("<tool_references>"))
+        assertTrue(result.output.contains("\"type\":\"tool_reference\""))
+        assertTrue(result.output.contains("\"tool_name\":\"TodoWrite\""))
+        assertFalse(result.output.contains("\"parameters\""))
+        assertFalse(result.output.contains("<functions>"))
+        assertTrue(registry.isDiscovered("TodoWrite"))
+    }
+
+    @Test
+    fun localModeStillExpandsFullSchemas() = runTest {
+        val f = Fixture()
+        assertEquals(ToolSearchRegistry.MODE_LOCAL, f.registry.mode)
+
+        val result = ToolSearchTool(f.registry).execute(buildJsonObject {
+            put("query", "select:TodoWrite")
+            put("max_results", 5)
+        })
+
+        assertTrue(result.output.contains("<functions>"))
+        assertFalse(result.output.contains("tool_reference"))
+    }
+
+    @Test
+    fun discoverInvokesPersistenceAndRestoreReloadsNames() = runTest {
+        val stored = mutableMapOf<String, MutableSet<String>>()
+        val registry = ToolSearchRegistry(
+            conversationId = 7L,
+            persistDiscovered = { convId, name ->
+                stored.getOrPut(convId.toString()) { mutableSetOf() } += name
+            },
+        )
+        registry.discover(listOf("TodoWrite", "CronCreate"))
+        assertEquals(setOf("TodoWrite", "CronCreate"), stored["7"])
+
+        val reopened = ToolSearchRegistry(
+            conversationId = 7L,
+            loadDiscovered = { convId -> stored[convId.toString()]?.toList().orEmpty() },
+        )
+        assertFalse(reopened.isDiscovered("TodoWrite"))
+        reopened.restore()
+        assertTrue(reopened.isDiscovered("TodoWrite"))
+        assertTrue(reopened.isDiscovered("CronCreate"))
+    }
+
+    @Test
+    fun persistenceFailureDoesNotBreakInMemoryDiscovery() = runTest {
+        val registry = ToolSearchRegistry(
+            conversationId = 9L,
+            persistDiscovered = { _, _ -> error("db offline") },
+            loadDiscovered = { _ -> error("db offline") },
+        )
+        registry.discover(listOf("TodoWrite"))
+        assertTrue(registry.isDiscovered("TodoWrite"))
+        registry.restore()
+        assertTrue(registry.isDiscovered("TodoWrite"))
+    }
 }

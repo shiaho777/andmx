@@ -23,8 +23,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkspaceChangeEntity::class,
         WorkflowJournalEntity::class,
         WorkflowActorMessageEntity::class,
+        DiscoveredToolEntity::class,
+        BackgroundTaskEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -58,6 +60,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_20_21,
                     MIGRATION_21_22,
                     MIGRATION_22_23,
+                    MIGRATION_23_24,
                 )
                 .build()
                 .also { instance = it }
@@ -404,6 +407,42 @@ abstract class AndmxDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE cron_automations ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
                 db.execSQL("UPDATE cron_automations SET kind = 'off_peak' WHERE title LIKE '[闲时]%'")
+            }
+        }
+
+        /** v23 → v24: ToolSearch discovered 持久化 + 后台任务元数据抗进程死亡。 */
+        private val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS discovered_tools (
+                        conversationId INTEGER NOT NULL,
+                        toolName TEXT NOT NULL,
+                        discoveredAt INTEGER NOT NULL,
+                        PRIMARY KEY(conversationId, toolName)
+                    )""",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_discovered_tools_conversationId ON discovered_tools(conversationId)",
+                )
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS background_tasks (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        conversationId INTEGER NOT NULL,
+                        command TEXT NOT NULL,
+                        cwd TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        outputPath TEXT NOT NULL,
+                        startedAt INTEGER NOT NULL,
+                        finishedAt INTEGER,
+                        exitCode INTEGER
+                    )""",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_background_tasks_conversationId ON background_tasks(conversationId)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_background_tasks_status ON background_tasks(status)",
+                )
             }
         }
 

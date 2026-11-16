@@ -36,6 +36,7 @@ import com.andmx.mcp.McpTransport
 import com.andmx.ui2.settings.SegmentedRow
 import com.andmx.ui2.settings.SettingsGroup
 import com.andmx.ui2.settings.StackedSettingRow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -176,6 +177,7 @@ fun McpEditPage(
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     var authNote by remember { mutableStateOf<String?>(null) }
+    val authScope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         McpOAuthFlow.lastResult.collect { result ->
@@ -422,7 +424,7 @@ fun McpEditPage(
                 }
                 SettingsGroup("OAuth") {
                     Text(
-                        tr("可选。填写 authorizationUrl / tokenUrl / clientId / scopes 后可走浏览器授权；也可直接填 accessToken 或 refreshToken。"),
+                        tr("可选。填写 authorizationUrl / tokenUrl / clientId / scopes 后可走浏览器授权；也可直接填 accessToken 或 refreshToken。留空时会尝试 OAuth 元数据发现与动态客户端注册（RFC 7591），不支持的服务器请手动填写 clientId。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -438,14 +440,22 @@ fun McpEditPage(
                     )
                     OutlinedButton(
                         onClick = {
-                            val result = runCatching {
-                                McpOAuthFlow.start(context, currentEntry().toConfig())
-                            }.getOrElse {
-                                McpOAuthFlow.Result(false, it.message ?: "授权启动失败")
+                            val entry = runCatching { currentEntry().toConfig() }.getOrNull()
+                            if (entry == null) {
+                                authNote = "✗ 配置无效，无法发起授权"
+                            } else {
+                                authNote = "… 正在准备授权（元数据发现 / 动态注册）"
+                                authScope.launch {
+                                    val result = runCatching {
+                                        McpOAuthFlow.start(context, entry)
+                                    }.getOrElse {
+                                        McpOAuthFlow.Result(false, it.message ?: "授权启动失败")
+                                    }
+                                    authNote = (if (result.ok) "✓ " else "✗ ") + result.message
+                                }
                             }
-                            authNote = (if (result.ok) "✓ " else "✗ ") + result.message
                         },
-                        enabled = oauthText.isNotBlank(),
+                        enabled = oauthText.isNotBlank() || remote,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     ) { Text(tr("浏览器授权")) }
                     authNote?.let {
