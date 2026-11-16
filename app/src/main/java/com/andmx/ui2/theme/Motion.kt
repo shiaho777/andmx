@@ -6,7 +6,12 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.InfiniteRepeatableSpec
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -48,6 +53,32 @@ data class Motion(
     val defaultExpand: FiniteAnimationSpec<IntSize> = paced(enterMs)
     val enterOffset: FiniteAnimationSpec<IntOffset> = paced(enterMs)
     val baseDp: FiniteAnimationSpec<Dp> = paced(baseMs)
+    val springFloat: FiniteAnimationSpec<Float> =
+        if (baseMs <= 0) snap() else spring(dampingRatio = 0.82f, stiffness = 380f)
+    val springDp: FiniteAnimationSpec<Dp> =
+        if (baseMs <= 0) snap() else spring(dampingRatio = 0.82f, stiffness = 380f)
+    val springSize: FiniteAnimationSpec<IntSize> =
+        if (baseMs <= 0) snap() else spring(dampingRatio = 0.9f, stiffness = 380f)
+    val cursorPulse: InfiniteRepeatableSpec<Float> = infiniteRepeatable(
+        animation = tween(durationMillis = if (inkMs <= 0) 1 else 480, easing = LinearEasing),
+        repeatMode = RepeatMode.Reverse,
+    )
+    val shimmerSweep: InfiniteRepeatableSpec<Float> = infiniteRepeatable(
+        animation = tween(durationMillis = if (inkMs <= 0) 1 else 1300, easing = LinearEasing),
+        repeatMode = RepeatMode.Restart,
+    )
+    val thinkSweep: InfiniteRepeatableSpec<Float> = infiniteRepeatable(
+        animation = tween(durationMillis = if (inkMs <= 0) 1 else 1400, easing = LinearEasing),
+        repeatMode = RepeatMode.Restart,
+    )
+
+    fun contentSize(): FiniteAnimationSpec<IntSize> = springSize
+
+    fun overlayEnter(): EnterTransition =
+        slideInVertically(enterOffset) { it / 12 } + fadeIn(enter)
+
+    fun overlayExit(): ExitTransition =
+        slideOutVertically(enterOffset) { it / 12 } + fadeOut(enter)
 
     fun push(): ContentTransform =
         (slideInHorizontally(enterOffset) { it } + fadeIn(enter)) togetherWith

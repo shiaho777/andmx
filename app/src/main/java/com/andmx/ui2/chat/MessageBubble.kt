@@ -134,7 +134,7 @@ private fun UserProcessBubble(
             if (message.content.isNotBlank()) {
                 Text(
                     text = message.content,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = if (isEditing) {
                         MaterialTheme.colorScheme.onTertiaryContainer
                     } else {

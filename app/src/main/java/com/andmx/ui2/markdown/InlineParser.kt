@@ -14,7 +14,12 @@ object InlineParser {
 
     private val escapable = setOf('\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '|', '~')
 
-    fun parse(text: String, defaultColor: Color, linkColor: Color = defaultColor): AnnotatedString =
+    fun parse(
+        text: String,
+        defaultColor: Color,
+        linkColor: Color = defaultColor,
+        codeBackground: Color = Color(0x14000000),
+    ): AnnotatedString =
         buildAnnotatedString {
             var i = 0
             while (i < text.length) {
@@ -57,7 +62,7 @@ object InlineParser {
                             pushStyle(
                                 SpanStyle(
                                     fontFamily = FontFamily.Monospace,
-                                    background = Color(0x14000000),
+                                    background = codeBackground,
                                     color = defaultColor,
                                 ),
                             )
@@ -76,7 +81,7 @@ object InlineParser {
                             pushStyle(
                                 SpanStyle(
                                     fontFamily = FontFamily.Monospace,
-                                    background = Color(0x14000000),
+                                    background = codeBackground,
                                     color = defaultColor,
                                 ),
                             )

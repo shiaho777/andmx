@@ -4,16 +4,13 @@ import com.andmx.ui2.settings.tr
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.clickable
@@ -197,7 +194,6 @@ fun ToolCallCard(
                 Text(
                     text = kindLabel,
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     color = if (toolCall.isError) {
@@ -212,7 +208,7 @@ fun ToolCallCard(
             if (summary.isNotBlank()) {
                 Text(
                     text = " · ",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                 )
                 if (toolCall.isRunning) {
@@ -225,7 +221,7 @@ fun ToolCallCard(
                     ) { s ->
                         Text(
                             text = s,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -234,7 +230,7 @@ fun ToolCallCard(
                 } else {
                     Text(
                         text = summary,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -247,7 +243,7 @@ fun ToolCallCard(
             if (!secondary.isNullOrBlank() && editPreview == null && !expanded) {
                 Text(
                     text = secondary,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -326,7 +322,7 @@ fun ToolCallCard(
                         Spacer(Modifier.width(4.dp))
                         Text(
                             action.label,
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = AndMXType.cardMeta.fontSize),
                         )
                     }
                 }
@@ -392,7 +388,7 @@ fun ToolCallCard(
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     item.content,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                                     color = if (item.status.lowercase() == "completed") {
                                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                     } else {
@@ -456,13 +452,13 @@ fun ToolCallCard(
                             }
                             toolCall.isRunning -> {
                                 Text(tr("执行中…"),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                                 )
                             }
                             toolCall.isError -> {
                                 Text(tr("无输出"),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                                     color = MaterialTheme.colorScheme.error,
                                 )
                             }
@@ -532,7 +528,7 @@ private fun StructuredToolCard(
                         v.take(160),
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
+                            fontSize = AndMXType.micro.fontSize,
                         ),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -614,11 +610,11 @@ private fun StructuredToolCard(
                 stickToBottom = toolCall.isRunning,
             )
             toolCall.isRunning -> Text(tr("执行中…"),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
             )
             toolCall.isError -> Text(tr("无输出"),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.error,
             )
         }
@@ -653,7 +649,7 @@ private fun ExecuteToolCard(toolCall: ToolCall) {
                     "$",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
+                        fontSize = AndMXType.cardMeta.fontSize,
                         lineHeight = 16.sp,
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -662,7 +658,7 @@ private fun ExecuteToolCard(toolCall: ToolCall) {
                     command,
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
+                        fontSize = AndMXType.cardMeta.fontSize,
                         lineHeight = 16.sp,
                     ),
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f),
@@ -684,11 +680,11 @@ private fun ExecuteToolCard(toolCall: ToolCall) {
                 fadeColor = MaterialTheme.colorScheme.surface,
             )
             toolCall.isRunning -> Text(tr("执行中…"),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
             )
             toolCall.isError -> Text(tr("无输出"),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.error,
             )
         }
@@ -725,13 +721,13 @@ private fun AskQuestionsCard(toolCall: ToolCall) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         q.header,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         q.question,
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
                         modifier = Modifier.weight(1f),
                     )
@@ -744,7 +740,7 @@ private fun AskQuestionsCard(toolCall: ToolCall) {
                         autoSkipped -> "— 自动继续，未作答"
                         else -> "— 未作答"
                     },
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = if (answer != null) {
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
                     } else {
@@ -763,7 +759,7 @@ private fun AskQuestionsCard(toolCall: ToolCall) {
         }
         if (toolCall.isError && output.isBlank()) {
             Text(tr("无输出"),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.error,
             )
         }
@@ -827,7 +823,7 @@ private fun FollowableOutputText(
             text = display,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                fontSize = 12.sp,
+                fontSize = AndMXType.cardMeta.fontSize,
                 lineHeight = 16.sp,
             ),
             color = if (emphasize) {
@@ -988,7 +984,7 @@ private fun MetaBlock(
     Column(Modifier.fillMaxWidth()) {
         Text(
             title,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            style = MaterialTheme.typography.labelSmall,
             color = if (emphasize) {
                 MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
             } else {
@@ -1009,7 +1005,7 @@ private fun MetaBlock(
                 body,
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                    fontSize = 12.sp,
+                    fontSize = AndMXType.cardMeta.fontSize,
                     lineHeight = 16.sp,
                 ),
                 color = if (emphasize) {
@@ -1032,10 +1028,7 @@ private fun GradientRunningLabel(text: String) {
     val shift by infinite.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1300, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
+        animationSpec = LocalMotion.current.shimmerSweep,
         label = "tool-shift",
     )
     val c1 = MaterialTheme.colorScheme.primary
@@ -1050,7 +1043,7 @@ private fun GradientRunningLabel(text: String) {
         text = text,
         style = TextStyle(
             brush = brush,
-            fontSize = 13.sp,
+            fontSize = AndMXType.cardTitle.fontSize,
             fontWeight = FontWeight.Medium,
         ),
         maxLines = 1,
@@ -1135,7 +1128,7 @@ private fun AnimatedDiffCounts(
                 Text(
                     "+",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 12.sp,
+                        fontSize = AndMXType.cardMeta.fontSize,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
                     ),
@@ -1154,7 +1147,7 @@ private fun AnimatedDiffCounts(
                 Text(
                     "-",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 12.sp,
+                        fontSize = AndMXType.cardMeta.fontSize,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
                     ),
@@ -1205,7 +1198,7 @@ private fun AnimatedMetricNumber(
     Text(
         text = display.toString(),
         style = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 12.sp,
+            fontSize = AndMXType.cardMeta.fontSize,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
         ),
@@ -1254,7 +1247,7 @@ private fun InlineEditDiffPreview(
             Spacer(Modifier.width(6.dp))
             Text(
                 text = fileNameOf(preview.path).ifBlank { "变更" },
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1268,7 +1261,7 @@ private fun InlineEditDiffPreview(
             )
             if (preview.path.isNotBlank()) {
                 Text(tr("打开"),
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 10.dp),
                 )
@@ -1286,7 +1279,7 @@ private fun InlineEditDiffPreview(
             if (preview.lines.size > lines.size) {
                 Text(
                     text = "… 另有 ${preview.lines.size - lines.size} 行",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
@@ -1480,7 +1473,6 @@ fun ToolGroupCard(tools: List<ToolCall>) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
@@ -1551,7 +1543,7 @@ private fun CompactToolProcessRow(tool: ToolCall) {
             Spacer(Modifier.width(8.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = when {
                     tool.isError -> MaterialTheme.colorScheme.error
                     tool.isRunning -> MaterialTheme.colorScheme.primary
@@ -1561,7 +1553,7 @@ private fun CompactToolProcessRow(tool: ToolCall) {
             if (summary.isNotBlank()) {
                 Text(
                     text = " · $summary",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
@@ -1600,7 +1592,7 @@ private fun CompactToolProcessRow(tool: ToolCall) {
                     text = stripAnsi(tool.output.orEmpty()).take(3000),
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
+                        fontSize = AndMXType.micro.fontSize,
                         lineHeight = 15.sp,
                     ),
                     color = if (tool.isError) {

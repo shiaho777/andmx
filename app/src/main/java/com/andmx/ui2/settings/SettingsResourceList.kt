@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.ui2.theme.AndMXType
 
 @Composable
 fun ResourcePageDescription(text: String, modifier: Modifier = Modifier) {
@@ -93,7 +94,7 @@ fun ResourceSearchField(
                 singleLine = true,
                 textStyle = TextStyle(
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 14.sp,
+                    fontSize = AndMXType.input.fontSize,
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.fillMaxWidth(),

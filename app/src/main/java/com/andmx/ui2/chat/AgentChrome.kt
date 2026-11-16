@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.animation.AnimatedVisibility
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.runtime.LaunchedEffect
@@ -84,7 +85,7 @@ fun ApprovalBanner(
             if (request.reason.isNotBlank()) {
                 Text(
                     request.reason,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -93,7 +94,7 @@ fun ApprovalBanner(
                 Text(
                     request.inputPreview,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
+                        fontSize = AndMXType.cardMeta.fontSize,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     ),
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -109,7 +110,7 @@ fun ApprovalBanner(
             }
             Text(
                 request.summary,
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
@@ -209,7 +210,7 @@ fun PlanStrip(
                 Spacer(Modifier.width(8.dp))
                 Text(
                     step.content,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -267,7 +268,7 @@ fun SubAgentStrip(
                 Column(Modifier.weight(1f)) {
                     Text(
                         agent.task,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -322,7 +323,7 @@ fun ApprovalTimelineCard(
             }
             Text(
                 item.summary,
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 6.dp),
@@ -403,7 +404,7 @@ fun SubAgentTimelineCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(tr("子代理 · ${item.state.lowercase()}"),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = AndMXType.cardMeta.fontSize),
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -417,7 +418,7 @@ fun SubAgentTimelineCard(
             }
             Text(
                 item.task,
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = if (expanded) 6 else 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp),
@@ -432,7 +433,7 @@ fun SubAgentTimelineCard(
                         Text(
                             act,
                             style = MaterialTheme.typography.bodySmall.copy(
-                                fontSize = 11.sp,
+                                fontSize = AndMXType.micro.fontSize,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
@@ -450,7 +451,7 @@ fun SubAgentTimelineCard(
                 Text(
                     item.result.take(4000),
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
+                        fontSize = AndMXType.cardMeta.fontSize,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -572,7 +573,7 @@ fun GoalStrip(
         )
         Text(
             goal.text,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+            style = MaterialTheme.typography.bodySmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSecondaryContainer,

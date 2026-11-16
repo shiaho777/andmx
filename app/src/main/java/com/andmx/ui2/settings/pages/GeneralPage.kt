@@ -91,6 +91,13 @@ fun GeneralPage(onBack: () -> Unit) {
                     )
                 }
                 HorizontalDivider()
+                SwitchRow(
+                    title = "动态取色",
+                    description = "跟随系统壁纸生成 Material You 配色（Android 12 及以上生效）。",
+                    checked = s.dynamicColor,
+                    onCheckedChange = { save(s.copy(dynamicColor = it)) },
+                )
+                HorizontalDivider()
                 StackedSettingRow(
                     title = "界面语言",
                     description = "选择应用 UI 的显示语言。",

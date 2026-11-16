@@ -245,6 +245,7 @@ fun ChatScreen(
     var sideChatExcerpt by remember { mutableStateOf<String?>(null) }
     var showFiles by remember { mutableStateOf(false) }
     var filesInitialPath by remember { mutableStateOf<String?>(null) }
+    var filesLastPath by remember { mutableStateOf<String?>(null) }
     var fileReview by remember { mutableStateOf<com.andmx.ui2.files.FileReviewAnchor?>(null) }
     var fileTreeRequestKey by remember { mutableStateOf(0) }
     var fileTreeRequestPath by remember { mutableStateOf<String?>(null) }
@@ -268,6 +269,7 @@ fun ChatScreen(
             showTerminal -> showTerminal = false
             showFiles -> {
                 showFiles = false
+                filesLastPath = filesInitialPath ?: filesLastPath
                 filesInitialPath = null
                 fileReview = null
             }
@@ -359,6 +361,7 @@ LaunchedEffect(Unit) {
                     val path = action.path
                     viewModel.addFileContext(path)
                     filesInitialPath = path
+                    filesLastPath = path
                     fileReview = action.review
                     showFiles = true
                 }
@@ -721,6 +724,7 @@ LaunchedEffect(Unit) {
                             true
                         }
                         SessionShortcuts.OPEN_FILES -> {
+                            filesInitialPath = filesLastPath
                             showFiles = true
                             true
                         }
@@ -1536,7 +1540,12 @@ LaunchedEffect(Unit) {
             }
 
             // ── 浮层：文件 / 设置（全屏）；终端用底部 sheet，见下方 ──
-            if (showFiles) {
+            val overlayMotion = LocalMotion.current
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showFiles,
+                enter = overlayMotion.overlayEnter(),
+                exit = overlayMotion.overlayExit(),
+            ) {
                 FilesScreen(
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                     initialPath = filesInitialPath,
@@ -1544,7 +1553,11 @@ LaunchedEffect(Unit) {
                     conversationId = currentConversationId,
                 )
             }
-            if (showSettings) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showSettings,
+                enter = overlayMotion.overlayEnter(),
+                exit = overlayMotion.overlayExit(),
+            ) {
                 SettingsScreen(
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                     onClose = {

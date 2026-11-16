@@ -291,10 +291,10 @@ private fun FileRow(
 
 @Composable
 private fun gitKindColor(kind: String): Color = when (kind) {
-    "新增" -> Color(0xFF4CAF50)
-    "修改" -> Color(0xFFFFA726)
-    "删除" -> Color(0xFFEF5350)
-    "重命名" -> Color(0xFF42A5F5)
-    "冲突" -> Color(0xFFEF5350)
+    "新增" -> com.andmx.ui2.theme.ZCodeSuccess
+    "修改" -> com.andmx.ui2.theme.ZCodeWarning
+    "删除" -> MaterialTheme.colorScheme.error
+    "重命名" -> MaterialTheme.colorScheme.tertiary
+    "冲突" -> MaterialTheme.colorScheme.error
     else -> MaterialTheme.colorScheme.primary
 }

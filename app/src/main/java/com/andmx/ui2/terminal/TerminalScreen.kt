@@ -6,6 +6,7 @@ import androidx.compose.ui.text.font.FontFamily
 import android.graphics.Typeface as AndroidTypeface
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.SettingsStore
+import com.andmx.ui2.theme.AndMXType
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -304,7 +305,7 @@ private fun CommandInput(
             singleLine = true,
             textStyle = TextStyle(
                 fontFamily = fontFamily,
-                fontSize = 14.sp,
+                fontSize = AndMXType.input.fontSize,
                 color = colors.foreground,
             ),
             cursorBrush = SolidColor(colors.cursor),

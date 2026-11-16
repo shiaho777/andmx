@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.andmx.exec.remote.RemoteDirEntry
 import com.andmx.exec.remote.RemoteFsClient
 import com.andmx.ui2.icons.FileTypeIcons
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.workspace.ChangeTracker
 import com.andmx.workspace.ProjectManager
 import com.andmx.workspace.WorkspaceKind
@@ -156,7 +157,7 @@ fun WorkspaceFileTree(
                 Text(
                     if (query.isNotBlank()) "没有匹配的文件。" else "当前目录为空。",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -271,14 +272,14 @@ private fun RemoteWorkspaceFileTree(
                     error ?: "加载失败",
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(14.dp),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
             filtered.isEmpty() -> {
                 Text(
                     if (query.isNotBlank()) "没有匹配的文件。" else "当前目录为空。",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -338,7 +339,7 @@ private fun FileTreeShell(
             )
             Spacer(Modifier.width(8.dp))
             Text(tr("返回任务"),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -352,13 +353,13 @@ private fun FileTreeShell(
             Column(Modifier.weight(1f)) {
                 Text(
                     title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 14.sp),
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -424,7 +425,7 @@ private fun FileTreeSearchField(
             singleLine = true,
             textStyle = TextStyle(
                 color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
+                fontSize = AndMXType.input.fontSize,
             ),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = Modifier.weight(1f),
@@ -432,7 +433,7 @@ private fun FileTreeSearchField(
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (query.isEmpty()) {
                         Text(tr("搜索文件..."),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                            style = MaterialTheme.typography.bodyMedium,
                             color = hint,
                         )
                     }
@@ -530,7 +531,7 @@ private fun FileTreeRow(
         Spacer(Modifier.width(10.dp))
         Text(
             name,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+            style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface,

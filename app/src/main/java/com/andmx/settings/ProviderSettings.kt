@@ -30,6 +30,7 @@ data class ProviderSettings(
     val customInstructions: String = "",
     /** "system" | "light" | "dark" */
     val themeMode: String = "system",
+    val dynamicColor: Boolean = true,
     /** accent color hex, e.g. "#339CFF" */
     val accent: String = "#339CFF",
     /** persona/tone, e.g. "务实" | "友好" | "简洁" | "幽默" */
@@ -129,6 +130,7 @@ class SettingsStore(
     private val approvalKey = stringPreferencesKey("approval_mode")
     private val instructionsKey = stringPreferencesKey("custom_instructions")
     private val themeModeKey = stringPreferencesKey("theme_mode")
+    private val dynamicColorKey = androidx.datastore.preferences.core.booleanPreferencesKey("dynamic_color")
     private val accentKey = stringPreferencesKey("accent")
     private val personaKey = stringPreferencesKey("persona")
     private val reasoningKey = stringPreferencesKey("reasoning_effort")
@@ -180,6 +182,7 @@ class SettingsStore(
             approvalMode = p[approvalKey] ?: def.approvalMode,
             customInstructions = p[instructionsKey] ?: def.customInstructions,
             themeMode = p[themeModeKey] ?: def.themeMode,
+            dynamicColor = p[dynamicColorKey] ?: def.dynamicColor,
             accent = p[accentKey] ?: def.accent,
             persona = p[personaKey] ?: def.persona,
             reasoningEffort = p[reasoningKey] ?: def.reasoningEffort,
@@ -226,6 +229,7 @@ class SettingsStore(
             p[approvalKey] = settings.approvalMode
             p[instructionsKey] = settings.customInstructions
             p[themeModeKey] = settings.themeMode
+            p[dynamicColorKey] = settings.dynamicColor
             p[accentKey] = settings.accent
             p[personaKey] = settings.persona
             p[reasoningKey] = settings.reasoningEffort

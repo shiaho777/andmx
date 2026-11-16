@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -118,7 +119,7 @@ fun CommandCenterSheet(
         ) {
             Text(tr("搜索"),
                 style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = 17.sp,
+                    fontSize = AndMXType.stat.fontSize,
                     fontWeight = FontWeight.SemiBold,
                 ),
             )
@@ -240,14 +241,14 @@ private fun CommandResultRow(
         Column(Modifier.weight(1f)) {
             Text(
                 title,
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
             )
             if (subtitle.isNotBlank()) {
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
