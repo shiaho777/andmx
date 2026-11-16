@@ -114,6 +114,7 @@ class SubAgentOrchestrator(
      * null 时保持旧行为（子代理自治，全部放行）。
      */
     private val approveTool: (suspend (permissionMode: String, tool: Tool, args: JsonObject) -> ApprovalOutcome)? = null,
+    private val toolSearch: com.andmx.agent.ToolSearchRegistry? = null,
 ) {
     /** Events emitted by sub-agents. */
     sealed interface SubAgentEvent {
@@ -251,8 +252,13 @@ class SubAgentOrchestrator(
             injectAgentsMd = spec.injectAgentsMd,
         )
         val baseTools = toolsFactory()
-        val tools = SubagentCatalog.filterTools(baseTools, agentDef) +
+        val filtered = SubagentCatalog.filterTools(baseTools, agentDef) +
             RespondToCoordinatorTool(agentId, coordinatorMessageSink)
+        val tools = if (toolSearch != null && filtered.none { it.name == com.andmx.agent.ToolSearchRegistry.TOOL_SEARCH_NAME }) {
+            filtered + toolSearch.controlTools()
+        } else {
+            filtered
+        }
         val (runClient, baseTurn) = resolveRun(spec.model)
         val thought = spec.thoughtLevel.trim()
         val turn = if (thought.isBlank() || thought.equals("inherit", ignoreCase = true)) {
@@ -273,6 +279,7 @@ class SubAgentOrchestrator(
             approve = { tool, args ->
                 approveTool?.invoke(spec.permissionMode, tool, args) ?: ApprovalOutcome.AllowedOnce
             },
+            toolSearch = toolSearch,
         )
 
         val outputFile = spec.outputFile.ifBlank { agentOutputFile(agentId) }

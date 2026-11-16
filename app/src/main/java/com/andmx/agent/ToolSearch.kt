@@ -20,17 +20,30 @@ import kotlinx.serialization.json.putJsonObject
  * 名字出现在 system-reminder 里；ToolSearch 命中后把完整定义展开给模型，
  * DeferredToolCall 再按名字解包执行。没有 registry 的引擎保持旧的全量行为。
  */
-class ToolSearchRegistry {
+class ToolSearchRegistry(
+    private val conversationId: Long = 0L,
+    val mode: String = MODE_LOCAL,
+    private val persistDiscovered: (suspend (Long, String) -> Unit)? = null,
+    private val loadDiscovered: (suspend (Long) -> List<String>)? = null,
+) {
 
     companion object {
         const val TOOL_SEARCH_NAME = "ToolSearch"
         const val DEFERRED_TOOL_CALL_NAME = "DeferredToolCall"
         const val DEFAULT_RESULTS = 5
+        const val MODE_LOCAL = "local"
+        const val MODE_DEFERRED = "deferred"
     }
 
     @Volatile private var toolsProvider: () -> List<Tool> = { emptyList() }
     @Volatile private var hiddenProvider: () -> Set<String> = { emptySet() }
     private val discovered = Collections.synchronizedSet(LinkedHashSet<String>())
+
+    suspend fun restore() {
+        val loader = loadDiscovered ?: return
+        val names = runCatching { loader(conversationId) }.getOrDefault(emptyList())
+        discovered.addAll(names)
+    }
 
     /** 引擎在每次 runTurn 前接上实时工具面与当轮隐藏集合。 */
     fun attach(toolsProvider: () -> List<Tool>, hiddenProvider: () -> Set<String>) {
@@ -53,8 +66,10 @@ class ToolSearchRegistry {
 
     fun discoveredNames(): Set<String> = synchronized(discovered) { discovered.toSet() }
 
-    fun discover(names: Collection<String>) {
+    suspend fun discover(names: Collection<String>) {
         discovered.addAll(names)
+        val persist = persistDiscovered ?: return
+        names.forEach { name -> runCatching { persist(conversationId, name) } }
     }
 
     fun resolveDeferred(name: String): Tool? =
@@ -165,6 +180,25 @@ class ToolSearchTool(
         registry.discover(matched.filter { it.shouldDefer }.map { it.name })
 
         val json = Json { encodeDefaults = true }
+        if (registry.mode == ToolSearchRegistry.MODE_DEFERRED) {
+            val references = matched.joinToString("\n") { tool ->
+                val reference = buildJsonObject {
+                    put("type", "tool_reference")
+                    put("tool_name", tool.name)
+                }
+                json.encodeToString(JsonElement.serializer(), reference)
+            }
+            return ToolResult(
+                buildString {
+                    append("Matched ${matched.size} tool reference(s). Total deferred tools: ${deferred.size}.\n")
+                    append("Schemas stay deferred; call these tools through ${ToolSearchRegistry.DEFERRED_TOOL_CALL_NAME} ")
+                    append("with {\"name\":\"<name>\",\"input\":{...}}.\n\n")
+                    append("<tool_references>\n")
+                    append(references)
+                    append("\n</tool_references>")
+                },
+            )
+        }
         val functions = matched.joinToString("\n") { tool ->
             val definition = buildJsonObject {
                 put("description", tool.description)

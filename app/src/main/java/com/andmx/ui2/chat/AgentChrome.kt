@@ -56,6 +56,8 @@ fun ApprovalBanner(
     onAllow: () -> Unit,
     onDeny: () -> Unit,
     onScope: (ChatController.ApprovalScope) -> Unit = {},
+    suggestions: List<com.andmx.agent.permission.PermissionSuggestion> = emptyList(),
+    onAcceptSuggestion: (com.andmx.agent.permission.PermissionSuggestion) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -122,6 +124,26 @@ fun ApprovalBanner(
                     color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
                     modifier = Modifier.padding(top = 6.dp),
                 )
+            }
+            if (suggestions.isNotEmpty()) {
+                Text(tr("始终允许类似操作"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    suggestions.forEach { suggestion ->
+                        OutlinedButton(onClick = { onAcceptSuggestion(suggestion) }) {
+                            Text(tr(suggestion.label))
+                        }
+                    }
+                }
             }
             // ZCode 对齐：会话/项目级 allow·deny 作用域；普通允许/拒绝走 ONCE。
             Row(

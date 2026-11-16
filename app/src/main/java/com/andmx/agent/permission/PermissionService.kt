@@ -54,6 +54,7 @@ data class PermissionDecisionResult(
     val sideEffectScope: String?,
     val alwaysAsk: Boolean = false,
     val approvalMode: String? = null,
+    val suggestions: List<PermissionSuggestion> = emptyList(),
 )
 
 class PermissionService(
@@ -403,6 +404,7 @@ class PermissionService(
         riskLevel = capability.riskLevel,
         sideEffectScope = capability.sideEffectScope,
         alwaysAsk = capability.alwaysAsk,
+        suggestions = if (decision == "ask") PermissionSuggestions.suggest(context.toolName, context.input) else emptyList(),
     )
 
     private data class ResolvedCapability(

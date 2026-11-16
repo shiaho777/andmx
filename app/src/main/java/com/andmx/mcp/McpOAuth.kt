@@ -34,6 +34,7 @@ data class McpOAuthConfig(
     val tokenType: String = "Bearer",
     val authorizationUrl: String = "",
     val redirectUri: String = "",
+    val registrationEndpoint: String = "",
 ) {
     fun isExpired(now: Long = System.currentTimeMillis()): Boolean =
         accessToken.isNotBlank() && expiresAtMs > 0L && now >= expiresAtMs - 60_000L
@@ -49,6 +50,7 @@ data class McpOAuthConfig(
         if (tokenType.isNotBlank()) put("tokenType", tokenType)
         if (authorizationUrl.isNotBlank()) put("authorizationUrl", authorizationUrl)
         if (redirectUri.isNotBlank()) put("redirectUri", redirectUri)
+        if (registrationEndpoint.isNotBlank()) put("registrationEndpoint", registrationEndpoint)
     }.toString()
 
     companion object {
@@ -78,10 +80,12 @@ data class McpOAuthConfig(
                     "authorizationUrl", "authorization_url", "authorizationEndpoint", "authorization_endpoint",
                 ),
                 redirectUri = body.string("redirectUri", "redirect_uri"),
+                registrationEndpoint = body.string("registrationEndpoint", "registration_endpoint"),
             )
             return config.takeIf {
                 it.accessToken.isNotBlank() || it.refreshToken.isNotBlank() ||
-                    it.tokenUrl.isNotBlank() || it.authorizationUrl.isNotBlank()
+                    it.tokenUrl.isNotBlank() || it.authorizationUrl.isNotBlank() ||
+                    it.registrationEndpoint.isNotBlank()
             }
         }
 
@@ -126,6 +130,8 @@ class McpOAuthStore(context: Context) {
         return McpOAuthConfig.parse(raw)
     }
 
+    fun load(server: McpServerConfig): McpOAuthConfig? = load(McpOAuthKeys.of(server))
+
     fun save(serverName: String, config: McpOAuthConfig) {
         prefs.edit().putString(key(serverName), config.toJson()).apply()
     }
@@ -155,10 +161,17 @@ class McpOAuth(context: Context) {
     internal var poster: ((String, String) -> String?)? = null
 
     suspend fun accessToken(server: McpServerConfig): String? = withContext(Dispatchers.IO) {
-        val configured = McpOAuthConfig.parse(server.oauthJson) ?: return@withContext null
+        val configured = McpOAuthConfig.parse(server.oauthJson)
         val identity = McpOAuthKeys.of(server)
         val stored = store.load(identity)
-        val merged = merge(configured, stored)
+        if (configured == null && stored == null) return@withContext null
+        var merged = merge(configured ?: McpOAuthConfig(), stored)
+        if (merged.accessToken.isBlank() && merged.tokenUrl.isBlank()) {
+            val discovered = McpOAuthDiscovery.fetchMetadata(server.command)
+            if (discovered != null && discovered.tokenEndpoint.isNotBlank()) {
+                merged = merged.copy(tokenUrl = discovered.tokenEndpoint)
+            }
+        }
         if (merged.accessToken.isNotBlank() && !merged.isExpired()) {
             return@withContext merged.accessToken
         }
@@ -171,13 +184,32 @@ class McpOAuth(context: Context) {
         store.clear(McpOAuthKeys.of(server))
     }
 
-    fun authorizationUrl(
+    fun saveRegisteredClient(server: McpServerConfig, config: McpOAuthConfig) {
+        val identity = McpOAuthKeys.of(server)
+        store.save(identity, merge(config, store.load(identity)))
+    }
+
+    suspend fun authorizationUrl(
         server: McpServerConfig,
         state: String,
         codeChallenge: String,
         redirectUri: String,
     ): String? {
-        val config = McpOAuthConfig.parse(server.oauthJson) ?: return null
+        val configured = McpOAuthConfig.parse(server.oauthJson)
+        val stored = store.load(McpOAuthKeys.of(server))
+        if (configured == null && stored == null) return null
+        var config = merge(configured ?: McpOAuthConfig(), stored)
+        if (config.authorizationUrl.isBlank()) {
+            val discovered = McpOAuthDiscovery.fetchMetadata(server.command) ?: return null
+            config = config.copy(
+                authorizationUrl = discovered.authorizationEndpoint,
+                tokenUrl = config.tokenUrl.ifBlank { discovered.tokenEndpoint },
+                scopes = config.scopes.ifEmpty { discovered.scopesSupported },
+            )
+            if (config.tokenUrl.isNotBlank()) {
+                store.save(McpOAuthKeys.of(server), config)
+            }
+        }
         val authorizationUrl = config.authorizationUrl.takeIf { it.isNotBlank() } ?: return null
         val params = buildList {
             add("response_type" to "code")
@@ -200,7 +232,10 @@ class McpOAuth(context: Context) {
         codeVerifier: String,
         redirectUri: String,
     ): String? = withContext(Dispatchers.IO) {
-        val config = McpOAuthConfig.parse(server.oauthJson) ?: return@withContext null
+        val configured = McpOAuthConfig.parse(server.oauthJson)
+        val stored = store.load(McpOAuthKeys.of(server))
+        if (configured == null && stored == null) return@withContext null
+        val config = merge(configured ?: McpOAuthConfig(), stored)
         val tokenUrl = config.tokenUrl.takeIf { it.isNotBlank() } ?: return@withContext null
         val form = buildList {
             add("grant_type" to "authorization_code")
@@ -234,6 +269,9 @@ class McpOAuth(context: Context) {
                 stored.expiresAtMs
             },
             tokenType = configured.tokenType.ifBlank { stored.tokenType },
+            authorizationUrl = configured.authorizationUrl.ifBlank { stored.authorizationUrl },
+            redirectUri = configured.redirectUri.ifBlank { stored.redirectUri },
+            registrationEndpoint = configured.registrationEndpoint.ifBlank { stored.registrationEndpoint },
         )
     }
 

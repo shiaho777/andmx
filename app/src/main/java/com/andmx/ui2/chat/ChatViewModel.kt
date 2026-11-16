@@ -3256,6 +3256,16 @@ class ChatViewModel @Inject constructor(
         controller.resolveApproval(allow)
     }
 
+    fun acceptApprovalSuggestion(suggestion: com.andmx.agent.permission.PermissionSuggestion) {
+        controller.approvalRuleStore.add(
+            controller.projectKey(),
+            suggestion.toolCanonical,
+            suggestion.ruleKey,
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW,
+        )
+        resolveApprovalScoped(true, ChatController.ApprovalScope.ONCE)
+    }
+
     /** ZCode 对齐：审批作用域（允许本会话 / 始终拒绝）。 */
     fun resolveApprovalScoped(allow: Boolean, scope: ChatController.ApprovalScope) {
         val denied = scope == ChatController.ApprovalScope.SESSION_DENY ||

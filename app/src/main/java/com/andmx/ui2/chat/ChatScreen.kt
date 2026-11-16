@@ -1506,6 +1506,10 @@ LaunchedEffect(Unit) {
                             onAllow = { viewModel.resolveApproval(true) },
                             onDeny = { viewModel.resolveApproval(false) },
                             onScope = { viewModel.resolveApprovalScoped(true, it) },
+                            suggestions = req.suggestions.ifEmpty {
+                                com.andmx.agent.permission.PermissionSuggestions.suggest(req.toolName, req.inputPreview)
+                            },
+                            onAcceptSuggestion = { viewModel.acceptApprovalSuggestion(it) },
                         )
                     }
                 }

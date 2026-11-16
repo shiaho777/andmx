@@ -3,6 +3,7 @@ package com.andmx.agent.workflow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WorkflowDashboardTest {
@@ -59,6 +60,85 @@ class WorkflowDashboardTest {
         assertEquals(emptyList<String>(), board[0].cards)
         assertEquals(listOf("B"), board[1].cards)
         assertEquals(listOf("A2"), board[2].cards)
+    }
+
+    @Test
+    fun boardLanesKeepCardKeysAndStatuses() {
+        val lanes = WorkflowDashboard.boardLanes(
+            spec(
+                """
+                {"key":"id","status":"state","cardTitle":"title","columns":["pending","running","done"]}
+                """.trimIndent(),
+            ),
+            items(
+                """{"id":"a","state":"pending","title":"A"}""",
+                """{"id":"b","state":"running","title":"B"}""",
+                """{"id":"c","state":"done","title":"C"}""",
+                """{"id":"b","state":"done","title":"B2"}""",
+            ),
+        )
+
+        assertEquals(listOf("pending", "running", "done"), lanes.map { it.name })
+        assertEquals(listOf("A"), lanes[0].cards.map { it.title })
+        assertEquals(emptyList<String>(), lanes[1].cards.map { it.title })
+        assertEquals(listOf("B2", "C"), lanes[2].cards.map { it.title })
+        assertEquals(listOf("b", "c"), lanes[2].cards.map { it.key })
+        assertTrue(lanes[2].cards.all { it.status == "done" })
+    }
+
+    @Test
+    fun boardLanesAppendUnknownStatusAfterDeclaredColumns() {
+        val lanes = WorkflowDashboard.boardLanes(
+            spec("""{"key":"id","status":"state","columns":["pending"]}"""),
+            items(
+                """{"id":"a","state":"pending"}""",
+                """{"id":"b","state":"blocked"}""",
+                """{"id":"c"}""",
+            ),
+        )
+
+        assertEquals(listOf("pending", "blocked", "other"), lanes.map { it.name })
+        assertEquals(listOf("b"), lanes[1].cards.map { it.key })
+        assertEquals(listOf("c"), lanes[2].cards.map { it.title })
+    }
+
+    @Test
+    fun boardLanesRequireKeyAndStatus() {
+        assertEquals(
+            emptyList<WorkflowDashboard.BoardLane>(),
+            WorkflowDashboard.boardLanes(spec("""{"status":"state"}"""), items("""{"state":"x"}""")),
+        )
+        assertEquals(
+            emptyList<WorkflowDashboard.BoardLane>(),
+            WorkflowDashboard.boardLanes(spec("""{"key":"id"}"""), items("""{"id":"a"}""")),
+        )
+    }
+
+    @Test
+    fun boardProjectionMatchesLanes() {
+        val spec = spec(
+            """{"key":"id","status":"state","cardTitle":"title","columns":["todo","done"]}""",
+        )
+        val items = items(
+            """{"id":"a","state":"todo","title":"A"}""",
+            """{"id":"b","state":"done","title":"B"}""",
+        )
+        val lanes = WorkflowDashboard.boardLanes(spec, items)
+        val columns = WorkflowDashboard.board(spec, items)
+        assertEquals(lanes.map { it.name }, columns.map { it.name })
+        assertEquals(lanes.map { l -> l.cards.map { it.title } }, columns.map { it.cards })
+    }
+
+    @Test
+    fun statusToneClassifiesCommonStates() {
+        assertEquals("done", WorkflowDashboard.statusTone("DONE"))
+        assertEquals("done", WorkflowDashboard.statusTone(" completed "))
+        assertEquals("running", WorkflowDashboard.statusTone("in_progress"))
+        assertEquals("running", WorkflowDashboard.statusTone("Doing"))
+        assertEquals("failed", WorkflowDashboard.statusTone("error"))
+        assertEquals("none", WorkflowDashboard.statusTone("pending"))
+        assertEquals("none", WorkflowDashboard.statusTone(""))
+        assertEquals("none", WorkflowDashboard.statusTone("banana"))
     }
 
     @Test

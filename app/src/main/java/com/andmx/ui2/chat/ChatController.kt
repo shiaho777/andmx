@@ -196,6 +196,7 @@ class ChatController private constructor(private val context: Context) {
     private val orchestrators = ConcurrentHashMap<Long, SubAgentOrchestrator>()
     private val backgroundTasksByConversation = ConcurrentHashMap<Long, com.andmx.agent.BackgroundTasks>()
     private val readFileStates = ConcurrentHashMap<Long, com.andmx.agent.ReadFileState>()
+    private val toolSearchRegistries = ConcurrentHashMap<Long, com.andmx.agent.ToolSearchRegistry>()
     private val shellWatchJobs = ConcurrentHashMap<Long, Job>()
     private val titleSidecarAttempted = ConcurrentHashMap.newKeySet<Long>()
 
@@ -208,9 +209,65 @@ class ChatController private constructor(private val context: Context) {
     private val dynamicWorkflowEnabled: Boolean
         get() = settingsSnapshot.dynamicWorkflowToolsEnabled
 
+    private fun toolSearchRegistryFor(conversationId: Long): com.andmx.agent.ToolSearchRegistry =
+        toolSearchRegistries.getOrPut(conversationId) {
+            com.andmx.agent.ToolSearchRegistry(
+                conversationId = conversationId,
+                mode = if (settingsSnapshot.toolSearchDeferred) {
+                    com.andmx.agent.ToolSearchRegistry.MODE_DEFERRED
+                } else {
+                    com.andmx.agent.ToolSearchRegistry.MODE_LOCAL
+                },
+                persistDiscovered = { convId, name ->
+                    com.andmx.data.AndmxDatabase.get(context).dao().upsertDiscoveredTool(
+                        com.andmx.data.DiscoveredToolEntity(conversationId = convId, toolName = name),
+                    )
+                },
+                loadDiscovered = { convId ->
+                    com.andmx.data.AndmxDatabase.get(context).dao().discoveredTools(convId).map { it.toolName }
+                },
+            ).also { registry ->
+                controllerScope.launch { runCatching { registry.restore() } }
+            }
+        }
+
     private fun backgroundTasksFor(conversationId: Long): com.andmx.agent.BackgroundTasks =
         backgroundTasksByConversation.getOrPut(conversationId) {
-            com.andmx.agent.BackgroundTasks(context).also { tasks ->
+            com.andmx.agent.BackgroundTasks(
+                context,
+                conversationId = conversationId,
+                persistTask = { record ->
+                    com.andmx.data.AndmxDatabase.get(context).dao().upsertBackgroundTask(
+                        com.andmx.data.BackgroundTaskEntity(
+                            id = record.id,
+                            conversationId = record.conversationId,
+                            command = record.command,
+                            cwd = record.cwd,
+                            status = record.status,
+                            outputPath = record.outputPath,
+                            startedAt = record.startedAt,
+                            finishedAt = record.finishedAt,
+                            exitCode = record.exitCode,
+                        ),
+                    )
+                },
+                loadTasks = { convId ->
+                    com.andmx.data.AndmxDatabase.get(context).dao().backgroundTasksFor(convId).map { row ->
+                        com.andmx.agent.BackgroundTasks.TaskRecord(
+                            id = row.id,
+                            conversationId = row.conversationId,
+                            command = row.command,
+                            cwd = row.cwd,
+                            status = row.status,
+                            outputPath = row.outputPath,
+                            startedAt = row.startedAt,
+                            finishedAt = row.finishedAt,
+                            exitCode = row.exitCode,
+                        )
+                    }
+                },
+            ).also { tasks ->
+                controllerScope.launch { runCatching { tasks.restore() } }
                 controllerScope.launch {
                     tasks.events.collect { ev ->
                         if (ev is com.andmx.agent.BackgroundTasks.Event.Terminated) {
@@ -577,6 +634,7 @@ class ChatController private constructor(private val context: Context) {
         val rulePreview: String = "",
         /** 审批原因（plan 模式拒绝等场景的描述字段）。 */
         val reason: String = "",
+        val suggestions: List<com.andmx.agent.permission.PermissionSuggestion> = emptyList(),
     )
 
     private class Session(
@@ -1474,6 +1532,8 @@ class ChatController private constructor(private val context: Context) {
 
     fun clearSession(conversationId: Long) {
         sessions.remove(conversationId)
+        toolSearchRegistries.remove(conversationId)
+        runCatching { mcpManager.closeSession(conversationId.toString()) }
         orchestrators.remove(conversationId)?.shutdown()
         subAgentWatchJobs.remove(conversationId)?.cancel()
         shellWatchJobs.remove(conversationId)?.cancel()
@@ -1604,7 +1664,7 @@ class ChatController private constructor(private val context: Context) {
             launchTitleSidecar(conversationId, text, provider, settings.model)
         }
 
-        ensureExtraTools(settings)
+        ensureExtraTools(settings, conversationId)
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         session.lastUserText = text
@@ -1850,7 +1910,7 @@ class ChatController private constructor(private val context: Context) {
             ?: providerStore.primary.firstOrNull()
             ?: return@flow emit(ChatEvent.Error("未配置提供商"))
         if (!provider.isUsable) return@flow emit(ChatEvent.Error("当前提供商不可用，请检查 API Key"))
-        ensureExtraTools(settings)
+        ensureExtraTools(settings, conversationId)
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         session.turnToolOutputs.clear()
@@ -1906,7 +1966,7 @@ class ChatController private constructor(private val context: Context) {
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
             ?: return "未配置提供商"
-        ensureExtraTools(settings)
+        ensureExtraTools(settings, conversationId)
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         val msg = session.engine.compactNow(settings, TurnContext(provider, settings.model), instructions)
@@ -2058,7 +2118,7 @@ class ChatController private constructor(private val context: Context) {
         }
     }
 
-    private suspend fun ensureExtraTools(settings: ProviderSettings) {
+    private suspend fun ensureExtraTools(settings: ProviderSettings, conversationId: Long = 0L) {
         val token = pluginSystem.currentReloadToken()
         if (!pluginsLoaded || lastPluginReloadToken != token) {
             pluginsLoaded = true
@@ -2091,7 +2151,9 @@ class ChatController private constructor(private val context: Context) {
         if (mcpText != mcpConfigLoaded) {
             mcpConfigLoaded = mcpText
             mcpTools = if (mcpText.isNotBlank()) {
-                runCatching { mcpManager.connectAll(mcpText) }.getOrDefault(emptyList())
+                runCatching {
+                    mcpManager.connectAll(mcpText, sessionId = conversationId.takeIf { it > 0L }?.toString())
+                }.getOrDefault(emptyList())
             } else {
                 emptyList()
             }
@@ -2198,6 +2260,7 @@ class ChatController private constructor(private val context: Context) {
                             "<agent-message from=\"${escXmlAttr(fromId)}\">$msg</agent-message>",
                         )
                     },
+                    toolSearch = toolSearchRegistryFor(conversationId),
                 )
                 orchestrators[conversationId] = orch
                 val known = existing.engine.listTools().map { it.first }.toSet()
@@ -2256,7 +2319,7 @@ class ChatController private constructor(private val context: Context) {
             settings = settings,
             provider = provider,
         )
-        val toolSearchRegistry = com.andmx.agent.ToolSearchRegistry()
+        val toolSearchRegistry = toolSearchRegistryFor(conversationId)
         val engine = AgentEngine(
             tools = tools,
             client = client,
@@ -2316,6 +2379,7 @@ class ChatController private constructor(private val context: Context) {
             approveTool = { permissionMode, tool, args ->
                 approveSubagentTool(conversationId, permissionMode, tool, args)
             },
+            toolSearch = toolSearchRegistry,
         )
         orchestrators[conversationId] = orch
         engine.addTools(listOf(orch.createSubAgentTool(), orch.createMultiAgentTool()) + createZCodeAgentTools(orch, conversationId))
@@ -2671,26 +2735,36 @@ class ChatController private constructor(private val context: Context) {
             sessionId = lookupId,
             content = "No persisted session was found for $lookupId.",
         )
-        val msgs = repo.messages(convId).takeLast(40)
-        val joined = msgs.joinToString("\n") { m ->
-            val role = m.role
-            val body = m.content.take(800)
-            "[$role] $body"
+        val msgs = repo.messages(convId).map { m ->
+            com.andmx.agent.zcode.SessionContextSynthesis.Message(
+                role = m.role,
+                content = m.content,
+                toolName = m.toolName,
+            )
         }
-        val filtered = if (query.isBlank()) joined else {
-            msgs.filter {
-                it.content.contains(query, ignoreCase = true) ||
-                    (it.toolName?.contains(query, ignoreCase = true) == true)
-            }.joinToString("\n") { "[${it.role}] ${it.content.take(800)}" }
-                .ifBlank { joined }
+        val synthesize: suspend (String) -> String? = lambda@{ prompt ->
+            val settings = settingsStore.settings.firstOrNull() ?: return@lambda null
+            val providers = providerStore.providers.firstOrNull().orEmpty()
+            val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
+                ?: providerStore.primary.firstOrNull() ?: return@lambda null
+            val client = TracedLlm(LlmClient(provider, trackerFor(conversationId)), ModelCallTrace.Source.COMPACT)
+            val req = com.andmx.llm.ChatRequest(
+                model = settings.model,
+                messages = listOf(com.andmx.llm.ApiMessage(role = "user", content = prompt)),
+            )
+            client.chat(req).getOrNull()?.content?.takeIf { it.isNotBlank() }
         }
-        val budget = maxTokens.coerceIn(1, 12_000) * 4
+        val result = if (strategy == "handoff") {
+            com.andmx.agent.zcode.SessionContextSynthesis.handoff(query, msgs, maxTokens, synthesize)
+        } else {
+            com.andmx.agent.zcode.SessionContextSynthesis.relevant(query, msgs, maxTokens, summarize = true, model = synthesize)
+        }
         return com.andmx.agent.zcode.SessionContextRead(
             status = "success",
             source = "local",
             sessionId = lookupId,
-            content = filtered.take(budget),
-            truncated = filtered.length > budget,
+            content = result.content,
+            truncated = result.truncated,
         )
     }
 
@@ -2899,6 +2973,9 @@ class ChatController private constructor(private val context: Context) {
             inputPreview = ruleSubject(tool.name, args).take(160),
             rulePreview = approvalRulePreview(tool.name, args.toString()),
             reason = reason.orEmpty(),
+            suggestions = runCatching {
+                com.andmx.agent.permission.PermissionSuggestions.suggest(tool.name, args)
+            }.getOrDefault(emptyList()),
         )
         notifyIfBackground(conversationId, "等待确认", summary)
         // 上游 PermissionRequest hook：与审批 UI 并行触发（外部审批桥接语义），不阻塞 deferred
@@ -3357,7 +3434,7 @@ class ChatController private constructor(private val context: Context) {
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
             ?: return "未配置提供商"
-        ensureExtraTools(settings)
+        ensureExtraTools(settings, conversationId)
         val session = obtainSession(conversationId, provider, settings)
         val summary = session.engine.checkpointNow(
             settings,

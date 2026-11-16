@@ -318,4 +318,32 @@ interface AndmxDao {
             "FROM workspace_changes WHERE conversationId = :sourceId",
     )
     suspend fun copyWorkspaceChanges(sourceId: Long, targetId: Long)
+
+    // ── v23: ToolSearch discovered tools ──────────────────────
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDiscoveredTool(tool: DiscoveredToolEntity)
+
+    @Query("SELECT * FROM discovered_tools WHERE conversationId = :conversationId ORDER BY discoveredAt ASC")
+    suspend fun discoveredTools(conversationId: Long): List<DiscoveredToolEntity>
+
+    @Query("DELETE FROM discovered_tools WHERE conversationId = :conversationId")
+    suspend fun deleteDiscoveredTools(conversationId: Long)
+
+    @Query("DELETE FROM discovered_tools WHERE conversationId = :conversationId AND toolName = :toolName")
+    suspend fun deleteDiscoveredTool(conversationId: Long, toolName: String)
+
+    // ── v23: Background task metadata ─────────────────────────
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertBackgroundTask(task: BackgroundTaskEntity)
+
+    @Query("SELECT * FROM background_tasks WHERE conversationId = :conversationId ORDER BY startedAt DESC")
+    suspend fun backgroundTasksFor(conversationId: Long): List<BackgroundTaskEntity>
+
+    @Query("SELECT * FROM background_tasks WHERE status = :status ORDER BY startedAt DESC")
+    suspend fun backgroundTasksByStatus(status: String): List<BackgroundTaskEntity>
+
+    @Query("DELETE FROM background_tasks WHERE id = :id")
+    suspend fun deleteBackgroundTask(id: String)
 }

@@ -41,7 +41,7 @@ class AndmxMigrationTest {
         val database = AndmxDatabase.get(context)
         try {
             val sqlite = database.openHelper.writableDatabase
-            assertEquals(23, sqlite.version)
+            assertEquals(24, sqlite.version)
             val dao = database.dao()
             val conversation = requireNotNull(dao.getConversation(41))
             assertEquals("/offline/project", conversation.project)
@@ -89,6 +89,8 @@ class AndmxMigrationTest {
                 "workspace_changes",
                 "workflow_journals",
                 "workflow_actor_messages",
+                "discovered_tools",
+                "background_tasks",
             )) {
                 sqlite.query(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'"

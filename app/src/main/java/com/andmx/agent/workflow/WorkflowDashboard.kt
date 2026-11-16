@@ -18,6 +18,8 @@ object WorkflowDashboard {
     data class Table(val columns: List<Field>, val rows: List<List<String>>)
     data class Metric(val label: String, val value: String, val unit: String? = null)
     data class BoardColumn(val name: String, val cards: List<String>)
+    data class BoardCard(val key: String, val title: String, val status: String)
+    data class BoardLane(val name: String, val cards: List<BoardCard>)
     data class ChartPoint(val index: Int, val x: String, val y: Double)
     data class ChartSeries(val label: String, val unit: String?, val points: List<ChartPoint>)
     data class Chart(
@@ -27,6 +29,16 @@ object WorkflowDashboard {
         val xLabels: List<String>,
         val series: List<ChartSeries>,
     )
+
+    fun statusTone(value: String): String {
+        val v = value.trim().lowercase()
+        return when {
+            v in setOf("done", "completed", "complete", "success", "succeeded", "passed", "closed", "resolved", "ok", "green") -> "done"
+            v in setOf("running", "active", "in_progress", "in-progress", "doing", "wip", "started") -> "running"
+            v in setOf("failed", "failure", "error", "cancelled", "canceled", "blocked", "red") -> "failed"
+            else -> "none"
+        }
+    }
 
     fun parseSpec(specJson: String): JsonObject? =
         runCatching { json.parseToJsonElement(specJson).jsonObject }.getOrNull()
@@ -54,26 +66,29 @@ object WorkflowDashboard {
         }
     }
 
-    fun board(spec: JsonObject, items: List<JsonObject>): List<BoardColumn> {
+    fun board(spec: JsonObject, items: List<JsonObject>): List<BoardColumn> =
+        boardLanes(spec, items).map { lane -> BoardColumn(lane.name, lane.cards.map { it.title }) }
+
+    fun boardLanes(spec: JsonObject, items: List<JsonObject>): List<BoardLane> {
         val columns = spec["columns"]?.let { element ->
             runCatching { element.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull } }.getOrNull()
         }.orEmpty()
         val key = spec["key"]?.stringOrNull() ?: return emptyList()
         val statusField = spec["status"]?.stringOrNull() ?: return emptyList()
         val titleField = spec["cardTitle"]?.stringOrNull()
-        val cards = LinkedHashMap<String, Pair<String, String>>()
+        val cards = LinkedHashMap<String, BoardCard>()
         items.forEachIndexed { index, item ->
             val cardKey = cell(item, key).ifBlank { "#$index" }
             val status = cell(item, statusField).ifBlank { "other" }
             val title = titleField?.let { cell(item, it) }?.takeIf { it.isNotBlank() } ?: cardKey
-            cards[cardKey] = status to title
+            cards[cardKey] = BoardCard(cardKey, title, status)
         }
-        val ordered = LinkedHashMap<String, MutableList<String>>()
+        val ordered = LinkedHashMap<String, MutableList<BoardCard>>()
         columns.forEach { ordered[it] = mutableListOf() }
-        cards.values.forEach { (status, title) ->
-            ordered.getOrPut(status) { mutableListOf() }.add(title)
+        cards.values.forEach { card ->
+            ordered.getOrPut(card.status) { mutableListOf() }.add(card)
         }
-        return ordered.map { (name, values) -> BoardColumn(name, values) }
+        return ordered.map { (name, values) -> BoardLane(name, values) }
     }
 
     fun chart(spec: JsonObject, items: List<JsonObject>): Chart? {

@@ -78,6 +78,7 @@ data class ProviderSettings(
      * 对齐 ZCode `includeDynamicWorkflow`：默认关闭，由用户在设置里打开。
      */
     val dynamicWorkflowToolsEnabled: Boolean = false,
+    val toolSearchDeferred: Boolean = false,
 
     // ── 代码预览（对标 ZCode Code Preview）──
     /** 浅色模式下代码块主题 id。 */
@@ -155,6 +156,7 @@ class SettingsStore(
     private val autoArchiveDaysKey = androidx.datastore.preferences.core.intPreferencesKey("task_auto_archive_days")
     private val summaryPanelModeKey = stringPreferencesKey("summary_panel_display_mode")
     private val askAutoResolveKey = androidx.datastore.preferences.core.booleanPreferencesKey("ask_auto_resolve")
+    private val toolSearchDeferredKey = androidx.datastore.preferences.core.booleanPreferencesKey("tool_search_deferred")
     private val lightCodeThemeKey = stringPreferencesKey("light_code_theme")
     private val darkCodeThemeKey = stringPreferencesKey("dark_code_theme")
     private val showLineNumbersKey = androidx.datastore.preferences.core.booleanPreferencesKey("show_line_numbers")
@@ -211,6 +213,7 @@ class SettingsStore(
             taskAutoArchiveDays = p[autoArchiveDaysKey] ?: def.taskAutoArchiveDays,
             summaryPanelDisplayMode = p[summaryPanelModeKey] ?: def.summaryPanelDisplayMode,
             askAutoResolve = p[askAutoResolveKey] ?: def.askAutoResolve,
+            toolSearchDeferred = p[toolSearchDeferredKey] ?: def.toolSearchDeferred,
             lightCodeTheme = p[lightCodeThemeKey] ?: def.lightCodeTheme,
             darkCodeTheme = p[darkCodeThemeKey] ?: def.darkCodeTheme,
             showLineNumbers = p[showLineNumbersKey] ?: def.showLineNumbers,
@@ -262,6 +265,7 @@ class SettingsStore(
             p[autoArchiveDaysKey] = settings.taskAutoArchiveDays
             p[summaryPanelModeKey] = settings.summaryPanelDisplayMode
             p[askAutoResolveKey] = settings.askAutoResolve
+            p[toolSearchDeferredKey] = settings.toolSearchDeferred
             p[lightCodeThemeKey] = settings.lightCodeTheme
             p[darkCodeThemeKey] = settings.darkCodeTheme
             p[showLineNumbersKey] = settings.showLineNumbers

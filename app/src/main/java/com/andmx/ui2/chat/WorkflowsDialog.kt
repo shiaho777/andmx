@@ -279,39 +279,10 @@ fun WorkflowRunDetailDialog(
                                 } else {
                                     when (preset.kind) {
                                         "table" -> WorkflowDashboard.table(spec, items)?.let { table ->
-                                            Text(
-                                                table.columns.joinToString(" · ") { it.label },
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                            table.rows.take(20).forEach { row ->
-                                                Text(
-                                                    row.joinToString(" · "),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                )
-                                            }
+                                            WorkflowTableView(table)
                                         }
-                                        "metrics" -> WorkflowDashboard.metrics(spec, items).forEach { metric ->
-                                            Text(
-                                                buildString {
-                                                    append(metric.label).append(": ").append(metric.value)
-                                                    metric.unit?.let { append(' ').append(it) }
-                                                },
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        }
-                                        "board" -> WorkflowDashboard.board(spec, items).forEach { column ->
-                                            Text(
-                                                buildString {
-                                                    append(column.name).append(" (")
-                                                    append(column.cards.size).append(")")
-                                                    if (column.cards.isNotEmpty()) {
-                                                        append(" · ").append(column.cards.joinToString(", "))
-                                                    }
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
-                                        }
+                                        "metrics" -> WorkflowMetricsView(WorkflowDashboard.metrics(spec, items))
+                                        "board" -> WorkflowBoardView(WorkflowDashboard.boardLanes(spec, items))
                                         "chart" -> WorkflowDashboard.chart(spec, items)?.let { chart ->
                                             WorkflowChart(chart)
                                         }

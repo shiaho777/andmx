@@ -212,9 +212,11 @@ data class ResourceSubscription(
  */
 class McpManager(private val context: Context) {
     private val runtime = ProotRuntime(context)
-    private val clients = mutableListOf<McpClient>()
-    private val httpTransports = mutableListOf<McpHttpTransport>()
+    private val clients = McpSessionRegistry<McpClient> { it.close() }
+    private val httpTransports = McpSessionRegistry<McpHttpTransport> { it.close() }
     private val oauth = McpOAuth(context)
+
+    private fun serverKey(cfg: McpServerConfig): String = cfg.name + "\u0000" + cfg.command
 
     /** A connected MCP server and the tools it advertised. */
     data class Connected(val name: String, val tools: List<String>, val transport: String)
@@ -226,42 +228,45 @@ class McpManager(private val context: Context) {
     private val _subscriptions = MutableStateFlow<List<ResourceSubscription>>(emptyList())
     val subscriptions: StateFlow<List<ResourceSubscription>> = _subscriptions
 
-    suspend fun connectAll(configText: String, onLog: (String) -> Unit = {}): List<Tool> {
+    suspend fun connectAll(configText: String, onLog: (String) -> Unit = {}, sessionId: String? = null): List<Tool> {
         val configs = McpServerConfig.parse(configText)
         if (configs.isEmpty()) return emptyList()
         val tools = mutableListOf<Tool>()
         for (cfg in configs) {
-            tools += connectOne(cfg, onLog)
+            tools += connectOne(cfg, onLog, sessionId)
         }
         return tools
     }
 
     /** Connect a single configured server; returns its tools (empty on failure). */
-    suspend fun connectOne(cfg: McpServerConfig, onLog: (String) -> Unit = {}): List<Tool> {
-        if (_connected.any { it.name == cfg.name }) return emptyList()
+    suspend fun connectOne(cfg: McpServerConfig, onLog: (String) -> Unit = {}, sessionId: String? = null): List<Tool> {
+        val key = serverKey(cfg)
+        if (clients.contains(key, sessionId) || httpTransports.contains(key, sessionId)) return emptyList()
         val tools = mutableListOf<Tool>()
         val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
         runCatching {
             when (cfg.transport) {
                 McpTransport.HTTP, McpTransport.WEBSOCKET -> {
                     val headers = cfg.headers.toMutableMap()
-                    if (cfg.oauthJson.isNotBlank()) {
-                        val token = runCatching { oauth.accessToken(cfg) }.getOrNull()
-                        if (token.isNullOrBlank()) {
-                            onLog("MCP ${cfg.name}: OAuth 配置存在，但没有可用 access token")
-                        } else {
-                            headers["Authorization"] = "Bearer $token"
-                        }
+                    val token = runCatching { oauth.accessToken(cfg) }.getOrNull()
+                    if (!token.isNullOrBlank()) {
+                        headers["Authorization"] = "Bearer $token"
+                    } else if (cfg.oauthJson.isNotBlank()) {
+                        onLog("MCP ${cfg.name}: OAuth 配置存在，但没有可用 access token")
                     }
-                    val transport = McpHttpTransport(
-                        cfg.name,
-                        cfg.command,
-                        headers = headers,
-                        protocolVersion = cfg.wireProtocol(),
-                        timeoutMs = cfg.timeoutMs,
-                    )
-                    val descs = transport.connect()
-                    httpTransports += transport
+                    val transport = httpTransports.getOrCreate(key, sessionId) {
+                        McpHttpTransport(
+                            cfg.name,
+                            cfg.command,
+                            headers = headers,
+                            protocolVersion = cfg.wireProtocol(),
+                            timeoutMs = cfg.timeoutMs,
+                        )
+                    }
+                    val descs = runCatching { transport.connect() }.getOrElse {
+                        httpTransports.remove(key, sessionId)
+                        throw it
+                    }
                     descs.forEach { desc ->
                         tools += object : Tool {
                             override val name = "${cfg.name}__${desc.name}"
@@ -282,15 +287,19 @@ class McpManager(private val context: Context) {
                         command = listOf(sh, "-lc", cfg.shellCommand()),
                         rootfs = runtime.rootfsDir.takeIf { it.exists() },
                     )
-                    val client = McpClient(
-                        cfg.name,
-                        argv,
-                        runtime.env() + cfg.env,
-                        protocolVersion = cfg.wireProtocol(),
-                        timeoutMs = cfg.timeoutMs,
-                    )
-                    val descs = client.connect()
-                    clients += client
+                    val client = clients.getOrCreate(key, sessionId) {
+                        McpClient(
+                            cfg.name,
+                            argv,
+                            runtime.env() + cfg.env,
+                            protocolVersion = cfg.wireProtocol(),
+                            timeoutMs = cfg.timeoutMs,
+                        )
+                    }
+                    val descs = runCatching { client.connect() }.getOrElse {
+                        clients.remove(key, sessionId)
+                        throw it
+                    }
                     descs.forEach { tools += McpTool(client, it) }
                     _connected += Connected(cfg.name, descs.map { it.name }, "STDIO")
                     onLog("MCP ${cfg.name} (stdio): ${descs.size} 个工具")
@@ -305,17 +314,36 @@ class McpManager(private val context: Context) {
         val idx = _connected.indexOfFirst { it.name == name }
         if (idx < 0) return false
         _connected.removeAt(idx)
-        clients.filter { it.serverName == name }.forEach { it.close() }
-        clients.removeAll { it.serverName == name }
-        httpTransports.filter { it.serverName == name }.forEach { it.close() }
-        httpTransports.removeAll { it.serverName == name }
+        clients.keysForName(name).forEach { clients.remove(it.first, it.second) }
+        httpTransports.keysForName(name).forEach { httpTransports.remove(it.first, it.second) }
         return true
     }
 
+    /** Release every connection owned by a conversation; stdio processes die with it. */
+    fun closeSession(sessionId: String) {
+        val closedClients = clients.closeSession(sessionId)
+        val closedHttp = httpTransports.closeSession(sessionId)
+        if (closedClients + closedHttp == 0) return
+        val liveKeys = clients.keys() + httpTransports.keys()
+        _connected.removeAll { connected -> liveKeys.none { it.first.startsWith(connected.name + "\u0000") } }
+    }
+
+    fun connectedFor(sessionId: String?): List<Connected> =
+        _connected.filter { connected ->
+            val sid = sessionId.orEmpty()
+            (clients.keys() + httpTransports.keys()).any { it.first.startsWith(connected.name + "\u0000") && it.second == sid }
+        }
+
+    private fun clientFor(serverName: String): McpClient? =
+        clients.keysForName(serverName).firstNotNullOfOrNull { clients.get(it.first, it.second) }
+
+    private fun httpFor(serverName: String): McpHttpTransport? =
+        httpTransports.keysForName(serverName).firstNotNullOfOrNull { httpTransports.get(it.first, it.second) }
+
     /** Subscribe to a resource update on a specific server. */
     suspend fun subscribeResource(serverName: String, uri: String): Boolean {
-        val client = clients.firstOrNull { it.serverName == serverName }
-        val http = httpTransports.firstOrNull { it.serverName == serverName }
+        val client = clientFor(serverName)
+        val http = httpFor(serverName)
         if (client == null && http == null) return false
         if (client != null && !client.supportsCapability("resources")) return false
         if (http != null && !http.supportsCapability("resources")) return false
@@ -334,8 +362,8 @@ class McpManager(private val context: Context) {
     }
 
     suspend fun unsubscribeResource(serverName: String, uri: String): Boolean {
-        val client = clients.firstOrNull { it.serverName == serverName }
-        val http = httpTransports.firstOrNull { it.serverName == serverName }
+        val client = clientFor(serverName)
+        val http = httpFor(serverName)
         val ok = when {
             client != null -> client.unsubscribeResource(uri)
             http != null -> http.unsubscribeResource(uri)
@@ -368,19 +396,19 @@ class McpManager(private val context: Context) {
     }
 
     suspend fun listResources(serverName: String): List<McpResource> =
-        clients.firstOrNull { it.serverName == serverName }?.listResources()
-            ?: httpTransports.firstOrNull { it.serverName == serverName }?.listResources()
+        clientFor(serverName)?.listResources()
+            ?: httpFor(serverName)?.listResources()
             ?: emptyList()
 
     suspend fun readResource(serverName: String, uri: String): String? =
         runCatching {
-            clients.firstOrNull { it.serverName == serverName }?.readResource(uri)
-                ?: httpTransports.firstOrNull { it.serverName == serverName }?.readResource(uri)
+            clientFor(serverName)?.readResource(uri)
+                ?: httpFor(serverName)?.readResource(uri)
         }.getOrNull()
 
     suspend fun listPrompts(serverName: String): List<McpPrompt> =
-        clients.firstOrNull { it.serverName == serverName }?.listPrompts()
-            ?: httpTransports.firstOrNull { it.serverName == serverName }?.listPrompts()
+        clientFor(serverName)?.listPrompts()
+            ?: httpFor(serverName)?.listPrompts()
             ?: emptyList()
 
     suspend fun getPrompt(
@@ -388,8 +416,8 @@ class McpManager(private val context: Context) {
         name: String,
         args: Map<String, String> = emptyMap(),
     ): List<McpPromptContent> =
-        clients.firstOrNull { it.serverName == serverName }?.getPrompt(name, args)
-            ?: httpTransports.firstOrNull { it.serverName == serverName }?.getPrompt(name, args)
+        clientFor(serverName)?.getPrompt(name, args)
+            ?: httpFor(serverName)?.getPrompt(name, args)
             ?: emptyList()
 
     /** List all resources from all connected servers. */
@@ -414,10 +442,8 @@ class McpManager(private val context: Context) {
         }
 
     fun close() {
-        clients.forEach { it.close() }
-        clients.clear()
-        httpTransports.forEach { it.close() }
-        httpTransports.clear()
+        clients.closeAll()
+        httpTransports.closeAll()
         _connected.clear()
     }
 }
