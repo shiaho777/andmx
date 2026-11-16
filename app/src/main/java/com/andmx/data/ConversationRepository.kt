@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 
 /** Thin repository over the Room DAO for conversations and messages. */
 class ConversationRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val dao = AndmxDatabase.get(context).dao()
 
     fun observeConversations(): Flow<List<ConversationEntity>> = dao.observeConversations()
@@ -140,7 +141,20 @@ class ConversationRepository(context: Context) {
         fileViewingGuestPath = fileViewingGuestPath,
     )
 
-    suspend fun delete(conversationId: Long) = dao.deleteConversation(conversationId)
+    suspend fun delete(conversationId: Long) {
+        val session = dao.getConversation(conversationId)
+        if (session != null) purgeSessionArtifacts(session)
+        dao.deleteConversation(conversationId)
+    }
+
+    suspend fun purgeSessionArtifacts(session: ConversationEntity) {
+        purgePathsFor(appContext.filesDir, session).forEach { runCatching { it.delete() } }
+        if (session.sessionId.isNotBlank()) {
+            runCatching {
+                com.andmx.data.rollout.SessionIndex(appContext).remove(session.sessionId)
+            }
+        }
+    }
 
     /**
      * Truncate a conversation: delete every message whose DB id >= [fromDbId]

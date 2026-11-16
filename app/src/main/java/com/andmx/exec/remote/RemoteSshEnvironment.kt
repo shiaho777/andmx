@@ -4,17 +4,18 @@ import android.content.Context
 import com.andmx.exec.ExecutionEnvironment
 import com.andmx.exec.ProcessResult
 import com.andmx.exec.ProcessSpec
+import com.andmx.exec.runProcessPumped
 import com.andmx.workspace.RemoteWorkspaceSpec
 import com.andmx.workspace.RemoteWorkspaceStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.File
 
 class RemoteSshEnvironment(
     private val context: Context,
     private val spec: RemoteWorkspaceSpec,
     private val remoteCwd: String = spec.remotePath.ifBlank { "~" },
+    private val commandTimeoutMs: Long = DEFAULT_COMMAND_TIMEOUT_MS,
 ) : ExecutionEnvironment {
     override val id: String = "remote-ssh:${spec.id}"
     override val displayName: String = "SSH ${spec.displayName}"
@@ -26,29 +27,23 @@ class RemoteSshEnvironment(
     override suspend fun execute(specProc: ProcessSpec): ProcessResult = withContext(Dispatchers.IO) {
         val started = System.nanoTime()
         val command = buildRemoteCommand(specProc)
+        var askpassScript: File? = null
         try {
-            val argv = store.buildSshArgv(spec, command)
-            val pb = ProcessBuilder(argv)
-            pb.redirectErrorStream(specProc.redirectErrorStream)
-            val proc = pb.start()
-            if (specProc.stdin != null) {
-                proc.outputStream.use {
-                    it.write(specProc.stdin!!.toByteArray())
-                    it.flush()
-                }
-            }
-            val stdout = BufferedReader(InputStreamReader(proc.inputStream)).readText()
-            val stderr = if (specProc.redirectErrorStream) {
-                ""
-            } else {
-                BufferedReader(InputStreamReader(proc.errorStream)).readText()
-            }
-            val code = proc.waitFor()
+            val plan = store.buildSshCommand(spec, command)
+            askpassScript = plan.askpassScript
+            val pumped = runProcessPumped(
+                argv = plan.argv,
+                stdin = specProc.stdin,
+                redirectErrorStream = specProc.redirectErrorStream,
+                timeoutMs = commandTimeoutMs,
+                env = plan.env,
+            )
             ProcessResult(
-                exitCode = code,
-                stdout = stdout,
-                stderr = stderr,
+                exitCode = pumped.exitCode,
+                stdout = pumped.stdout,
+                stderr = pumped.stderr,
                 durationMs = (System.nanoTime() - started) / 1_000_000,
+                error = if (pumped.timedOut) "命令超时（${commandTimeoutMs}ms），已终止" else null,
             )
         } catch (t: Throwable) {
             ProcessResult(
@@ -58,7 +53,13 @@ class RemoteSshEnvironment(
                 durationMs = (System.nanoTime() - started) / 1_000_000,
                 error = t.message ?: t.javaClass.simpleName,
             )
+        } finally {
+            askpassScript?.let { runCatching { it.delete() } }
         }
+    }
+
+    companion object {
+        const val DEFAULT_COMMAND_TIMEOUT_MS = 120_000L
     }
 
     private fun buildRemoteCommand(specProc: ProcessSpec): String {
@@ -91,9 +92,10 @@ data class RemoteDirEntry(
 class RemoteFsClient(
     private val context: Context,
     private val spec: RemoteWorkspaceSpec,
+    private val commandTimeoutMs: Long = RemoteSshEnvironment.DEFAULT_COMMAND_TIMEOUT_MS,
 ) {
     suspend fun exec(command: String, cwd: String? = null): ProcessResult {
-        val env = RemoteSshEnvironment(context, spec, cwd ?: spec.remotePath.ifBlank { "~" })
+        val env = RemoteSshEnvironment(context, spec, cwd ?: spec.remotePath.ifBlank { "~" }, commandTimeoutMs)
         return env.execute(
             ProcessSpec(
                 argv = listOf("/bin/sh", "-lc", command),
@@ -101,6 +103,32 @@ class RemoteFsClient(
                 redirectErrorStream = true,
             ),
         )
+    }
+
+    suspend fun readBytes(path: String, maxBytes: Int): Result<ByteArray> {
+        val dollar = "$"
+        val remoteScript =
+            "f=${q(path)}; " +
+                "if [ ! -f \"${dollar}f\" ]; then echo __ERR__ not_a_file; exit 1; fi; " +
+                "sz=${dollar}(wc -c < \"${dollar}f\" | tr -d ' '); " +
+                "if [ \"${dollar}sz\" -gt $maxBytes ]; then echo __ERR__ too_large:${dollar}sz; exit 1; fi; " +
+                "base64 < \"${dollar}f\" | tr -d '\\n'"
+        val res = exec(remoteScript)
+        val out = res.stdout.trim()
+        if (out.startsWith("__ERR__")) {
+            return Result.failure(IllegalStateException(out.removePrefix("__ERR__").trim()))
+        }
+        if (res.error != null || (!res.ok && out.isBlank())) {
+            return Result.failure(IllegalStateException(res.error ?: res.stderr.ifBlank { "read failed" }))
+        }
+        if (out.isEmpty()) return Result.success(ByteArray(0))
+        val bytes = runCatching {
+            android.util.Base64.decode(out, android.util.Base64.DEFAULT)
+        }.getOrElse { return Result.failure(IllegalStateException("远程内容解码失败")) }
+        if (bytes.size > maxBytes) {
+            return Result.failure(IllegalStateException("too_large:${bytes.size}"))
+        }
+        return Result.success(bytes)
     }
 
     suspend fun listDir(path: String): List<RemoteDirEntry> {

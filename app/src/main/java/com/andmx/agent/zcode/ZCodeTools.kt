@@ -743,11 +743,16 @@ fun buildZCodeToolSurface(
     webFetchSummarizer: (suspend (content: String, prompt: String) -> String?)? = null,
     onShell: ((ShellTool) -> Unit)? = null,
     conversationId: Long = 0L,
+    embeddedSearch: Boolean = false,
+    includeResultTools: Boolean = false,
+    submitResultSlot: java.util.concurrent.atomic.AtomicReference<String?>? = null,
+    escalateHandler: (suspend (question: String, context: String) -> String)? = null,
+    shellRuntime: () -> String = { "" },
 ): List<Tool> {
     val access = WorkspaceAccess(context)
-    val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks)
+    val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks, shellRuntime = shellRuntime)
     onShell?.invoke(shell)
-    val shellWithHint = GhRateLimitHintTool(shell)
+    val shellWithHint = if (embeddedSearch) EmbeddedSearchBashTool(GhRateLimitHintTool(shell)) else GhRateLimitHintTool(shell)
     val read = ReadFileTool(context, readFileState)
     val write = WriteFileTool(context, readFileState, conversationId)
     val edit = EditFileTool(context, readFileState, conversationId)
@@ -799,7 +804,45 @@ fun buildZCodeToolSurface(
         zcode += search
         zcode += planTool
     }
-    return zcode
+    if (includeResultTools) {
+        zcode += resultTools(submitResultSlot, escalateHandler)
+    }
+    return filterEmbeddedSearch(zcode, embeddedSearch)
+}
+
+internal const val EMBEDDED_SEARCH_BASH_HINT =
+    "\n\nEmbedded search mode: Glob/Grep tools are not available. " +
+        "Use find/grep through this Bash tool for file discovery and content search."
+
+fun filterEmbeddedSearch(tools: List<Tool>, enabled: Boolean): List<Tool> =
+    if (!enabled) tools else tools.filter { it.name != "Glob" && it.name != "Grep" }
+
+private class EmbeddedSearchBashTool(private val inner: Tool) : Tool, ExecutionAwareTool {
+    override val name get() = inner.name
+    override val description get() = inner.description + EMBEDDED_SEARCH_BASH_HINT
+    override val parameters get() = inner.parameters
+    override val risk get() = inner.risk
+    override val shouldDefer get() = inner.shouldDefer
+    override val timeoutMs get() = inner.timeoutMs
+    override val concurrentSafe get() = inner.concurrentSafe
+    override val destructive get() = inner.destructive
+    override val readOnly get() = inner.readOnly
+    override val needsApproval get() = inner.needsApproval
+    override val allowedInPlanMode get() = inner.allowedInPlanMode
+    override val permissionName get() = inner.permissionName
+    override val riskLevel get() = inner.riskLevel
+    override val sideEffectScope get() = inner.sideEffectScope
+    override val alwaysAsk get() = inner.alwaysAsk
+    override val userApprovalRule get() = inner.userApprovalRule
+    override val stopTurnOnSuccess get() = inner.stopTurnOnSuccess
+    override val maxOutputBytes get() = inner.maxOutputBytes
+    override fun resolveTimeoutMs(args: JsonObject): Long? = inner.resolveTimeoutMs(args)
+
+    override suspend fun execute(args: JsonObject): ToolResult = execute("", args)
+
+    override suspend fun execute(callId: String, args: JsonObject): ToolResult =
+        if (inner is ExecutionAwareTool && callId.isNotBlank()) inner.execute(callId, args)
+        else inner.execute(args)
 }
 
 

@@ -66,7 +66,7 @@ class WebSearchToolTest {
         assertFalse(search.description.contains("provider-native", ignoreCase = true))
         assertFalse(search.description.contains("uses provider-native web search", ignoreCase = true))
         assertEquals(listOf("query"), required(search))
-        assertEquals(setOf("query", "allowed_domains", "blocked_domains"), props(search).keys)
+        assertEquals(setOf("query", "allowed_domains", "blocked_domains", "max_results"), props(search).keys)
         assertEquals(false, search.parameters["additionalProperties"]!!.jsonPrimitive.booleanOrNull)
         assertEquals(
             "https://json-schema.org/draft/2020-12/schema",

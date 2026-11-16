@@ -12,9 +12,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 import java.util.UUID
 
 enum class RemoteKind { SSH }
@@ -128,26 +126,47 @@ class RemoteWorkspaceStore(context: Context) {
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=15",
             "-o", "ConnectionAttempts=1",
-            "-o", "ServerAliveInterval=30",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=3",
         )
-        if (batchMode) {
-            argv.add(2, "-o")
-            argv.add(3, "BatchMode=yes")
-        }
-        if (auth == SshAuthMethod.PRIVATE_KEY && spec.privateKeyPath.isNotBlank()) {
-            argv += listOf("-i", spec.privateKeyPath)
-            if (spec.passphrase.isNotBlank()) {
-                // OpenSSH will prompt; without ssh-agent, passphrase keys may fail in batch mode.
+        if (auth == SshAuthMethod.PRIVATE_KEY) {
+            if (batchMode) argv += listOf("-o", "BatchMode=yes")
+            val keyPath = spec.privateKeyPath.ifBlank {
+                SshAuthSupport.discoverPrivateKey(defaultKeyDirs())
             }
+            if (keyPath != null) argv += listOf("-i", keyPath)
         }
         argv += listOf(spec.sshTarget, remoteCommand)
         if (auth == SshAuthMethod.PASSWORD) {
             val sshpass = findBinary("sshpass")
-                ?: error("密码认证需要 sshpass，请改用私钥")
-            return listOf(sshpass, "-p", spec.password) + argv
+            if (sshpass != null) {
+                return listOf(sshpass, "-p", spec.password) + argv
+            }
+            if (!batchMode) return argv
+            error(SshAuthSupport.KEY_AUTH_HINT)
         }
         return argv
     }
+
+    internal fun buildSshCommand(spec: RemoteWorkspaceSpec, remoteCommand: String): SshCommandPlan {
+        val ssh = findSshBinary() ?: error("ssh binary not found")
+        val auth = runCatching { SshAuthMethod.valueOf(spec.authMethod) }
+            .getOrDefault(SshAuthMethod.PRIVATE_KEY)
+        val plan = SshAuthSupport.resolveAuth(
+            spec = spec,
+            auth = auth,
+            sshpassPath = if (auth == SshAuthMethod.PASSWORD) findBinary("sshpass") else null,
+            keyDirs = defaultKeyDirs(),
+            askpassDir = File(appContext.cacheDir, "ssh-askpass"),
+        )
+        return plan.copy(argv = plan.commandLine(ssh, spec.sshTarget, remoteCommand))
+    }
+
+    private fun defaultKeyDirs(): List<File> = listOf(
+        File(System.getProperty("user.home").orEmpty(), ".ssh"),
+        File(appContext.filesDir, "rootfs/root/.ssh"),
+        File(appContext.filesDir, ".ssh"),
+    )
 
     suspend fun probe(spec: RemoteWorkspaceSpec): RemoteProbeResult = withContext(Dispatchers.IO) {
         val connected = connect(spec)
@@ -166,8 +185,14 @@ class RemoteWorkspaceStore(context: Context) {
         }
         val auth = runCatching { SshAuthMethod.valueOf(spec.authMethod) }
             .getOrDefault(SshAuthMethod.PRIVATE_KEY)
-        if (auth == SshAuthMethod.PRIVATE_KEY && spec.privateKeyPath.isBlank()) {
-            return@withContext RemoteConnectResult(false, "私钥路径不能为空", logs)
+        if (auth == SshAuthMethod.PRIVATE_KEY && spec.privateKeyPath.isBlank() &&
+            SshAuthSupport.discoverPrivateKey(defaultKeyDirs()) == null
+        ) {
+            return@withContext RemoteConnectResult(
+                false,
+                "未配置私钥路径，且未在 ~/.ssh 发现默认密钥（id_ed25519/id_rsa 等），请配置密钥",
+                logs,
+            )
         }
         if (auth == SshAuthMethod.PASSWORD && spec.password.isBlank()) {
             return@withContext RemoteConnectResult(false, "密码不能为空", logs)
@@ -190,14 +215,19 @@ class RemoteWorkspaceStore(context: Context) {
                 append("cd ${shellSingleQuote(spec.remotePath)} 2>/dev/null && pwd || echo REMOTE_PATH_MISSING")
             }
         }
+        var askpassScript: File? = null
         try {
-            val argv = buildSshArgv(spec, remoteCmd)
+            val plan = buildSshCommand(spec, remoteCmd)
+            askpassScript = plan.askpassScript
             logs += "正在请求宿主进程创建远程 session..."
-            val pb = ProcessBuilder(argv)
-            pb.redirectErrorStream(true)
-            val proc = pb.start()
-            val out = BufferedReader(InputStreamReader(proc.inputStream)).readText()
-            val code = proc.waitFor()
+            val pumped = com.andmx.exec.runProcessPumped(
+                argv = plan.argv,
+                redirectErrorStream = true,
+                timeoutMs = 45_000L,
+                env = plan.env,
+            )
+            val out = pumped.stdout
+            val code = pumped.exitCode
             logs += out.lineSequence().filter { it.isNotBlank() }.take(24).toList()
             val ok = code == 0 && out.contains("REMOTE_OK")
             if (!ok) {
@@ -235,6 +265,8 @@ class RemoteWorkspaceStore(context: Context) {
         } catch (t: Throwable) {
             logs += (t.message ?: t.toString())
             RemoteConnectResult(false, "SSH 连接失败：${t.message ?: "unknown"}", logs)
+        } finally {
+            askpassScript?.let { runCatching { it.delete() } }
         }
     }
 

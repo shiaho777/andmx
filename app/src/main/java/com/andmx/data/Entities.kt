@@ -221,6 +221,7 @@ data class CronAutomationEntity(
     /** active | completed | failed */
     val lifecycleStatus: String = "active",
     val model: String = "",
+    val kind: String = "",
     val createdAtMs: Long = System.currentTimeMillis(),
 )
 
