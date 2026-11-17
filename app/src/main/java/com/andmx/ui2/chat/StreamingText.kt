@@ -66,6 +66,8 @@ fun StreamingText(
     isStreaming: Boolean,
     modifier: Modifier = Modifier,
     muted: Boolean = false,
+    highlightRanges: List<com.andmx.ui2.markdown.MarkdownHighlight> = emptyList(),
+    selectionActions: SelectionActions? = null,
 ) {
     val contentColor = if (muted) {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
@@ -81,6 +83,8 @@ fun StreamingText(
             streaming = false,
             contentColor = contentColor,
             bodySizeSp = bodySizeSp,
+            highlightRanges = highlightRanges,
+            selectionActions = selectionActions,
         )
         return
     }

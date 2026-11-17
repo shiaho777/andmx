@@ -863,6 +863,27 @@ class GitBaseline(
         commit to push(workspacePath)
     }
 
+    suspend fun commitGraph(
+        workspacePath: String,
+        limit: Int = 50,
+    ): List<com.andmx.ui2.files.CommitNode> = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val n = limit.coerceIn(1, 200)
+        val script = "cd '$workspacePath' 2>/dev/null && git log --format=%H|%P|%s|%an|%at -n $n 2>/dev/null"
+        val res = runShell(workspacePath, script, login = false)
+        runCatching { com.andmx.ui2.files.GitGraphParser.parse(res.stdout, n) }.getOrDefault(emptyList())
+    }
+
+    suspend fun commitLogRaw(
+        workspacePath: String,
+        limit: Int = 50,
+    ): List<String> = withContext(Dispatchers.IO) {
+        val n = limit.coerceIn(1, 200)
+        val script = "cd '$workspacePath' 2>/dev/null && git log --format=%h|%s|%an|%at -n $n 2>/dev/null"
+        val res = runShell(workspacePath, script, login = false)
+        res.stdout.lines().map { it.trim() }.filter { it.isNotEmpty() }.take(n)
+    }
+
     private fun shellEscape(value: String): String {
         val q = 39.toChar()
         val bs = 92.toChar()

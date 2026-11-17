@@ -64,6 +64,8 @@ fun MessageBubble(
     fileExists: ((String) -> Boolean)? = null,
     mergedCodeComments: List<AssistantCodeComment>? = null,
     isEditing: Boolean = false,
+    highlightRanges: List<FindHighlight> = emptyList(),
+    selectionActions: SelectionActions? = null,
 ) {
     val isUser = message.role == "user"
     if (isUser) {
@@ -74,6 +76,8 @@ fun MessageBubble(
             onEdit = onEdit,
             onQuote = onQuote,
             isEditing = isEditing,
+            highlightRanges = highlightRanges,
+            selectionActions = selectionActions,
         )
     } else {
         AssistantProcessBlock(
@@ -87,6 +91,8 @@ fun MessageBubble(
             onFeedback = onFeedback,
             fileExists = fileExists,
             mergedCodeComments = mergedCodeComments,
+            highlightRanges = highlightRanges,
+            selectionActions = selectionActions,
         )
     }
 }
@@ -99,8 +105,34 @@ private fun UserProcessBubble(
     onEdit: (() -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
     isEditing: Boolean = false,
+    highlightRanges: List<FindHighlight> = emptyList(),
+    selectionActions: SelectionActions? = null,
 ) {
     val maxBubble = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
+    val currentHighlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+    val otherHighlight = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+    val userText = remember(message.content, highlightRanges, currentHighlight, otherHighlight) {
+        if (highlightRanges.isEmpty()) {
+            androidx.compose.ui.text.AnnotatedString(message.content)
+        } else {
+            androidx.compose.ui.text.buildAnnotatedString {
+                append(message.content)
+                highlightRanges.forEach { h ->
+                    val start = h.start.coerceIn(0, message.content.length)
+                    val end = h.endExclusive.coerceIn(start, message.content.length)
+                    if (end > start) {
+                        addStyle(
+                            androidx.compose.ui.text.SpanStyle(
+                                background = if (h.isCurrent) currentHighlight else otherHighlight,
+                            ),
+                            start,
+                            end,
+                        )
+                    }
+                }
+            }
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -112,7 +144,7 @@ private fun UserProcessBubble(
                 .widthIn(max = maxBubble)
                 .clip(Chrome.bubble)
                 .then(
-                    if (onCopy != null) {
+                    if (onCopy != null && selectionActions == null) {
                         Modifier.pointerInput(message.id) {
                             detectTapGestures(onLongPress = { onCopy() })
                         }
@@ -132,15 +164,22 @@ private fun UserProcessBubble(
                 if (message.content.isNotBlank()) Spacer(Modifier.height(6.dp))
             }
             if (message.content.isNotBlank()) {
-                Text(
-                    text = message.content,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (isEditing) {
-                        MaterialTheme.colorScheme.onTertiaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    },
-                )
+                val body = @Composable {
+                    Text(
+                        text = userText,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isEditing) {
+                            MaterialTheme.colorScheme.onTertiaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        },
+                    )
+                }
+                if (selectionActions != null) {
+                    SelectableWithToolbar(actions = selectionActions) { body() }
+                } else {
+                    body()
+                }
             }
         }
         if (message.content.isNotBlank() && (onCopy != null || onEdit != null || onQuote != null || message.createdAt > 0L || message.sortKey > 0L)) {
@@ -215,6 +254,8 @@ private fun AssistantProcessBlock(
     onFeedback: ((Int) -> Unit)? = null,
     fileExists: ((String) -> Boolean)? = null,
     mergedCodeComments: List<AssistantCodeComment>? = null,
+    highlightRanges: List<FindHighlight> = emptyList(),
+    selectionActions: SelectionActions? = null,
 ) {
     val process = message.isProcess
     val fileProjection = remember(message.content, message.isStreaming) {
@@ -241,6 +282,10 @@ private fun AssistantProcessBlock(
     }
     var showFull by remember(message.id) { mutableStateOf(false) }
     val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else commentProjection.text
+    val markdownHighlights = remember(highlightRanges, message.content, visibleText) {
+        ChatFind.rebase(message.content, visibleText, highlightRanges)
+            .map { com.andmx.ui2.markdown.MarkdownHighlight(it.start, it.endExclusive, it.isCurrent) }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -255,6 +300,8 @@ private fun AssistantProcessBlock(
             text = visibleText,
             isStreaming = message.isStreaming,
             muted = process,
+            highlightRanges = markdownHighlights,
+            selectionActions = selectionActions,
         )
         if (previewPlan.truncated && !showFull) {
             Row(
