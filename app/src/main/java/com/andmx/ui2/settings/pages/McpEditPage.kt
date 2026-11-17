@@ -215,10 +215,10 @@ fun McpEditPage(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text(if (initial == null) "新建 MCP 服务器" else "编辑 MCP 服务器") },
+                title = { Text(if (initial == null) tr("新建 MCP 服务器") else tr("编辑 MCP 服务器")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
@@ -233,11 +233,11 @@ fun McpEditPage(
                                 error = null
                                 onSave(entry)
                             } catch (t: Throwable) {
-                                error = t.message ?: "无法保存"
+                                error = t.message ?: tr("无法保存")
                             }
                         },
                         enabled = canSave,
-                    ) { Icon(Icons.Outlined.Check, "保存") }
+                    ) { Icon(Icons.Outlined.Check, tr("保存")) }
                 },
             )
         },
@@ -258,7 +258,7 @@ fun McpEditPage(
                 )
             }
             SegmentedRow(
-                options = listOf("form" to "表单", "json" to "JSON"),
+                options = listOf("form" to tr("表单"), "json" to "JSON"),
                 selected = editorMode,
                 onSelect = { next ->
                     if (next == editorMode) {
@@ -283,14 +283,14 @@ fun McpEditPage(
                                 editorMode = "form"
                             }
                             .onFailure {
-                                error = it.message ?: "JSON 无法转回表单"
+                                error = it.message ?: tr("JSON 无法转回表单")
                             }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             if (editorMode == "json") {
-                SettingsGroup("完整配置") {
+                SettingsGroup(tr("完整配置")) {
                     Text(
                         tr("可以粘贴 {\"server-name\": {...}}，或 {\"mcpServers\": {\"server-name\": {...}}}。一次只编辑一个服务器。"),
                         style = MaterialTheme.typography.bodySmall,
@@ -308,8 +308,8 @@ fun McpEditPage(
                     )
                 }
             } else {
-                SettingsGroup("基本信息") {
-                    StackedSettingRow(title = "名称", description = "工具名前缀，如 filesystem") {
+                SettingsGroup(tr("基本信息")) {
+                    StackedSettingRow(title = tr("名称"), description = tr("工具名前缀，如 filesystem")) {
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
@@ -319,18 +319,18 @@ fun McpEditPage(
                         )
                     }
                     StackedSettingRow(
-                        title = "传输类型",
-                        description = if (remote) "远程 HTTP 或旧版 SSE" else "本地命令，在 proot 里启动",
+                        title = tr("传输类型"),
+                        description = if (remote) tr("远程 HTTP 或旧版 SSE") else tr("本地命令，在 proot 里启动"),
                     ) {
                         SegmentedRow(
-                            options = listOf("remote" to "HTTP / SSE", "stdio" to "本地命令"),
+                            options = listOf("remote" to "HTTP / SSE", "stdio" to tr("本地命令")),
                             selected = if (remote) "remote" else "stdio",
                             onSelect = { remote = it == "remote" },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     if (remote) {
-                        StackedSettingRow(title = "远程方式", description = "SSE 走同一套 HTTP 客户端。") {
+                        StackedSettingRow(title = tr("远程方式"), description = tr("SSE 走同一套 HTTP 客户端。")) {
                             SegmentedRow(
                                 options = listOf("http" to "HTTP", "sse" to "SSE"),
                                 selected = if (sse) "sse" else "http",
@@ -339,7 +339,7 @@ fun McpEditPage(
                             )
                         }
                     }
-                    StackedSettingRow(title = "超时", description = "毫秒。留空用 60 秒。") {
+                    StackedSettingRow(title = tr("超时"), description = tr("毫秒。留空用 60 秒。")) {
                         OutlinedTextField(
                             value = timeoutText,
                             onValueChange = { timeoutText = it.filter { ch -> ch.isDigit() }.take(7) },
@@ -349,12 +349,12 @@ fun McpEditPage(
                         )
                     }
                     if (!sse) {
-                        StackedSettingRow(title = "协议版本", description = "自动使用当前客户端版本。") {
+                        StackedSettingRow(title = tr("协议版本"), description = tr("自动使用当前客户端版本。")) {
                             SegmentedRow(
                                 options = listOf(
-                                    "" to "自动",
-                                    "legacy" to "旧版",
-                                    McpProtocol.LATEST_VERSION to "当前",
+                                    "" to tr("自动"),
+                                    "legacy" to tr("旧版"),
+                                    McpProtocol.LATEST_VERSION to tr("当前"),
                                 ),
                                 selected = when (protocolVersion) {
                                     "legacy" -> "legacy"
@@ -367,9 +367,9 @@ fun McpEditPage(
                         }
                     }
                 }
-                SettingsGroup(if (remote) "端点" else "命令") {
+                SettingsGroup(if (remote) tr("端点") else tr("命令")) {
                     if (remote) {
-                        StackedSettingRow(title = "URL", description = "服务器地址") {
+                        StackedSettingRow(title = "URL", description = tr("服务器地址")) {
                             OutlinedTextField(
                                 value = target,
                                 onValueChange = { target = it },
@@ -379,7 +379,7 @@ fun McpEditPage(
                                 singleLine = true,
                             )
                         }
-                        StackedSettingRow(title = "请求头", description = "JSON 对象，例如 Authorization。") {
+                        StackedSettingRow(title = tr("请求头"), description = tr("JSON 对象，例如 Authorization。")) {
                             OutlinedTextField(
                                 value = headersText,
                                 onValueChange = { headersText = it },
@@ -390,7 +390,7 @@ fun McpEditPage(
                             )
                         }
                     } else {
-                        StackedSettingRow(title = "命令", description = "可执行文件，例如 npx") {
+                        StackedSettingRow(title = tr("命令"), description = tr("可执行文件，例如 npx")) {
                             OutlinedTextField(
                                 value = target,
                                 onValueChange = { target = it },
@@ -400,7 +400,7 @@ fun McpEditPage(
                                 singleLine = true,
                             )
                         }
-                        StackedSettingRow(title = "参数", description = "空格分隔，接在命令后面执行。") {
+                        StackedSettingRow(title = tr("参数"), description = tr("空格分隔，接在命令后面执行。")) {
                             OutlinedTextField(
                                 value = args,
                                 onValueChange = { args = it },
@@ -410,7 +410,7 @@ fun McpEditPage(
                                 minLines = 2,
                             )
                         }
-                        StackedSettingRow(title = "环境变量", description = "JSON 对象，会加到进程环境上。") {
+                        StackedSettingRow(title = tr("环境变量"), description = tr("JSON 对象，会加到进程环境上。")) {
                             OutlinedTextField(
                                 value = envText,
                                 onValueChange = { envText = it },
@@ -442,9 +442,9 @@ fun McpEditPage(
                         onClick = {
                             val entry = runCatching { currentEntry().toConfig() }.getOrNull()
                             if (entry == null) {
-                                authNote = "✗ 配置无效，无法发起授权"
+                                authNote = tr("✗ 配置无效，无法发起授权")
                             } else {
-                                authNote = "… 正在准备授权（元数据发现 / 动态注册）"
+                                authNote = tr("… 正在准备授权（元数据发现 / 动态注册）")
                                 authScope.launch {
                                     val result = runCatching {
                                         McpOAuthFlow.start(context, entry)

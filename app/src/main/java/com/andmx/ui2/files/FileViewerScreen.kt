@@ -247,18 +247,18 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回")) }
                 },
                 actions = {
                     if (kind == FileKind.OFFICE) {
                         IconButton(onClick = { openFileExternally(context, file) }) {
-                            Icon(Icons.Outlined.OpenInNew, "用其他应用打开")
+                            Icon(Icons.Outlined.OpenInNew, tr("用其他应用打开"))
                         }
                     }
                     if (kind == FileKind.TEXT || kind == FileKind.MARKDOWN) {
                         IconButton(onClick = { wrap = !wrap }) {
                             Icon(
-                                Icons.Outlined.WrapText, "自动换行",
+                                Icons.Outlined.WrapText, tr("自动换行"),
                                 tint = if (wrap) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -269,9 +269,9 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                                     withContext(Dispatchers.IO) { runCatching { file.writeText(draft) } }
                                     editing = false
                                 }
-                            }) { Icon(Icons.Outlined.Check, "保存") }
+                            }) { Icon(Icons.Outlined.Check, tr("保存")) }
                         } else {
-                            IconButton(onClick = { editing = true }) { Icon(Icons.Outlined.Edit, "编辑") }
+                            IconButton(onClick = { editing = true }) { Icon(Icons.Outlined.Edit, tr("编辑")) }
                         }
                     }
                 }
@@ -315,9 +315,9 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                     kind == FileKind.OFFICE && officeText != null ->
                         OfficePreview(officeText!!)
                     kind == FileKind.OFFICE ->
-                        CenterHint("无法提取这个 Office 文档的文本。可能已加密，或文件结构不受支持。")
+                        CenterHint(tr("无法提取这个 Office 文档的文本。可能已加密，或文件结构不受支持。"))
                     kind == FileKind.BINARY ->
-                        CenterHint("当前文件看起来像二进制内容，暂不支持预览。")
+                        CenterHint(tr("当前文件看起来像二进制内容，暂不支持预览。"))
                     kind == FileKind.IMAGE && imageBitmap != null ->
                         Image(
                             bitmap = imageBitmap!!,
@@ -328,7 +328,7 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                             contentScale = ContentScale.Fit,
                         )
                     kind == FileKind.IMAGE ->
-                        CenterHint("无法解码这张图片（SVG 等矢量格式暂不支持预览）。")
+                        CenterHint(tr("无法解码这张图片（SVG 等矢量格式暂不支持预览）。"))
                     kind == FileKind.PDF && pdfPreview != null -> {
                         val preview = pdfPreview!!
                         LazyColumn(Modifier.fillMaxSize()) {
@@ -355,11 +355,11 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                         }
                     }
                     kind == FileKind.PDF ->
-                        CenterHint("无法打开这个 PDF 文件。")
+                        CenterHint(tr("无法打开这个 PDF 文件。"))
                     fullContent == null ->
-                        CenterHint("文件不存在，或当前环境无法访问该路径。")
+                        CenterHint(tr("文件不存在，或当前环境无法访问该路径。"))
                     fullContent!!.isEmpty() ->
-                        CenterHint("文件为空")
+                        CenterHint(tr("文件为空"))
                     editing ->
                         EditView(draft = draft, onChange = { draft = it })
                     kind == FileKind.MARKDOWN && !mdSource ->
@@ -410,12 +410,12 @@ private fun MediaPreview(file: File, audio: Boolean) {
         onDispose { view.value?.stopPlayback() }
     }
     if (failed) {
-        CenterHint("系统无法播放这个文件（缺少解码器，或文件已损坏）。")
+        CenterHint(tr("系统无法播放这个文件（缺少解码器，或文件已损坏）。"))
         return
     }
     Column(Modifier.fillMaxSize()) {
         if (!file.exists()) {
-            CenterHint("文件不存在，或当前环境无法访问该路径。")
+            CenterHint(tr("文件不存在，或当前环境无法访问该路径。"))
             return@Column
         }
         if (audio) {
@@ -619,7 +619,7 @@ private fun openFileExternally(context: android.content.Context, file: File) {
     }.onFailure {
         android.widget.Toast.makeText(
             context,
-            "没有可打开该文件的应用。",
+            tr("没有可打开该文件的应用。"),
             android.widget.Toast.LENGTH_SHORT,
         ).show()
     }

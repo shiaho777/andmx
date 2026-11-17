@@ -38,13 +38,13 @@ class AgentRunService : Service() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(CHANNEL_ID) == null) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "后台任务", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "会话在后台继续运行时的持续通知"
+                NotificationChannel(CHANNEL_ID, tr("后台任务"), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = tr("会话在后台继续运行时的持续通知")
                 },
             )
         }
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AndMX 正在运行")
+            .setContentTitle(tr("AndMX 正在运行"))
             .setContentText(tr("会话还在后台继续，离开这个页面不会中断"))
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)

@@ -62,8 +62,8 @@ fun QueueStrip(
                 )
                 Text(
                     when (paused) {
-                        ChatViewModel.QueuePause.STOPPED -> "由于你中断了当前响应，队列已暂停"
-                        ChatViewModel.QueuePause.ERROR -> "由于当前响应出错，队列已暂停（内容未丢失）"
+                        ChatViewModel.QueuePause.STOPPED -> tr("由于你中断了当前响应，队列已暂停")
+                        ChatViewModel.QueuePause.ERROR -> tr("由于当前响应出错，队列已暂停（内容未丢失）")
                         ChatViewModel.QueuePause.NONE -> ""
                     },
                     style = MaterialTheme.typography.labelMedium,
@@ -109,13 +109,13 @@ fun QueueStrip(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                IconChip(Icons.Outlined.Edit, "编辑") { onEdit(i) }
-                if (i > 0) IconChip(Icons.Outlined.KeyboardArrowUp, "上移") { onMove(i, -1) }
-                if (i < queue.lastIndex) IconChip(Icons.Outlined.KeyboardArrowDown, "下移") { onMove(i, 1) }
+                IconChip(Icons.Outlined.Edit, tr("编辑")) { onEdit(i) }
+                if (i > 0) IconChip(Icons.Outlined.KeyboardArrowUp, tr("上移")) { onMove(i, -1) }
+                if (i < queue.lastIndex) IconChip(Icons.Outlined.KeyboardArrowDown, tr("下移")) { onMove(i, 1) }
                 if (canSendNow) {
-                    IconChip(Icons.AutoMirrored.Filled.Send, "立即发送") { onSendNow(i) }
+                    IconChip(Icons.AutoMirrored.Filled.Send, tr("立即发送")) { onSendNow(i) }
                 }
-                IconChip(Icons.Outlined.Close, "移除") { onRemove(i) }
+                IconChip(Icons.Outlined.Close, tr("移除")) { onRemove(i) }
             }
         }
     }

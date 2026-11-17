@@ -142,7 +142,7 @@ fun RemoteWorkspaceDialog(
                                         )
                                     }
                                     IconButton(onClick = { onDelete(profile.id) }) {
-                                        Icon(Icons.Outlined.Delete, "删除", Modifier.size(18.dp))
+                                        Icon(Icons.Outlined.Delete, tr("删除"), Modifier.size(18.dp))
                                     }
                                 }
                             }
@@ -274,19 +274,19 @@ fun RemoteWorkspaceDialog(
                     onClick = {
                         error = null
                         if (editing.host.isBlank() || editing.username.isBlank()) {
-                            error = "主机和用户名不能为空"
+                            error = tr("主机和用户名不能为空")
                             return@TextButton
                         }
                         if (editing.authMethod == SshAuthMethod.PRIVATE_KEY.name &&
                             editing.privateKeyPath.isBlank()
                         ) {
-                            error = "私钥路径不能为空"
+                            error = tr("私钥路径不能为空")
                             return@TextButton
                         }
                         if (editing.authMethod == SshAuthMethod.PASSWORD.name &&
                             editing.password.isBlank()
                         ) {
-                            error = "密码不能为空"
+                            error = tr("密码不能为空")
                             return@TextButton
                         }
                         onSave(editing)
@@ -315,9 +315,9 @@ fun RemoteWorkspaceDialog(
             title = {
                 Text(
                     when {
-                        busy -> "正在连接..."
-                        result?.ok == true -> "连接成功"
-                        else -> "连接失败"
+                        busy -> tr("正在连接...")
+                        result?.ok == true -> tr("连接成功")
+                        else -> tr("连接失败")
                     },
                 )
             },
@@ -407,7 +407,7 @@ fun RemoteWorkspaceDialog(
                                     loadDir(spec, if (parent.isBlank()) "/" else parent)
                                 },
                             ) {
-                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "上一级")
+                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("上一级"))
                             }
                             Text(
                                 browsePath.ifBlank { "—" },

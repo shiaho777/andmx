@@ -21,10 +21,10 @@ object UiLang {
 
 fun tr(text: String): String {
     if (UiLang.tag != "en") return text
-    settingsEn[text]?.let { return it }
+    AppStrings.lookup(text)?.let { return it }
     for (phrase in phraseTemplates) {
         val matched = phrase.regex.matchEntire(text) ?: continue
-        val args = matched.groupValues.drop(1).map { settingsEn[it] ?: it }.toTypedArray()
+        val args = matched.groupValues.drop(1).map { AppStrings.lookup(it) ?: it }.toTypedArray()
         return runCatching { phrase.english.format(*args) }.getOrDefault(text)
     }
     return text

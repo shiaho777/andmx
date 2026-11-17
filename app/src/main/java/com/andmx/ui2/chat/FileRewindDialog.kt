@@ -67,7 +67,7 @@ fun FileRewindDialog(
             title = { Text(tr("全部还原")) },
             text = {
                 Text(tr("将把 ${changes.size} 个文件的改动还原为 agent 修改前的内容") +
-                        "（外部改动过的文件会跳过）。此操作不可撤销。",
+                        tr("（外部改动过的文件会跳过）。此操作不可撤销。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             },
@@ -114,7 +114,7 @@ fun FileRewindDialog(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             val stats = statsByPath[c.path] ?: DiffStats(0, 0)
-                            val kind = if (c.isNew) "新建" else "修改"
+                            val kind = if (c.isNew) tr("新建") else tr("修改")
                             Text(
                                 tr("$kind · +${stats.added}/-${stats.removed} · ${fmt.format(Date(c.timestamp))}"),
                                 style = MaterialTheme.typography.labelSmall,

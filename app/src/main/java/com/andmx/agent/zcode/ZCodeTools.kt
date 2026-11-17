@@ -748,6 +748,10 @@ fun buildZCodeToolSurface(
     submitResultSlot: java.util.concurrent.atomic.AtomicReference<String?>? = null,
     escalateHandler: (suspend (question: String, context: String) -> String)? = null,
     shellRuntime: () -> String = { "" },
+    imageSearchApiConfig: () -> com.andmx.agent.ImageSearchApiConfig = { com.andmx.agent.ImageSearchConfig.snapshot() },
+    pluginCatalog: (suspend () -> List<com.andmx.agent.plugins.PluginMarketplace.CatalogPlugin>)? = null,
+    pluginInstalledNames: (suspend () -> Set<String>)? = null,
+    pluginAutoRecommend: () -> Boolean = { false },
 ): List<Tool> {
     val access = WorkspaceAccess(context)
     val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks, shellRuntime = shellRuntime)
@@ -787,7 +791,13 @@ fun buildZCodeToolSurface(
         ApplyPatchTool(context, conversationId),
         GitTool(context, cwdProvider = cwdProvider),
         ComputerUseTool(context),
+        com.andmx.agent.ImageSearchTool(networkPolicy = networkPolicy, apiConfig = imageSearchApiConfig),
+        com.andmx.agent.office.OfficeWriteTool(context),
     )
+    if (pluginCatalog != null && pluginInstalledNames != null) {
+        zcode += com.andmx.agent.plugins.SearchPluginsTool(pluginCatalog, pluginInstalledNames, pluginAutoRecommend)
+        zcode += com.andmx.agent.plugins.SuggestPluginInstallTool(pluginCatalog, pluginInstalledNames)
+    }
     if (includeGoals) {
         zcode += CreateGoalTool(goalState)
         zcode += UpdateGoalTool(goalState)

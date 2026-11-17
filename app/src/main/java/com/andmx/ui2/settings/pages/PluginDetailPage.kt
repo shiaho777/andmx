@@ -76,14 +76,14 @@ fun PluginDetailPage(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp),
         ) {
-            SettingsGroup("状态") {
+            SettingsGroup(tr("状态")) {
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (plugin.enabled) "已启用" else "已停用",
+                            if (plugin.enabled) tr("已启用") else tr("已停用"),
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
@@ -101,7 +101,7 @@ fun PluginDetailPage(
             }
 
             if (m.description.isNotBlank()) {
-                SettingsGroup("描述") {
+                SettingsGroup(tr("描述")) {
                     Text(
                         m.description,
                         style = MaterialTheme.typography.bodyMedium,
@@ -110,11 +110,11 @@ fun PluginDetailPage(
                 }
             }
 
-            SettingsGroup("组件") {
-                CapabilitySection("工具", Icons.Outlined.Terminal, m.tools)
-                CapabilitySection("技能", Icons.Outlined.Bolt, m.skills)
-                CapabilitySection("命令", Icons.Outlined.Terminal, m.commands)
-                CapabilitySection("MCP 服务器", Icons.Outlined.Cloud, m.mcpServers)
+            SettingsGroup(tr("组件")) {
+                CapabilitySection(tr("工具"), Icons.Outlined.Terminal, m.tools)
+                CapabilitySection(tr("技能"), Icons.Outlined.Bolt, m.skills)
+                CapabilitySection(tr("命令"), Icons.Outlined.Terminal, m.commands)
+                CapabilitySection(tr("MCP 服务器"), Icons.Outlined.Cloud, m.mcpServers)
                 CapabilitySection(
                     "Hooks",
                     Icons.Outlined.Link,
@@ -130,7 +130,7 @@ fun PluginDetailPage(
             }
 
             if (configFields.isNotEmpty()) {
-                SettingsGroup("用户配置") {
+                SettingsGroup(tr("用户配置")) {
                     configFields.forEach { (key, desc) ->
                         OutlinedTextField(
                             value = drafts[key].orEmpty(),
@@ -154,15 +154,15 @@ fun PluginDetailPage(
                 }
             }
 
-            SettingsGroup("安装信息") {
-                InfoLine("目录", plugin.dir)
-                InfoLine("版本", m.version)
-                if (m.author.isNotBlank()) InfoLine("作者", m.author)
-                if (plugin.installSource.isNotBlank()) InfoLine("来源", plugin.installSource)
+            SettingsGroup(tr("安装信息")) {
+                InfoLine(tr("目录"), plugin.dir)
+                InfoLine(tr("版本"), m.version)
+                if (m.author.isNotBlank()) InfoLine(tr("作者"), m.author)
+                if (plugin.installSource.isNotBlank()) InfoLine(tr("来源"), plugin.installSource)
             }
 
             if (onUninstall != null) {
-                SettingsGroup("危险操作") {
+                SettingsGroup(tr("危险操作")) {
                     TextButton(onClick = { confirmUninstall = true }) {
                         Icon(Icons.Outlined.Delete, null)
                         Text(tr(" 卸载插件"), color = MaterialTheme.colorScheme.error)
@@ -226,19 +226,19 @@ private fun InfoLine(label: String, value: String) {
 }
 
 private fun sourceLabel(source: PluginSystem.PluginSource): String = when (source) {
-    PluginSystem.PluginSource.BUILTIN -> "内置"
-    PluginSystem.PluginSource.MARKETPLACE -> "市场安装"
-    PluginSystem.PluginSource.LOCAL -> "本地"
+    PluginSystem.PluginSource.BUILTIN -> tr("内置")
+    PluginSystem.PluginSource.MARKETPLACE -> tr("市场安装")
+    PluginSystem.PluginSource.LOCAL -> tr("本地")
 }
 
 private fun mobileConfigFields(pluginName: String): List<Pair<String, String>> = when (pluginName) {
     "andmx-android-dev" -> listOf(
-        "sdk_path" to "Android SDK 根目录，空则自动探测",
-        "default_avd" to "默认 AVD 名称",
-        "api_level" to "默认 API level",
-        "build_tools_version" to "build-tools 版本",
+        "sdk_path" to tr("Android SDK 根目录，空则自动探测"),
+        "default_avd" to tr("默认 AVD 名称"),
+        "api_level" to tr("默认 API level"),
+        "build_tools_version" to tr("build-tools 版本"),
         "system_image_variant" to "default / google_apis / google_apis_playstore",
-        "system_image_abi" to "ABI，空则自动",
+        "system_image_abi" to tr("ABI，空则自动"),
         "jdk_major" to "JDK major",
     )
     else -> emptyList()

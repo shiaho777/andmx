@@ -212,21 +212,21 @@ private fun UserActionBar(
         if (onCopy != null) {
             ActionChip(
                 icon = Icons.Outlined.ContentCopy,
-                label = "复制",
+                label = tr("复制"),
                 onClick = onCopy,
             )
         }
         if (onEdit != null) {
             ActionChip(
                 icon = Icons.Outlined.Edit,
-                label = if (isEditing) "编辑中" else "编辑",
+                label = if (isEditing) tr("编辑中") else tr("编辑"),
                 onClick = onEdit,
             )
         }
         if (onQuote != null) {
             ActionChip(
                 icon = Icons.Outlined.FormatQuote,
-                label = "引用",
+                label = tr("引用"),
                 onClick = onQuote,
             )
         }
@@ -385,35 +385,35 @@ private fun AssistantActionBar(
             if (onCopy != null) {
                 ActionChip(
                     icon = Icons.Outlined.ContentCopy,
-                    label = "复制",
+                    label = tr("复制"),
                     onClick = onCopy,
                 )
             }
             if (onBranch != null) {
                 ActionChip(
                     icon = Icons.Outlined.AccountTree,
-                    label = "分支",
+                    label = tr("分支"),
                     onClick = onBranch,
                 )
             }
             if (onRegenerate != null) {
                 ActionChip(
                     icon = Icons.Outlined.Refresh,
-                    label = "重新生成",
+                    label = tr("重新生成"),
                     onClick = onRegenerate,
                 )
             }
             if (onQuote != null) {
                 ActionChip(
                     icon = Icons.Outlined.FormatQuote,
-                    label = "引用",
+                    label = tr("引用"),
                     onClick = onQuote,
                 )
             }
             if (onSideChat != null) {
                 ActionChip(
                     icon = Icons.Outlined.ChatBubbleOutline,
-                    label = "侧聊",
+                    label = tr("侧聊"),
                     onClick = onSideChat,
                 )
             }

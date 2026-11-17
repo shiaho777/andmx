@@ -32,7 +32,7 @@ fun AboutPage(onBack: () -> Unit) {
     val context = LocalContext.current
     val diagnostics = diagnostics()
 
-    SettingsScaffold(title = "关于", onBack = onBack) {
+    SettingsScaffold(title = tr("关于"), onBack = onBack) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(
                 "AndMX",
@@ -46,12 +46,12 @@ fun AboutPage(onBack: () -> Unit) {
                 modifier = Modifier.padding(top = 2.dp, bottom = 16.dp),
             )
 
-            InfoRow("版本", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            InfoRow("构建变体", BuildConfig.FLAVOR)
-            InfoRow("构建类型", BuildConfig.BUILD_TYPE)
-            InfoRow("包名", BuildConfig.APPLICATION_ID)
-            InfoRow("系统版本", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            InfoRow("设备", "${Build.MANUFACTURER} ${Build.MODEL}")
+            InfoRow(tr("版本"), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            InfoRow(tr("构建变体"), BuildConfig.FLAVOR)
+            InfoRow(tr("构建类型"), BuildConfig.BUILD_TYPE)
+            InfoRow(tr("包名"), BuildConfig.APPLICATION_ID)
+            InfoRow(tr("系统版本"), "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            InfoRow(tr("设备"), "${Build.MANUFACTURER} ${Build.MODEL}")
 
             Text(
                 tr("应用信息"),
@@ -61,20 +61,20 @@ fun AboutPage(onBack: () -> Unit) {
             )
             SettingsItem(
                 icon = Icons.Outlined.OpenInNew,
-                title = "查看最新版本",
-                subtitle = "在浏览器打开 GitHub Releases",
+                title = tr("查看最新版本"),
+                subtitle = tr("在浏览器打开 GitHub Releases"),
                 onClick = { openUrl(context, RELEASES_URL) },
             )
             SettingsItem(
                 icon = Icons.Outlined.Info,
-                title = "查看 GitHub 仓库",
+                title = tr("查看 GitHub 仓库"),
                 subtitle = REPO_URL,
                 onClick = { openUrl(context, REPO_URL) },
             )
             SettingsItem(
                 icon = Icons.Outlined.ContentCopy,
-                title = "复制诊断信息",
-                subtitle = "版本、设备与构建变体，便于反馈问题",
+                title = tr("复制诊断信息"),
+                subtitle = tr("版本、设备与构建变体，便于反馈问题"),
                 onClick = {
                     copy(context, diagnostics)
                     Toast.makeText(context, tr("已复制诊断信息"), Toast.LENGTH_SHORT).show()

@@ -61,7 +61,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("代码预览", onBack) }) { padding ->
+        topBar = { backAppBar(tr("代码预览"), onBack) }) { padding ->
         Column(
             Modifier
                 .padding(padding)
@@ -69,7 +69,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp)
         ) {
-            SettingsGroup("实时预览") {
+            SettingsGroup(tr("实时预览")) {
                 Text(tr("代码块将按当前界面主题使用对应配色。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -85,7 +85,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 )
             }
 
-            SettingsGroup("深色预览") {
+            SettingsGroup(tr("深色预览")) {
                 ThemeRow(
                     themes = CodeThemes.darkThemes,
                     selected = s.darkCodeTheme,
@@ -93,7 +93,7 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 )
             }
 
-            SettingsGroup("浅色预览") {
+            SettingsGroup(tr("浅色预览")) {
                 ThemeRow(
                     themes = CodeThemes.lightThemes,
                     selected = s.lightCodeTheme,
@@ -101,25 +101,25 @@ fun CodePreviewPage(onBack: () -> Unit) {
                 )
             }
 
-            SettingsGroup("显示") {
+            SettingsGroup(tr("显示")) {
                 SwitchRow(
-                    title = "显示行号",
-                    description = "在代码内容和差异视图中显示行号。",
+                    title = tr("显示行号"),
+                    description = tr("在代码内容和差异视图中显示行号。"),
                     checked = s.showLineNumbers,
                     onCheckedChange = { save(s.copy(showLineNumbers = it)) }
                 )
                 SwitchRow(
-                    title = "长行自动换行",
-                    description = "代码内容过长时自动换行。",
+                    title = tr("长行自动换行"),
+                    description = tr("代码内容过长时自动换行。"),
                     checked = s.wrapLongLines,
                     onCheckedChange = { save(s.copy(wrapLongLines = it)) }
                 )
             }
 
-            SettingsGroup("代码字号") {
+            SettingsGroup(tr("代码字号")) {
                 StackedSettingRow(
                     title = "代码字号：${s.codeFontSize}",
-                    description = "调整代码块、文件预览和差异视图的默认字号。"
+                    description = tr("调整代码块、文件预览和差异视图的默认字号。")
                 ) {
                     Slider(
                         value = s.codeFontSize.toFloat(),

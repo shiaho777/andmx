@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import com.andmx.ui2.settings.tr
 data class DayBucket(
     val dayStart: Long,
     val tokens: Long,
@@ -51,8 +52,8 @@ data class UsageStats(
 )
 
 enum class UsageRange(val label: String, val days: Int) {
-    D7("最近 7 天", 7),
-    D30("最近 30 天", 30),
+    D7(tr("最近 7 天"), 7),
+    D30(tr("最近 30 天"), 30),
 }
 
 object UsageCalculator {
@@ -212,7 +213,7 @@ object UsageCalculator {
                 if (other > 0L) {
                     add(
                         ModelUsage(
-                            model = "其他模型",
+                            model = tr("其他模型"),
                             tokens = other,
                             share = if (totalTokens > 0) other.toFloat() / totalTokens else 0f,
                         ),
@@ -287,11 +288,11 @@ object UsageCalculator {
         }
         if (n >= 100_000_000L) {
             val v = n / 100_000_000.0
-            return if (abs(v - v.roundToInt()) < 0.05) "${v.roundToInt()}亿" else trimDecimal(v) + "亿"
+            return if (abs(v - v.roundToInt()) < 0.05) "${v.roundToInt()}亿" else trimDecimal(v) + tr("亿")
         }
         if (n >= 10_000L) {
             val v = n / 10_000.0
-            return if (abs(v - v.roundToInt()) < 0.05 && v < 100) "${v.roundToInt()}万" else trimDecimal(v) + "万"
+            return if (abs(v - v.roundToInt()) < 0.05 && v < 100) "${v.roundToInt()}万" else trimDecimal(v) + tr("万")
         }
         return n.toString()
     }

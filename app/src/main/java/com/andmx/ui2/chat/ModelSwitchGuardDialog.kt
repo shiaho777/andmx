@@ -27,12 +27,12 @@ fun ModelSwitchGuardDialog(
             Column {
                 if (guard.running) {
                     Text(tr("当前会话已用 ${guard.used} tokens，超过 ${guard.modelLabel} 的可用上下文 ${guard.target}。") +
-                            "任务运行中无法压缩，请等任务完成后再切换。",
+                            tr("任务运行中无法压缩，请等任务完成后再切换。"),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 } else {
                     Text(tr("当前会话已用 ${guard.used} tokens，超过 ${guard.modelLabel} 的可用上下文 ${guard.target}（已预留最大输出）。") +
-                            "建议先压缩上下文再切换，避免切换后立即溢出。",
+                            tr("建议先压缩上下文再切换，避免切换后立即溢出。"),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(Modifier.padding(2.dp))
@@ -53,7 +53,7 @@ fun ModelSwitchGuardDialog(
                 if (!guard.running) {
                     TextButton(onClick = onForceSwitch) { Text(tr("仍然切换")) }
                 }
-                TextButton(onClick = onCancel) { Text(if (guard.running) "知道了" else "取消") }
+                TextButton(onClick = onCancel) { Text(if (guard.running) tr("知道了") else tr("取消")) }
             }
         },
     )

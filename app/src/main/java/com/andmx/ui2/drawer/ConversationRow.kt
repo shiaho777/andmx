@@ -86,7 +86,7 @@ fun ConversationRow(
         preferCreated = sortMode == SortMode.CREATED,
     )
     val timeText = relativeTaskTime(ts)
-    val title = conversation.title.ifBlank { "新任务" }
+    val title = conversation.title.ifBlank { tr("新任务") }
     val multiLine = showWorkspaceMeta || !compact
 
     Box(
@@ -210,7 +210,7 @@ fun ConversationRow(
                 ) {
                     Icon(
                         Icons.Outlined.MoreHoriz,
-                        "更多",
+                        tr("更多"),
                         Modifier.size(18.dp),
                         tint = metaColor.copy(alpha = 0.85f),
                     )
@@ -235,7 +235,7 @@ fun ConversationRow(
                         )
                         DropdownMenuItem(
                             text = {
-                                Text(if (conversation.pinned) "取消置顶任务" else "置顶任务")
+                                Text(if (conversation.pinned) tr("取消置顶任务") else tr("置顶任务"))
                             },
                             leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
                             onClick = {
@@ -244,7 +244,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text(tr(if (unread) "标记为已读" else "标记为未读")) },
+                            text = { Text(tr(if (unread) tr("标记为已读") else tr("标记为未读"))) },
                             leadingIcon = {
                                 Icon(
                                     if (unread) Icons.Outlined.MarkEmailRead
@@ -268,7 +268,7 @@ fun ConversationRow(
                     } else {
                         DropdownMenuItem(
                             text = {
-                                Text(if (conversation.pinned) "取消置顶任务" else "置顶任务")
+                                Text(if (conversation.pinned) tr("取消置顶任务") else tr("置顶任务"))
                             },
                             leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
                             onClick = {
@@ -293,7 +293,7 @@ fun ConversationRow(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text(tr(if (unread) "标记为已读" else "标记为未读")) },
+                            text = { Text(tr(if (unread) tr("标记为已读") else tr("标记为未读"))) },
                             leadingIcon = {
                                 Icon(
                                     if (unread) Icons.Outlined.MarkEmailRead

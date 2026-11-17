@@ -36,9 +36,9 @@ fun ThemeModeSelector(
     modifier: Modifier = Modifier
 ) {
     val options = listOf(
-        ThemeOption("light", "浅色", listOf(Color(0xFFFFFFFF), Color(0xFFF1F1EF), Color(0xFF1A1A1F))),
-        ThemeOption("dark", "深色", listOf(Color(0xFF1A1A1F), Color(0xFF2A2A33), Color(0xFFECECEE))),
-        ThemeOption("system", "系统", listOf(Color(0xFFFFFFFF), Color(0xFF1A1A1F), Color(0xFF9A9AA2)))
+        ThemeOption("light", tr("浅色"), listOf(Color(0xFFFFFFFF), Color(0xFFF1F1EF), Color(0xFF1A1A1F))),
+        ThemeOption("dark", tr("深色"), listOf(Color(0xFF1A1A1F), Color(0xFF2A2A33), Color(0xFFECECEE))),
+        ThemeOption("system", tr("系统"), listOf(Color(0xFFFFFFFF), Color(0xFF1A1A1F), Color(0xFF9A9AA2)))
     )
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -113,7 +113,7 @@ private fun ThemeSwatchCard(
             if (selected) {
                 Icon(
                     Icons.Outlined.CheckCircle,
-                    contentDescription = "已选",
+                    contentDescription = tr("已选"),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )

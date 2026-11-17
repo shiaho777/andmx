@@ -222,13 +222,13 @@ private fun RemoteFilesScreen(
                                 .ifBlank { "/" }
                             reload(parent)
                         }) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, "上一级")
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("上一级"))
                         }
                     }
                 },
                 actions = {
                     IconButton(onClick = { refresh++ }) {
-                        Icon(Icons.Outlined.Refresh, "刷新")
+                        Icon(Icons.Outlined.Refresh, tr("刷新"))
                     }
                 },
             )
@@ -321,7 +321,7 @@ private fun RemoteFileViewer(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
             )

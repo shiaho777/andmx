@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
+import com.andmx.ui2.settings.tr
 
 /**
  * Goal 完成度验证时间线行（ZCode goalVerificationTimeline 对齐）：
@@ -50,9 +51,9 @@ fun GoalVerifyRow(item: GoalVerifyItem) {
     )
     val running = item.passed == null
     val statusText = when (item.passed) {
-        null -> "验证中"
-        true -> "已完成"
-        false -> "未通过 · 继续迭代"
+        null -> tr("验证中")
+        true -> tr("已完成")
+        false -> tr("未通过 · 继续迭代")
     }
     val statusColor = when (item.passed) {
         null -> MaterialTheme.colorScheme.onSurfaceVariant

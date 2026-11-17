@@ -198,7 +198,7 @@ fun ProviderEditPage(
 
     fun fetchModels() {
         if (baseUrl.isBlank()) {
-            fetchState = FetchState.Failed("请先填写 Base URL")
+            fetchState = FetchState.Failed(tr("请先填写 Base URL"))
             return
         }
         fetchState = FetchState.Loading
@@ -211,13 +211,13 @@ fun ProviderEditPage(
                 onSuccess = { ids ->
                     val sorted = ids.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
                     if (sorted.isEmpty()) {
-                        FetchState.Failed("未能获取模型列表（请检查 URL/Key，或端点是否支持 /models）")
+                        FetchState.Failed(tr("未能获取模型列表（请检查 URL/Key，或端点是否支持 /models）"))
                     } else {
                         FetchState.Ready(sorted)
                     }
                 },
                 onFailure = { t ->
-                    FetchState.Failed(t.message?.take(120) ?: "获取失败")
+                    FetchState.Failed(t.message?.take(120) ?: tr("获取失败"))
                 }
             )
         }
@@ -255,15 +255,15 @@ fun ProviderEditPage(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text(if (initial == null) "添加供应商" else "编辑供应商") },
+                title = { Text(if (initial == null) tr("添加供应商") else tr("编辑供应商")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
                     IconButton(onClick = { onSave(build()) }, enabled = canSave) {
-                        Icon(Icons.Outlined.Check, "保存")
+                        Icon(Icons.Outlined.Check, tr("保存"))
                     }
                 }
             )
@@ -295,8 +295,8 @@ fun ProviderEditPage(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp)
         ) {
-            SettingsGroup("基本信息") {
-                StackedSettingRow(title = "名称", description = "在聊天时用于识别该供应商") {
+            SettingsGroup(tr("基本信息")) {
+                StackedSettingRow(title = tr("名称"), description = tr("在聊天时用于识别该供应商")) {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -308,8 +308,8 @@ fun ProviderEditPage(
                     )
                 }
                 StackedSettingRow(
-                    title = "协议类型",
-                    description = "决定请求路径与鉴权方式"
+                    title = tr("协议类型"),
+                    description = tr("决定请求路径与鉴权方式")
                 ) {
                     SegmentedRow(
                         options = listOf(
@@ -324,7 +324,7 @@ fun ProviderEditPage(
                 }
             }
 
-            SettingsGroup("连接") {
+            SettingsGroup(tr("连接")) {
                 StackedSettingRow(title = "Base URL") {
                     OutlinedTextField(
                         value = baseUrl,
@@ -338,7 +338,7 @@ fun ProviderEditPage(
                 }
                 StackedSettingRow(
                     title = "API Key",
-                    description = "设置 API Key 后即可启用。"
+                    description = tr("设置 API Key 后即可启用。")
                 ) {
                     OutlinedTextField(
                         value = apiKey,
@@ -352,17 +352,17 @@ fun ProviderEditPage(
                         else PasswordVisualTransformation(),
                         trailingIcon = {
                             TextButton(onClick = { showKey = !showKey }) {
-                                Text(if (showKey) "隐藏" else "显示")
+                                Text(if (showKey) tr("隐藏") else tr("显示"))
                             }
                         }
                     )
                 }
             }
 
-            SettingsGroup("模型列表") {
+            SettingsGroup(tr("模型列表")) {
                 StackedSettingRow(
-                    title = "从 API 获取",
-                    description = "拉取供应商 /models 目录，搜索后勾选即可添加，无需手填 ID"
+                    title = tr("从 API 获取"),
+                    description = tr("拉取供应商 /models 目录，搜索后勾选即可添加，无需手填 ID")
                 ) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -389,7 +389,7 @@ fun ProviderEditPage(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (catalogue.isEmpty()) "获取模型列表" else "重新获取")
+                                Text(if (catalogue.isEmpty()) tr("获取模型列表") else tr("重新获取"))
                             }
                         }
                         if (catalogue.isNotEmpty()) {
@@ -416,7 +416,7 @@ fun ProviderEditPage(
                 }
 
                 if (catalogue.isNotEmpty() || selectedModels.isNotEmpty()) {
-                    StackedSettingRow(title = "搜索过滤") {
+                    StackedSettingRow(title = tr("搜索过滤")) {
                         OutlinedTextField(
                             value = modelQuery,
                             onValueChange = { modelQuery = it },
@@ -431,7 +431,7 @@ fun ProviderEditPage(
                             trailingIcon = {
                                 if (modelQuery.isNotEmpty()) {
                                     IconButton(onClick = { modelQuery = "" }) {
-                                        Icon(Icons.Outlined.Close, "清除")
+                                        Icon(Icons.Outlined.Close, tr("清除"))
                                     }
                                 }
                             },
@@ -443,9 +443,9 @@ fun ProviderEditPage(
 
                 if (catalogue.isNotEmpty()) {
                     StackedSettingRow(
-                        title = "可选模型",
+                        title = tr("可选模型"),
                         description = if (modelQuery.isBlank()) {
-                            "勾选后加入下方已选列表"
+                            tr("勾选后加入下方已选列表")
                         } else {
                             "匹配 ${filteredCatalogue.size} / ${catalogue.size}"
                         }
@@ -453,7 +453,7 @@ fun ProviderEditPage(
                         ModelPickList(
                             ids = filteredCatalogue,
                             selected = selectedModels.toSet(),
-                            emptyText = if (modelQuery.isBlank()) "暂无模型" else "无匹配模型",
+                            emptyText = if (modelQuery.isBlank()) tr("暂无模型") else tr("无匹配模型"),
                             onToggle = { toggleModel(it) },
                             maxHeight = 280.dp
                         )
@@ -493,17 +493,17 @@ fun ProviderEditPage(
                 }
 
                 StackedSettingRow(
-                    title = "已选模型",
+                    title = tr("已选模型"),
                     description = if (selectedModels.isEmpty()) {
-                        "聊天时将从这里选择可用模型；可为每个模型设置上下文长度"
+                        tr("聊天时将从这里选择可用模型；可为每个模型设置上下文长度")
                     } else {
                         "已选 ${selectedModels.size} 个 · 点开可设置上下文长度"
                     }
                 ) {
                     if (filteredSelected.isEmpty()) {
                         Text(
-                            if (selectedModels.isEmpty()) "尚未添加模型，可拉取列表勾选，或手动输入 ID"
-                            else "无匹配已选模型",
+                            if (selectedModels.isEmpty()) tr("尚未添加模型，可拉取列表勾选，或手动输入 ID")
+                            else tr("无匹配已选模型"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -559,7 +559,7 @@ fun ProviderEditPage(
                 }
             }
 
-            SettingsGroup("Claude 模型映射") {
+            SettingsGroup(tr("Claude 模型映射")) {
                 Text(tr("为 Claude 的各模型槽位选择对应的模型"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -574,7 +574,7 @@ fun ProviderEditPage(
                 )
             }
 
-            SettingsGroup("连接测试") {
+            SettingsGroup(tr("连接测试")) {
                 val firstModel = selectedModels.firstOrNull()
                 Button(
                     onClick = {
@@ -707,7 +707,7 @@ private fun SelectedModelsEditor(
                     IconButton(onClick = { onRemove(id) }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             Icons.Outlined.Close,
-                            contentDescription = "移除",
+                            contentDescription = tr("移除"),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -881,7 +881,7 @@ private fun ModelPickList(
                         IconButton(onClick = { onToggle(id) }, modifier = Modifier.size(36.dp)) {
                             Icon(
                                 Icons.Outlined.Close,
-                                contentDescription = "移除",
+                                contentDescription = tr("移除"),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -935,7 +935,7 @@ private fun ClaudeMappingEditor(
                 Box {
                     OutlinedButton(onClick = { open = true }) {
                         Text(
-                            value.ifBlank { "未设置" },
+                            value.ifBlank { tr("未设置") },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = 160.dp),
@@ -990,9 +990,9 @@ private fun TestResultText(text: String, color: Color) {
  * 集中写在 [buildReasoningConfig] / [splitReasoningConfig] 的 when 里。
  */
 internal enum class ReasoningChoice(val label: String) {
-    NONE("不支持"),
-    EFFORT("强度档位"),
-    THINKING("思考预算"),
+    NONE(tr("不支持")),
+    EFFORT(tr("强度档位")),
+    THINKING(tr("思考预算")),
 }
 
 /** OpenAI 系约定俗成的强度阶梯；目录里出现阶梯外的档位时保留在末尾，不丢数据。 */
@@ -1072,10 +1072,10 @@ internal fun splitReasoningConfig(config: ReasoningConfig?): ReasoningDraft = wh
 }
 
 private val MODEL_INPUT_MODALITIES = listOf(
-    "text" to "文本",
-    "image" to "图片",
-    "video" to "视频",
-    "audio" to "音频",
+    "text" to tr("文本"),
+    "image" to tr("图片"),
+    "video" to tr("视频"),
+    "audio" to tr("音频"),
     "pdf" to "PDF",
 )
 
@@ -1108,7 +1108,7 @@ private fun ChipRow(
                     {
                         Icon(
                             Icons.Outlined.Lock,
-                            contentDescription = "必选",
+                            contentDescription = tr("必选"),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1387,7 +1387,7 @@ private fun AddModelDialog(
                 )
                 Spacer(Modifier.height(6.dp))
                 ChipRow(
-                    options = listOf("text" to "文本"),
+                    options = listOf("text" to tr("文本")),
                     selected = setOf("text"),
                     locked = setOf("text"),
                     onToggle = { _, _ -> }

@@ -138,11 +138,11 @@ fun TerminalScreen(
             )
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { newSession() }) {
-                Icon(Icons.Outlined.Add, "新建终端", tint = colors.chromeContent)
+                Icon(Icons.Outlined.Add, tr("新建终端"), tint = colors.chromeContent)
             }
             if (onClose != null) {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.Outlined.Close, "关闭终端", tint = colors.chromeContent)
+                    Icon(Icons.Outlined.Close, tr("关闭终端"), tint = colors.chromeContent)
                 }
             }
         }
@@ -175,7 +175,7 @@ fun TerminalScreen(
                                     ) {
                                         Icon(
                                             Icons.Outlined.Close,
-                                            "关闭",
+                                            tr("关闭"),
                                             Modifier.size(13.dp),
                                             tint = colors.chromeMuted,
                                         )
@@ -235,7 +235,7 @@ fun TerminalScreen(
             }) {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardReturn,
-                    "发送",
+                    tr("发送"),
                     tint = if (state.running) colors.chromeContent else colors.chromeMuted,
                 )
             }
@@ -294,7 +294,7 @@ private fun CommandInput(
     ) {
         if (value.isEmpty()) {
             Text(
-                if (enabled) "输入命令…" else "终端未运行",
+                if (enabled) tr("输入命令…") else tr("终端未运行"),
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = fontFamily),
                 color = colors.chromeMuted,
             )

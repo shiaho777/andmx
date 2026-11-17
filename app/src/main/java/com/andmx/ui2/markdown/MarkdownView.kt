@@ -479,7 +479,7 @@ private fun LinkAwareText(
             val url = menuUrl ?: return@DropdownMenu
             DropdownMenuItem(
                 text = {
-                    Text(tr(if (localFilePath(url) != null) "打开文件" else "在浏览器中打开"))
+                    Text(tr(if (localFilePath(url) != null) tr("打开文件") else tr("在浏览器中打开")))
                 },
                 onClick = {
                     menuUrl = null
@@ -756,7 +756,7 @@ fun CodeBlockThemed(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (code.isBlank()) "" else language.ifBlank { "代码" },
+                text = if (code.isBlank()) "" else language.ifBlank { tr("代码") },
                 style = MaterialTheme.typography.labelSmall,
                 color = theme.comment,
             )
@@ -767,7 +767,7 @@ fun CodeBlockThemed(
             ) {
                 Icon(
                     Icons.Outlined.WrapText,
-                    "自动换行",
+                    tr("自动换行"),
                     Modifier.size(14.dp),
                     tint = if (wrap) theme.foreground else theme.comment,
                 )
@@ -778,7 +778,7 @@ fun CodeBlockThemed(
             ) {
                 Icon(
                     Icons.Outlined.ContentCopy,
-                    "复制代码",
+                    tr("复制代码"),
                     Modifier.size(14.dp),
                     tint = theme.comment,
                 )

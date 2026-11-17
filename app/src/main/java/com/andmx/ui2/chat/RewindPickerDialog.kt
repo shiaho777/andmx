@@ -43,7 +43,7 @@ fun RewindPickerDialog(
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     Text(tr("选择一条用户消息，回到它发送前的状态：该消息及之后的对话会被移除，") +
-                            "该时点之后 agent 做过的文件改动会一并还原（外部改动过的文件会跳过）。",
+                            tr("该时点之后 agent 做过的文件改动会一并还原（外部改动过的文件会跳过）。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -83,7 +83,7 @@ fun RewindPickerDialog(
             title = { Text(tr("确认回滚")) },
             text = {
                 Text(tr("将移除「${m.content.lineSequence().firstOrNull().orEmpty().take(40)}」及其后的全部对话，") +
-                        "并还原该时点之后的文件改动。此操作不可撤销。",
+                        tr("并还原该时点之后的文件改动。此操作不可撤销。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             },

@@ -42,7 +42,7 @@ fun NewFileDialog(onDismiss: () -> Unit, onCreate: (String, Boolean) -> Unit) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    placeholder = { Text(if (isDir) "文件夹名称" else "文件名，如 notes.md") },
+                    placeholder = { Text(if (isDir) tr("文件夹名称") else tr("文件名，如 notes.md")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                 )

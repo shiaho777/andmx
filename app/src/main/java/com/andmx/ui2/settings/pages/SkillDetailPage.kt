@@ -74,16 +74,16 @@ fun SkillDetailPage(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp)
         ) {
-            SettingsGroup("状态") {
-                InfoLineSkill("触发方式", "\$${skill.name}")
-                InfoLineSkill("版本", frontmatter["version"].orEmpty().ifBlank { "未声明" })
-                InfoLineSkill("说明", skill.description.ifBlank { frontmatter["description"].orEmpty().ifBlank { "未声明" } })
-                InfoLineSkill("SKILL.md", if (skill.hasSkillMd) "已包含" else "缺失")
-                InfoLineSkill("路径", skill.path)
+            SettingsGroup(tr("状态")) {
+                InfoLineSkill(tr("触发方式"), "\$${skill.name}")
+                InfoLineSkill(tr("版本"), frontmatter["version"].orEmpty().ifBlank { tr("未声明") })
+                InfoLineSkill(tr("说明"), skill.description.ifBlank { frontmatter["description"].orEmpty().ifBlank { tr("未声明") } })
+                InfoLineSkill("SKILL.md", if (skill.hasSkillMd) tr("已包含") else tr("缺失"))
+                InfoLineSkill(tr("路径"), skill.path)
                 diagnostics?.let { result ->
-                    InfoLineSkill("检查", if (result.valid) "通过" else "有问题")
-                    result.errors.forEach { InfoLineSkill("错误", it) }
-                    result.warnings.forEach { InfoLineSkill("提醒", it) }
+                    InfoLineSkill(tr("检查"), if (result.valid) tr("通过") else tr("有问题"))
+                    result.errors.forEach { InfoLineSkill(tr("错误"), it) }
+                    result.warnings.forEach { InfoLineSkill(tr("提醒"), it) }
                 }
             }
 
@@ -92,7 +92,7 @@ fun SkillDetailPage(
                     MarkdownView(markdown = skillMd)
                 }
             } else if (!skill.hasSkillMd) {
-                SettingsGroup("说明") {
+                SettingsGroup(tr("说明")) {
                     Text(tr("该技能目录缺少 SKILL.md，可能无法被正确加载。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error

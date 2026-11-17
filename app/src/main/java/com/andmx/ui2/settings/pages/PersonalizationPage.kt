@@ -67,7 +67,7 @@ fun PersonalizationPage(onBack: () -> Unit) {
                 saved = ""
                 draft = ""
             } else {
-                error = it.message ?: "读取失败"
+                error = it.message ?: tr("读取失败")
             }
         }
     }
@@ -134,7 +134,7 @@ fun PersonalizationPage(onBack: () -> Unit) {
                                 saved = draft
                                 error = null
                             }.onFailure {
-                                error = it.message ?: "保存失败"
+                                error = it.message ?: tr("保存失败")
                             }
                         }
                     },

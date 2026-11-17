@@ -169,7 +169,7 @@ fun WorkflowRunDetailDialog(
                                         append(hole.siteId)
                                         append(" · #").append(hole.ordinal)
                                         if (hole.since > 0) {
-                                            append(" · 等待 ")
+                                            append(tr(" · 等待 "))
                                             append(((now - hole.since).coerceAtLeast(0)) / 1000)
                                             append("s")
                                         }

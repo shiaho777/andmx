@@ -72,27 +72,27 @@ import com.andmx.ui2.settings.pages.WorkspaceIgnorePage
 import com.andmx.ui2.settings.pages.UsagePage
 
 enum class SettingsPage(val title: String, val icon: ImageVector) {
-    HOME("设置", Icons.Outlined.Tune),
-    GENERAL("常规", Icons.Outlined.Tune),
-    PERSONALIZATION("个性化", Icons.Outlined.Person),
-    CODE_PREVIEW("代码预览", Icons.Outlined.Code),
-    MODEL("模型设置", Icons.Outlined.Dns),
-    SKILLS("技能", Icons.Outlined.Bolt),
-    SUBAGENT("子智能体", Icons.Outlined.SmartToy),
-    MCP("MCP 服务器", Icons.Outlined.Storage),
-    PLUGIN("插件", Icons.Outlined.Extension),
-    COMMAND("命令", Icons.Outlined.Terminal),
-    AUTOMATIONS("自动化", Icons.Outlined.Alarm),
+    HOME(tr("设置"), Icons.Outlined.Tune),
+    GENERAL(tr("常规"), Icons.Outlined.Tune),
+    PERSONALIZATION(tr("个性化"), Icons.Outlined.Person),
+    CODE_PREVIEW(tr("代码预览"), Icons.Outlined.Code),
+    MODEL(tr("模型设置"), Icons.Outlined.Dns),
+    SKILLS(tr("技能"), Icons.Outlined.Bolt),
+    SUBAGENT(tr("子智能体"), Icons.Outlined.SmartToy),
+    MCP(tr("MCP 服务器"), Icons.Outlined.Storage),
+    PLUGIN(tr("插件"), Icons.Outlined.Extension),
+    COMMAND(tr("命令"), Icons.Outlined.Terminal),
+    AUTOMATIONS(tr("自动化"), Icons.Outlined.Alarm),
     HOOKS("Hooks", Icons.Outlined.Anchor),
-    BROWSER("浏览器控制", Icons.Outlined.Language),
+    BROWSER(tr("浏览器控制"), Icons.Outlined.Language),
     COMPUTER("Android Use", Icons.Outlined.PhoneAndroid),
-    SHORTCUTS("键盘快捷键", Icons.Outlined.Keyboard),
-    WORKSPACE_SEARCH("工作区搜索", Icons.Outlined.Search),
-    INDEX("索引库", Icons.AutoMirrored.Outlined.ManageSearch),
-    USAGE("使用统计", Icons.Outlined.QueryStats),
-    MODEL_TRAJECTORY("模型调用轨迹", Icons.Outlined.QueryStats),
-    MEMORY("记忆", Icons.Outlined.Storage),
-    ABOUT("关于", Icons.Outlined.Info),
+    SHORTCUTS(tr("键盘快捷键"), Icons.Outlined.Keyboard),
+    WORKSPACE_SEARCH(tr("工作区搜索"), Icons.Outlined.Search),
+    INDEX(tr("索引库"), Icons.AutoMirrored.Outlined.ManageSearch),
+    USAGE(tr("使用统计"), Icons.Outlined.QueryStats),
+    MODEL_TRAJECTORY(tr("模型调用轨迹"), Icons.Outlined.QueryStats),
+    MEMORY(tr("记忆"), Icons.Outlined.Storage),
+    ABOUT(tr("关于"), Icons.Outlined.Info),
 }
 
 @Composable
@@ -153,42 +153,42 @@ private fun SettingsHome(
 ) {
     var query by remember { mutableStateOf("") }
     val groups = listOf(
-        "基础设置" to listOf(
+        tr("基础设置") to listOf(
             SettingsPage.GENERAL, SettingsPage.CODE_PREVIEW, SettingsPage.MODEL,
             SettingsPage.BROWSER, SettingsPage.COMPUTER, SettingsPage.SHORTCUTS,
             SettingsPage.WORKSPACE_SEARCH,
         ),
-        "Agent 能力" to listOf(
+        tr("Agent 能力") to listOf(
             SettingsPage.PERSONALIZATION, SettingsPage.MEMORY, SettingsPage.SUBAGENT, SettingsPage.PLUGIN,
             SettingsPage.MCP, SettingsPage.SKILLS, SettingsPage.COMMAND,
             SettingsPage.AUTOMATIONS, SettingsPage.HOOKS,
         ),
-        "数据与统计" to listOf(
+        tr("数据与统计") to listOf(
             SettingsPage.INDEX, SettingsPage.USAGE, SettingsPage.MODEL_TRAJECTORY,
         ),
-        "关于" to listOf(SettingsPage.ABOUT),
+        tr("关于") to listOf(SettingsPage.ABOUT),
     )
     val descriptions = mapOf(
-        SettingsPage.GENERAL to "语言与当前窗口体验",
-        SettingsPage.PERSONALIZATION to "写一段全局指令，应用到本机 Agent 的后续会话。",
-        SettingsPage.CODE_PREVIEW to "设置代码内容的主题、字号和显示方式，不受界面字号影响。",
-        SettingsPage.MODEL to "模型供应商与默认模型",
+        SettingsPage.GENERAL to tr("语言与当前窗口体验"),
+        SettingsPage.PERSONALIZATION to tr("写一段全局指令，应用到本机 Agent 的后续会话。"),
+        SettingsPage.CODE_PREVIEW to tr("设置代码内容的主题、字号和显示方式，不受界面字号影响。"),
+        SettingsPage.MODEL to tr("模型供应商与默认模型"),
         SettingsPage.SKILLS to "管理项目级与用户级技能。启用后可在聊天里通过 \$skill-name 使用。",
-        SettingsPage.SUBAGENT to "管理 ZCode Agent 运行时消费的用户级子智能体 Markdown 文件。",
-        SettingsPage.MCP to "管理 ZCode Agent 使用的 MCP 服务器配置。",
-        SettingsPage.PLUGIN to "启用或停用已安装的插件。插件可打包技能、命令、Hooks 和 MCP 服务器。",
-        SettingsPage.COMMAND to "管理 ZCode Agent 的 .md 命令文件。命令可通过 /command-name 在聊天中调用。",
-        SettingsPage.AUTOMATIONS to "查看、开关和删除已保存的定时任务。",
-        SettingsPage.HOOKS to "查看已启用插件声明的钩子。",
-        SettingsPage.BROWSER to "开关网页抓取，以及证书校验和抓取缓存。",
-        SettingsPage.COMPUTER to "查看无障碍和屏幕录制是否已打开，并前往系统设置。",
-        SettingsPage.SHORTCUTS to "外接键盘在输入框里实际生效的快捷键。",
-        SettingsPage.WORKSPACE_SEARCH to "编辑当前工作区的 .zcodeignore。",
-        SettingsPage.INDEX to "工作区索引与搜索",
-        SettingsPage.USAGE to "查看会话活跃度与模型用量的粗略统计。",
-        SettingsPage.MODEL_TRAJECTORY to "逐次模型调用的来源、Token 与输入输出",
-        SettingsPage.MEMORY to "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",
-        SettingsPage.ABOUT to "版本、构建与诊断信息",
+        SettingsPage.SUBAGENT to tr("管理 ZCode Agent 运行时消费的用户级子智能体 Markdown 文件。"),
+        SettingsPage.MCP to tr("管理 ZCode Agent 使用的 MCP 服务器配置。"),
+        SettingsPage.PLUGIN to tr("启用或停用已安装的插件。插件可打包技能、命令、Hooks 和 MCP 服务器。"),
+        SettingsPage.COMMAND to tr("管理 ZCode Agent 的 .md 命令文件。命令可通过 /command-name 在聊天中调用。"),
+        SettingsPage.AUTOMATIONS to tr("查看、开关和删除已保存的定时任务。"),
+        SettingsPage.HOOKS to tr("查看已启用插件声明的钩子。"),
+        SettingsPage.BROWSER to tr("开关网页抓取，以及证书校验和抓取缓存。"),
+        SettingsPage.COMPUTER to tr("查看无障碍和屏幕录制是否已打开，并前往系统设置。"),
+        SettingsPage.SHORTCUTS to tr("外接键盘在输入框里实际生效的快捷键。"),
+        SettingsPage.WORKSPACE_SEARCH to tr("编辑当前工作区的 .zcodeignore。"),
+        SettingsPage.INDEX to tr("工作区索引与搜索"),
+        SettingsPage.USAGE to tr("查看会话活跃度与模型用量的粗略统计。"),
+        SettingsPage.MODEL_TRAJECTORY to tr("逐次模型调用的来源、Token 与输入输出"),
+        SettingsPage.MEMORY to tr("在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。"),
+        SettingsPage.ABOUT to tr("版本、构建与诊断信息"),
     )
     val filtered = filterSettingsGroups(query, groups, descriptions)
 
@@ -200,7 +200,7 @@ private fun SettingsHome(
                 title = { Text(tr("设置")) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 colors = settingsTopBarColors(),
