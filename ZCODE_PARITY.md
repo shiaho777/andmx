@@ -502,3 +502,61 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 3. **合并冲突处理**：逐文件 diff 已有，但 merge/rebase 冲突的交互式解决仍未做。
 4. **i18n 完整覆盖**：设置与聊天主链路已覆盖，长尾页面仍有硬编码中文。
 
+## 九、2026-11-18 九阶段全量补齐（P1–P9，对上游 v3.18.2）
+
+本轮以审计确认的空桩/缩水/缺失清单为准，九阶段全部实施并经 CI 门禁合入 main。
+上游快照仍为 v3.17.2；v3.18 新增能力按上游文档与 diff 证据对齐实现。
+
+### 已闭环（原缺口 → 现状）
+
+| 原缺口 | 阶段 | 现状 |
+|---|---|---|
+| Motion token 覆盖不全 / 浮层零转场 / Material You 未接线 / 魔法字号 | P1 | spring/循环/尺寸 token 全覆盖；Files/Settings 转场+路径记忆；dynamicColor 设置开关；AndMXTypography+AndMXType 收敛 ~96 处 |
+| UsagePage 私建色板 / 行内代码底色暗色不可见 / git 状态色硬编码 | P1 | 全部回归 colorScheme |
+| topic 归档整链空桩 | P2 | TopicArchive JSONL（去重/分页/预算截断），用户消息同步归档，ReadSessionContext topic 真实解析 |
+| 权限规则首键命中漏配 | P2 | subjects 收集全部输入键 |
+| PermissionModes / isPlanModeAllowed 平行死代码 | P2 | 删除，测试改写为真实 PermissionService 闸门 |
+| API key 明文注释误导 | P2 | 核实早已 Keystore 加密，注释修正 |
+| RootfsInstaller 无重试/校验/先毁旧环境 | P2 | 3 次重试 + 官方 SHA256 + 暂存解压原子替换+回滚 |
+| GitTool 无超时/注入面 | P2 | 120s 超时 + shell 元字符/-c 注入/定位旗标/破坏性旗标防护 + 只读分类对齐 |
+| CodeHighlight 跨语言关键词表 | P3 | 表驱动单遍分词器，15 语言 8 类 token |
+| 终端 256 色取模降 8 色 / 整屏单 Text | P3 | 完整 256 色+真彩 SGR+粗斜下反；LazyColumn 按行虚拟化（万行 ~19ms） |
+| diff 硬编码红绿行级 | P3 | hunk 解析+行内配对公共前后缀强调，主题色 |
+| 流式仅裸光标 | P3 | 逐块淡入+shimmer 占位 |
+| Markdown 图片降级链接 / 无公式 | P3 | 自研加载器真实渲染（磁盘/内存 LRU、协议白名单）；KaTeX 0.16.11 离线 |
+| 会话查找无高亮 / 无选择工具条 / 回合导航纯计数器 / 无提交图 | P4 | ChatFind 高亮+循环跳转；LocalTextToolbar 代理选择工具条（复制/引用/侧聊）；TurnIndex 回合导航；Canvas 提交图 |
+| JsRepl WebView 假 REPL / logs 恒空 | P5 | 会话级持久上下文 + console 捕获（含 Promise/setTimeout）+ 超时兜底 |
+| WebSearch 抓 DDG HTML | P5 | provider-native → Tavily/Bing/Brave API → 加固 DDG 回退 |
+| SSH 无超时/stderr 死锁/依赖 sshpass | P5 | 双泵+ConnectTimeout+命令超时；密钥优先+sshpass/SSH_ASKPASS 链；远端 PDF/视频拉取缓存 |
+| computeruse key 无回截图/清通知语义错/无长按双击/Thread.sleep | P5 | 四项全修 |
+| OffPeak 标题前缀当类型 | P5 | 结构化 kind + 并发/每日配额排队 |
+| embedded-search / shell runtime 选择缺失 | P5 | 均实现并经设置接线 |
+| ToolSearch discovered 仅内存 / 子代理未接 | P6 | Room v24 持久化+恢复，子代理共享 registry，deferred 模式 tool_reference |
+| BackgroundTasks 纯内存不抗进程死 | P6 | 落库+恢复如实标记 interrupted |
+| ReadSessionContext 尾 40 条子串过滤 | P6 | handoff 模型合成胶囊 + relevant 可选摘要 + 如实回退 |
+| MCP 无 DCR / 无会话隔离 | P6 | RFC 7591 DCR + RFC 8414 发现 + per-session 连接键控 |
+| 无权限建议层 | P6 | PermissionSuggestions 前缀/目录/域名候选 + 审批卡片落库 |
+| 工作流看板文本投影 | P6 | table/metrics/board 原生 Compose 视图 |
+| ImageSearch 缺失 | P7 | Bing/Brave API + DDG 双回退 |
+| 文档创作缺失 | P7 | office_write 纯 Kotlin OOXML docx/xlsx/pptx + PdfDocument，回读往返验证 |
+| 插件发现/推荐缺失 | P7 | SearchPlugins/SuggestPluginInstall + 纯 Kotlin BM25（中文 bigram） |
+| design 插件缺失 | P7 | design-guide 技能 + 与 AndMXType/Motion 一致的 token runtime |
+| i18n 字典映射 / 长尾硬编码 | P7 | 1344 条迁移 str_ 字符串资源（中英），tr() 调用点零改动，长尾补包裹 |
+| 语音输入零基础 | P7 | 系统识别→provider 转写→仅录音如实降级→隐藏；录音胶囊三态 |
+| ChatController 上帝类 | P8 | 三步抽离 SessionControl：24 个会话 map+Session、审批/事件流、回合状态机；主流程留薄转发 |
+| Extension Host（上游 v3.18 新增） | P9 | Application 级宿主 + 受限 WebView JSON-RPC 桥 + 5 类 UI 插槽 + Keystore plugin-secrets + 15s 启动预算降级 |
+| canonical Agent 工具名（报告旧待核项） | — | 已补齐（ZCodeAgentTool reportedName="Agent"），销项 |
+
+### 仍留尾巴（如实记录，不假装闭环）
+
+1. **合并冲突交互解决**：仍仅检测+提示（GitBaseline），无解决 UI。
+2. **whisper.cpp 离线转写**：语音第三级为「仅录音+如实提示」，NDK 离线模型未集成。
+3. **Extension Host 宿主实例 API**：UI 插槽当前用占位 WebView 渲染 htmlAsset，宿主 acquire 实例开放后替换（ExtensionSlotWebView 处）。
+4. **上游 v3.18 其余增量**：session-control 包边界（oxlint 规则）、归档永久删除的物理清理细节、插件启动预算的细粒度指标，按 Android 形态做了等价实现而非逐行对齐。
+5. **快照版本**：ZCode-main/ 仍为 v3.17.2，建议下次同步到 v3.18.2 并重跑对标。
+
+### 验证口径
+
+每阶段：双 flavor（lite/proot）Kotlin 编译 + 全量 Robolectric/JUnit 单测 + GitHub CI/build 门禁绿后合入。
+最终基线：1751 项单测 0 失败。新增测试覆盖：高亮快照/SGR/diff/查找/回合/提交图/SSH 死锁回归/DCR 双路径/持久化恢复/BM25/Office 回读/语音决策矩阵/i18n 资源往返/桥渗透（越权方法/文件 URL/网络/超限）。
+
