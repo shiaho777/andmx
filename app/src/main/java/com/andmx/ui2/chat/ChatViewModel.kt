@@ -102,7 +102,7 @@ class ChatViewModel @Inject constructor(
     val goalVerifications: StateFlow<List<GoalVerifyItem>> = _goalVerifications.asStateFlow()
 
 
-    val pendingApproval: StateFlow<ChatController.ApprovalRequest?> = controller.pendingApproval
+    val pendingApproval: StateFlow<ApprovalRequest?> = controller.pendingApproval
     val planSteps: StateFlow<List<com.andmx.agent.UpdatePlanTool.PlanStep>> = controller.planSteps
 
 
@@ -3285,13 +3285,13 @@ class ChatViewModel @Inject constructor(
             suggestion.ruleKey,
             com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW,
         )
-        resolveApprovalScoped(true, ChatController.ApprovalScope.ONCE)
+        resolveApprovalScoped(true, ApprovalScope.ONCE)
     }
 
     /** ZCode 对齐：审批作用域（允许本会话 / 始终拒绝）。 */
-    fun resolveApprovalScoped(allow: Boolean, scope: ChatController.ApprovalScope) {
-        val denied = scope == ChatController.ApprovalScope.SESSION_DENY ||
-            scope == ChatController.ApprovalScope.PROJECT_DENY
+    fun resolveApprovalScoped(allow: Boolean, scope: ApprovalScope) {
+        val denied = scope == ApprovalScope.SESSION_DENY ||
+            scope == ApprovalScope.PROJECT_DENY
         resolveApproval(allow && !denied)
         controller.resolveApprovalScoped(allow, scope)
     }
