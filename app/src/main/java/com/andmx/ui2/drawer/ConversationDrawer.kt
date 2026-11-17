@@ -48,6 +48,8 @@ import kotlin.math.min
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.ConversationEntity
 import com.andmx.data.TaskGroupEntity
+import com.andmx.ui2.ext.ExtensionSlotHost
+import com.andmx.ui2.ext.ExtensionSlotIds
 import com.andmx.ui2.files.WorkspaceFileTree
 import com.andmx.ui2.chat.ChatActionBus
 import com.andmx.workspace.ChangeTracker
@@ -260,6 +262,7 @@ fun ConversationDrawer(
                                 label = tr("技能"),
                                 onClick = { closeAnd(onOpenSkills) },
                             )
+                            ExtensionSlotHost(ExtensionSlotIds.SIDE_PANE_LAUNCHER, Modifier.fillMaxWidth())
                         }
                     }
 

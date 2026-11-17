@@ -91,6 +91,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.andmx.agent.SlashCommands
+import com.andmx.ui2.ext.ExtensionSlotHost
+import com.andmx.ui2.ext.ExtensionSlotIds
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ReasoningConfig
 import androidx.compose.ui.platform.LocalContext
@@ -480,6 +482,7 @@ fun Composer(
                                     onRemove = { onRemoveContextChip(chip.id) },
                                 )
                             }
+                            ExtensionSlotHost(ExtensionSlotIds.COMPOSER_MENTION, inline = true)
                         }
                     }
                     Box(Modifier.fillMaxWidth()) {
@@ -518,6 +521,8 @@ fun Composer(
                     )
                     Spacer(Modifier.size(6.dp))
                 }
+
+                ExtensionSlotHost(ExtensionSlotIds.COMPOSER_STATUS, Modifier.fillMaxWidth())
 
                 CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                     BoxWithConstraints(Modifier.fillMaxWidth()) {

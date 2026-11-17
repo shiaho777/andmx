@@ -98,6 +98,8 @@ import com.andmx.settings.SettingsStore
 import com.andmx.ui2.settings.TaskAutoArchive
 import com.andmx.ui2.drawer.defaultCommandCenterItems
 import com.andmx.ui2.settings.SettingsPage
+import com.andmx.ui2.ext.ExtensionSlotHost
+import com.andmx.ui2.ext.ExtensionSlotIds
 import com.andmx.ui2.files.FilesScreen
 import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
@@ -1017,6 +1019,8 @@ LaunchedEffect(Unit) {
                     }
                 },
             )
+
+            ExtensionSlotHost(ExtensionSlotIds.NAV_PRIMARY, Modifier.fillMaxWidth())
 
             // ZCode 对齐：无消息时 Composer 居中 + 欢迎语；有消息时 Composer 在底部
             val isEmpty = timeline.isEmpty()
