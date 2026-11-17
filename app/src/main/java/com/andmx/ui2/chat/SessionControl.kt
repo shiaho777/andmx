@@ -17,8 +17,11 @@ import com.andmx.data.rollout.RolloutWriter
 import com.andmx.llm.TokenUsageTracker
 import com.andmx.ui2.settings.tr
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -73,6 +76,9 @@ internal class SessionControl {
     val runningConversations = ConcurrentHashMap.newKeySet<Long>()
     val turnJobs = ConcurrentHashMap<Long, Job>()
 
+    private val _runningIds = MutableStateFlow<Set<Long>>(emptySet())
+    val runningIds: StateFlow<Set<Long>> = _runningIds.asStateFlow()
+
     val automationTurnIds = ConcurrentHashMap.newKeySet<Long>()
     val offPeakTurnIds = ConcurrentHashMap.newKeySet<Long>()
     val automationIdsByConversation = ConcurrentHashMap<Long, String>()
@@ -86,6 +92,55 @@ internal class SessionControl {
 
     val pendingApprovalState = MutableStateFlow<ApprovalRequest?>(null)
     val pendingApproval: StateFlow<ApprovalRequest?> = pendingApprovalState.asStateFlow()
+
+    fun isTurnRunning(conversationId: Long): Boolean =
+        turnJobs[conversationId]?.isActive == true || runningConversations.contains(conversationId)
+
+    fun activeTurnJob(conversationId: Long): Job? =
+        turnJobs[conversationId]?.takeIf { it.isActive }
+
+    private fun publishRunning() {
+        _runningIds.value = runningConversations.toSet()
+    }
+
+    fun beginTurn(conversationId: Long) {
+        runningConversations += conversationId
+        publishRunning()
+    }
+
+    fun endTurn(conversationId: Long) {
+        runningConversations -= conversationId
+        publishRunning()
+    }
+
+    fun cancelTurnJob(conversationId: Long) {
+        turnJobs[conversationId]?.cancel()
+    }
+
+    fun startTurnJob(
+        conversationId: Long,
+        scope: CoroutineScope,
+        acquire: () -> Unit,
+        release: () -> Unit,
+        block: suspend () -> Unit,
+    ): Job {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            beginTurn(conversationId)
+            acquire()
+            try {
+                block()
+            } finally {
+                release()
+                endTurn(conversationId)
+            }
+        }
+        turnJobs[conversationId] = job
+        job.invokeOnCompletion {
+            if (turnJobs[conversationId] === job) turnJobs.remove(conversationId)
+        }
+        job.start()
+        return job
+    }
 
     fun liveBus(conversationId: Long): MutableSharedFlow<ChatEvent> =
         liveChatEvents.getOrPut(conversationId) {

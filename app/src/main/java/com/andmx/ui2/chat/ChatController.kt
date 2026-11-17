@@ -94,7 +94,6 @@ import com.andmx.settings.SettingsStore
 import com.andmx.workspace.WorkspaceAccess
 import com.andmx.workspace.WorkspaceKind
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -460,19 +459,13 @@ class ChatController private constructor(private val context: Context) {
     private val cronStore = CronStore(context)
     private val runningConversations get() = sessionControl.runningConversations
     private val turnJobs get() = sessionControl.turnJobs
-    private val _runningIds = MutableStateFlow<Set<Long>>(emptySet())
-    val runningIds: StateFlow<Set<Long>> = _runningIds.asStateFlow()
+    val runningIds: StateFlow<Set<Long>> get() = sessionControl.runningIds
 
-    fun isTurnRunning(conversationId: Long): Boolean =
-        turnJobs[conversationId]?.isActive == true || runningConversations.contains(conversationId)
-
-    private fun publishRunning() {
-        _runningIds.value = runningConversations.toSet()
-    }
+    fun isTurnRunning(conversationId: Long): Boolean = sessionControl.isTurnRunning(conversationId)
 
     /** 回合跑在进程级作用域里，切换会话或退出界面都不会取消它。 */
     fun launchTurn(conversationId: Long, text: String, images: List<String> = emptyList()): Job {
-        turnJobs[conversationId]?.let { if (it.isActive) return it }
+        sessionControl.activeTurnJob(conversationId)?.let { return it }
         return startTurnJob(conversationId) {
             sendMessage(conversationId, text, images).collect { ev ->
                 sessionControl.emitLiveEvent(conversationId, ev)
@@ -481,7 +474,7 @@ class ChatController private constructor(private val context: Context) {
     }
 
     fun launchRegenerate(conversationId: Long): Job {
-        turnJobs[conversationId]?.let { if (it.isActive) return it }
+        sessionControl.activeTurnJob(conversationId)?.let { return it }
         return startTurnJob(conversationId) {
             regenerateTurn(conversationId).collect { ev ->
                 sessionControl.emitLiveEvent(conversationId, ev)
@@ -490,30 +483,18 @@ class ChatController private constructor(private val context: Context) {
     }
 
     fun cancelTurn(conversationId: Long) {
-        turnJobs[conversationId]?.cancel()
+        sessionControl.cancelTurnJob(conversationId)
         stopTurn(conversationId)
     }
 
-    private fun startTurnJob(conversationId: Long, block: suspend () -> Unit): Job {
-        val job = controllerScope.launch(start = CoroutineStart.LAZY) {
-            runningConversations += conversationId
-            publishRunning()
-            AgentRunService.acquire(context)
-            try {
-                block()
-            } finally {
-                AgentRunService.release(context)
-                runningConversations -= conversationId
-                publishRunning()
-            }
-        }
-        turnJobs[conversationId] = job
-        job.invokeOnCompletion {
-            if (turnJobs[conversationId] === job) turnJobs.remove(conversationId)
-        }
-        job.start()
-        return job
-    }
+    private fun startTurnJob(conversationId: Long, block: suspend () -> Unit): Job =
+        sessionControl.startTurnJob(
+            conversationId = conversationId,
+            scope = controllerScope,
+            acquire = { AgentRunService.acquire(context) },
+            release = { AgentRunService.release(context) },
+            block = block,
+        )
     private val automationTurnIds get() = sessionControl.automationTurnIds
     private val offPeakTurnIds get() = sessionControl.offPeakTurnIds
     private val automationIdsByConversation get() = sessionControl.automationIdsByConversation
@@ -1180,7 +1161,7 @@ class ChatController private constructor(private val context: Context) {
     ): String {
         val convId = request.conversationId
         val engine = sessions[convId]?.engine
-        val turnJob = turnJobs[convId]?.takeIf { it.isActive }
+        val turnJob = sessionControl.activeTurnJob(convId)
         val askUser: suspend () -> String = {
             askWorkflowEscalation(
                 convId,
