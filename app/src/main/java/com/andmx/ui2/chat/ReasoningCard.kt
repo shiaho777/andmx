@@ -46,6 +46,7 @@ import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import kotlinx.coroutines.delay
+import com.andmx.ui2.settings.tr
 
 internal const val REASONING_TAIL_LIMIT = 200
 
@@ -54,9 +55,9 @@ internal fun reasoningTriggerLabel(
     isOpen: Boolean,
     durationSec: Int?,
 ): String = if (isStreaming && !isOpen) {
-    "正在思考"
+    tr("正在思考")
 } else when (durationSec) {
-    null -> "思考 · 持续了几秒"
+    null -> tr("思考 · 持续了几秒")
     else -> "思考 · 持续了 ${durationSec} 秒"
 }
 
@@ -237,7 +238,7 @@ private fun ThinkingLabel() {
         end = Offset(shift * 240f + 180f, 40f),
     )
     Text(
-        text = "正在思考",
+        text = tr("正在思考"),
         style = TextStyle(
             brush = brush,
             fontSize = AndMXType.cardTitle.fontSize,

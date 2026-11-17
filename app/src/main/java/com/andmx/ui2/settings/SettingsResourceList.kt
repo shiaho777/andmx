@@ -154,7 +154,7 @@ fun ResourceSectionHeader(
     title: String,
     count: Int,
     hint: String? = null,
-    countSuffix: String = "项",
+    countSuffix: String = tr("项"),
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth().padding(top = 4.dp)) {

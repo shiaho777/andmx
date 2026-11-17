@@ -60,13 +60,13 @@ fun ModelTrajectoryPage(onBack: () -> Unit) {
                 title = { Text(tr("模型调用轨迹")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
                     if (calls.isNotEmpty()) {
                         IconButton(onClick = { ModelCallTrace.clear() }) {
-                            Icon(Icons.Outlined.Delete, "清空")
+                            Icon(Icons.Outlined.Delete, tr("清空"))
                         }
                     }
                 },
@@ -155,13 +155,13 @@ fun ModelTrajectoryPage(onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TraceStat("输入", call.inputTokens)
+                        TraceStat(tr("输入"), call.inputTokens)
                         Spacer(Modifier.width(10.dp))
                         if (call.cachedInputTokens > 0) {
-                            TraceStat("缓存", call.cachedInputTokens)
+                            TraceStat(tr("缓存"), call.cachedInputTokens)
                             Spacer(Modifier.width(10.dp))
                         }
-                        TraceStat("输出", call.outputTokens)
+                        TraceStat(tr("输出"), call.outputTokens)
                         Spacer(Modifier.weight(1f))
                         Text(
                             "${call.finish.label} · ${formatDuration(call.durationMs)}",
@@ -171,9 +171,9 @@ fun ModelTrajectoryPage(onBack: () -> Unit) {
                     }
                     if (expanded) {
                         Spacer(Modifier.height(10.dp))
-                        TracePreviewBlock("输入", call.inputPreview)
+                        TracePreviewBlock(tr("输入"), call.inputPreview)
                         Spacer(Modifier.height(8.dp))
-                        TracePreviewBlock("输出", call.outputPreview)
+                        TracePreviewBlock(tr("输出"), call.outputPreview)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -208,7 +208,7 @@ private fun TracePreviewBlock(label: String, content: String) {
             .padding(10.dp),
     ) {
         Text(
-            content.ifBlank { "（空）" },
+            content.ifBlank { tr("（空）") },
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
             color = MaterialTheme.colorScheme.onSurface,
         )

@@ -53,8 +53,8 @@ fun CommandEditPage(
     val canSave = nameLengthOk && nameCharsOk && promptOk
 
     val nameError = when {
-        name.isNotEmpty() && !nameLengthOk -> "长度必须在 1 到 48 个字符之间"
-        !nameCharsOk -> "仅允许使用字母、数字、连字符和下划线"
+        name.isNotEmpty() && !nameLengthOk -> tr("长度必须在 1 到 48 个字符之间")
+        !nameCharsOk -> tr("仅允许使用字母、数字、连字符和下划线")
         else -> null
     }
 
@@ -63,10 +63,10 @@ fun CommandEditPage(
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
-                title = { Text(if (initial == null) "新建命令" else "编辑命令") },
+                title = { Text(if (initial == null) tr("新建命令") else tr("编辑命令")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
@@ -84,7 +84,7 @@ fun CommandEditPage(
                         },
                         enabled = canSave
                     ) {
-                        Icon(Icons.Outlined.Check, "保存")
+                        Icon(Icons.Outlined.Check, tr("保存"))
                     }
                 }
             )
@@ -97,9 +97,9 @@ fun CommandEditPage(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp)
         ) {
-            SettingsGroup("命令") {
+            SettingsGroup(tr("命令")) {
                 StackedSettingRow(
-                    title = "名称",
+                    title = tr("名称"),
                     description = nameError ?: "调用方式：/${name.ifBlank { "my-command" }}"
                 ) {
                     OutlinedTextField(
@@ -112,7 +112,7 @@ fun CommandEditPage(
                         prefix = { Text("/") }
                     )
                 }
-                StackedSettingRow(title = "描述（可选）") {
+                StackedSettingRow(title = tr("描述（可选）")) {
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
@@ -121,7 +121,7 @@ fun CommandEditPage(
                         singleLine = true
                     )
                 }
-                StackedSettingRow(title = "参数提示（可选）") {
+                StackedSettingRow(title = tr("参数提示（可选）")) {
                     OutlinedTextField(
                         value = argumentHint,
                         onValueChange = { argumentHint = it },
@@ -132,7 +132,7 @@ fun CommandEditPage(
                 }
             }
 
-            SettingsGroup("提示词") {
+            SettingsGroup(tr("提示词")) {
                 OutlinedTextField(
                     value = prompt,
                     onValueChange = { prompt = it },

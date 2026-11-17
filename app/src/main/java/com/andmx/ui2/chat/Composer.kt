@@ -61,10 +61,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -91,6 +93,14 @@ import androidx.compose.ui.window.PopupProperties
 import com.andmx.agent.SlashCommands
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ReasoningConfig
+import androidx.compose.ui.platform.LocalContext
+import com.andmx.ui2.chat.voice.VoiceCapsuleBar
+import com.andmx.ui2.chat.voice.VoiceCapsuleState
+import com.andmx.ui2.chat.voice.VoiceInputManager
+import com.andmx.ui2.chat.voice.VoiceMicButton
+import com.andmx.ui2.chat.voice.VoicePhase
+import com.andmx.ui2.chat.voice.appendVoiceText
+import kotlinx.coroutines.delay
 
 /**
  * ZCode 对齐的对话输入区。
@@ -149,6 +159,7 @@ fun Composer(
     placeholder: String = DEFAULT_PLACEHOLDER,
     flat: Boolean = false,
     modelMenuToken: Int = 0,
+    voiceTranscribe: (suspend (ByteArray) -> String?)? = null,
     modifier: Modifier = Modifier,
 ) {
     val motion = LocalMotion.current
@@ -164,6 +175,34 @@ fun Composer(
     LaunchedEffect(inputHistory) { historyBrowse = null }
     LaunchedEffect(value) {
         if (value.isEmpty() && historyBrowse != null) historyBrowse = null
+    }
+
+    val voiceContext = LocalContext.current
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+    val voiceState = remember(voiceContext, voiceTranscribe) {
+        VoiceCapsuleState(
+            manager = VoiceInputManager(voiceContext, transcribe = voiceTranscribe),
+            onInsertText = { spoken ->
+                latestOnValueChange(appendVoiceText(latestValue, spoken))
+            },
+        )
+    }
+    DisposableEffect(voiceState) {
+        onDispose { voiceState.cancel() }
+    }
+    LaunchedEffect(voiceState, voiceState.phase) {
+        if (voiceState.phase == VoicePhase.RECORDING) {
+            while (true) {
+                voiceState.tick(System.currentTimeMillis())
+                delay(200)
+            }
+        }
+    }
+    LaunchedEffect(voiceState, voiceState.phase) {
+        if (voiceState.phase == VoicePhase.TRANSCRIBING) {
+            voiceState.runTranscription()
+        }
     }
 
     // ZCode 快捷键：Shift+Tab 循环切换执行模式
@@ -402,6 +441,7 @@ fun Composer(
         }
         Box(cardModifier) {
             Column {
+                VoiceCapsuleBar(voiceState)
                 if (attachments.isNotEmpty()) {
                     FlowRow(
                         Modifier
@@ -518,6 +558,7 @@ fun Composer(
                                 onSelect = onReasoningSelected,
                                 showLabel = showThoughtLabel,
                             )
+                            VoiceMicButton(voiceState)
                             SendStopButton(
                                 isLoading = isLoading,
                                 canSend = canSend,
@@ -554,7 +595,7 @@ private fun SteerBar(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            tr(if (pending) "等待引导当前任务…" else "引导当前任务"),
+            tr(if (pending) tr("等待引导当前任务…") else tr("引导当前任务")),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f).padding(start = 8.dp),
@@ -586,7 +627,7 @@ private fun InputHistoryMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        CircleIcon(Icons.Outlined.History, "历史提示词") { expanded = true }
+        CircleIcon(Icons.Outlined.History, tr("历史提示词")) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             history.take(50).forEach { entry ->
                 val whenSent = com.andmx.ui2.drawer.historySentLabel(entry.sentAt)
@@ -632,16 +673,16 @@ private fun PlusMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        CircleIcon(Icons.Outlined.Add, "添加上下文") { expanded = true }
+        CircleIcon(Icons.Outlined.Add, tr("添加上下文")) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            PlusMenuItem(Icons.Outlined.AttachFile, "添加图片", "从相册或文件选择图片") {
+            PlusMenuItem(Icons.Outlined.AttachFile, tr("添加图片"), tr("从相册或文件选择图片")) {
                 expanded = false
                 onAddAttachment()
             }
             PlusMenuItem(
                 Icons.AutoMirrored.Outlined.InsertDriveFile,
-                "添加文档",
-                "文本/代码/JSON 等可读文档会直接内联为上下文",
+                tr("添加文档"),
+                tr("文本/代码/JSON 等可读文档会直接内联为上下文"),
             ) {
                 expanded = false
                 onAddDocument()
@@ -661,24 +702,24 @@ private fun PlusMenu(
                     }
             }
             if (clipImage != null) {
-                PlusMenuItem(Icons.Outlined.ContentPaste, "粘贴剪贴板图片", "将剪贴板中的图片添加为附件") {
+                PlusMenuItem(Icons.Outlined.ContentPaste, tr("粘贴剪贴板图片"), tr("将剪贴板中的图片添加为附件")) {
                     expanded = false
                     onPasteClipboardImage(clipImage)
                 }
             }
-            PlusMenuItem(Icons.AutoMirrored.Outlined.InsertDriveFile, "插入 @ 引用", "引用工作区文件") {
+            PlusMenuItem(Icons.AutoMirrored.Outlined.InsertDriveFile, tr("插入 @ 引用"), tr("引用工作区文件")) {
                 expanded = false
                 onInsertMention()
             }
-            PlusMenuItem(Icons.AutoMirrored.Outlined.Chat, "插入 # 会话", "关联历史对话上下文") {
+            PlusMenuItem(Icons.AutoMirrored.Outlined.Chat, tr("插入 # 会话"), tr("关联历史对话上下文")) {
                 expanded = false
                 onInsertConversation()
             }
-            PlusMenuItem(Icons.Outlined.Terminal, "插入 / 命令", "调用已保存的命令或子智能体") {
+            PlusMenuItem(Icons.Outlined.Terminal, tr("插入 / 命令"), tr("调用已保存的命令或子智能体")) {
                 expanded = false
                 onInsertCommand()
             }
-            PlusMenuItem(Icons.Outlined.Bolt, "插入 \$ 技能", "调用已安装的技能") {
+            PlusMenuItem(Icons.Outlined.Bolt, "插入 \$ 技能", tr("调用已安装的技能")) {
                 expanded = false
                 onInsertSkill()
             }
@@ -862,7 +903,7 @@ private fun ModelPill(
                 .padding(horizontal = 4.dp, vertical = 6.dp),
         ) {
             Text(
-                tr(modelLabel.ifBlank { "选择模型" }),
+                tr(modelLabel.ifBlank { tr("选择模型") }),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (modelLabel.isBlank()) {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -960,7 +1001,7 @@ private fun ModelPill(
                                                 Spacer(Modifier.width(12.dp))
                                             }
                                             Text(
-                                                tr(p.name.ifBlank { "未命名" }),
+                                                tr(p.name.ifBlank { tr("未命名") }),
                                                 style = MaterialTheme.typography.labelMedium,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -986,9 +1027,9 @@ private fun ModelPill(
                                     Text(
                                         tr(
                                             when {
-                                                focus == null && enabledProviders.isEmpty() -> "暂无供应商"
-                                                focus == null -> "选择供应商"
-                                                else -> "该供应商暂无模型"
+                                                focus == null && enabledProviders.isEmpty() -> tr("暂无供应商")
+                                                focus == null -> tr("选择供应商")
+                                                else -> tr("该供应商暂无模型")
                                             },
                                         ),
                                         style = MaterialTheme.typography.labelSmall,
@@ -1415,8 +1456,8 @@ internal const val DEFAULT_PLACEHOLDER =
     "向 AndMX 提问，@ 提及文件，/ 使用命令或子智能体，\$ 使用技能，# 关联对话"
 
 internal fun composerPlaceholder(flat: Boolean, isLoading: Boolean, guide: Boolean): String = when {
-    isLoading && guide -> "继续输入，发送后引导当前这一轮"
-    isLoading -> "继续输入，发送后加入队列，本轮结束后再跑"
+    isLoading && guide -> tr("继续输入，发送后引导当前这一轮")
+    isLoading -> tr("继续输入，发送后加入队列，本轮结束后再跑")
     flat -> DEFAULT_PLACEHOLDER
     else -> "继续这个任务，@ 提及文件，/ 使用命令，\$ 使用技能"
 }

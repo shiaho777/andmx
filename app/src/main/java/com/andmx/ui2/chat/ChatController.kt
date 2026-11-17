@@ -129,6 +129,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import com.andmx.ui2.settings.tr
 
 class ChatController private constructor(private val context: Context) {
     companion object {
@@ -1336,7 +1337,7 @@ class ChatController private constructor(private val context: Context) {
                 ),
             ),
         )
-        notifyIfBackground(conversationId, "工作流等待确认", question)
+        notifyIfBackground(conversationId, tr("工作流等待确认"), question)
         return try {
             val raw = deferred.await()
             val (answers, _) = AskUserQuestionParser.parseAnswersJson(raw)
@@ -1480,7 +1481,7 @@ class ChatController private constructor(private val context: Context) {
 
     fun stopTurn(conversationId: Long) {
         resolveApproval(false)
-        orchestrators[conversationId]?.cancelAll("用户停止")
+        orchestrators[conversationId]?.cancelAll(tr("用户停止"))
         backgroundTasksByConversation[conversationId]?.cancelAll()
         refreshSubAgents(conversationId)
         val session = sessions[conversationId]
@@ -1648,16 +1649,16 @@ class ChatController private constructor(private val context: Context) {
         }
 
         val settings = settingsStore.settings.firstOrNull()
-            ?: return@flow emit(ChatEvent.Error("设置未初始化"))
+            ?: return@flow emit(ChatEvent.Error(tr("设置未初始化")))
         if (!settings.hasSelection) {
-            return@flow emit(ChatEvent.Error("请先选择模型"))
+            return@flow emit(ChatEvent.Error(tr("请先选择模型")))
         }
         val providers = providerStore.providers.firstOrNull().orEmpty()
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
-            ?: return@flow emit(ChatEvent.Error("未配置提供商"))
+            ?: return@flow emit(ChatEvent.Error(tr("未配置提供商")))
         if (!provider.isUsable) {
-            return@flow emit(ChatEvent.Error("当前提供商不可用，请检查 API Key"))
+            return@flow emit(ChatEvent.Error(tr("当前提供商不可用，请检查 API Key")))
         }
 
         if (firstUserMessage && titleSidecarAttempted.add(conversationId)) {
@@ -1686,7 +1687,7 @@ class ChatController private constructor(private val context: Context) {
             }.getOrNull()
             if (hookResult != null) {
                 if (hookResult.decision == HookSystem.HookDecision.BLOCK) {
-                    emit(ChatEvent.Error(hookResult.message?.ifBlank { "被 UserPromptSubmit hook 拦截" } ?: "被 UserPromptSubmit hook 拦截"))
+                    emit(ChatEvent.Error(hookResult.message?.ifBlank { tr("被 UserPromptSubmit hook 拦截") } ?: tr("被 UserPromptSubmit hook 拦截")))
                     emit(ChatEvent.Done)
                     return@flow
                 }
@@ -1739,7 +1740,7 @@ class ChatController private constructor(private val context: Context) {
         } catch (c: kotlinx.coroutines.CancellationException) {
             throw c
         } catch (e: Exception) {
-            emit(ChatEvent.Error(e.message ?: "未知错误"))
+            emit(ChatEvent.Error(e.message ?: tr("未知错误")))
         } finally {
             if (_pendingApproval.value?.conversationId == conversationId) {
                 _pendingApproval.value = null
@@ -1843,7 +1844,7 @@ class ChatController private constructor(private val context: Context) {
                         EventMsg(type = "task_failed", turnId = turnId, errorMessage = event.message),
                     )
                 }
-                notifyIfBackground(conversationId, "任务失败", event.message)
+                notifyIfBackground(conversationId, tr("任务失败"), event.message)
                 runCatching { repo.setTaskStatus(conversationId, "failed") }
                 if (focusedConversationId != conversationId) {
                     runCatching { repo.setUnreadAt(conversationId, System.currentTimeMillis()) }
@@ -1885,8 +1886,8 @@ class ChatController private constructor(private val context: Context) {
                 applyGoalTokenUsage(session)
                 refreshTokenUsage(conversationId)
                 notifyIfBackground(
-                    conversationId, "任务完成",
-                    session.lastAssistantText.trim().ifBlank { "回合已结束" },
+                    conversationId, tr("任务完成"),
+                    session.lastAssistantText.trim().ifBlank { tr("回合已结束") },
                 )
                 runCatching { repo.setTaskStatus(conversationId, "completed") }
                 if (focusedConversationId != conversationId) {
@@ -1903,13 +1904,13 @@ class ChatController private constructor(private val context: Context) {
 
     suspend fun regenerateTurn(conversationId: Long): Flow<ChatEvent> = flow {
         val settings = settingsStore.settings.firstOrNull()
-            ?: return@flow emit(ChatEvent.Error("设置未初始化"))
-        if (!settings.hasSelection) return@flow emit(ChatEvent.Error("请先选择模型"))
+            ?: return@flow emit(ChatEvent.Error(tr("设置未初始化")))
+        if (!settings.hasSelection) return@flow emit(ChatEvent.Error(tr("请先选择模型")))
         val providers = providerStore.providers.firstOrNull().orEmpty()
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
-            ?: return@flow emit(ChatEvent.Error("未配置提供商"))
-        if (!provider.isUsable) return@flow emit(ChatEvent.Error("当前提供商不可用，请检查 API Key"))
+            ?: return@flow emit(ChatEvent.Error(tr("未配置提供商")))
+        if (!provider.isUsable) return@flow emit(ChatEvent.Error(tr("当前提供商不可用，请检查 API Key")))
         ensureExtraTools(settings, conversationId)
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
@@ -1948,7 +1949,7 @@ class ChatController private constructor(private val context: Context) {
         } catch (c: kotlinx.coroutines.CancellationException) {
             throw c
         } catch (e: Exception) {
-            emit(ChatEvent.Error(e.message ?: "未知错误"))
+            emit(ChatEvent.Error(e.message ?: tr("未知错误")))
         } finally {
             if (_pendingApproval.value?.conversationId == conversationId) {
                 _pendingApproval.value = null
@@ -1961,16 +1962,16 @@ class ChatController private constructor(private val context: Context) {
 
     suspend fun compactConversation(conversationId: Long, instructions: String = ""): String {
         val settings = settingsStore.settings.firstOrNull()
-            ?: return "设置未初始化"
+            ?: return tr("设置未初始化")
         val providers = providerStore.providers.firstOrNull().orEmpty()
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
-            ?: return "未配置提供商"
+            ?: return tr("未配置提供商")
         ensureExtraTools(settings, conversationId)
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         val msg = session.engine.compactNow(settings, TurnContext(provider, settings.model), instructions)
-            ?: return "上下文较短，无需压缩"
+            ?: return tr("上下文较短，无需压缩")
         refreshTokenUsage(conversationId)
         return msg
     }
@@ -2167,13 +2168,13 @@ class ChatController private constructor(private val context: Context) {
 
     /** /mcp connect <server>：按配置名连接单个 MCP 服务器并把工具挂入会话工具面。 */
     suspend fun mcpConnect(name: String): String {
-        val settings = settingsStore.settings.firstOrNull() ?: return "设置不可用。"
+        val settings = settingsStore.settings.firstOrNull() ?: return tr("设置不可用。")
         val cfg = com.andmx.mcp.McpServerConfig.parse(settings.mcpServers)
             .firstOrNull { it.name == name } ?: return "未配置服务器 `$name`。"
         if (mcpManager.connected.any { it.name == name }) return "`$name` 已连接。"
         val added = runCatching { mcpManager.connectOne(cfg) }
             .getOrElse { return "连接失败：${it.message}" }
-        if (added.isEmpty()) return "连接失败：未获得工具（查看日志）。"
+        if (added.isEmpty()) return tr("连接失败：未获得工具（查看日志）。")
         mcpTools = mcpTools + added
         mcpContextTools = mcpContextToolsFor(mcpManager)
         _mcpStatus.value = mcpManager.connected
@@ -2465,7 +2466,7 @@ class ChatController private constructor(private val context: Context) {
                     }
                     if (resumed.wasTruncated) {
                         liveBus(conversationId).tryEmit(
-                            ChatEvent.AssistantComplete("_(已从 rollout 恢复：截断了未完成的最后一轮)_"),
+                            ChatEvent.AssistantComplete(tr("_(已从 rollout 恢复：截断了未完成的最后一轮)_")),
                         )
                     }
                     val msgs = resumed.messages.filter { it.role != "system" }
@@ -2531,16 +2532,27 @@ class ChatController private constructor(private val context: Context) {
             cwdProvider = cwd,
             embeddedSearch = settingsSnapshot.embeddedSearch,
             shellRuntime = { settingsSnapshot.bashShellRuntime },
+            imageSearchApiConfig = {
+                com.andmx.agent.ImageSearchApiConfig(settingsSnapshot.searchApiProvider, settingsSnapshot.searchApiKey)
+            },
+            pluginCatalog = {
+                runCatching {
+                    com.andmx.agent.plugins.PluginMarketplace(context, guestFs).loadCatalog().catalog.plugins
+                }.getOrDefault(emptyList())
+            },
+            pluginInstalledNames = {
+                runCatching { pluginSystem.discover().plugins.map { it.manifest.name }.toSet() }.getOrDefault(emptySet())
+            },
             onPlanModeChange = { mode -> applyExecMode(mode, conversationId) },
             currentMode = { sessions[conversationId]?.approvalMode ?: planMode.mode },
             askUser = ask@{ questions, rawArgs ->
-                val session = sessions[conversationId] ?: return@ask "会话不可用"
+                val session = sessions[conversationId] ?: return@ask tr("会话不可用")
                 val deferred = kotlinx.coroutines.CompletableDeferred<String>()
                 session.pendingAnswer = deferred
                 session.answerSnoozed = false
                 val summary = questions.joinToString(" · ") { q ->
                     q.header.ifBlank { q.question.take(24) }
-                }.ifBlank { "需要你的决定" }
+                }.ifBlank { tr("需要你的决定") }
                 val startedAt = System.currentTimeMillis()
                 val autoResolve = _questionAutoResolve.value
                 _pendingApproval.value = ApprovalRequest(
@@ -2554,7 +2566,7 @@ class ChatController private constructor(private val context: Context) {
                     autoDeadlineAt = if (autoResolve) startedAt + ASK_AUTO_RESOLVE_MS else null,
                     countdownVisibleAt = if (autoResolve) startedAt + ASK_HIDDEN_GRACE_MS else null,
                 )
-                notifyIfBackground(conversationId, "等待你的回答", summary)
+                notifyIfBackground(conversationId, tr("等待你的回答"), summary)
                 if (autoResolve) {
                     session.answerTimer = controllerScope.launch {
                         delay(ASK_AUTO_RESOLVE_MS)
@@ -2588,7 +2600,7 @@ class ChatController private constructor(private val context: Context) {
                     conversationId = conversationId,
                     toolName = "EnterPlanMode",
                     risk = ToolRisk.READ,
-                    summary = reason.ifBlank { "进入计划模式" },
+                    summary = reason.ifBlank { tr("进入计划模式") },
                     modeLabel = session.approvalMode.label,
                     kind = "enter_plan",
                 )
@@ -2959,7 +2971,7 @@ class ChatController private constructor(private val context: Context) {
         // not a refusal, and the model can only tell the difference if
         // the two are reported differently.
         val session = sessions[conversationId]
-            ?: return ApprovalOutcome.Unavailable("会话不可用")
+            ?: return ApprovalOutcome.Unavailable(tr("会话不可用"))
         val deferred = CompletableDeferred<Boolean>()
         session.pending = deferred
         session.pendingArgs = args.toString()
@@ -2977,7 +2989,7 @@ class ChatController private constructor(private val context: Context) {
                 com.andmx.agent.permission.PermissionSuggestions.suggest(tool.name, args)
             }.getOrDefault(emptyList()),
         )
-        notifyIfBackground(conversationId, "等待确认", summary)
+        notifyIfBackground(conversationId, tr("等待确认"), summary)
         // 上游 PermissionRequest hook：与审批 UI 并行触发（外部审批桥接语义），不阻塞 deferred
         if (hookSystem.hasHooksFor(com.andmx.agent.hooks.HookSystem.HookEvent.PERMISSION_REQUEST)) {
             controllerScope.launch {
@@ -3354,7 +3366,7 @@ class ChatController private constructor(private val context: Context) {
         val recent = repo.messages(conversationId).takeLast(8).map {
             HandoffRunLogItem(
                 title = it.toolName ?: it.role,
-                state = if (it.toolError) "失败" else "完成",
+                state = if (it.toolError) tr("失败") else tr("完成"),
                 detail = it.content.take(160),
             )
         }
@@ -3368,9 +3380,9 @@ class ChatController private constructor(private val context: Context) {
                 goalNote = goal.note,
                 tokenEstimate = estimateContextTokens(conversationId),
                 contextPressureLabel = when {
-                    estimateContextTokens(conversationId) > 90_000 -> "偏高"
-                    estimateContextTokens(conversationId) > 40_000 -> "中等"
-                    else -> "轻量"
+                    estimateContextTokens(conversationId) > 90_000 -> tr("偏高")
+                    estimateContextTokens(conversationId) > 40_000 -> tr("中等")
+                    else -> tr("轻量")
                 },
                 messageCount = repo.messages(conversationId).size,
                 toolCount = tools.size,
@@ -3429,18 +3441,18 @@ class ChatController private constructor(private val context: Context) {
     }
 
     suspend fun checkpointConversation(conversationId: Long): String {
-        val settings = settingsStore.settings.firstOrNull() ?: return "设置未初始化"
+        val settings = settingsStore.settings.firstOrNull() ?: return tr("设置未初始化")
         val providers = providerStore.providers.firstOrNull().orEmpty()
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
-            ?: return "未配置提供商"
+            ?: return tr("未配置提供商")
         ensureExtraTools(settings, conversationId)
         val session = obtainSession(conversationId, provider, settings)
         val summary = session.engine.checkpointNow(
             settings,
             TurnContext(provider, settings.model),
             goal = session.goalState.goal.text,
-        ) ?: return "无法生成交接检查点"
+        ) ?: return tr("无法生成交接检查点")
         return "已生成交接检查点并压缩历史。\n\n$summary"
     }
 

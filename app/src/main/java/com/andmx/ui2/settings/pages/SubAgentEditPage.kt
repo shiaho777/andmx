@@ -88,9 +88,9 @@ fun SubAgentEditPage(
 
     val nameError = when {
         builtIn -> null
-        name.trim().length !in 3..50 -> "名称需 3–50 个字符"
-        !Regex("^[a-zA-Z0-9-]+$").matches(name.trim()) -> "仅字母、数字、连字符"
-        name.trim() in SubagentCatalog.BUILTIN_NAMES -> "名称被内置代理占用"
+        name.trim().length !in 3..50 -> tr("名称需 3–50 个字符")
+        !Regex("^[a-zA-Z0-9-]+$").matches(name.trim()) -> tr("仅字母、数字、连字符")
+        name.trim() in SubagentCatalog.BUILTIN_NAMES -> tr("名称被内置代理占用")
         else -> null
     }
     val canSave = if (builtIn) {
@@ -108,14 +108,14 @@ fun SubAgentEditPage(
                     Text(
                         when {
                             builtIn -> "内置 · ${initial?.name.orEmpty()}"
-                            initial == null -> "新建子智能体"
-                            else -> "编辑子智能体"
+                            initial == null -> tr("新建子智能体")
+                            else -> tr("编辑子智能体")
                         }
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
@@ -154,11 +154,11 @@ fun SubAgentEditPage(
                                 error = null
                                 onSave(agent)
                             } catch (t: Throwable) {
-                                error = t.message ?: "保存失败"
+                                error = t.message ?: tr("保存失败")
                             }
                         },
                         enabled = canSave
-                    ) { Icon(Icons.Outlined.Check, "保存") }
+                    ) { Icon(Icons.Outlined.Check, tr("保存")) }
                 }
             )
         }
@@ -180,28 +180,28 @@ fun SubAgentEditPage(
             }
 
             if (builtIn) {
-                SettingsGroup("内置代理") {
+                SettingsGroup(tr("内置代理")) {
                     StackedSettingRow(
-                        title = "名称",
+                        title = tr("名称"),
                         description = initial?.name.orEmpty()
                     ) {}
                     StackedSettingRow(
-                        title = "描述",
+                        title = tr("描述"),
                         description = initial?.description.orEmpty()
                     ) {}
                     StackedSettingRow(
-                        title = "工具",
+                        title = tr("工具"),
                         description = if (SubagentCatalog.isAllTools(initial?.tools)) {
-                            "全部工具"
+                            tr("全部工具")
                         } else {
                             (initial?.tools ?: emptyList()).joinToString(", ")
                         }
                     ) {}
                 }
-                SettingsGroup("模型覆盖") {
+                SettingsGroup(tr("模型覆盖")) {
                     StackedSettingRow(
-                        title = "模型",
-                        description = "继承默认使用当前会话模型；也可指定已配置供应商下的模型。",
+                        title = tr("模型"),
+                        description = tr("继承默认使用当前会话模型；也可指定已配置供应商下的模型。"),
                     ) {
                         SubagentModelSelectField(
                             value = model,
@@ -210,17 +210,17 @@ fun SubAgentEditPage(
                         )
                     }
                     StackedSettingRow(
-                        title = "思考等级",
-                        description = "留空则跟随当前会话。",
+                        title = tr("思考等级"),
+                        description = tr("留空则跟随当前会话。"),
                     ) {
                         ThoughtLevelField(value = thoughtLevel, onSelect = { thoughtLevel = it })
                     }
                 }
             } else {
-                SettingsGroup("基本信息") {
+                SettingsGroup(tr("基本信息")) {
                     StackedSettingRow(
-                        title = "名称",
-                        description = nameError ?: "运行时通过该名称调度（subagent_type）"
+                        title = tr("名称"),
+                        description = nameError ?: tr("运行时通过该名称调度（subagent_type）")
                     ) {
                         OutlinedTextField(
                             value = name,
@@ -231,7 +231,7 @@ fun SubAgentEditPage(
                             isError = nameError != null
                         )
                     }
-                    StackedSettingRow(title = "描述", description = "展示给模型的简短说明") {
+                    StackedSettingRow(title = tr("描述"), description = tr("展示给模型的简短说明")) {
                         OutlinedTextField(
                             value = description,
                             onValueChange = { description = it },
@@ -243,10 +243,10 @@ fun SubAgentEditPage(
                     }
                 }
 
-                SettingsGroup("模型与权限") {
+                SettingsGroup(tr("模型与权限")) {
                     StackedSettingRow(
-                        title = "模型",
-                        description = "继承默认使用当前会话模型；也可指定已配置供应商下的模型。",
+                        title = tr("模型"),
+                        description = tr("继承默认使用当前会话模型；也可指定已配置供应商下的模型。"),
                     ) {
                         SubagentModelSelectField(
                             value = model,
@@ -254,12 +254,12 @@ fun SubAgentEditPage(
                             onSelect = { model = it },
                         )
                     }
-                    StackedSettingRow(title = "权限模式") {
+                    StackedSettingRow(title = tr("权限模式")) {
                         SegmentedRow(
                             options = listOf(
-                                "default" to "默认",
-                                "acceptEdits" to "接受编辑",
-                                "plan" to "计划",
+                                "default" to tr("默认"),
+                                "acceptEdits" to tr("接受编辑"),
+                                "plan" to tr("计划"),
                             ),
                             selected = if (permissionMode in listOf("default", "acceptEdits", "plan")) {
                                 permissionMode
@@ -270,12 +270,12 @@ fun SubAgentEditPage(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    StackedSettingRow(title = "更多权限") {
+                    StackedSettingRow(title = tr("更多权限")) {
                         SegmentedRow(
                             options = listOf(
-                                "auto" to "自动",
-                                "bypassPermissions" to "绕过",
-                                "dontAsk" to "不询问",
+                                "auto" to tr("自动"),
+                                "bypassPermissions" to tr("绕过"),
+                                "dontAsk" to tr("不询问"),
                             ),
                             selected = if (permissionMode in listOf("auto", "bypassPermissions", "dontAsk")) {
                                 permissionMode
@@ -287,12 +287,12 @@ fun SubAgentEditPage(
                         )
                     }
                     StackedSettingRow(
-                        title = "思考等级",
-                        description = "留空则跟随当前会话。",
+                        title = tr("思考等级"),
+                        description = tr("留空则跟随当前会话。"),
                     ) {
                         ThoughtLevelField(value = thoughtLevel, onSelect = { thoughtLevel = it })
                     }
-                    StackedSettingRow(title = "最大轮次", description = "留空使用默认") {
+                    StackedSettingRow(title = tr("最大轮次"), description = tr("留空使用默认")) {
                         OutlinedTextField(
                             value = maxTurnsText,
                             onValueChange = { maxTurnsText = it.filter { ch -> ch.isDigit() }.take(3) },
@@ -303,15 +303,15 @@ fun SubAgentEditPage(
                     }
                 }
 
-                SettingsGroup("颜色标记") {
+                SettingsGroup(tr("颜色标记")) {
                     ColorPicker(selected = color, onSelect = { color = it })
                 }
 
-                SettingsGroup("工具") {
+                SettingsGroup(tr("工具")) {
                     SegmentedRow(
                         options = listOf(
-                            "all" to "全部工具",
-                            "custom" to "自定义",
+                            "all" to tr("全部工具"),
+                            "custom" to tr("自定义"),
                         ),
                         selected = if (toolsAll) "all" else "custom",
                         onSelect = {
@@ -361,22 +361,22 @@ fun SubAgentEditPage(
                     }
                 }
 
-                SettingsGroup("运行") {
+                SettingsGroup(tr("运行")) {
                     SwitchRow(
-                        title = "允许后台运行",
-                        description = "模型请求时允许该子智能体作为后台任务运行。",
+                        title = tr("允许后台运行"),
+                        description = tr("模型请求时允许该子智能体作为后台任务运行。"),
                         checked = background,
                         onCheckedChange = { background = it }
                     )
                     SwitchRow(
-                        title = "注入 AGENTS.md",
-                        description = "启动时把工作区说明写进这个子智能体的上下文。",
+                        title = tr("注入 AGENTS.md"),
+                        description = tr("启动时把工作区说明写进这个子智能体的上下文。"),
                         checked = injectAgentsMd,
                         onCheckedChange = { injectAgentsMd = it }
                     )
                 }
 
-                SettingsGroup("系统提示词") {
+                SettingsGroup(tr("系统提示词")) {
                     OutlinedTextField(
                         value = systemPrompt,
                         onValueChange = { systemPrompt = it },
@@ -407,13 +407,13 @@ fun SubAgentEditPage(
 private fun ThoughtLevelField(value: String, onSelect: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SegmentedRow(
-            options = listOf("" to "继承", "off" to "关闭", "low" to "低"),
+            options = listOf("" to tr("继承"), "off" to tr("关闭"), "low" to tr("低")),
             selected = value,
             onSelect = onSelect,
             modifier = Modifier.fillMaxWidth(),
         )
         SegmentedRow(
-            options = listOf("medium" to "中", "high" to "高", "max" to "最高"),
+            options = listOf("medium" to tr("中"), "high" to tr("高"), "max" to tr("最高")),
             selected = value,
             onSelect = onSelect,
             modifier = Modifier.fillMaxWidth(),

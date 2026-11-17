@@ -167,7 +167,7 @@ fun PluginPage(onBack: () -> Unit) {
                             refresh++
                             marketRefresh++
                         } else {
-                            snackbar.showSnackbar(res.errors.firstOrNull() ?: "安装失败")
+                            snackbar.showSnackbar(res.errors.firstOrNull() ?: tr("安装失败"))
                         }
                     }
                 },
@@ -210,7 +210,7 @@ fun PluginPage(onBack: () -> Unit) {
                             refresh++
                             view = PluginView.List
                         } else {
-                            snackbar.showSnackbar(res.errors.firstOrNull() ?: "安装失败")
+                            snackbar.showSnackbar(res.errors.firstOrNull() ?: tr("安装失败"))
                         }
                     }
                 },
@@ -232,7 +232,7 @@ fun PluginPage(onBack: () -> Unit) {
                         snackbar.showSnackbar("已安装 ${res.name}")
                         refresh++
                     } else {
-                        snackbar.showSnackbar(res.errors.firstOrNull() ?: "安装失败")
+                        snackbar.showSnackbar(res.errors.firstOrNull() ?: tr("安装失败"))
                     }
                 }
             },
@@ -246,7 +246,7 @@ fun PluginPage(onBack: () -> Unit) {
                         snackbar.showSnackbar("已安装 ${res.name}")
                         refresh++
                     } else {
-                        snackbar.showSnackbar(res.errors.firstOrNull() ?: "安装失败")
+                        snackbar.showSnackbar(res.errors.firstOrNull() ?: tr("安装失败"))
                     }
                 }
             },
@@ -310,7 +310,7 @@ private fun PluginHubView(
                 title = { Text(tr("插件")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = tr("返回"))
                     }
                 },
                 colors = settingsTopBarColors(),
@@ -323,7 +323,7 @@ private fun PluginHubView(
                         if (refreshing) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
+                            Icon(Icons.Outlined.Refresh, contentDescription = tr("刷新"))
                         }
                     }
                 },
@@ -332,7 +332,7 @@ private fun PluginHubView(
         floatingActionButton = {
             if (tab == 0) {
                 FloatingActionButton(onClick = onInstallClick) {
-                    Icon(Icons.Outlined.Add, contentDescription = "安装插件")
+                    Icon(Icons.Outlined.Add, contentDescription = tr("安装插件"))
                 }
             }
         },
@@ -344,14 +344,14 @@ private fun PluginHubView(
             }
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 ResourcePageDescription(
-                    if (tab == 0) "启用或停用已安装的插件。插件可打包技能、命令、Hooks 和 MCP 服务器。"
-                    else "浏览插件市场并安装。官方目录与 AndMX / Claude 市场对齐。"
+                    if (tab == 0) tr("启用或停用已安装的插件。插件可打包技能、命令、Hooks 和 MCP 服务器。")
+                    else tr("浏览插件市场并安装。官方目录与 AndMX / Claude 市场对齐。")
                 )
                 Spacer(Modifier.height(10.dp))
                 ResourceSearchField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = if (tab == 0) "搜索已安装插件..." else "搜索市场插件...",
+                    placeholder = if (tab == 0) tr("搜索已安装插件...") else tr("搜索市场插件..."),
                 )
             }
             if (tab == 1) {
@@ -375,8 +375,8 @@ private fun PluginHubView(
                     if (installedFiltered.isEmpty()) {
                         EmptyState(
                             icon = Icons.Outlined.Extension,
-                            title = "还没有插件",
-                            message = "可从市场安装，或用 + 从 Git / 本地路径安装。",
+                            title = tr("还没有插件"),
+                            message = tr("可从市场安装，或用 + 从 Git / 本地路径安装。"),
                         )
                     } else {
                         LazyColumn(
@@ -385,7 +385,7 @@ private fun PluginHubView(
                         ) {
                             item {
                                 ResourceSectionHeader(
-                                    title = "已安装插件",
+                                    title = tr("已安装插件"),
                                     count = installedFiltered.size,
                                 )
                             }
@@ -414,8 +414,8 @@ private fun PluginHubView(
                     if (marketItems.isEmpty()) {
                         EmptyState(
                             icon = Icons.Outlined.Storefront,
-                            title = "市场暂无结果",
-                            message = "下拉刷新，或检查网络后重试。官方目录会与 Claude Plugins Official 对齐。",
+                            title = tr("市场暂无结果"),
+                            message = tr("下拉刷新，或检查网络后重试。官方目录会与 Claude Plugins Official 对齐。"),
                         )
                     } else {
                         LazyColumn(
@@ -424,7 +424,7 @@ private fun PluginHubView(
                         ) {
                             item {
                                 ResourceSectionHeader(
-                                    title = "插件市场",
+                                    title = tr("插件市场"),
                                     count = marketItems.size,
                                     hint = "来源 ${market.from}" + (market.error?.let { " · $it" } ?: ""),
                                 )
@@ -464,7 +464,7 @@ private fun InstalledPluginRow(
     val versionStatus = com.andmx.agent.plugins.PluginVersion.compare(m.version, latestVersion)
     val versionNote = when (versionStatus) {
         com.andmx.agent.plugins.PluginVersion.Status.UPDATE_AVAILABLE -> "有更新 $latestVersion"
-        com.andmx.agent.plugins.PluginVersion.Status.VERSION_CHANGED -> "版本不同"
+        com.andmx.agent.plugins.PluginVersion.Status.VERSION_CHANGED -> tr("版本不同")
         com.andmx.agent.plugins.PluginVersion.Status.NONE -> null
     }
     val meta = listOfNotNull(
@@ -480,16 +480,16 @@ private fun InstalledPluginRow(
         subtitle = listOfNotNull(
             m.version.takeIf { it.isNotBlank() && it != "0.0.0" },
             versionNote,
-            (m.description.ifBlank { "暂无描述" } + sourceSuffix(plugin.source)).take(120),
+            (m.description.ifBlank { tr("暂无描述") } + sourceSuffix(plugin.source)).take(120),
         ).joinToString(" · "),
         onClick = onOpen,
         trailing = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ResourceBadge(
                     when (plugin.source) {
-                        PluginSystem.PluginSource.BUILTIN -> "内置"
-                        PluginSystem.PluginSource.MARKETPLACE -> "市场"
-                        PluginSystem.PluginSource.LOCAL -> "本地"
+                        PluginSystem.PluginSource.BUILTIN -> tr("内置")
+                        PluginSystem.PluginSource.MARKETPLACE -> tr("市场")
+                        PluginSystem.PluginSource.LOCAL -> tr("本地")
                     }
                 )
                 Spacer(Modifier.width(8.dp))
@@ -514,12 +514,12 @@ private fun MarketPluginRow(
                 entry.author.takeIf { it.isNotBlank() },
                 entry.category,
                 entry.marketplace,
-            ).joinToString(" · ").ifBlank { "暂无描述" }
+            ).joinToString(" · ").ifBlank { tr("暂无描述") }
         },
         onClick = onOpen,
         trailing = {
             if (installed) {
-                ResourceBadge("已安装")
+                ResourceBadge(tr("已安装"))
             } else {
                 TextButton(onClick = onInstall) { Text(tr("安装")) }
             }
@@ -633,11 +633,11 @@ private fun InstallPluginDialog(
                             else "/root/project/my-plugin",
                         )
                     },
-                    label = { Text(if (mode == 0) "仓库 URL" else "Guest 路径") },
+                    label = { Text(if (mode == 0) tr("仓库 URL") else tr("Guest 路径")) },
                 )
                 Text(
-                    if (mode == 0) "将 clone 到 /root/.andmx/plugins/<name>，并识别 .andmx-plugin / .zcode-plugin / .codex-plugin / SKILL.md。"
-                    else "从 proot 内路径复制整个目录作为插件。",
+                    if (mode == 0) tr("将 clone 到 /root/.andmx/plugins/<name>，并识别 .andmx-plugin / .zcode-plugin / .codex-plugin / SKILL.md。")
+                    else tr("从 proot 内路径复制整个目录作为插件。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -666,7 +666,7 @@ private fun InstallPluginDialog(
 }
 
 private fun sourceSuffix(source: PluginSystem.PluginSource): String = when (source) {
-    PluginSystem.PluginSource.BUILTIN -> " · 内置"
-    PluginSystem.PluginSource.MARKETPLACE -> " · 市场"
-    PluginSystem.PluginSource.LOCAL -> " · 本地"
+    PluginSystem.PluginSource.BUILTIN -> tr(" · 内置")
+    PluginSystem.PluginSource.MARKETPLACE -> tr(" · 市场")
+    PluginSystem.PluginSource.LOCAL -> tr(" · 本地")
 }

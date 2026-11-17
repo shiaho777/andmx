@@ -155,7 +155,7 @@ fun WorkspaceFileTree(
         when {
             files.isEmpty() -> {
                 Text(
-                    if (query.isNotBlank()) "没有匹配的文件。" else "当前目录为空。",
+                    if (query.isNotBlank()) tr("没有匹配的文件。") else tr("当前目录为空。"),
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -220,7 +220,7 @@ private fun RemoteWorkspaceFileTree(
         scope.launch {
             val list = withContext(Dispatchers.IO) {
                 runCatching { client.listDir(path) }.getOrElse {
-                    error = it.message ?: "读取目录失败"
+                    error = it.message ?: tr("读取目录失败")
                     emptyList()
                 }
             }
@@ -269,7 +269,7 @@ private fun RemoteWorkspaceFileTree(
             }
             error != null -> {
                 Text(
-                    error ?: "加载失败",
+                    error ?: tr("加载失败"),
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(14.dp),
                     style = MaterialTheme.typography.bodySmall,
@@ -277,7 +277,7 @@ private fun RemoteWorkspaceFileTree(
             }
             filtered.isEmpty() -> {
                 Text(
-                    if (query.isNotBlank()) "没有匹配的文件。" else "当前目录为空。",
+                    if (query.isNotBlank()) tr("没有匹配的文件。") else tr("当前目录为空。"),
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -368,21 +368,21 @@ private fun FileTreeShell(
             if (canGoUp) {
                 FileTreeIconButton(
                     icon = Icons.AutoMirrored.Outlined.ArrowBack,
-                    contentDescription = "上一级",
+                    contentDescription = tr("上一级"),
                     onClick = onGoUp,
                 )
             }
             if (onToggleChanged != null) {
                 FileTreeIconButton(
                     icon = Icons.Outlined.Difference,
-                    contentDescription = "仅显示变更文件",
+                    contentDescription = tr("仅显示变更文件"),
                     selected = changedOnly,
                     onClick = onToggleChanged,
                 )
             }
             FileTreeIconButton(
                 icon = Icons.Outlined.Refresh,
-                contentDescription = "刷新文件树",
+                contentDescription = tr("刷新文件树"),
                 onClick = onRefresh,
             )
         }

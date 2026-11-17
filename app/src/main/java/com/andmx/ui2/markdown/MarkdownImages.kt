@@ -1,6 +1,7 @@
 package com.andmx.ui2.markdown
 
 import java.security.MessageDigest
+import com.andmx.ui2.settings.tr
 
 object MarkdownImages {
     data class ImageRef(val alt: String, val url: String)
@@ -75,7 +76,7 @@ object MarkdownImages {
         val inside = text.substring(mid + 2, end).trim()
         val url = titleSuffix.replace(inside, "").trim()
         if (url.isEmpty() || url.any { it.isWhitespace() }) return null
-        val alt = text.substring(start + 2, mid).ifBlank { "图片" }
+        val alt = text.substring(start + 2, mid).ifBlank { tr("图片") }
         return ImageRef(alt, url) to end + 1
     }
 

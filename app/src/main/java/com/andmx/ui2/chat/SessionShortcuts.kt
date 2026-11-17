@@ -7,6 +7,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import com.andmx.ui2.settings.tr
 
 data class ShortcutCommand(
     val id: String,
@@ -39,27 +40,27 @@ object SessionShortcuts {
     const val NEWLINE = "composerInsertNewline"
 
     val commands = listOf(
-        ShortcutCommand(OPEN_COMMAND_CENTER, "打开命令面板", "全局", "Ctrl+K"),
-        ShortcutCommand(OPEN_SETTINGS, "打开设置", "全局", "Ctrl+,"),
-        ShortcutCommand(TOGGLE_SIDEBAR, "切换左侧栏", "全局", "Ctrl+B"),
-        ShortcutCommand(TOGGLE_TERMINAL, "打开终端", "全局", "Ctrl+J"),
-        ShortcutCommand(SWITCH_THEME, "切换主题", "全局", "Ctrl+Shift+L"),
-        ShortcutCommand(CYCLE_THOUGHT, "切换思考级别", "全局", "Ctrl+T"),
-        ShortcutCommand(CYCLE_MODE, "切换会话模式", "全局", "Ctrl+Shift+M"),
-        ShortcutCommand(NEW_TASK, "新建任务", "全局", "Ctrl+N"),
-        ShortcutCommand(OPEN_FILES, "打开文件", "全局", "Ctrl+O"),
-        ShortcutCommand(FIND_IN_TASK, "在任务中查找", "全局", "Ctrl+F"),
-        ShortcutCommand(PREVIOUS_CONVERSATION, "上一个任务", "全局", "Ctrl+Shift+["),
-        ShortcutCommand(NEXT_CONVERSATION, "下一个任务", "全局", "Ctrl+Shift+]"),
-        ShortcutCommand(NAVIGATE_BACK, "上一回合", "全局", "Ctrl+["),
-        ShortcutCommand(NAVIGATE_FORWARD, "下一回合", "全局", "Ctrl+]"),
-        ShortcutCommand(OPEN_MODEL_MENU, "打开模型菜单", "全局", "Ctrl+M"),
-        ShortcutCommand(ZOOM_IN, "放大界面", "全局", "Ctrl+="),
-        ShortcutCommand(ZOOM_OUT, "缩小界面", "全局", "Ctrl+-"),
-        ShortcutCommand(ZOOM_RESET, "重置界面大小", "全局", "Ctrl+0"),
-        ShortcutCommand(STOP, "停止生成", "输入框", "Esc"),
-        ShortcutCommand(SEND, "发送", "输入框", "Enter"),
-        ShortcutCommand(NEWLINE, "换行", "输入框", "Shift+Enter"),
+        ShortcutCommand(OPEN_COMMAND_CENTER, tr("打开命令面板"), tr("全局"), "Ctrl+K"),
+        ShortcutCommand(OPEN_SETTINGS, tr("打开设置"), tr("全局"), "Ctrl+,"),
+        ShortcutCommand(TOGGLE_SIDEBAR, tr("切换左侧栏"), tr("全局"), "Ctrl+B"),
+        ShortcutCommand(TOGGLE_TERMINAL, tr("打开终端"), tr("全局"), "Ctrl+J"),
+        ShortcutCommand(SWITCH_THEME, tr("切换主题"), tr("全局"), "Ctrl+Shift+L"),
+        ShortcutCommand(CYCLE_THOUGHT, tr("切换思考级别"), tr("全局"), "Ctrl+T"),
+        ShortcutCommand(CYCLE_MODE, tr("切换会话模式"), tr("全局"), "Ctrl+Shift+M"),
+        ShortcutCommand(NEW_TASK, tr("新建任务"), tr("全局"), "Ctrl+N"),
+        ShortcutCommand(OPEN_FILES, tr("打开文件"), tr("全局"), "Ctrl+O"),
+        ShortcutCommand(FIND_IN_TASK, tr("在任务中查找"), tr("全局"), "Ctrl+F"),
+        ShortcutCommand(PREVIOUS_CONVERSATION, tr("上一个任务"), tr("全局"), "Ctrl+Shift+["),
+        ShortcutCommand(NEXT_CONVERSATION, tr("下一个任务"), tr("全局"), "Ctrl+Shift+]"),
+        ShortcutCommand(NAVIGATE_BACK, tr("上一回合"), tr("全局"), "Ctrl+["),
+        ShortcutCommand(NAVIGATE_FORWARD, tr("下一回合"), tr("全局"), "Ctrl+]"),
+        ShortcutCommand(OPEN_MODEL_MENU, tr("打开模型菜单"), tr("全局"), "Ctrl+M"),
+        ShortcutCommand(ZOOM_IN, tr("放大界面"), tr("全局"), "Ctrl+="),
+        ShortcutCommand(ZOOM_OUT, tr("缩小界面"), tr("全局"), "Ctrl+-"),
+        ShortcutCommand(ZOOM_RESET, tr("重置界面大小"), tr("全局"), "Ctrl+0"),
+        ShortcutCommand(STOP, tr("停止生成"), tr("输入框"), "Esc"),
+        ShortcutCommand(SEND, tr("发送"), tr("输入框"), "Enter"),
+        ShortcutCommand(NEWLINE, tr("换行"), tr("输入框"), "Shift+Enter"),
     )
 
     @Volatile

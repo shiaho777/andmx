@@ -57,27 +57,27 @@ object ToolPresentation {
     fun family(name: String): Family = rawFamily(name).let { it.copy(label = tr(it.label)) }
 
     private fun rawFamily(name: String): Family = when (ToolArgs.canonical(name)) {
-        "shell" -> Family("终端", Icons.Outlined.Terminal)
+        "shell" -> Family(tr("终端"), Icons.Outlined.Terminal)
         "git" -> Family("Git", Icons.Outlined.Terminal)
-        "read", "list", "todoread" -> Family("读取", Icons.Outlined.Description)
-        "write", "edit", "multiedit", "patch" -> Family("编辑", Icons.Outlined.Edit)
-        "grep", "glob" -> Family("搜索", Icons.Outlined.Search)
-        "webfetch", "search" -> Family("网络", Icons.Outlined.Language)
-        "todo" -> Family("待办", Icons.AutoMirrored.Outlined.ListAlt)
-        "skill" -> Family("技能", Icons.Outlined.AutoAwesome)
-        "agent" -> Family("子代理", Icons.Outlined.Build)
-        "send" -> Family("消息", Icons.Outlined.ChatBubbleOutline)
-        "taskoutput" -> Family("任务输出", Icons.Outlined.Build)
-        "taskstop" -> Family("停止任务", Icons.Outlined.Build)
-        "enterplan", "exitplan" -> Family("计划", Icons.AutoMirrored.Outlined.ListAlt)
-        "ask" -> Family("询问", Icons.AutoMirrored.Outlined.HelpOutline)
-        "sessionctx" -> Family("会话", Icons.Outlined.History)
-        "goal" -> Family("目标", Icons.Outlined.Flag)
+        "read", "list", "todoread" -> Family(tr("读取"), Icons.Outlined.Description)
+        "write", "edit", "multiedit", "patch" -> Family(tr("编辑"), Icons.Outlined.Edit)
+        "grep", "glob" -> Family(tr("搜索"), Icons.Outlined.Search)
+        "webfetch", "search" -> Family(tr("网络"), Icons.Outlined.Language)
+        "todo" -> Family(tr("待办"), Icons.AutoMirrored.Outlined.ListAlt)
+        "skill" -> Family(tr("技能"), Icons.Outlined.AutoAwesome)
+        "agent" -> Family(tr("子代理"), Icons.Outlined.Build)
+        "send" -> Family(tr("消息"), Icons.Outlined.ChatBubbleOutline)
+        "taskoutput" -> Family(tr("任务输出"), Icons.Outlined.Build)
+        "taskstop" -> Family(tr("停止任务"), Icons.Outlined.Build)
+        "enterplan", "exitplan" -> Family(tr("计划"), Icons.AutoMirrored.Outlined.ListAlt)
+        "ask" -> Family(tr("询问"), Icons.AutoMirrored.Outlined.HelpOutline)
+        "sessionctx" -> Family(tr("会话"), Icons.Outlined.History)
+        "goal" -> Family(tr("目标"), Icons.Outlined.Flag)
         "mcp" -> Family("MCP", Icons.Outlined.Code)
-        "cron" -> Family("定时", Icons.Outlined.Schedule)
-        "offpeak" -> Family("闲时", Icons.Outlined.Schedule)
-        "toolsearch" -> Family("工具检索", Icons.Outlined.Search)
-        "deferred" -> Family("延迟工具", Icons.Outlined.Build)
+        "cron" -> Family(tr("定时"), Icons.Outlined.Schedule)
+        "offpeak" -> Family(tr("闲时"), Icons.Outlined.Schedule)
+        "toolsearch" -> Family(tr("工具检索"), Icons.Outlined.Search)
+        "deferred" -> Family(tr("延迟工具"), Icons.Outlined.Build)
         else -> Family(displayName(name), Icons.Outlined.Build)
     }
 
@@ -86,41 +86,41 @@ object ToolPresentation {
 
     private fun kindLabelZh(tc: ToolCall): String {
         val st = status(tc)
-        if (st == Status.FAILED) return "失败"
-        if (st == Status.DENIED) return "已拒绝"
-        if (st == Status.STOPPED) return "已停止"
+        if (st == Status.FAILED) return tr("失败")
+        if (st == Status.DENIED) return tr("已拒绝")
+        if (st == Status.STOPPED) return tr("已停止")
         val running = st == Status.RUNNING || st == Status.PENDING
         return when (ToolArgs.canonical(tc.name)) {
-            "shell", "git" -> if (running) "执行中" else "已执行"
-            "read" -> if (running) "读取中" else "已读取"
-            "list" -> if (running) "浏览中" else "已浏览"
-            "todoread" -> if (running) "读取待办" else "已读取"
-            "write" -> if (running) "写入中" else "已写入"
-            "edit", "multiedit", "patch" -> if (running) "编辑中" else "已编辑"
-            "grep" -> if (running) "搜索中" else "已搜索"
-            "glob" -> if (running) "匹配中" else "已匹配"
-            "webfetch" -> if (running) "抓取中" else "已抓取"
-            "search" -> if (running) "检索中" else "已检索"
-            "todo" -> if (running) "更新待办" else "已更新待办"
-            "skill" -> if (running) "运行技能" else "已运行技能"
-            "agent" -> if (running) "子代理运行中" else "子代理完成"
-            "send" -> if (running) "发送中" else "已发送"
-            "taskoutput" -> if (running) "获取输出中" else "已获取输出"
-            "taskstop" -> if (running) "停止中" else "已停止"
-            "enterplan" -> if (running) "进入计划" else "已进入计划"
-            "exitplan" -> if (running) "提交计划" else "计划已提交"
-            "ask" -> if (running) "等待回答" else "已回答"
-            "sessionctx" -> if (running) "读取上下文" else "已读取上下文"
-            "goal" -> if (running) "更新目标" else "目标已更新"
-            "mcp" -> if (running) "调用中" else "已调用"
-            "computer" -> if (running) "Android Use 中" else "Android Use"
-            "listmodels" -> if (running) "列出模型" else "已列出模型"
-            "cron" -> if (running) "更新定时任务" else "定时任务已更新"
-            "offpeak" -> if (running) "排入闲时" else "已排入闲时"
-            "workflow" -> if (running) "工作流操作" else "工作流已更新"
-            "toolsearch" -> if (running) "检索工具" else "已检索工具"
-            "deferred" -> if (running) "调用工具" else "已调用工具"
-            else -> if (running) "运行中" else family(tc.name).label
+            "shell", "git" -> if (running) tr("执行中") else tr("已执行")
+            "read" -> if (running) tr("读取中") else tr("已读取")
+            "list" -> if (running) tr("浏览中") else tr("已浏览")
+            "todoread" -> if (running) tr("读取待办") else tr("已读取")
+            "write" -> if (running) tr("写入中") else tr("已写入")
+            "edit", "multiedit", "patch" -> if (running) tr("编辑中") else tr("已编辑")
+            "grep" -> if (running) tr("搜索中") else tr("已搜索")
+            "glob" -> if (running) tr("匹配中") else tr("已匹配")
+            "webfetch" -> if (running) tr("抓取中") else tr("已抓取")
+            "search" -> if (running) tr("检索中") else tr("已检索")
+            "todo" -> if (running) tr("更新待办") else tr("已更新待办")
+            "skill" -> if (running) tr("运行技能") else tr("已运行技能")
+            "agent" -> if (running) tr("子代理运行中") else tr("子代理完成")
+            "send" -> if (running) tr("发送中") else tr("已发送")
+            "taskoutput" -> if (running) tr("获取输出中") else tr("已获取输出")
+            "taskstop" -> if (running) tr("停止中") else tr("已停止")
+            "enterplan" -> if (running) tr("进入计划") else tr("已进入计划")
+            "exitplan" -> if (running) tr("提交计划") else tr("计划已提交")
+            "ask" -> if (running) tr("等待回答") else tr("已回答")
+            "sessionctx" -> if (running) tr("读取上下文") else tr("已读取上下文")
+            "goal" -> if (running) tr("更新目标") else tr("目标已更新")
+            "mcp" -> if (running) tr("调用中") else tr("已调用")
+            "computer" -> if (running) tr("Android Use 中") else "Android Use"
+            "listmodels" -> if (running) tr("列出模型") else tr("已列出模型")
+            "cron" -> if (running) tr("更新定时任务") else tr("定时任务已更新")
+            "offpeak" -> if (running) tr("排入闲时") else tr("已排入闲时")
+            "workflow" -> if (running) tr("工作流操作") else tr("工作流已更新")
+            "toolsearch" -> if (running) tr("检索工具") else tr("已检索工具")
+            "deferred" -> if (running) tr("调用工具") else tr("已调用工具")
+            else -> if (running) tr("运行中") else family(tc.name).label
         }
     }
 
@@ -210,10 +210,10 @@ object ToolPresentation {
 
     sealed class Action(private val zh: String) {
         val label: String get() = tr(zh)
-        class OpenFile(val path: String) : Action("打开文件")
-        data object OpenTerminal : Action("终端")
-        class OpenUrl(val url: String) : Action("打开链接")
-        class Copy(val text: String) : Action("复制")
+        class OpenFile(val path: String) : Action(tr("打开文件"))
+        data object OpenTerminal : Action(tr("终端"))
+        class OpenUrl(val url: String) : Action(tr("打开链接"))
+        class Copy(val text: String) : Action(tr("复制"))
     }
 
     fun actions(tc: ToolCall): List<Action> {

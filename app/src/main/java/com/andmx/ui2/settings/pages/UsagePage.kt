@@ -114,7 +114,7 @@ fun UsagePage(onBack: () -> Unit) {
     Scaffold(
         containerColor = pageBg,
         contentColor = onSurface,
-        topBar = { backAppBar("使用统计", onBack) },
+        topBar = { backAppBar(tr("使用统计"), onBack) },
     ) { padding ->
         Column(
             Modifier
@@ -302,22 +302,22 @@ private fun SummaryRow(
     onSurface: Color,
     divider: Color,
 ) {
-    val zhDays = "天"
+    val zhDays = tr("天")
     val items = listOf(
         SummaryItem(
             UsageCalculator.formatCount(stats.lifetimeTotalTokens),
-            "累计 Token 数",
+            tr("累计 Token 数"),
         ),
         SummaryItem(
             UsageCalculator.formatCount(stats.peakDayTokens),
-            "峰值 Token 数",
+            tr("峰值 Token 数"),
         ),
         SummaryItem(
-            UsageChartLogic.formatDuration(stats.longestSessionMs, zhDays, "小时", "分钟"),
-            "最长聊天时长",
+            UsageChartLogic.formatDuration(stats.longestSessionMs, zhDays, tr("小时"), tr("分钟")),
+            tr("最长聊天时长"),
         ),
-        SummaryItem("${stats.currentStreak} $zhDays", "当前连续天数"),
-        SummaryItem("${stats.longestStreak} $zhDays", "最长连续天数"),
+        SummaryItem("${stats.currentStreak} $zhDays", tr("当前连续天数")),
+        SummaryItem("${stats.longestStreak} $zhDays", tr("最长连续天数")),
     )
     Row(
         Modifier
@@ -406,9 +406,9 @@ private fun HeatmapCard(
                 ).padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
                 val modes = listOf(
-                    "每日" to UsageChartLogic.HeatMode.DAILY,
-                    "每周" to UsageChartLogic.HeatMode.WEEKLY,
-                    "累计" to UsageChartLogic.HeatMode.CUMULATIVE,
+                    tr("每日") to UsageChartLogic.HeatMode.DAILY,
+                    tr("每周") to UsageChartLogic.HeatMode.WEEKLY,
+                    tr("累计") to UsageChartLogic.HeatMode.CUMULATIVE,
                 )
                 modes.forEach { (label, m) ->
                     val selected = mode == m
@@ -644,7 +644,7 @@ private fun ToolCallCard(
         Text(tr("工具调用"), color = onSurface, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(8.dp))
         Text(
-            if (total == 0) "这段时间没有工具调用" else "合计 $total 次",
+            if (total == 0) tr("这段时间没有工具调用") else "合计 $total 次",
             color = muted,
             style = MaterialTheme.typography.bodySmall,
         )

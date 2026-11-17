@@ -155,7 +155,7 @@ fun AskUserQuestionPanel(
                         Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                             Text(q.question, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                ans ?: "（未作答）",
+                                ans ?: tr("（未作答）"),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = if (ans != null) FontWeight.Medium else FontWeight.Normal,
                             )

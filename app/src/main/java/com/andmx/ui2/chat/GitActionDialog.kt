@@ -51,10 +51,10 @@ fun GitActionDialog(
     onFetch: (onDone: (GitBaseline.PushResult) -> Unit) -> Unit = {},
     onPull: (onDone: (GitBaseline.PushResult) -> Unit) -> Unit = {},
     onSetIdentity: (name: String, email: String, onDone: (GitBaseline.BaselineResult) -> Unit) -> Unit = { _, _, cb ->
-        cb(GitBaseline.BaselineResult(false, "当前会话不支持设置 Git 身份"))
+        cb(GitBaseline.BaselineResult(false, tr("当前会话不支持设置 Git 身份")))
     },
     onFileDiff: (path: String, onDone: (String) -> Unit) -> Unit = { _, cb ->
-        cb("当前会话不支持读取文件差异")
+        cb(tr("当前会话不支持读取文件差异"))
     },
     onPickBranch: () -> Unit = {},
     onLoadCommitGraph: (onDone: (List<com.andmx.ui2.files.CommitNode>) -> Unit) -> Unit = { cb -> cb(emptyList()) },
@@ -299,13 +299,13 @@ fun GitActionDialog(
                                 busy = false
                                 result.onSuccess { commitMessage = it }
                                     .onFailure {
-                                        message = it.message ?: "生成提交消息失败，请重试或手动填写。"
+                                        message = it.message ?: tr("生成提交消息失败，请重试或手动填写。")
                                     }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (commitMessage.isBlank()) "生成提交消息" else "重新生成")
+                        Text(if (commitMessage.isBlank()) tr("生成提交消息") else tr("重新生成"))
                     }
                     message?.let {
                         Text(
@@ -345,7 +345,7 @@ fun GitActionDialog(
                                         doCommit(it)
                                     }.onFailure {
                                         busy = false
-                                        message = it.message ?: "生成提交消息失败，请重试或手动填写。"
+                                        message = it.message ?: tr("生成提交消息失败，请重试或手动填写。")
                                     }
                                 }
                             }
@@ -362,7 +362,7 @@ fun GitActionDialog(
                                     message = when {
                                         !commit.ok -> commit.message
                                         push == null -> commit.message
-                                        push.ok -> "已提交并推送当前更改"
+                                        push.ok -> tr("已提交并推送当前更改")
                                         else -> "已提交，但推送失败：${push.message}"
                                     }
                                     if (commit.ok && push?.ok == true) onDismiss()
@@ -378,7 +378,7 @@ fun GitActionDialog(
                                         doCommitPush(it)
                                     }.onFailure {
                                         busy = false
-                                        message = it.message ?: "生成提交消息失败，请重试或手动填写。"
+                                        message = it.message ?: tr("生成提交消息失败，请重试或手动填写。")
                                     }
                                 }
                             }
@@ -398,9 +398,9 @@ fun GitActionDialog(
                 Column {
                     Text(
                         if (gitInfo.hasUpstream) {
-                            "将当前分支最新提交推送到远程分支。"
+                            tr("将当前分支最新提交推送到远程分支。")
                         } else {
-                            "首次推送会把当前分支发布到远程并设置 upstream。"
+                            tr("首次推送会把当前分支发布到远程并设置 upstream。")
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -22,6 +22,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import com.andmx.ui2.settings.tr
 
 /** Events streamed out of an agent turn for the UI to render. */
 sealed interface AgentEvent {
@@ -630,7 +631,7 @@ class AgentEngine(
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.loop(settings: ProviderSettings, turn: TurnContext) {
         if (!acquireTurnLoop()) {
-            emit(AgentEvent.Failed("已有进行中的回合", errorType = "turn_in_progress"))
+            emit(AgentEvent.Failed(tr("已有进行中的回合"), errorType = "turn_in_progress"))
             emit(AgentEvent.Done)
             return
         }
@@ -772,7 +773,7 @@ class AgentEngine(
                         com.andmx.data.session.SessionEventType.COMPACT_FAILED,
                         buildJsonObject { put("reason", "compact_failed") },
                     )
-                    failTurn(machine, "model_context_exceeded", "上下文压缩失败", "error_max_budget")
+                    failTurn(machine, "model_context_exceeded", tr("上下文压缩失败"), "error_max_budget")
                     return
                 }
             }
@@ -916,7 +917,7 @@ class AgentEngine(
             }
             if (sawReasoning) emit(AgentEvent.ReasoningDone)
             if (msg == null) {
-                val detail = lastModelError ?: "多次重试后仍无响应"
+                val detail = lastModelError ?: tr("多次重试后仍无响应")
                 sessionEvents?.invoke(
                     com.andmx.data.session.SessionEventType.MODEL_ERROR,
                     buildJsonObject { put("errorType", "model_error"); put("message", detail) },
@@ -953,7 +954,7 @@ class AgentEngine(
                             outputTokenContinuations = 0
                             continue
                         }
-                        failTurn(machine, "error_max_budget", "模型回复超出输出 token 上限", "error_max_budget")
+                        failTurn(machine, "error_max_budget", tr("模型回复超出输出 token 上限"), "error_max_budget")
                         return
                     }
                     OutputTokenContinuation.Decision.NONE -> {
@@ -1325,7 +1326,7 @@ class AgentEngine(
             } catch (c: kotlinx.coroutines.CancellationException) {
                 throw c
             } catch (t: Throwable) {
-                lastError = t.message ?: "请求失败"
+                lastError = t.message ?: tr("请求失败")
                 lastModelError = lastError
                 false
             }

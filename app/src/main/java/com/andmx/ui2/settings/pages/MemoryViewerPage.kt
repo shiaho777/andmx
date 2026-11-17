@@ -64,17 +64,17 @@ private val MemoryFiles = listOf(
     MemoryFileEntry(
         "MEMORY.md",
         "/root/.andmx/memory/MEMORY.md",
-        "已巩固的长期记忆（Phase 2 产物）",
+        tr("已巩固的长期记忆（Phase 2 产物）"),
     ),
     MemoryFileEntry(
         "raw_memories.md",
         "/root/.andmx/memory/raw_memories.md",
-        "逐轮提取的原始记忆（Phase 1 产物）",
+        tr("逐轮提取的原始记忆（Phase 1 产物）"),
     ),
     MemoryFileEntry(
         "memory_summary.md",
         "/root/.andmx/memory/memory_summary.md",
-        "记忆概览摘要",
+        tr("记忆概览摘要"),
     ),
 )
 
@@ -102,14 +102,14 @@ fun MemoryViewerPage(onBack: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("记忆", onBack) },
+        topBar = { backAppBar(tr("记忆"), onBack) },
     ) { padding ->
         val sel = selected
         if (sel != null) {
             val content by produceState("" to false, sel) {
                 value = withContext(Dispatchers.IO) {
                     runCatching { fs.readText(sel.path, limit = 5 * 1024 * 1024) to false }
-                        .getOrElse { (it.message ?: "无法读取") to (it.message?.contains("过大") == true) }
+                        .getOrElse { (it.message ?: tr("无法读取")) to (it.message?.contains("过大") == true) }
                 }
             }
             val tooLarge = content.second
@@ -132,8 +132,8 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                 ) {
                     Text(
                         when {
-                            tooLarge -> "该记忆文件超过 5 MiB 预览上限。"
-                            content.first.isBlank() -> "（文件不存在或为空）"
+                            tooLarge -> tr("该记忆文件超过 5 MiB 预览上限。")
+                            content.first.isBlank() -> tr("（文件不存在或为空）")
                             else -> content.first
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 17.sp),
@@ -155,8 +155,8 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                 .padding(bottom = 32.dp),
         ) {
             SwitchRow(
-                title = "工作区记忆",
-                description = "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",
+                title = tr("工作区记忆"),
+                description = tr("在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。"),
                 checked = settings.memoryEnabled,
                 onCheckedChange = { enabled ->
                     scope.launch { store.update(settings.copy(memoryEnabled = enabled)) }
@@ -193,7 +193,7 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                             val result = withContext(Dispatchers.IO) {
                                 runCatching { memorySystem.consolidate() }.isSuccess
                             }
-                            note = if (result) "已巩固记忆" else "巩固失败"
+                            note = if (result) tr("已巩固记忆") else tr("巩固失败")
                             refresh++
                         }
                     },
@@ -205,7 +205,7 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                                 runCatching { memorySystem.dream() }.getOrNull()
                             }
                             note = if (result == null) {
-                                "整理失败"
+                                tr("整理失败")
                             } else {
                                 "已整理：${result.before} → ${result.after} 条"
                             }
@@ -309,7 +309,7 @@ fun MemoryViewerPage(onBack: () -> Unit) {
                                         withContext(Dispatchers.IO) {
                                             runCatching { memorySystem.deleteRaw(item.content) }
                                         }
-                                        note = "已删除一条原始记忆"
+                                        note = tr("已删除一条原始记忆")
                                         refresh++
                                     }
                                 },
@@ -334,7 +334,7 @@ private fun relativeInstant(raw: String): String {
 private fun relativeFromEpoch(ms: Long): String {
     val minutes = (System.currentTimeMillis() - ms) / 60_000
     return when {
-        minutes < 1 -> "刚刚"
+        minutes < 1 -> tr("刚刚")
         minutes < 60 -> "$minutes 分钟前"
         minutes < 60 * 24 -> "${minutes / 60} 小时前"
         minutes < 60 * 24 * 30 -> "${minutes / (60 * 24)} 天前"

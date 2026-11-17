@@ -551,7 +551,7 @@ fun ContextUsageBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (lastTurnTokens > 0) "上下文 · 上轮 $lastTurnTokens" else "上下文",
+                if (lastTurnTokens > 0) "上下文 · 上轮 $lastTurnTokens" else tr("上下文"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

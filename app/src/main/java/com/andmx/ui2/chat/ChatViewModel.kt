@@ -159,7 +159,7 @@ class ChatViewModel @Inject constructor(
                 list.take(30).map { c ->
                     ConversationPick(
                         id = c.id,
-                        title = c.title.ifBlank { "未命名会话" },
+                        title = c.title.ifBlank { tr("未命名会话") },
                         subtitle = c.project.takeIf { it.isNotBlank() }.orEmpty(),
                     )
                 }
@@ -334,7 +334,7 @@ class ChatViewModel @Inject constructor(
                                 (el as? kotlinx.serialization.json.JsonObject)
                                     ?.get("task")
                                     ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                            }.getOrNull().orEmpty().ifBlank { msg.toolName ?: "子代理" }
+                            }.getOrNull().orEmpty().ifBlank { msg.toolName ?: tr("子代理") }
                             subItems += SubAgentItem(
                                 id = "hist-sub-${msg.id}",
                                 task = task,
@@ -378,7 +378,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val project = projectManager.hostPath.value
                 ?: projectManager.guestMountPath
-            val id = repo.createConversation(project = project, title = "新任务")
+            val id = repo.createConversation(project = project, title = tr("新任务"))
             switchToConversation(id)
         }
     }
@@ -391,7 +391,7 @@ class ChatViewModel @Inject constructor(
         }
         val project = projectManager.hostPath.value
             ?: projectManager.guestMountPath
-        val id = repo.createConversation(project = project, title = "新任务")
+        val id = repo.createConversation(project = project, title = tr("新任务"))
         _currentConversationId.value = id
         return id
     }
@@ -402,7 +402,7 @@ class ChatViewModel @Inject constructor(
                 _customSlashSpecs.value = commands.map { c ->
                     SlashCommands.Spec(
                         name = "/" + c.name.removePrefix("/"),
-                        desc = c.description.ifBlank { "自定义命令" },
+                        desc = c.description.ifBlank { tr("自定义命令") },
                         keywords = listOf("custom", "command"),
                     )
                 }
@@ -552,7 +552,7 @@ class ChatViewModel @Inject constructor(
                 onDone(
                     com.andmx.workspace.GitBaseline.SwitchResult(
                         ok = false,
-                        message = "未选择工作区",
+                        message = tr("未选择工作区"),
                         issue = com.andmx.workspace.GitBaseline.SwitchIssue.UNKNOWN,
                     )
                 )
@@ -562,7 +562,7 @@ class ChatViewModel @Inject constructor(
                 .getOrElse {
                     com.andmx.workspace.GitBaseline.SwitchResult(
                         ok = false,
-                        message = it.message ?: "执行失败",
+                        message = it.message ?: tr("执行失败"),
                         issue = com.andmx.workspace.GitBaseline.SwitchIssue.UNKNOWN,
                     )
                 }
@@ -584,7 +584,7 @@ class ChatViewModel @Inject constructor(
                 onDone(
                     com.andmx.workspace.GitBaseline.SwitchResult(
                         ok = false,
-                        message = "未选择工作区",
+                        message = tr("未选择工作区"),
                         issue = com.andmx.workspace.GitBaseline.SwitchIssue.UNKNOWN,
                     )
                 )
@@ -594,7 +594,7 @@ class ChatViewModel @Inject constructor(
                 .getOrElse {
                     com.andmx.workspace.GitBaseline.SwitchResult(
                         ok = false,
-                        message = it.message ?: "执行失败",
+                        message = it.message ?: tr("执行失败"),
                         issue = com.andmx.workspace.GitBaseline.SwitchIssue.UNKNOWN,
                     )
                 }
@@ -645,11 +645,11 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val path = workspaceExecPath()
             if (path == null) {
-                onDone("未选择工作区")
+                onDone(tr("未选择工作区"))
                 return@launch
             }
             val diff = runCatching { gitBaseline.fileDiff(path, pathInRepo) }
-                .getOrElse { it.message ?: "读取差异失败" }
+                .getOrElse { it.message ?: tr("读取差异失败") }
             onDone(diff)
         }
     }
@@ -694,14 +694,14 @@ class ChatViewModel @Inject constructor(
                 onDone(
                     com.andmx.workspace.GitBaseline.PushResult(
                         ok = false,
-                        message = "未选择工作区",
+                        message = tr("未选择工作区"),
                     )
                 )
                 return@launch
             }
             val result = runCatching { gitBaseline.push(path) }
                 .getOrElse {
-                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: "推送失败")
+                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: tr("推送失败"))
                 }
             result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
             if (result.ok) refreshGitInfo()
@@ -713,12 +713,12 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val path = workspaceExecPath()
             if (path == null) {
-                onDone(com.andmx.workspace.GitBaseline.PushResult(false, "未选择工作区"))
+                onDone(com.andmx.workspace.GitBaseline.PushResult(false, tr("未选择工作区")))
                 return@launch
             }
             val result = runCatching { gitBaseline.fetch(path) }
                 .getOrElse {
-                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: "获取失败")
+                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: tr("获取失败"))
                 }
             result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
             if (result.ok) refreshGitInfo()
@@ -730,12 +730,12 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val path = workspaceExecPath()
             if (path == null) {
-                onDone(com.andmx.workspace.GitBaseline.PushResult(false, "未选择工作区"))
+                onDone(com.andmx.workspace.GitBaseline.PushResult(false, tr("未选择工作区")))
                 return@launch
             }
             val result = runCatching { gitBaseline.pull(path) }
                 .getOrElse {
-                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: "拉取失败")
+                    com.andmx.workspace.GitBaseline.PushResult(false, it.message ?: tr("拉取失败"))
                 }
             result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
             if (result.ok) refreshGitInfo()
@@ -751,12 +751,12 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val path = workspaceExecPath()
             if (path == null) {
-                onDone(com.andmx.workspace.GitBaseline.BaselineResult(false, "未选择工作区"))
+                onDone(com.andmx.workspace.GitBaseline.BaselineResult(false, tr("未选择工作区")))
                 return@launch
             }
             val result = runCatching { gitBaseline.setIdentity(path, name, email) }
                 .getOrElse {
-                    com.andmx.workspace.GitBaseline.BaselineResult(false, it.message ?: "保存身份失败")
+                    com.andmx.workspace.GitBaseline.BaselineResult(false, it.message ?: tr("保存身份失败"))
                 }
             result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
             if (result.ok) refreshGitInfo()
@@ -771,11 +771,11 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val path = workspaceExecPath()
             if (path == null) {
-                onDone(com.andmx.workspace.GitBaseline.CommitResult(false, "未选择工作区"))
+                onDone(com.andmx.workspace.GitBaseline.CommitResult(false, tr("未选择工作区")))
                 return@launch
             }
             val result = runCatching { gitBaseline.commitWorkspace(path, message) }
-                .getOrElse { com.andmx.workspace.GitBaseline.CommitResult(false, it.message ?: "提交失败") }
+                .getOrElse { com.andmx.workspace.GitBaseline.CommitResult(false, it.message ?: tr("提交失败")) }
             result.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
             if (result.ok) refreshGitInfo()
             onDone(result)
@@ -789,12 +789,12 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val path = workspaceExecPath()
             if (path == null) {
-                onDone(com.andmx.workspace.GitBaseline.CommitResult(false, "未选择工作区"), null)
+                onDone(com.andmx.workspace.GitBaseline.CommitResult(false, tr("未选择工作区")), null)
                 return@launch
             }
             val pair = runCatching { gitBaseline.commitAndPush(path, message) }
                 .getOrElse {
-                    com.andmx.workspace.GitBaseline.CommitResult(false, it.message ?: "提交失败") to null
+                    com.andmx.workspace.GitBaseline.CommitResult(false, it.message ?: tr("提交失败")) to null
                 }
             pair.first.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
             pair.second?.gitInfo?.let { _gitInfo.value = it.takeIf { g -> g.isRepo } }
@@ -1170,11 +1170,11 @@ class ChatViewModel @Inject constructor(
                     val arg = cmd.args.substringAfter(' ', "").trim()
                     when (sub) {
                         "connect" -> {
-                            if (arg.isBlank()) appendLocalAssistant("用法 `/mcp connect <server>`")
+                            if (arg.isBlank()) appendLocalAssistant(tr("用法 `/mcp connect <server>`"))
                             else appendLocalAssistant(controller.mcpConnect(arg))
                         }
                         "disconnect" -> {
-                            if (arg.isBlank()) appendLocalAssistant("用法 `/mcp disconnect <server>`")
+                            if (arg.isBlank()) appendLocalAssistant(tr("用法 `/mcp disconnect <server>`"))
                             else appendLocalAssistant(controller.mcpDisconnect(arg))
                         }
                         else -> {
@@ -1185,12 +1185,12 @@ class ChatViewModel @Inject constructor(
                             val connected = controller.mcpStatus.value
                             val body = buildString {
                                 if (configured.isEmpty() && connected.isEmpty()) {
-                                    appendLine("未配置 MCP 服务器（在设置 → MCP 中添加）。")
+                                    appendLine(tr("未配置 MCP 服务器（在设置 → MCP 中添加）。"))
                                 } else {
-                                    appendLine("MCP 服务器：")
+                                    appendLine(tr("MCP 服务器："))
                                     configured.forEach { cfg ->
                                         val live = connected.firstOrNull { it.name == cfg.name }
-                                        val state = if (live != null) "已连接 · ${live.tools.size} tools" else "未连接"
+                                        val state = if (live != null) "已连接 · ${live.tools.size} tools" else tr("未连接")
                                         appendLine("- ${cfg.name} (${cfg.transport}) · $state")
                                     }
                                     connected.filter { live -> configured.none { it.name == live.name } }
@@ -1221,8 +1221,8 @@ class ChatViewModel @Inject constructor(
                     "list" -> viewModelScope.launch {
                         val lines = controller.pluginStatusLines()
                         appendLocalAssistant(
-                            if (lines.isEmpty()) "没有已发现的插件。"
-                            else "插件：\n" + lines.joinToString("\n"),
+                            if (lines.isEmpty()) tr("没有已发现的插件。")
+                            else tr("插件：\n") + lines.joinToString("\n"),
                         )
                     }
                     else -> ChatActionBus.openPluginsSettings()
@@ -1239,7 +1239,7 @@ class ChatViewModel @Inject constructor(
                     if (cmd.args.isBlank()) {
                         appendLocalAssistant(
                             "当前界面语言：`${cur.locale}`（system=跟随系统）\n" +
-                                "可选：`system` / `zh-CN` / `en-US`，用法 `/locale <值>`",
+                                tr("可选：`system` / `zh-CN` / `en-US`，用法 `/locale <值>`"),
                         )
                         return@launch
                     }
@@ -1264,7 +1264,7 @@ class ChatViewModel @Inject constructor(
                     appendLocalAssistant(
                         "当前执行模式：`${cur.id}`（${cur.label}）\n可选：" +
                             ExecMode.entries.joinToString(" / ") { "`${it.id}`" } +
-                            "\n用法 `/mode <id>`",
+                            tr("\n用法 `/mode <id>`"),
                     )
                 } else {
                     val target = ExecMode.from(cmd.args).takeIf {
@@ -1292,9 +1292,9 @@ class ChatViewModel @Inject constructor(
                 if (cmd.name.isBlank()) {
                     val names = _skills.value.map { it.name }
                     appendLocalAssistant(
-                        if (names.isEmpty()) "没有已安装的技能（在设置 → 技能中安装）。"
+                        if (names.isEmpty()) tr("没有已安装的技能（在设置 → 技能中安装）。")
                         else "已安装技能（${names.size}）：\n" + names.joinToString("\n") { "- `$it`" } +
-                            "\n用法 `/skill <名称> [任务]`",
+                            tr("\n用法 `/skill <名称> [任务]`"),
                     )
                 } else {
                     val skill = _skills.value.firstOrNull { it.name.equals(cmd.name, true) }
@@ -1318,7 +1318,7 @@ class ChatViewModel @Inject constructor(
                         com.andmx.agent.GoalAction.SHOW -> {
                             val g = controller.goal.value
                             appendLocalAssistant(
-                                if (!g.hasGoal) "当前没有目标。用法：/goal <目标文本>"
+                                if (!g.hasGoal) tr("当前没有目标。用法：/goal <目标文本>")
                                 else "目标：${g.text}\n状态：${g.status.label}\n预算：${g.tokensUsed}/${g.tokenBudget}",
                             )
                         }
@@ -1328,12 +1328,12 @@ class ChatViewModel @Inject constructor(
                         }
                         com.andmx.agent.GoalAction.CLEAR -> {
                             controller.setGoalText(id, "")
-                            appendLocalAssistant("已清除目标")
+                            appendLocalAssistant(tr("已清除目标"))
                         }
                         com.andmx.agent.GoalAction.PAUSE -> {
                             val g = controller.goal.value
                             if (!g.hasGoal) {
-                                appendLocalAssistant("当前没有目标可暂停。")
+                                appendLocalAssistant(tr("当前没有目标可暂停。"))
                             } else {
                                 controller.setGoalStatus(id, com.andmx.agent.GoalStatus.PAUSED, "由 /goal 暂停")
                                 appendLocalAssistant("已暂停目标：${g.text}")
@@ -1342,7 +1342,7 @@ class ChatViewModel @Inject constructor(
                         com.andmx.agent.GoalAction.RESUME -> {
                             val g = controller.goal.value
                             if (!g.hasGoal) {
-                                appendLocalAssistant("当前没有目标可恢复。")
+                                appendLocalAssistant(tr("当前没有目标可恢复。"))
                             } else {
                                 controller.setGoalStatus(id, com.andmx.agent.GoalStatus.ACTIVE, "由 /goal 恢复")
                                 appendLocalAssistant("已恢复目标：${g.text}")
@@ -1353,7 +1353,7 @@ class ChatViewModel @Inject constructor(
                 return true
             }
             else -> {
-                appendLocalAssistant("未知命令。输入 /help 查看可用命令。")
+                appendLocalAssistant(tr("未知命令。输入 /help 查看可用命令。"))
                 return true
             }
         }
@@ -1382,13 +1382,13 @@ class ChatViewModel @Inject constructor(
                         "- `${r.runId}` · ${r.status} · phase=$phase · ${r.task.take(60)}"
                     }
                     appendLocalAssistant(
-                        if (lines.isEmpty()) "没有专家工作流运行。" else lines.joinToString("\n"),
+                        if (lines.isEmpty()) tr("没有专家工作流运行。") else lines.joinToString("\n"),
                     )
                 }
                 "stop", "cancel" -> {
                     val runId = parts.getOrNull(1)
                     if (runId == null) {
-                        appendLocalAssistant("用法 `/expert stop <runId>`")
+                        appendLocalAssistant(tr("用法 `/expert stop <runId>`"))
                     } else {
                         val (ok, err) = svc.cancel(runId)
                         appendLocalAssistant(if (ok) "已请求取消运行 `$runId`。" else "无法取消 `$runId`：${err ?: "未知原因"}")
@@ -1397,7 +1397,7 @@ class ChatViewModel @Inject constructor(
                 "resume" -> {
                     val runId = parts.getOrNull(1)
                     if (runId == null) {
-                        appendLocalAssistant("用法 `/expert resume <runId>`")
+                        appendLocalAssistant(tr("用法 `/expert resume <runId>`"))
                     } else {
                         val (snap, err) = svc.resume(runId)
                         appendLocalAssistant(
@@ -1422,7 +1422,7 @@ class ChatViewModel @Inject constructor(
                     )
                     appendLocalAssistant(
                         "专家工作流已启动：runId=`${snap.runId}`，后台运行中。\n" +
-                            "用 `/expert status` 或 /workflows 查看进度。",
+                            tr("用 `/expert status` 或 /workflows 查看进度。"),
                     )
                 }
             }
@@ -1452,11 +1452,11 @@ class ChatViewModel @Inject constructor(
                 type = "text/markdown"
                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 putExtra(android.content.Intent.EXTRA_TEXT, md.take(4000))
-                putExtra(android.content.Intent.EXTRA_SUBJECT, conv?.title ?: "AndMX 对话")
+                putExtra(android.content.Intent.EXTRA_SUBJECT, conv?.title ?: tr("AndMX 对话"))
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 clipData = android.content.ClipData.newUri(context.contentResolver, "conversation", uri)
             }
-            startChooser(intent, "分享对话")
+            startChooser(intent, tr("分享对话"))
         }
     }
 
@@ -1466,7 +1466,7 @@ class ChatViewModel @Inject constructor(
             putExtra(android.content.Intent.EXTRA_TEXT, text)
             putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
         }
-        startChooser(intent, "分享")
+        startChooser(intent, tr("分享"))
     }
 
     private fun startChooser(intent: android.content.Intent, title: String) {
@@ -1496,12 +1496,12 @@ class ChatViewModel @Inject constructor(
 
 
     fun copyMessage(content: String) {
-        copyTextToClipboard(content, toast = "已复制")
+        copyTextToClipboard(content, toast = tr("已复制"))
     }
 
     fun beginEditUserMessage(messageId: Long): String? {
         if (_isLoading.value) {
-            _error.value = "请等待当前回复完成后再编辑"
+            _error.value = tr("请等待当前回复完成后再编辑")
             return null
         }
         if (pendingEditMessageId == messageId) {
@@ -1523,10 +1523,10 @@ class ChatViewModel @Inject constructor(
     fun copyTurnLog(messageId: Long) {
         val log = buildTurnLog(messageId)
         if (log.isBlank()) {
-            android.widget.Toast.makeText(context, "没有可复制的内容", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, tr("没有可复制的内容"), android.widget.Toast.LENGTH_SHORT).show()
             return
         }
-        copyTextToClipboard(log, toast = "已复制完整日志")
+        copyTextToClipboard(log, toast = tr("已复制完整日志"))
     }
 
     private fun copyTextToClipboard(text: String, toast: String) {
@@ -1546,24 +1546,24 @@ class ChatViewModel @Inject constructor(
 
     fun branchFromMessage(messageId: Long) {
         if (_isLoading.value) {
-            _error.value = "任务结束后可分叉"
+            _error.value = tr("任务结束后可分叉")
             return
         }
         viewModelScope.launch {
             val parentId = _currentConversationId.value
             if (parentId <= 0L) {
-                _error.value = "当前没有可分叉的对话"
+                _error.value = tr("当前没有可分叉的对话")
                 return@launch
             }
             val live = _messages.value
             val liveIdx = live.indexOfFirst { it.id == messageId }
             if (liveIdx < 0) {
-                _error.value = "原对话已不包含分叉那条消息"
+                _error.value = tr("原对话已不包含分叉那条消息")
                 return@launch
             }
             val history = runCatching { repo.messages(parentId) }.getOrDefault(emptyList())
             if (history.isEmpty() && liveIdx < 0) {
-                _error.value = "派生自旧对话（已丢失追溯信息）"
+                _error.value = tr("派生自旧对话（已丢失追溯信息）")
                 return@launch
             }
             val slice: List<com.andmx.data.MessageEntity> = when {
@@ -1581,7 +1581,7 @@ class ChatViewModel @Inject constructor(
                 else -> emptyList()
             }
             if (slice.isEmpty()) {
-                _error.value = "找不到分叉点 checkpoint"
+                _error.value = tr("找不到分叉点 checkpoint")
                 return@launch
             }
             val parent = runCatching { repo.conversation(parentId) }.getOrNull()
@@ -1589,7 +1589,7 @@ class ChatViewModel @Inject constructor(
                 ?: projectManager.hostPath.value
                 ?: projectManager.guestMountPath
             val titleSeed = slice.firstOrNull { it.role == "user" }?.content?.take(24).orEmpty()
-            val title = "(分支) " + titleSeed.ifBlank { "会话" }
+            val title = tr("(分支) ") + titleSeed.ifBlank { tr("会话") }
             val childId = repo.createConversation(project = project, title = title)
             for (m in slice) {
                 repo.addMessage(
@@ -1606,7 +1606,7 @@ class ChatViewModel @Inject constructor(
             }
             runCatching { repo.recordSpawnEdge(parentId, childId, status = "branched") }
             switchToConversation(childId)
-            android.widget.Toast.makeText(context, "已分叉会话", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, tr("已分叉会话"), android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1614,7 +1614,7 @@ class ChatViewModel @Inject constructor(
         if (_isLoading.value) return
         val hasUser = _messages.value.any { it.role == "user" }
         if (!hasUser) {
-            _error.value = "没有可重新生成的用户消息"
+            _error.value = tr("没有可重新生成的用户消息")
             return
         }
         val msgs = _messages.value.toMutableList()
@@ -1816,12 +1816,12 @@ class ChatViewModel @Inject constructor(
         else controller.resolveApproval(false)
         _isLoading.value = false
         val running = _toolCalls.value.map {
-            if (it.isRunning) it.copy(isRunning = false, isError = true, output = it.output ?: "已停止") else it
+            if (it.isRunning) it.copy(isRunning = false, isError = true, output = it.output ?: tr("已停止")) else it
         }
         _toolCalls.value = running
         _subAgentItems.value = _subAgentItems.value.map {
             if (it.state == "RUNNING" || it.state == "WAITING") {
-                it.copy(state = "CLOSED", result = it.result.ifBlank { "已停止" })
+                it.copy(state = "CLOSED", result = it.result.ifBlank { tr("已停止") })
             } else it
         }
         val current = _messages.value.toMutableList()
@@ -1856,15 +1856,15 @@ class ChatViewModel @Inject constructor(
     /** ZCode `/compact`：对话里出分隔状态，不把结果伪装成一条助手回复。 */
     fun compressContext(instructions: String = "") {
         if (compactJob?.isActive == true) {
-            _compactNotice.value = CompactNotice(running = false, text = "已有压缩任务正在运行或排队。")
+            _compactNotice.value = CompactNotice(running = false, text = tr("已有压缩任务正在运行或排队。"))
             return
         }
         if (_isLoading.value || controller.isTurnRunning(_currentConversationId.value)) {
-            _compactNotice.value = CompactNotice(running = false, text = "运行中不能压缩上下文，请等待当前任务结束。")
+            _compactNotice.value = CompactNotice(running = false, text = tr("运行中不能压缩上下文，请等待当前任务结束。"))
             return
         }
         compactJob = viewModelScope.launch {
-            _compactNotice.value = CompactNotice(running = true, text = "正在压缩上下文")
+            _compactNotice.value = CompactNotice(running = true, text = tr("正在压缩上下文"))
             try {
                 val id = ensureConversationReady()
                 val raw = controller.compactConversation(id, instructions)
@@ -1873,10 +1873,10 @@ class ChatViewModel @Inject constructor(
                 appendCompactMarker(id, label)
                 refreshContextUsage()
             } catch (c: kotlinx.coroutines.CancellationException) {
-                _compactNotice.value = CompactNotice(running = false, text = "上下文压缩已中断")
+                _compactNotice.value = CompactNotice(running = false, text = tr("上下文压缩已中断"))
                 throw c
             } catch (_: Throwable) {
-                val label = "上下文压缩失败"
+                val label = tr("上下文压缩失败")
                 _compactNotice.value = CompactNotice(running = false, text = label)
                 val id = _currentConversationId.value
                 if (id > 0L) appendCompactMarker(id, label)
@@ -1887,10 +1887,10 @@ class ChatViewModel @Inject constructor(
     private fun compactOutcome(raw: String): String = when {
         raw.startsWith("已压缩") -> {
             val detail = raw.removePrefix("已压缩：").trim()
-            if (detail.isEmpty()) "上下文已压缩" else "上下文已压缩 · $detail"
+            if (detail.isEmpty()) tr("上下文已压缩") else "上下文已压缩 · $detail"
         }
-        raw == "上下文较短，无需压缩" -> "上下文已是最新，无需压缩"
-        else -> "上下文压缩失败"
+        raw == "上下文较短，无需压缩" -> tr("上下文已是最新，无需压缩")
+        else -> tr("上下文压缩失败")
     }
 
     private fun appendCompactMarker(conversationId: Long, label: String) {
@@ -1958,7 +1958,7 @@ class ChatViewModel @Inject constructor(
     fun startSideChat(excerpt: String, question: String) {
         viewModelScope.launch {
             val project = projectManager.hostPath.value ?: projectManager.guestMountPath
-            val id = repo.createConversation(project = project, title = "新任务")
+            val id = repo.createConversation(project = project, title = tr("新任务"))
             val body = buildString {
                 append("The user opened a side chat about this excerpt from the parent conversation:\n\n---\n")
                 append(excerpt.take(6_000))
@@ -1987,7 +1987,7 @@ class ChatViewModel @Inject constructor(
     fun openRewindPicker() {
         if (_isLoading.value) return
         if (rewindCheckpoints.value.isEmpty()) {
-            appendLocalAssistant("没有可回滚的检查点：先发送一条用户消息。")
+            appendLocalAssistant(tr("没有可回滚的检查点：先发送一条用户消息。"))
             return
         }
         _rewindPickerOpen.value = true
@@ -2167,7 +2167,7 @@ class ChatViewModel @Inject constructor(
             }
             sub == "resume" -> {
                 if (runId.isBlank()) {
-                    appendLocalAssistant("用法：/dwf resume <runId>")
+                    appendLocalAssistant(tr("用法：/dwf resume <runId>"))
                 } else {
                     resumeWorkflowRun(runId)
                     openWorkflowDetail(runId)
@@ -2175,7 +2175,7 @@ class ChatViewModel @Inject constructor(
             }
             sub == "holes" -> {
                 if (runId.isBlank()) {
-                    appendLocalAssistant("用法：/dwf holes <runId>")
+                    appendLocalAssistant(tr("用法：/dwf holes <runId>"))
                 } else {
                     viewModelScope.launch {
                         val snapshot = controller.workflowService.getRun(runId)
@@ -2185,13 +2185,13 @@ class ChatViewModel @Inject constructor(
                                 "工作流 $runId 当前没有等待补全的留白。"
                             } else {
                                 buildString {
-                                    append("工作流 ").append(runId).append(" 的待补全留白：\n")
+                                    append(tr("工作流 ")).append(runId).append(tr(" 的待补全留白：\n"))
                                     holes.forEach { hole ->
                                         append("- ").append(hole.siteId)
                                         if (hole.name.isNotBlank()) append(" · ").append(hole.name)
-                                        append("（第 ").append(hole.ordinal).append(" 个实例）\n")
+                                        append(tr("（第 ")).append(hole.ordinal).append(tr(" 个实例）\n"))
                                     }
-                                    append("用 FillWorkflowHole 提供补全后的脚本和 hole_id。")
+                                    append(tr("用 FillWorkflowHole 提供补全后的脚本和 hole_id。"))
                                 }
                             },
                         )
@@ -2223,7 +2223,7 @@ class ChatViewModel @Inject constructor(
             }
             val newId = runCatching { repo.forkConversation(id, until) }.getOrNull()
             if (newId == null) {
-                _error.value = "分叉失败"
+                _error.value = tr("分叉失败")
                 return@launch
             }
             runCatching { com.andmx.workspace.ChangeTracker.copy(id, newId) }
@@ -2288,7 +2288,7 @@ class ChatViewModel @Inject constructor(
     /** /resume [sessionId]：无参开抽屉挑选；带 id 直接恢复（上游 /resume 对齐）。 */
     fun resumeSession(sessionId: String = "") {
         if (sessionId.isBlank()) {
-            appendLocalAssistant("在左侧会话列表中选择要恢复的历史会话。")
+            appendLocalAssistant(tr("在左侧会话列表中选择要恢复的历史会话。"))
             ChatActionBus.openDrawer()
             return
         }
@@ -2303,7 +2303,7 @@ class ChatViewModel @Inject constructor(
             if (hit == null) {
                 appendLocalAssistant("找不到会话 `$sessionId`。")
             } else if (hit.id == _currentConversationId.value) {
-                appendLocalAssistant("已在该会话中。")
+                appendLocalAssistant(tr("已在该会话中。"))
             } else {
                 switchToConversation(hit.id)
             }
@@ -2320,7 +2320,7 @@ class ChatViewModel @Inject constructor(
         if (target == "status") {
             val latest = checkpoints.lastOrNull()
             appendLocalAssistant(
-                if (latest == null) "没有可回滚的检查点：先发送一条用户消息。"
+                if (latest == null) tr("没有可回滚的检查点：先发送一条用户消息。")
                 else "最近检查点：#${latest.id} · ${latest.content.take(60)}",
             )
             return
@@ -2355,7 +2355,7 @@ class ChatViewModel @Inject constructor(
             val latest = repo.conversationsByArchived(false)
                 .firstOrNull { it.id != _currentConversationId.value }
             if (latest == null) {
-                appendLocalAssistant("没有可恢复的历史会话。")
+                appendLocalAssistant(tr("没有可恢复的历史会话。"))
             } else {
                 switchToConversation(latest.id)
             }
@@ -2387,7 +2387,7 @@ class ChatViewModel @Inject constructor(
             val curModel = settingsStore.settings.firstOrNull()?.model.orEmpty()
             val body = buildString {
                 appendLine("当前：`${curProvider?.id ?: "-"}/${curModel.ifBlank { "-" }}`")
-                appendLine("可选模型：")
+                appendLine(tr("可选模型："))
                 providers.forEach { p ->
                     p.models.keys.forEach { m ->
                         val mark = if (p.id == curProvider?.id && m == curModel) "（current）" else ""
@@ -2603,14 +2603,14 @@ class ChatViewModel @Inject constructor(
             else -> emptyList()
         }
         if (cfg == null || cfg.style == com.andmx.llm.provider.ReasoningStyle.NONE && levels.isEmpty()) {
-            appendLocalAssistant("当前模型不支持推理档位。")
+            appendLocalAssistant(tr("当前模型不支持推理档位。"))
             return
         }
         val arg = args.trim()
         if (arg.isEmpty() || arg.equals("list", true)) {
             val cur = settings.reasoningEffort.ifBlank { "off" }
             val body = buildString {
-                appendLine("推理强度：")
+                appendLine(tr("推理强度："))
                 (listOf("off") + levels).distinct().forEach {
                     appendLine(if (it == cur) "- $it  [current]" else "- $it")
                 }
@@ -2738,7 +2738,7 @@ class ChatViewModel @Inject constructor(
         val id = "msg:$messageId"
         val result = MessageSelections.validate(_contextChips.value, content, id)
         if (result is MessageSelections.AddResult.Rejected) return result.reason
-        val typeLabel = if (role == "user") "用户消息" else "助手消息"
+        val typeLabel = if (role == "user") tr("用户消息") else tr("助手消息")
         addContextChip(
             ContextChip(
                 id = id,

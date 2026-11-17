@@ -106,24 +106,24 @@ fun FileBrowser(
                     }
                 },
                 navigationIcon = if (!atRoot) {
-                    { IconButton(onClick = onUp) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "上一级") } }
+                    { IconButton(onClick = onUp) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("上一级")) } }
                 } else {{}},
                 actions = {
                     IconButton(onClick = onToggleChanged) {
                         Icon(
                             Icons.Outlined.Difference,
-                            "仅显示变更文件",
+                            tr("仅显示变更文件"),
                             tint = if (changedOnly) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, "刷新") }
+                    IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, tr("刷新")) }
                 }
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { newFileDialog = true }) {
-                Icon(Icons.Outlined.NoteAdd, "新建文件")
+                Icon(Icons.Outlined.NoteAdd, tr("新建文件"))
             }
         }
     ) { padding ->
@@ -139,9 +139,9 @@ fun FileBrowser(
             if (files.isEmpty()) {
                 Text(
                     when {
-                        changedOnly -> "没有变更文件。"
-                        query.isNotBlank() -> "没有匹配的文件。"
-                        else -> "当前目录为空。"
+                        changedOnly -> tr("没有变更文件。")
+                        query.isNotBlank() -> tr("没有匹配的文件。")
+                        else -> tr("当前目录为空。")
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

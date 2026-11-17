@@ -78,7 +78,7 @@ fun IndexPage(onBack: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("索引库", onBack) },
+        topBar = { backAppBar(tr("索引库"), onBack) },
     ) { padding ->
         Column(
             Modifier
@@ -87,9 +87,9 @@ fun IndexPage(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp),
         ) {
-            SettingsGroup("代码库") {
+            SettingsGroup(tr("代码库")) {
                 SwitchRow(
-                    title = "索引新文件夹",
+                    title = tr("索引新文件夹"),
                     description = "自动索引文件数少于 ${s.indexFileLimit} 的新文件夹。",
                     checked = indexFoldersChecked,
                     onCheckedChange = {
@@ -103,18 +103,18 @@ fun IndexPage(onBack: () -> Unit) {
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "索引存储库以实现即时搜索（测试版）",
-                    description = "自动对仓库进行索引，加快文件联想与文件搜索。所有数据均存储在本地。",
+                    title = tr("索引存储库以实现即时搜索（测试版）"),
+                    description = tr("自动对仓库进行索引，加快文件联想与文件搜索。所有数据均存储在本地。"),
                     checked = s.instantGrep,
                     onCheckedChange = { save(s.copy(instantGrep = it)) },
                 )
             }
 
-            SettingsGroup("当前项目") {
+            SettingsGroup(tr("当前项目")) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            projectManager.projectName.ifBlank { "未选择项目" },
+                            projectManager.projectName.ifBlank { tr("未选择项目") },
                             style = MaterialTheme.typography.titleMedium,
                         )
                         if (hostPath != null) {
@@ -132,12 +132,12 @@ fun IndexPage(onBack: () -> Unit) {
                         }
 
                         val phaseLabel = when (status.phase) {
-                            WorkspaceIndexPhase.IDLE -> "未索引"
-                            WorkspaceIndexPhase.COUNTING -> "统计中"
-                            WorkspaceIndexPhase.BUILDING -> "索引中"
-                            WorkspaceIndexPhase.READY -> "已就绪"
-                            WorkspaceIndexPhase.SKIPPED -> "已跳过"
-                            WorkspaceIndexPhase.ERROR -> "失败"
+                            WorkspaceIndexPhase.IDLE -> tr("未索引")
+                            WorkspaceIndexPhase.COUNTING -> tr("统计中")
+                            WorkspaceIndexPhase.BUILDING -> tr("索引中")
+                            WorkspaceIndexPhase.READY -> tr("已就绪")
+                            WorkspaceIndexPhase.SKIPPED -> tr("已跳过")
+                            WorkspaceIndexPhase.ERROR -> tr("失败")
                         }
                         Text(tr("状态：$phaseLabel"),
                             style = MaterialTheme.typography.labelLarge,

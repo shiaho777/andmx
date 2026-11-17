@@ -52,7 +52,7 @@ fun GeneralPage(onBack: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("常规", onBack) },
+        topBar = { backAppBar(tr("常规"), onBack) },
     ) { padding ->
         Column(
             Modifier
@@ -61,10 +61,10 @@ fun GeneralPage(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 40.dp),
         ) {
-            SettingsGroup("界面设置") {
+            SettingsGroup(tr("界面设置")) {
                 StackedSettingRow(
-                    title = "界面字号",
-                    description = "调整应用界面的文字大小，图标和布局尺寸不受影响。",
+                    title = tr("界面字号"),
+                    description = tr("调整应用界面的文字大小，图标和布局尺寸不受影响。"),
                 ) {
                     androidx.compose.material3.Slider(
                         value = s.uiFontSizePx.toFloat(),
@@ -80,10 +80,10 @@ fun GeneralPage(onBack: () -> Unit) {
                     )
                 }
             }
-            SettingsGroup("外观") {
+            SettingsGroup(tr("外观")) {
                 StackedSettingRow(
-                    title = "界面主题",
-                    description = "选择浅色、深色或跟随系统主题。",
+                    title = tr("界面主题"),
+                    description = tr("选择浅色、深色或跟随系统主题。"),
                 ) {
                     ThemeModeSelector(
                         selected = s.themeMode,
@@ -92,20 +92,20 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
                 HorizontalDivider()
                 SwitchRow(
-                    title = "动态取色",
-                    description = "跟随系统壁纸生成 Material You 配色（Android 12 及以上生效）。",
+                    title = tr("动态取色"),
+                    description = tr("跟随系统壁纸生成 Material You 配色（Android 12 及以上生效）。"),
                     checked = s.dynamicColor,
                     onCheckedChange = { save(s.copy(dynamicColor = it)) },
                 )
                 HorizontalDivider()
                 StackedSettingRow(
-                    title = "界面语言",
-                    description = "选择应用 UI 的显示语言。",
+                    title = tr("界面语言"),
+                    description = tr("选择应用 UI 的显示语言。"),
                 ) {
                     SegmentedRow(
                         options = listOf(
-                            "system" to "系统默认",
-                            "zh-CN" to "中文简体",
+                            "system" to tr("系统默认"),
+                            "zh-CN" to tr("中文简体"),
                             "en-US" to "English",
                         ),
                         selected = localeValue,
@@ -115,57 +115,57 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
-            SettingsGroup("消息流") {
+            SettingsGroup(tr("消息流")) {
                 SwitchRow(
-                    title = "显示思考过程",
-                    description = "在消息流中展示完整的模型思考内容；关闭时每轮仍展示第一次思考。",
+                    title = tr("显示思考过程"),
+                    description = tr("在消息流中展示完整的模型思考内容；关闭时每轮仍展示第一次思考。"),
                     checked = s.showReasoning,
                     onCheckedChange = { save(s.copy(showReasoning = it)) },
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "显示待办",
-                    description = "在消息流中展示 Todo 工具卡片。",
+                    title = tr("显示待办"),
+                    description = tr("在消息流中展示 Todo 工具卡片。"),
                     checked = s.showTodos,
                     onCheckedChange = { save(s.copy(showTodos = it)) },
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "分组探索工具",
-                    description = "将连续的读取和搜索工具聚合为 Explore 分组。",
+                    title = tr("分组探索工具"),
+                    description = tr("将连续的读取和搜索工具聚合为 Explore 分组。"),
                     checked = s.toolGroupingExplore,
                     onCheckedChange = { save(s.copy(toolGroupingExplore = it)) },
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "分组终端命令",
-                    description = "将连续的非只读 Shell 命令聚合为 Terminal 分组。",
+                    title = tr("分组终端命令"),
+                    description = tr("将连续的非只读 Shell 命令聚合为 Terminal 分组。"),
                     checked = s.toolGroupingTerminal,
                     onCheckedChange = { save(s.copy(toolGroupingTerminal = it)) },
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "分组文件更改",
-                    description = "将连续的 Write、Edit 和 ApplyPatch 调用聚合为 Changes 分组。",
+                    title = tr("分组文件更改"),
+                    description = tr("将连续的 Write、Edit 和 ApplyPatch 调用聚合为 Changes 分组。"),
                     checked = s.toolGroupingChanges,
                     onCheckedChange = { save(s.copy(toolGroupingChanges = it)) },
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "提问自动继续",
-                    description = "开启后，Agent 提问 5 分钟未回答会自动继续；关闭后，当前和后续提问会一直等待你的回答。",
+                    title = tr("提问自动继续"),
+                    description = tr("开启后，Agent 提问 5 分钟未回答会自动继续；关闭后，当前和后续提问会一直等待你的回答。"),
                     checked = s.askAutoResolve,
                     onCheckedChange = { save(s.copy(askAutoResolve = it)) },
                 )
                 HorizontalDivider()
                 StackedSettingRow(
-                    title = "交互行为",
-                    description = "在 ZCode 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。",
+                    title = tr("交互行为"),
+                    description = tr("在 ZCode 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。"),
                 ) {
                     SegmentedRow(
                         options = listOf(
-                            "queue" to "队列",
-                            "guide" to "引导",
+                            "queue" to tr("队列"),
+                            "guide" to tr("引导"),
                         ),
                         selected = s.interactionBehavior,
                         onSelect = { save(s.copy(interactionBehavior = it)) },
@@ -174,14 +174,14 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
                 HorizontalDivider()
                 StackedSettingRow(
-                    title = "状态面板展开策略",
-                    description = "对话底部状态胶囊与面板的展开方式。",
+                    title = tr("状态面板展开策略"),
+                    description = tr("对话底部状态胶囊与面板的展开方式。"),
                 ) {
                     SegmentedRow(
                         options = listOf(
-                            "auto" to "自动展开",
-                            "expanded" to "始终展开",
-                            "collapsed" to "始终收起",
+                            "auto" to tr("自动展开"),
+                            "expanded" to tr("始终展开"),
+                            "collapsed" to tr("始终收起"),
                         ),
                         selected = s.summaryPanelDisplayMode,
                         onSelect = { save(s.copy(summaryPanelDisplayMode = it)) },
@@ -190,36 +190,36 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
-            SettingsGroup("动态工作流") {
+            SettingsGroup(tr("动态工作流")) {
                 SwitchRow(
-                    title = "启用动态工作流工具",
-                    description = "开放 CreateWorkflow、AmendWorkflow、EvalWorkflowSnippet 等 11 个工作流工具。实验能力：脚本在设备内的 WebView 沙箱执行；切换后空闲会话会重建工具面。",
+                    title = tr("启用动态工作流工具"),
+                    description = tr("开放 CreateWorkflow、AmendWorkflow、EvalWorkflowSnippet 等 11 个工作流工具。实验能力：脚本在设备内的 WebView 沙箱执行；切换后空闲会话会重建工具面。"),
                     checked = s.dynamicWorkflowToolsEnabled,
                     onCheckedChange = { save(s.copy(dynamicWorkflowToolsEnabled = it)) },
                 )
             }
 
-            SettingsGroup("通知") {
+            SettingsGroup(tr("通知")) {
                 SwitchRow(
-                    title = "任务通知",
-                    description = "任务完成、失败或需要确认时发送系统通知。",
+                    title = tr("任务通知"),
+                    description = tr("任务完成、失败或需要确认时发送系统通知。"),
                     checked = s.notification,
                     onCheckedChange = { save(s.copy(notification = it)) },
                 )
                 HorizontalDivider()
                 SwitchRow(
-                    title = "通知声音",
-                    description = "通知开启后，可单独关闭任务通知提示音。",
+                    title = tr("通知声音"),
+                    description = tr("通知开启后，可单独关闭任务通知提示音。"),
                     checked = s.notificationSound,
                     onCheckedChange = { save(s.copy(notificationSound = it)) },
                     enabled = s.notification,
                 )
             }
 
-            SettingsGroup("终端") {
+            SettingsGroup(tr("终端")) {
                 StackedSettingRow(
-                    title = "终端字体",
-                    description = "留空时自动探测系统终端配置；填写后作为 ZCode 终端的字体覆盖。",
+                    title = tr("终端字体"),
+                    description = tr("留空时自动探测系统终端配置；填写后作为 ZCode 终端的字体覆盖。"),
                 ) {
                     OutlinedTextField(
                         value = s.terminalFontFamily,
@@ -231,24 +231,24 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
-            SettingsGroup("任务管理") {
+            SettingsGroup(tr("任务管理")) {
                 SwitchRow(
-                    title = "自动归档旧任务",
-                    description = "定时扫描最近打开过的工作区，将已完成、无未读、未置顶且超过保留期的任务自动归档。",
+                    title = tr("自动归档旧任务"),
+                    description = tr("定时扫描最近打开过的工作区，将已完成、无未读、未置顶且超过保留期的任务自动归档。"),
                     checked = s.taskAutoArchive,
                     onCheckedChange = { save(s.copy(taskAutoArchive = it)) },
                 )
                 HorizontalDivider()
                 StackedSettingRow(
-                    title = "归档保留时长",
-                    description = "任务最后更新时间早于该时长后，才会进入自动归档候选。",
+                    title = tr("归档保留时长"),
+                    description = tr("任务最后更新时间早于该时长后，才会进入自动归档候选。"),
                 ) {
                     SegmentedRow(
                         options = listOf(
-                            "3" to "3 天后归档",
-                            "7" to "7 天后归档",
-                            "14" to "14 天后归档",
-                            "30" to "30 天后归档",
+                            "3" to tr("3 天后归档"),
+                            "7" to tr("7 天后归档"),
+                            "14" to tr("14 天后归档"),
+                            "30" to tr("30 天后归档"),
                         ),
                         selected = s.taskAutoArchiveDays.toString(),
                         enabled = s.taskAutoArchive,
@@ -258,8 +258,8 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
                 HorizontalDivider()
                 StackedSettingRow(
-                    title = "闲时窗口",
-                    description = "OffPeak 任务排入每日该时刻启动的闲时窗口（本地时间）。",
+                    title = tr("闲时窗口"),
+                    description = tr("OffPeak 任务排入每日该时刻启动的闲时窗口（本地时间）。"),
                 ) {
                     SegmentedRow(
                         options = listOf(
@@ -276,7 +276,7 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
-            SettingsGroup("输出风格") {
+            SettingsGroup(tr("输出风格")) {
                 Text(tr("写进动态系统提示。名称为空时用 custom。正文为空则不注入。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -299,7 +299,7 @@ fun GeneralPage(onBack: () -> Unit) {
                 )
             }
 
-            SettingsGroup("自定义指令") {
+            SettingsGroup(tr("自定义指令")) {
                 Text(tr("追加到系统提示的额外指令，会在所有新任务中生效。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -337,7 +337,7 @@ private fun ApprovalRulesSection() {
     val current = rules[projectKey].orEmpty()
     if (current.isEmpty()) return
 
-    SettingsGroup("项目权限规则") {
+    SettingsGroup(tr("项目权限规则")) {
         Text(tr("本项目内的持久规则：始终允许 / 每次询问 / 始终拒绝。移除后对应操作回到按模式判定。"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -345,9 +345,9 @@ private fun ApprovalRulesSection() {
         )
         val grouped = current.groupBy { it.behavior }
         listOf(
-            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW to "始终允许",
-            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ASK to "每次询问",
-            com.andmx.agent.ApprovalRuleStore.RuleBehavior.DENY to "始终拒绝",
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW to tr("始终允许"),
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ASK to tr("每次询问"),
+            com.andmx.agent.ApprovalRuleStore.RuleBehavior.DENY to tr("始终拒绝"),
         ).forEach { (behavior, label) ->
             grouped[behavior].orEmpty().sortedBy { it.display }.forEach { rule ->
                 StackedSettingRow(

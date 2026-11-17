@@ -7,6 +7,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.sign
+import com.andmx.ui2.settings.tr
 
 /**
  * Chart logic aligned with ZCode desktop's usage stats renderer
@@ -392,7 +393,7 @@ object UsageChartLogic {
         if (n < 0) return "0"
         val abs = n.toDouble()
         return when {
-            abs >= 1e8 -> trim(n / 1e8) + "亿"
+            abs >= 1e8 -> trim(n / 1e8) + tr("亿")
             abs >= 1e3 -> trim(n / 1e3) + "k"
             else -> n.toString()
         }

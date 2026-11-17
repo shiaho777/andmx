@@ -2,6 +2,7 @@ package com.andmx.ui2.drawer
 
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
+import com.andmx.ui2.settings.tr
 
 fun activityTimestamp(createdAt: Long, updatedAt: Long, preferCreated: Boolean): Long {
     val primary = if (preferCreated) createdAt else updatedAt
@@ -52,12 +53,12 @@ fun relativeTaskTime(ts: Long): String {
 }
 
 enum class TimelineBucket(private val zh: String) {
-    TODAY("今天"),
-    YESTERDAY("昨天"),
-    THIS_WEEK("本周"),
-    LAST_WEEK("上周"),
-    THIS_MONTH("本月"),
-    OLDER("更早"),
+    TODAY(tr("今天")),
+    YESTERDAY(tr("昨天")),
+    THIS_WEEK(tr("本周")),
+    LAST_WEEK(tr("上周")),
+    THIS_MONTH(tr("本月")),
+    OLDER(tr("更早")),
     ;
     val label: String get() = com.andmx.ui2.settings.tr(zh)
 }

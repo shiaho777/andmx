@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 internal fun turnLog(
     messageId: Long,
     messages: List<ChatMessage>,
@@ -42,9 +44,9 @@ internal fun turnLog(
 
     inRangeMessages.forEach { m ->
         val title = when {
-            m.role == "user" -> "用户"
-            m.isProcess -> "过程"
-            else -> "助手"
+            m.role == "user" -> tr("用户")
+            m.isProcess -> tr("过程")
+            else -> tr("助手")
         }
         add(
             m.sortKey,

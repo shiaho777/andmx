@@ -1,12 +1,14 @@
 package com.andmx.ui2.chat
 
+import com.andmx.ui2.settings.tr
+
 enum class AssistantFileKind(val label: String) {
-    PDF("PDF 文档"),
-    MARKDOWN("Markdown 文档"),
-    OFFICE("Office 文档"),
-    VIDEO("视频"),
-    AUDIO("音频"),
-    WEB("网页"),
+    PDF(tr("PDF 文档")),
+    MARKDOWN(tr("Markdown 文档")),
+    OFFICE(tr("Office 文档")),
+    VIDEO(tr("视频")),
+    AUDIO(tr("音频")),
+    WEB(tr("网页")),
 }
 
 data class AssistantFileCard(

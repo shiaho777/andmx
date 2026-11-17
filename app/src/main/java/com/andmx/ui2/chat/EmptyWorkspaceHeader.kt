@@ -75,7 +75,7 @@ fun EmptyWorkspaceHeader(
         horizontalArrangement = Arrangement.Start,
     ) {
         WorkspacePill(
-            label = if (hasWorkspace) projectName else "选择项目",
+            label = if (hasWorkspace) projectName else tr("选择项目"),
             path = hostPath,
             candidates = candidates,
             onSelectWorkspace = onSelectWorkspace,
@@ -98,9 +98,9 @@ fun EmptyWorkspaceHeader(
         if (showBranch && (hasChanges || ahead > 0)) {
             PillButton(
                 icon = Icons.Outlined.CloudUpload,
-                text = "提交",
+                text = tr("提交"),
                 onClick = onGitActions,
-                contentDescription = "提交或推送",
+                contentDescription = tr("提交或推送"),
             )
         }
     }
@@ -127,7 +127,7 @@ private fun WorkspacePill(
                 query = ""
                 expanded = true
             },
-            contentDescription = "选择项目",
+            contentDescription = tr("选择项目"),
         )
         DropdownMenu(
             expanded = expanded,
@@ -246,7 +246,7 @@ private fun BranchPill(
         icon = Icons.Outlined.AccountTree,
         text = branch,
         onClick = onClick,
-        contentDescription = "切换 Git 分支",
+        contentDescription = tr("切换 Git 分支"),
         trailing = when {
             dirty && dirtyFileCount > 0 -> "·$dirtyFileCount"
             dirty -> "·"

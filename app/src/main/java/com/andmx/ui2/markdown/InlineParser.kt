@@ -8,6 +8,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import com.andmx.ui2.settings.tr
 
 object InlineParser {
     const val UrlAnnotationTag = "url"
@@ -84,7 +85,7 @@ object InlineParser {
                     if (mid != -1 && end != -1) {
                         val alt = text.substring(i + 2, mid)
                         if (alt.isBlank()) {
-                            out.append("图片")
+                            out.append(tr("图片"))
                             repeat(2) { map.add(mid) }
                         } else {
                             emit(i + 2, mid)
@@ -271,7 +272,7 @@ object InlineParser {
                         val mid = text.indexOf("](", i + 2)
                         val end = if (mid != -1) matchingParen(text, mid + 2) else -1
                         if (mid != -1 && end != -1) {
-                            val alt = text.substring(i + 2, mid).ifBlank { "图片" }
+                            val alt = text.substring(i + 2, mid).ifBlank { tr("图片") }
                             val url = text.substring(mid + 2, end)
                             pushStringAnnotation(UrlAnnotationTag, url)
                             pushStyle(

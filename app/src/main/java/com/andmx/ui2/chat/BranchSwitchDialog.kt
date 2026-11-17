@@ -102,7 +102,7 @@ fun BranchSwitchDialog(
     fun attemptSwitch(name: String, create: Boolean) {
         val target = name.trim()
         if (target.isEmpty()) {
-            message = "分支名无效，请换一个名称。"
+            message = tr("分支名无效，请换一个名称。")
             return
         }
         busy = true
@@ -165,7 +165,7 @@ fun BranchSwitchDialog(
                 onGenerateCommitMessage(pendingName) { result ->
                     busy = false
                     result.onSuccess { commitMessage = it }
-                        .onFailure { message = it.message ?: "生成提交消息失败，请重试或手动填写。" }
+                        .onFailure { message = it.message ?: tr("生成提交消息失败，请重试或手动填写。") }
                 }
             },
             onConfirm = {
@@ -184,7 +184,7 @@ fun BranchSwitchDialog(
                             doSwitch(it)
                         }.onFailure {
                             busy = false
-                            message = it.message ?: "生成提交消息失败，请重试或手动填写。"
+                            message = it.message ?: tr("生成提交消息失败，请重试或手动填写。")
                         }
                     }
                 }
@@ -298,7 +298,7 @@ private fun ListBranchesDialog(
                                         if (info.isCurrent) {
                                             Icon(
                                                 Icons.Outlined.Check,
-                                                contentDescription = "当前分支",
+                                                contentDescription = tr("当前分支"),
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp),
                                             )
@@ -435,9 +435,9 @@ private fun BlockedDialog(
             Column {
                 Text(
                     if (untracked) {
-                        "你对以下未跟踪文件的更改将被检出操作覆盖："
+                        tr("你对以下未跟踪文件的更改将被检出操作覆盖：")
                     } else {
-                        "你对以下文件的更改将被检出操作覆盖："
+                        tr("你对以下文件的更改将被检出操作覆盖：")
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -561,7 +561,7 @@ private fun CommitAndSwitchDialog(
                     onClick = onGenerate,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (commitMessage.isBlank()) "生成提交消息" else "重新生成")
+                    Text(if (commitMessage.isBlank()) tr("生成提交消息") else tr("重新生成"))
                 }
                 message?.let {
                     Text(

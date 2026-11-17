@@ -3,6 +3,7 @@ package com.andmx.ui2.chat
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import com.andmx.ui2.settings.tr
 
 /**
  * 进程内入站入口：系统分享、外部链接、通知点击。
@@ -24,8 +25,8 @@ object InboundBus {
         if (text.isNotBlank()) channel.trySend(Event.Text(text))
     }
 
-    fun shareImage(uri: String, name: String = "分享图片") {
-        if (uri.isNotBlank()) channel.trySend(Event.Image(uri, name.ifBlank { "分享图片" }))
+    fun shareImage(uri: String, name: String = tr("分享图片")) {
+        if (uri.isNotBlank()) channel.trySend(Event.Image(uri, name.ifBlank { tr("分享图片") }))
     }
 
     fun openConversation(id: Long) {

@@ -247,17 +247,17 @@ fun ConversationDrawer(
                             Spacer(Modifier.height(2.dp))
                             DrawerQuickAction(
                                 icon = Icons.Outlined.Search,
-                                label = "搜索任务",
+                                label = tr("搜索任务"),
                                 onClick = { searchOpen = true },
                             )
                             DrawerQuickAction(
                                 icon = Icons.Outlined.Search,
-                                label = "搜索命令",
+                                label = tr("搜索命令"),
                                 onClick = { closeAnd(onOpenSearch) },
                             )
                             DrawerQuickAction(
                                 icon = Icons.Outlined.AutoAwesome,
-                                label = "技能",
+                                label = tr("技能"),
                                 onClick = { closeAnd(onOpenSkills) },
                             )
                         }
@@ -439,7 +439,7 @@ fun ConversationDrawer(
     }
     deleteTarget?.let { target ->
         DeleteDialog(
-            title = target.title.ifBlank { "新任务" },
+            title = target.title.ifBlank { tr("新任务") },
             archived = deleteArchived,
             onDismiss = {
                 deleteTarget = null
@@ -458,7 +458,7 @@ fun ConversationDrawer(
     }
     archiveTarget?.let { target ->
         ArchiveConfirmDialog(
-            title = target.title.ifBlank { "新任务" },
+            title = target.title.ifBlank { tr("新任务") },
             onDismiss = { archiveTarget = null },
             onConfirm = {
                 scope.launch { dao.setArchived(target.id, true) }
@@ -541,7 +541,7 @@ private fun TaskList(
     ) {
         if (pinned.isNotEmpty()) {
             item(key = "sec_pinned") {
-                SectionHeader(title = "已置顶")
+                SectionHeader(title = tr("已置顶"))
             }
             items(visiblePinned, key = { "pin_${it.id}" }) { conv ->
                 ConversationRow(
@@ -702,7 +702,7 @@ private fun TaskList(
                     val items = assigned[gid].orEmpty()
                     val group = groupMap[gid]
                     if (items.isEmpty() && group == null) return@forEach
-                    val title = group?.name ?: if (gid.isBlank()) "最近任务" else gid
+                    val title = group?.name ?: if (gid.isBlank()) tr("最近任务") else gid
                     val color = group?.let { groupColors[it.color] } ?: Color.Transparent
                     val key = "grp_${gid.ifBlank { "recent" }}"
                     val sorted = items.sortedWith(conversationComparator(sortMode))

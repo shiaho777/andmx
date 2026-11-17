@@ -18,6 +18,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.util.UUID
+import com.andmx.ui2.settings.tr
 
 private fun JsonObject.str(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 private fun JsonObject.bool(key: String): Boolean? =
@@ -49,56 +50,56 @@ private object ForgeProfiles {
     val all: List<Profile> = listOf(
         Profile(
             id = "web-static",
-            title = "静态网页",
-            summary = "HTML/CSS/JS 静态站点，可在当前工作区直接编辑与预览",
+            title = tr("静态网页"),
+            summary = tr("HTML/CSS/JS 静态站点，可在当前工作区直接编辑与预览"),
             tags = listOf("web", "html", "frontend", "static"),
             requires = listOf("workspace_writable"),
             nextPlugins = listOf("andmx-html-video"),
         ),
         Profile(
             id = "web-node",
-            title = "Node 前端/脚本",
-            summary = "package.json 驱动的 Node 工程；无 Node 时给安装指引",
+            title = tr("Node 前端/脚本"),
+            summary = tr("package.json 驱动的 Node 工程；无 Node 时给安装指引"),
             tags = listOf("web", "node", "javascript", "typescript"),
             requires = listOf("workspace_writable", "node_optional"),
             nextPlugins = emptyList(),
         ),
         Profile(
             id = "android-app",
-            title = "Android 应用",
-            summary = "Android/Compose 工程脚手架；构建运行委托 andmx-android-dev",
+            title = tr("Android 应用"),
+            summary = tr("Android/Compose 工程脚手架；构建运行委托 andmx-android-dev"),
             tags = listOf("android", "kotlin", "compose", "mobile"),
             requires = listOf("workspace_writable"),
             nextPlugins = listOf("andmx-android-dev"),
         ),
         Profile(
             id = "python-script",
-            title = "Python 脚本/工具",
-            summary = "main.py + requirements 轻量工具工程",
+            title = tr("Python 脚本/工具"),
+            summary = tr("main.py + requirements 轻量工具工程"),
             tags = listOf("python", "script", "tooling"),
             requires = listOf("workspace_writable", "python_optional"),
             nextPlugins = emptyList(),
         ),
         Profile(
             id = "docs-markdown",
-            title = "文档站/笔记",
-            summary = "Markdown 文档目录与基础规范",
+            title = tr("文档站/笔记"),
+            summary = tr("Markdown 文档目录与基础规范"),
             tags = listOf("docs", "markdown", "writing"),
             requires = listOf("workspace_writable"),
             nextPlugins = listOf("document-skills"),
         ),
         Profile(
             id = "html-video-ready",
-            title = "HTML 影片工作区",
-            summary = "为 andmx-html-video 准备目录约定与说明",
+            title = tr("HTML 影片工作区"),
+            summary = tr("为 andmx-html-video 准备目录约定与说明"),
             tags = listOf("video", "html", "creative"),
             requires = listOf("workspace_writable"),
             nextPlugins = listOf("andmx-html-video"),
         ),
         Profile(
             id = "agent-skill-pack",
-            title = "Agent 技能包",
-            summary = "skills/ 目录与 SKILL.md 模板",
+            title = tr("Agent 技能包"),
+            summary = tr("skills/ 目录与 SKILL.md 模板"),
             tags = listOf("agent", "skill", "plugin"),
             requires = listOf("workspace_writable"),
             nextPlugins = listOf("skill-creator"),

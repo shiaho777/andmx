@@ -181,10 +181,10 @@ private fun McpListView(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("MCP 服务器", onBack) },
+        topBar = { backAppBar(tr("MCP 服务器"), onBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {
-                Icon(Icons.Outlined.Add, "新建 MCP 服务器")
+                Icon(Icons.Outlined.Add, tr("新建 MCP 服务器"))
             }
         }
     ) { padding ->
@@ -193,8 +193,8 @@ private fun McpListView(
                 McpHeader()
                 EmptyState(
                     icon = Icons.Outlined.Cloud,
-                    title = "还没有 MCP 服务器",
-                    message = "添加一个 MCP 服务器，让 Agent 获得额外能力。",
+                    title = tr("还没有 MCP 服务器"),
+                    message = tr("添加一个 MCP 服务器，让 Agent 获得额外能力。"),
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -224,7 +224,7 @@ private fun McpListView(
                 if (localFiltered.isNotEmpty() || (entries.isEmpty() && pluginFiltered.isEmpty() && !loadingPlugins && q.isEmpty())) {
                     item {
                         McpSectionHeader(
-                            title = "已配置 MCP 服务器",
+                            title = tr("已配置 MCP 服务器"),
                             count = localFiltered.size,
                         )
                     }
@@ -285,9 +285,9 @@ private fun McpListView(
                 if (pluginFiltered.isNotEmpty()) {
                     item {
                         McpSectionHeader(
-                            title = "Plugin MCP 服务器",
+                            title = tr("Plugin MCP 服务器"),
                             count = pluginFiltered.size,
-                            hint = "由插件注册，修改请到对应插件中进行。",
+                            hint = tr("由插件注册，修改请到对应插件中进行。"),
                         )
                     }
                     items(pluginFiltered, key = { "plugin:${it.id}" }) { entry ->
@@ -546,13 +546,13 @@ private fun PluginMcpCard(entry: PluginSystem.PluginMcpEntry) {
 private fun pluginMcpStatus(entry: PluginSystem.PluginMcpEntry): Pair<String, String> {
     return when {
         entry.status == "error" && !entry.error.isNullOrBlank() ->
-            "未加载" to entry.error
+            tr("未加载") to entry.error
         entry.active ->
-            "插件内置" to "该 MCP 服务器由已启用插件提供，配置跟随插件管理。"
+            tr("插件内置") to tr("该 MCP 服务器由已启用插件提供，配置跟随插件管理。")
         entry.pluginEnabled ->
-            "未加载" to (entry.error ?: "插件声明了该 MCP 服务器，但当前未成功加载，请查看插件诊断。")
+            tr("未加载") to (entry.error ?: tr("插件声明了该 MCP 服务器，但当前未成功加载，请查看插件诊断。"))
         else ->
-            "插件未启用" to "该 MCP 服务器内置在插件中，启用插件后会加载。"
+            tr("插件未启用") to tr("该 MCP 服务器内置在插件中，启用插件后会加载。")
     }
 }
 

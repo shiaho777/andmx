@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.settings.UiLang
 import com.andmx.ui2.theme.AndMXType
+import com.andmx.ui2.settings.tr
 
 data class StarterSuggestion(val title: String, val prompt: String)
 
@@ -53,9 +54,9 @@ fun starterSuggestions(
             )
         } else {
             listOf(
-                StarterSuggestion("认识一下", "介绍一下你能帮我做哪些事，用中文回答"),
-                StarterSuggestion("写段代码", "用 Kotlin 写一个带取消支持的防抖函数，并逐行解释"),
-                StarterSuggestion("学点东西", "用通俗的方式讲讲 Jetpack Compose 的重组机制"),
+                StarterSuggestion(tr("认识一下"), "介绍一下你能帮我做哪些事，用中文回答"),
+                StarterSuggestion(tr("写段代码"), "用 Kotlin 写一个带取消支持的防抖函数，并逐行解释"),
+                StarterSuggestion(tr("学点东西"), "用通俗的方式讲讲 Jetpack Compose 的重组机制"),
             )
         }
     }
@@ -69,7 +70,7 @@ fun starterSuggestions(
             )
         } else {
             StarterSuggestion(
-                "Review 未提交改动",
+                tr("Review 未提交改动"),
                 "看一下工作区里未提交的 $dirtyFileCount 个文件的改动，逐个点评风险，最后给出 commit 信息建议",
             )
         }
@@ -82,7 +83,7 @@ fun starterSuggestions(
             )
         } else {
             StarterSuggestion(
-                "推送前检查",
+                tr("推送前检查"),
                 "当前分支领先远端 $ahead 个提交，帮我检查这些提交是否适合 push，有没有明显问题",
             )
         }
@@ -95,7 +96,7 @@ fun starterSuggestions(
             )
         } else {
             StarterSuggestion(
-                "讲解这个项目",
+                tr("讲解这个项目"),
                 "介绍一下 $project 的整体结构和关键模块，指出新人最应该先看的三个地方，用中文回答",
             )
         }

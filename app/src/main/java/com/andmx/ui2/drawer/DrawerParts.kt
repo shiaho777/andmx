@@ -147,14 +147,14 @@ fun ViewModeSegmented(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SegmentedChip(
-            label = "分组",
+            label = tr("分组"),
             icon = Icons.Outlined.Tag,
             selected = viewMode == ViewMode.GROUPED,
             selectedBg = selectedBg,
             onClick = { onViewChange(ViewMode.GROUPED) },
         )
         SegmentedChip(
-            label = "项目",
+            label = tr("项目"),
             icon = Icons.Outlined.Folder,
             selected = viewMode == ViewMode.BY_PROJECT || viewMode == ViewMode.TIMELINE,
             selectedBg = selectedBg,
@@ -224,7 +224,7 @@ fun TaskToolbar(
         if (showArchived) {
             ToolbarIcon(
                 icon = Icons.AutoMirrored.Outlined.ArrowBack,
-                contentDescription = "返回任务",
+                contentDescription = tr("返回任务"),
                 selected = false,
                 onClick = onToggleArchived,
             )
@@ -239,13 +239,13 @@ fun TaskToolbar(
             )
             ToolbarIcon(
                 icon = Icons.Outlined.Search,
-                contentDescription = "搜索归档",
+                contentDescription = tr("搜索归档"),
                 selected = searchOpen,
                 onClick = onToggleSearch,
             )
             ToolbarIcon(
                 icon = Icons.Outlined.Archive,
-                contentDescription = "归档",
+                contentDescription = tr("归档"),
                 selected = true,
                 onClick = onToggleArchived,
             )
@@ -258,7 +258,7 @@ fun TaskToolbar(
             Spacer(Modifier.width(2.dp))
             ToolbarIcon(
                 icon = if (allExpanded) Icons.Outlined.UnfoldLess else Icons.Outlined.UnfoldMore,
-                contentDescription = if (allExpanded) "收起全部" else "展开全部",
+                contentDescription = if (allExpanded) tr("收起全部") else tr("展开全部"),
                 selected = false,
                 onClick = onToggleExpandAll,
             )
@@ -269,7 +269,7 @@ fun TaskToolbar(
         Box {
             ToolbarIcon(
                 icon = Icons.AutoMirrored.Outlined.Sort,
-                contentDescription = "排序",
+                contentDescription = tr("排序"),
                 selected = false,
                 onClick = { sortMenu = true },
             )
@@ -324,7 +324,7 @@ fun TaskToolbar(
 
         ToolbarIcon(
             icon = Icons.Outlined.Archive,
-            contentDescription = "归档",
+            contentDescription = tr("归档"),
             selected = false,
             onClick = onToggleArchived,
         )
@@ -367,7 +367,7 @@ fun SearchField(
     onQueryChange: (String) -> Unit,
     onClose: (() -> Unit)? = null,
 ) {
-    val placeholder = if (archived) "搜索归档任务..." else "搜索任务..."
+    val placeholder = if (archived) tr("搜索归档任务...") else tr("搜索任务...")
     TextField(
         value = query,
         onValueChange = onQueryChange,
@@ -384,7 +384,7 @@ fun SearchField(
                 }) {
                     Icon(
                         Icons.Outlined.Close,
-                        if (query.isNotEmpty()) "清除搜索" else "关闭搜索",
+                        if (query.isNotEmpty()) tr("清除搜索") else tr("关闭搜索"),
                         Modifier.size(18.dp),
                     )
                 }
@@ -465,10 +465,10 @@ fun DrawerEmpty(searching: Boolean, archived: Boolean = false) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(
             when {
-                searching && archived -> "没有找到相关归档任务"
-                searching -> "没有找到相关任务"
-                archived -> "暂无归档任务"
-                else -> "暂无任务"
+                searching && archived -> tr("没有找到相关归档任务")
+                searching -> tr("没有找到相关任务")
+                archived -> tr("暂无归档任务")
+                else -> tr("暂无任务")
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -512,7 +512,7 @@ fun ShowMoreButton(expanded: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 8.dp),
     ) {
         Text(
-            if (expanded) "显示更少" else "显示更多",
+            if (expanded) tr("显示更少") else tr("显示更多"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -557,11 +557,11 @@ fun DeleteDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (archived) "删除这个归档任务？" else "删除这个任务？") },
+        title = { Text(if (archived) tr("删除这个归档任务？") else tr("删除这个任务？")) },
         text = {
             Text(
                 if (archived) {
-                    "该任务会从归档中移除，并清理本地会话数据。不会删除工作区中的文件。"
+                    tr("该任务会从归档中移除，并清理本地会话数据。不会删除工作区中的文件。")
                 } else {
                     "任务“$title”会从当前工作区移除，现有记录无法恢复。"
                 },
@@ -644,7 +644,7 @@ fun MoveToGroupDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        if (currentGroupId.isBlank()) "✓  最近任务" else "最近任务",
+                        if (currentGroupId.isBlank()) tr("✓  最近任务") else tr("最近任务"),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -698,7 +698,7 @@ fun ProjectSectionActions(onOpenFiles: () -> Unit) {
     ) {
         Icon(
             Icons.Outlined.FolderOpen,
-            "查看文件",
+            tr("查看文件"),
             Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )

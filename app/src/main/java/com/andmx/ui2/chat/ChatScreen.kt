@@ -510,8 +510,8 @@ LaunchedEffect(Unit) {
                     }
                 }
                 "locale", "language" -> listOf(
-                    ArgSuggestion("system", "system", "跟随系统"),
-                    ArgSuggestion("zh-CN", "zh-CN", "简体中文"),
+                    ArgSuggestion("system", "system", tr("跟随系统")),
+                    ArgSuggestion("zh-CN", "zh-CN", tr("简体中文")),
                     ArgSuggestion("en-US", "en-US", "English"),
                 )
                 "skill" -> skills.map { ArgSuggestion(it.name, it.name, it.path.substringAfterLast('/')) }
@@ -638,8 +638,8 @@ LaunchedEffect(Unit) {
                 add(
                     MentionSuggestion(
                         kind = MentionKind.FILE_BROWSER,
-                        label = "浏览文件…",
-                        subtitle = "打开项目文件树",
+                        label = tr("浏览文件…"),
+                        subtitle = tr("打开项目文件树"),
                     ),
                 )
             }.take(9)
@@ -873,7 +873,7 @@ LaunchedEffect(Unit) {
                     onAddAttachment = { imagePicker.launch("image/*") },
                     onAddDocument = { documentPicker.launch("*/*") },
                     onPasteClipboardImage = { uri ->
-                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "剪贴板图片"
+                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: tr("剪贴板图片")
                         attachments = attachments + Attachment(name = name, uri = uri.toString())
                     },
                     onInsertMention = {
@@ -955,7 +955,7 @@ LaunchedEffect(Unit) {
                 title = {
                     Column {
                         Text(
-                            if (timeline.isEmpty()) "新任务"
+                            if (timeline.isEmpty()) tr("新任务")
                             else conversationTitle.ifBlank { projectName.ifBlank { "AndMX" } },
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -973,7 +973,7 @@ LaunchedEffect(Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = { drawerOpen = !drawerOpen }) {
-                        Icon(Icons.Outlined.Menu, "切换侧边栏")
+                        Icon(Icons.Outlined.Menu, tr("切换侧边栏"))
                     }
                 },
                 // ZCode：终端从对话头部右上角唤起（再点收起）
@@ -986,17 +986,17 @@ LaunchedEffect(Unit) {
                 ),
                 actions = {
                     IconButton(onClick = { showCommandCenter = true }) {
-                        Icon(Icons.Outlined.Search, "搜索")
+                        Icon(Icons.Outlined.Search, tr("搜索"))
                     }
                     IconButton(onClick = {
                         fileTreeRequestPath = null
                         fileTreeRequestKey += 1
                         drawerOpen = true
                     }) {
-                        Icon(Icons.Outlined.FolderOpen, "查看文件")
+                        Icon(Icons.Outlined.FolderOpen, tr("查看文件"))
                     }
                     IconButton(onClick = { viewModel.shareConversation() }) {
-                        Icon(Icons.Outlined.Share, "分享对话")
+                        Icon(Icons.Outlined.Share, tr("分享对话"))
                     }
                     if (gitInfo?.isRepo == true) {
                         IconButton(onClick = {
@@ -1004,13 +1004,13 @@ LaunchedEffect(Unit) {
                             viewModel.refreshGitInfo()
                             showGitActions = true
                         }) {
-                            Icon(Icons.Outlined.Commit, "Git 操作")
+                            Icon(Icons.Outlined.Commit, tr("Git 操作"))
                         }
                     }
                     IconButton(onClick = { showTerminal = !showTerminal }) {
                         Icon(
                             Icons.Outlined.Terminal,
-                            if (showTerminal) "关闭终端" else "终端",
+                            if (showTerminal) tr("关闭终端") else tr("终端"),
                             tint = if (showTerminal) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurface,
                         )
@@ -1420,7 +1420,7 @@ LaunchedEffect(Unit) {
                     ) {
                         Icon(
                             Icons.Outlined.KeyboardArrowDown,
-                            "回到底部",
+                            tr("回到底部"),
                             Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                         )
@@ -1479,7 +1479,7 @@ LaunchedEffect(Unit) {
                 }
 
                 if (compactNotice?.running == true) {
-                    CompactMarkerRow(compactNotice?.text ?: "正在压缩上下文")
+                    CompactMarkerRow(compactNotice?.text ?: tr("正在压缩上下文"))
                 }
                 LaunchedEffect(currentConversationId, isLoading) {
                     viewModel.refreshWorkflowRuns()
@@ -1860,9 +1860,9 @@ private fun EmptyConversationState(
                 Text(
                     tr(
                         buildString {
-                            append("开始在 ")
+                            append(tr("开始在 "))
                             append(projectName)
-                            append(" 项目新建任务")
+                            append(tr(" 项目新建任务"))
                         },
                     ),
                     style = MaterialTheme.typography.bodyMedium,
@@ -1945,12 +1945,12 @@ private fun emptyGreeting(): String {
     val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     return tr(
         when (hour) {
-            in 5..8 -> "早上好呀，新的一天开始啦"
-            in 9..11 -> "上午好呀，有什么想让我帮忙的吗"
-            in 12..13 -> "中午好呀，要不要先休息一下"
-            in 14..17 -> "下午好呀，接下来交给我吧"
-            in 18..22 -> "晚上好呀，今天辛苦啦"
-            else -> "夜深啦，别忘了照顾好自己哦"
+            in 5..8 -> tr("早上好呀，新的一天开始啦")
+            in 9..11 -> tr("上午好呀，有什么想让我帮忙的吗")
+            in 12..13 -> tr("中午好呀，要不要先休息一下")
+            in 14..17 -> tr("下午好呀，接下来交给我吧")
+            in 18..22 -> tr("晚上好呀，今天辛苦啦")
+            else -> tr("夜深啦，别忘了照顾好自己哦")
         },
     )
 }
@@ -2020,7 +2020,7 @@ private fun FileDragOverlay(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    if (overComposer) "松开以引用此文件或目录"
+                    if (overComposer) tr("松开以引用此文件或目录")
                     else payload.relativePath.ifBlank { payload.name },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -2056,6 +2056,6 @@ private fun attachmentDisplayName(context: android.content.Context, uri: android
     }.getOrNull()
     return fromResolver?.takeIf { it.isNotBlank() }
         ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-        ?: "附件"
+        ?: tr("附件")
 }
 

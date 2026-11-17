@@ -4,6 +4,7 @@ import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ReasoningConfig
 import com.andmx.llm.provider.ReasoningStyle
+import com.andmx.ui2.settings.tr
 
 /**
  * 持久化到 [com.andmx.settings.ProviderSettings.approvalMode]。
@@ -18,38 +19,38 @@ enum class ExecMode(
     BUILD(
         id = "build",
         collaboration = com.andmx.agent.permission.CollaborationMode.BUILD,
-        labelText = "构建",
-        descriptionText = "只读直接执行，改文件和跑命令前要确认",
+        labelText = tr("构建"),
+        descriptionText = tr("只读直接执行，改文件和跑命令前要确认"),
     ),
     EDIT(
         id = "edit",
         collaboration = com.andmx.agent.permission.CollaborationMode.EDIT,
-        labelText = "编辑",
-        descriptionText = "工作区文件编辑直接应用，其它副作用仍要确认",
+        labelText = tr("编辑"),
+        descriptionText = tr("工作区文件编辑直接应用，其它副作用仍要确认"),
     ),
     PLAN(
         id = "plan",
         collaboration = com.andmx.agent.permission.CollaborationMode.PLAN,
-        labelText = "计划",
-        descriptionText = "只做只读探索，不改文件、不跑有副作用的命令",
+        labelText = tr("计划"),
+        descriptionText = tr("只做只读探索，不改文件、不跑有副作用的命令"),
     ),
     YOLO(
         id = "yolo",
         collaboration = com.andmx.agent.permission.CollaborationMode.YOLO,
         labelText = "Yolo",
-        descriptionText = "跳过权限确认，直接执行",
+        descriptionText = tr("跳过权限确认，直接执行"),
     ),
     GUARDED(
         id = "guarded",
         collaboration = com.andmx.agent.permission.CollaborationMode.GUARDED,
         labelText = "Guarded",
-        descriptionText = "默认直接执行，危险命令仍要单独确认一次",
+        descriptionText = tr("默认直接执行，危险命令仍要单独确认一次"),
     ),
     AUTO(
         id = "auto",
         collaboration = com.andmx.agent.permission.CollaborationMode.AUTO,
-        labelText = "自动",
-        descriptionText = "低/中风险直接执行，高风险与破坏性操作仍要确认",
+        labelText = tr("自动"),
+        descriptionText = tr("低/中风险直接执行，高风险与破坏性操作仍要确认"),
     );
 
     val label: String get() = com.andmx.ui2.settings.tr(labelText)
@@ -123,9 +124,9 @@ object MessageSelections {
         current.any { it.id == id } -> AddResult.Ok
         current.count { it.kind == ContextChipKind.MESSAGE } >= MAX_COUNT ->
             AddResult.Rejected("最多可添加 $MAX_COUNT 条对话引用。")
-        content.length > MAX_SINGLE_CHARS -> AddResult.Rejected("单条引用最多 8,000 个字符。")
+        content.length > MAX_SINGLE_CHARS -> AddResult.Rejected(tr("单条引用最多 8,000 个字符。"))
         current.filter { it.kind == ContextChipKind.MESSAGE }.sumOf { it.payload.length } + content.length >
-            MAX_TOTAL_CHARS -> AddResult.Rejected("对话引用总计最多 16,000 个字符。")
+            MAX_TOTAL_CHARS -> AddResult.Rejected(tr("对话引用总计最多 16,000 个字符。"))
         else -> AddResult.Ok
     }
 }
@@ -170,13 +171,13 @@ fun thoughtOptionsFor(reasoning: ReasoningConfig?): List<ThoughtOption> {
 }
 
 internal fun effortLabel(level: String): String = com.andmx.ui2.settings.tr(when (level.lowercase()) {
-    "off", "disabled", "none" -> "关闭"
-    "enabled", "on" -> "开启"
-    "minimal", "min" -> "最低"
-    "low" -> "低"
-    "medium", "med" -> "中"
-    "high" -> "高"
-    "max", "xhigh", "extra_high" -> "最高"
+    "off", "disabled", "none" -> tr("关闭")
+    "enabled", "on" -> tr("开启")
+    "minimal", "min" -> tr("最低")
+    "low" -> tr("低")
+    "medium", "med" -> tr("中")
+    "high" -> tr("高")
+    "max", "xhigh", "extra_high" -> tr("最高")
     else -> level.replaceFirstChar { it.uppercase() }
 })
 
@@ -184,13 +185,13 @@ fun thoughtLabel(effort: String, options: List<ThoughtOption>): String =
     options.firstOrNull { it.wireValue.equals(effort, ignoreCase = true) }?.label
         ?: options.firstOrNull { isThoughtOff(it.wireValue) && isThoughtOff(effort) }?.label
         ?: com.andmx.ui2.settings.tr(when (effort.lowercase()) {
-            "", "off", "disabled", "none" -> "关闭"
-            "enabled", "on" -> "开启"
-            "minimal", "min" -> "最低"
-            "low" -> "低"
-            "medium", "med" -> "中"
-            "high" -> "高"
-            "max", "xhigh", "extra_high" -> "最高"
+            "", "off", "disabled", "none" -> tr("关闭")
+            "enabled", "on" -> tr("开启")
+            "minimal", "min" -> tr("最低")
+            "low" -> tr("低")
+            "medium", "med" -> tr("中")
+            "high" -> tr("高")
+            "max", "xhigh", "extra_high" -> tr("最高")
             else -> effort.replaceFirstChar { it.uppercase() }
         })
 

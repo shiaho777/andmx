@@ -292,7 +292,7 @@ private fun GoalSection(goal: ConversationGoal) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Flag, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.tertiary)
             Spacer(Modifier.width(6.dp))
-            SectionLabel("目标")
+            SectionLabel(tr("目标"))
         }
         Spacer(Modifier.height(3.dp))
         Text(
@@ -382,7 +382,7 @@ internal fun planFocusWindow(
 private fun ProgressSection(steps: List<UpdatePlanTool.PlanStep>) {
     val focus = remember(steps) { planFocusWindow(steps) }
     Column {
-        SectionLabel("进度")
+        SectionLabel(tr("进度"))
         Spacer(Modifier.height(4.dp))
         focus.beforeLabel?.let { label ->
             BucketRow(tr(label))
@@ -471,7 +471,7 @@ private fun WorkflowSection(
     onOpen: () -> Unit,
 ) {
     Column(Modifier.clickable(onClick = onOpen)) {
-        SectionLabel("工作流")
+        SectionLabel(tr("工作流"))
         Spacer(Modifier.height(4.dp))
         workflows.forEach { run ->
             Row(
@@ -552,7 +552,7 @@ private fun ContextSection(
 ) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("上下文")
+            SectionLabel(tr("上下文"))
             Spacer(Modifier.weight(1f))
             Text(
                 "${formatTokens(tokens)} / ${formatTokens(window)}",
@@ -621,7 +621,7 @@ private fun ContextSection(
             enabled = !compactRunning,
             label = {
                 Text(
-                    if (compactRunning) "正在压缩上下文" else "压缩上下文",
+                    if (compactRunning) tr("正在压缩上下文") else tr("压缩上下文"),
                     style = MaterialTheme.typography.labelSmall,
                 )
             },

@@ -92,7 +92,7 @@ fun AutomationsPage(onBack: () -> Unit) {
     }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
-        topBar = { backAppBar("自动化", onBack) },
+        topBar = { backAppBar(tr("自动化"), onBack) },
     ) { padding ->
         Column(
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -141,14 +141,14 @@ fun AutomationsPage(onBack: () -> Unit) {
                 onClick = {
                     val target = if (conversationId > 0L) conversationId else conversations.firstOrNull()?.id ?: 0L
                     if (target <= 0L || title.isBlank() || prompt.isBlank()) {
-                        createNote = "需要标题、内容和一个已有会话"
+                        createNote = tr("需要标题、内容和一个已有会话")
                         return@OutlinedButton
                     }
                     scope.launch {
                         val (_, err) = withContext(Dispatchers.IO) {
                             store.create(target, title.trim(), prompt.trim(), cron.trim(), null, recurring, null, null, null, "")
                         }
-                        createNote = err ?: "已添加"
+                        createNote = err ?: tr("已添加")
                         if (err == null) {
                             title = ""
                             prompt = ""
@@ -169,7 +169,7 @@ fun AutomationsPage(onBack: () -> Unit) {
                             Text(item.title, style = MaterialTheme.typography.titleSmall)
                             Text(
                                 buildString {
-                                    append(item.cronExpr.ifBlank { "闲时" })
+                                    append(item.cronExpr.ifBlank { tr("闲时") })
                                     append(" · ")
                                     append(item.lifecycleStatus)
                                     if (item.nextRunAt > 0) append(" · 下次 ${fmt.format(Date(item.nextRunAt))}")
@@ -326,14 +326,14 @@ fun HooksPage(onBack: () -> Unit) {
                             enabled = !snapshot.trusted && snapshot.hooks.isNotEmpty(),
                             onClick = {
                                 HookTrustStore.trust(snapshot.workspaceKey, snapshot.fingerprint)
-                                note = "已信任项目钩子"
+                                note = tr("已信任项目钩子")
                             },
                         ) { Text(tr("信任并启用")) }
                         OutlinedButton(
                             enabled = snapshot.trusted || previousHash != null,
                             onClick = {
                                 HookTrustStore.revoke(snapshot.workspaceKey)
-                                note = "已撤销项目钩子信任"
+                                note = tr("已撤销项目钩子信任")
                             },
                             modifier = Modifier.padding(start = 8.dp),
                         ) { Text(tr("撤销信任")) }
@@ -397,7 +397,7 @@ fun HooksPage(onBack: () -> Unit) {
                     onClick = {
                         scope.launch {
                             val saved = withContext(Dispatchers.IO) { writeUserHooks(fs, path, drafts) }
-                            note = if (saved) "已写入 $path" else "写入失败"
+                            note = if (saved) "已写入 $path" else tr("写入失败")
                         }
                     },
                     modifier = Modifier.padding(start = 8.dp),
@@ -503,15 +503,15 @@ fun ComputerUsePage(onBack: () -> Unit) {
     ) { padding ->
         Column(Modifier.padding(padding).padding(16.dp)) {
             SwitchRow(
-                title = "启用 Android Use",
-                description = "关闭后，新会话不再提供屏幕操作工具。",
+                title = tr("启用 Android Use"),
+                description = tr("关闭后，新会话不再提供屏幕操作工具。"),
                 checked = settings.androidUseEnabled,
                 onCheckedChange = { on ->
                     scope.launch { store.update(settings.copy(androidUseEnabled = on)) }
                 },
             )
-            StatusLine("无障碍服务", if (status.accessibility) "已开启" else "未开启")
-            StatusLine("屏幕录制", if (status.projection) "这次运行已授权" else "尚未授权")
+            StatusLine(tr("无障碍服务"), if (status.accessibility) tr("已开启") else tr("未开启"))
+            StatusLine(tr("屏幕录制"), if (status.projection) tr("这次运行已授权") else tr("尚未授权"))
             Text(tr("无障碍用来点击、滑动和读取当前界面。屏幕录制只在这次运行里有效，进程退出后需要重新允许。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -533,7 +533,7 @@ fun ComputerUsePage(onBack: () -> Unit) {
                     )
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) { Text(if (status.projection) "重新允许屏幕录制" else "允许屏幕录制") }
+            ) { Text(if (status.projection) tr("重新允许屏幕录制") else tr("允许屏幕录制")) }
         }
     }
 }
@@ -574,28 +574,28 @@ fun BrowserSettingsPage(onBack: () -> Unit) {
     }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
-        topBar = { backAppBar("浏览器控制", onBack) },
+        topBar = { backAppBar(tr("浏览器控制"), onBack) },
     ) { padding ->
         Column(
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         ) {
-            SettingsGroup("控制") {
+            SettingsGroup(tr("控制")) {
                 SwitchRow(
-                    title = "开启网页抓取",
-                    description = "关闭后，新会话不再提供 WebFetch 和网页搜索。",
+                    title = tr("开启网页抓取"),
+                    description = tr("关闭后，新会话不再提供 WebFetch 和网页搜索。"),
                     checked = s.browserControlEnabled,
                     onCheckedChange = { save(s.copy(browserControlEnabled = it)) },
                 )
             }
-            SettingsGroup("安全") {
+            SettingsGroup(tr("安全")) {
                 SwitchRow(
-                    title = "忽略证书校验",
-                    description = "开启后，网页抓取和搜索不再校验 HTTPS 证书。只影响这两项，不影响系统浏览器。",
+                    title = tr("忽略证书校验"),
+                    description = tr("开启后，网页抓取和搜索不再校验 HTTPS 证书。只影响这两项，不影响系统浏览器。"),
                     checked = s.allowInsecureCertificates,
                     onCheckedChange = { save(s.copy(allowInsecureCertificates = it)) },
                 )
             }
-            SettingsGroup("浏览器数据") {
+            SettingsGroup(tr("浏览器数据")) {
                 Text(
                     tr("当前记住了 ${WebFetchCache.count()} 条网页正文，15 分钟后过期。"),
                     style = MaterialTheme.typography.bodySmall,
@@ -612,7 +612,7 @@ fun BrowserSettingsPage(onBack: () -> Unit) {
                     }
                     OutlinedButton(onClick = {
                         val removed = WebFetchCache.clear()
-                        note = if (removed == 0) "缓存本来就是空的" else "已清除 $removed 条网页抓取缓存"
+                        note = if (removed == 0) tr("缓存本来就是空的") else "已清除 $removed 条网页抓取缓存"
                     }) { Text(tr("清除")) }
                 }
                 if (note.isNotBlank()) {
@@ -644,7 +644,7 @@ fun ShortcutsPage(onBack: () -> Unit) {
     }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
-        topBar = { backAppBar("键盘快捷键", onBack) },
+        topBar = { backAppBar(tr("键盘快捷键"), onBack) },
     ) { padding ->
         Column(
             Modifier
@@ -665,8 +665,8 @@ fun ShortcutsPage(onBack: () -> Unit) {
                 },
         ) {
             Text(
-                if (recording == null) "点某一行，再按外接键盘上的新按键。Esc 取消。"
-                else "正在录制，按下新的快捷键。",
+                if (recording == null) tr("点某一行，再按外接键盘上的新按键。Esc 取消。")
+                else tr("正在录制，按下新的快捷键。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -690,12 +690,12 @@ fun ShortcutsPage(onBack: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(tr(item.label), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            if (recording == item.id) "请按键…" else "$binding · ${item.scope}",
+                            if (recording == item.id) tr("请按键…") else "$binding · ${item.scope}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { recording = item.id }) { Text(tr(if (recording == item.id) "录制中" else "改键")) }
+                    TextButton(onClick = { recording = item.id }) { Text(tr(if (recording == item.id) tr("录制中") else tr("改键"))) }
                     if (custom) {
                         TextButton(onClick = { save(overrides - item.id) }) { Text(tr("恢复")) }
                     }
@@ -726,7 +726,7 @@ fun WorkspaceIgnorePage(onBack: () -> Unit) {
     }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
-        topBar = { backAppBar("工作区搜索", onBack) },
+        topBar = { backAppBar(tr("工作区搜索"), onBack) },
     ) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
             Text(tr("`.zcodeignore` 里的规则会从工作区搜索里排除。一行一条，语法和 gitignore 相同。"),
@@ -750,13 +750,13 @@ fun WorkspaceIgnorePage(onBack: () -> Unit) {
                                 saved = text
                                 note = "已写入 $path"
                             } else {
-                                note = "写入失败"
+                                note = tr("写入失败")
                             }
                         }
                     },
                     enabled = dirty,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (dirty) "保存" else "已保存") }
+                ) { Text(if (dirty) tr("保存") else tr("已保存")) }
                 OutlinedButton(
                     onClick = {
                         if (!text.contains("# 默认排除")) {
@@ -775,12 +775,12 @@ fun WorkspaceIgnorePage(onBack: () -> Unit) {
                                 }.getOrDefault("")
                             }
                             if (gitignore.isBlank()) {
-                                note = "当前工作区没有 .gitignore"
+                                note = tr("当前工作区没有 .gitignore")
                             } else if (text.contains("# 从 .gitignore 同步")) {
-                                note = "已经同步过 .gitignore"
+                                note = tr("已经同步过 .gitignore")
                             } else {
                                 text += "\n# 从 .gitignore 同步\n$gitignore"
-                                note = "已放进编辑框，保存后才会生效"
+                                note = tr("已放进编辑框，保存后才会生效")
                             }
                         }
                     },

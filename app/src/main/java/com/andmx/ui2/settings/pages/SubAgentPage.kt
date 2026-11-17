@@ -104,9 +104,9 @@ private sealed class AgentView {
 }
 
 private enum class AgentFilter(val label: String) {
-    All("全部"),
-    Enabled("已启用"),
-    Disabled("已停用"),
+    All(tr("全部")),
+    Enabled(tr("已启用")),
+    Disabled(tr("已停用")),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -207,7 +207,7 @@ fun SubAgentPage(onBack: () -> Unit) {
                             cm.setPrimaryClip(
                                 android.content.ClipData.newPlainText("agents", folderPath)
                             )
-                            android.widget.Toast.makeText(context, "路径已复制", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, tr("路径已复制"), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     ) { Text(tr("复制路径")) }
                 }
@@ -409,18 +409,18 @@ private fun AgentListView(
                 title = { Text(tr("子智能体")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
                     IconButton(onClick = onAdd) {
-                        Icon(Icons.Outlined.Add, "新建子智能体")
+                        Icon(Icons.Outlined.Add, tr("新建子智能体"))
                     }
                     IconButton(onClick = onOpenFolder) {
-                        Icon(Icons.Outlined.FolderOpen, "打开用户子智能体目录")
+                        Icon(Icons.Outlined.FolderOpen, tr("打开用户子智能体目录"))
                     }
                     IconButton(onClick = onRefresh) {
-                        Icon(Icons.Outlined.Refresh, "刷新")
+                        Icon(Icons.Outlined.Refresh, tr("刷新"))
                     }
                 },
                 colors = settingsTopBarColors(),
@@ -433,7 +433,7 @@ private fun AgentListView(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                ResourcePageDescription("管理 AndMX Agent 运行时消费的用户级子智能体 Markdown 文件。")
+                ResourcePageDescription(tr("管理 AndMX Agent 运行时消费的用户级子智能体 Markdown 文件。"))
             }
 
             item {
@@ -442,12 +442,12 @@ private fun AgentListView(
                         ResourceSearchField(
                             value = query,
                             onValueChange = { query = it },
-                            placeholder = "搜索子智能体...",
+                            placeholder = tr("搜索子智能体..."),
                         )
                     },
                     filter = {
                         ResourceFilterDropdown(
-                            label = "全部",
+                            label = tr("全部"),
                             options = AgentFilter.entries.map { it.label },
                             selected = filter.label,
                             onSelect = { label ->
@@ -472,7 +472,7 @@ private fun AgentListView(
 
             if (users.isNotEmpty()) {
                 item {
-                    ResourceSectionHeader(title = "用户子智能体", count = users.size)
+                    ResourceSectionHeader(title = tr("用户子智能体"), count = users.size)
                 }
                 item {
                     ResourceCardGroup {
@@ -496,9 +496,9 @@ private fun AgentListView(
             if (plugins.isNotEmpty()) {
                 item {
                     ResourceSectionHeader(
-                        title = "插件子智能体",
+                        title = tr("插件子智能体"),
                         count = plugins.size,
-                        hint = "由插件注册，修改请到对应插件中进行。",
+                        hint = tr("由插件注册，修改请到对应插件中进行。"),
                     )
                 }
                 item {
@@ -523,9 +523,9 @@ private fun AgentListView(
             if (builtIns.isNotEmpty()) {
                 item {
                     ResourceSectionHeader(
-                        title = "内置子智能体",
+                        title = tr("内置子智能体"),
                         count = builtIns.size,
-                        hint = "内置 profile 是运行时默认能力，当前不可在这里编辑。",
+                        hint = tr("内置 profile 是运行时默认能力，当前不可在这里编辑。"),
                     )
                 }
                 item {
@@ -574,7 +574,7 @@ private fun AgentRow(
         agent.model
     }
     val toolsLabel = if (SubagentCatalog.isAllTools(agent.tools)) {
-        "全部工具"
+        tr("全部工具")
     } else {
         "${agent.tools.size} 个工具"
     }
@@ -636,7 +636,7 @@ private fun AgentRow(
             }
             Spacer(Modifier.height(2.dp))
             Text(
-                agent.description.ifBlank { "暂无描述" },
+                agent.description.ifBlank { tr("暂无描述") },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -679,10 +679,10 @@ private fun AgentRow(
                     ),
                 )
                 IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.Edit, "编辑", Modifier.size(16.dp), tint = subtle)
+                    Icon(Icons.Outlined.Edit, tr("编辑"), Modifier.size(16.dp), tint = subtle)
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.Delete, "删除", Modifier.size(16.dp), tint = subtle)
+                    Icon(Icons.Outlined.Delete, tr("删除"), Modifier.size(16.dp), tint = subtle)
                 }
             }
         }
@@ -870,24 +870,24 @@ internal fun agentColor(id: String): Color = when (id) {
 }
 
 internal fun modelLabel(m: String): String = when (m) {
-    "", "inherit", "defaultMain" -> "继承默认"
-    "main" -> "主模型"
-    "lite" -> "轻量模型"
+    "", "inherit", "defaultMain" -> tr("继承默认")
+    "main" -> tr("主模型")
+    "lite" -> tr("轻量模型")
     else -> m
 }
 
 internal fun permLabel(p: String): String = when (p) {
-    "acceptEdits" -> "接受编辑"
-    "plan" -> "计划模式"
-    "auto" -> "自动"
-    "bypassPermissions" -> "绕过权限"
-    "dontAsk" -> "不询问"
-    else -> "默认权限"
+    "acceptEdits" -> tr("接受编辑")
+    "plan" -> tr("计划模式")
+    "auto" -> tr("自动")
+    "bypassPermissions" -> tr("绕过权限")
+    "dontAsk" -> tr("不询问")
+    else -> tr("默认权限")
 }
 
 private fun scopeLabel(agent: CustomSubAgent): String = when {
-    isBuiltInAgent(agent) -> "内置"
-    agent.source == "plugin" -> "插件"
-    agent.scope == "workspace" -> "工作区"
-    else -> "用户"
+    isBuiltInAgent(agent) -> tr("内置")
+    agent.source == "plugin" -> tr("插件")
+    agent.scope == "workspace" -> tr("工作区")
+    else -> tr("用户")
 }

@@ -109,10 +109,10 @@ private fun CommandListView(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("命令", onBack) },
+        topBar = { backAppBar(tr("命令"), onBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {
-                Icon(Icons.Outlined.Add, "新建命令")
+                Icon(Icons.Outlined.Add, tr("新建命令"))
             }
         }
     ) { padding ->
@@ -130,9 +130,9 @@ private fun CommandListView(
                 )
             }
 
-            item { GroupHeader("用户命令") }
+            item { GroupHeader(tr("用户命令")) }
             if (userMatches.isEmpty()) {
-                item { EmptyHint("暂无用户命令，点击右下角新建") }
+                item { EmptyHint(tr("暂无用户命令，点击右下角新建")) }
             } else {
                 items(userMatches, key = { it.id }) { cmd ->
                     ListItem(
@@ -140,7 +140,7 @@ private fun CommandListView(
                             Text("/${cmd.name}", fontFamily = FontFamily.Monospace)
                         },
                         supportingContent = {
-                            Text(cmd.description.ifBlank { "暂无描述" })
+                            Text(cmd.description.ifBlank { tr("暂无描述") })
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -149,7 +149,7 @@ private fun CommandListView(
                 }
             }
 
-            item { GroupHeader("内置命令") }
+            item { GroupHeader(tr("内置命令")) }
             items(builtinMatches) { spec ->
                 ListItem(
                     headlineContent = { Text(spec.name, fontFamily = FontFamily.Monospace) },

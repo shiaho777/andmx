@@ -84,6 +84,7 @@ class MainActivity2 : ComponentActivity() {
 
             val localeTag = settings.locale
             androidx.compose.runtime.SideEffect {
+                com.andmx.ui2.settings.AppStrings.init(applicationContext)
                 com.andmx.ui2.settings.UiLang.apply(localeTag)
             }
             val providerStore = remember { com.andmx.settings.ProviderStore(context) }

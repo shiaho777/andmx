@@ -97,8 +97,8 @@ private sealed class SkillView {
 }
 
 private enum class SkillSourceFilter(val label: String) {
-    All("全部"),
-    Local("工作区与个人"),
+    All(tr("全部")),
+    Local(tr("工作区与个人")),
     Plugin("Plugin"),
 }
 
@@ -157,7 +157,7 @@ fun SkillsPage(onBack: () -> Unit, onCloseSettings: (() -> Unit)? = null) {
                         val result = runCatching {
                             installer.createSkill(name, description)
                         }.getOrElse {
-                            SkillInstaller.InstallResult(false, name, "", listOf(it.message ?: "创建失败"))
+                            SkillInstaller.InstallResult(false, name, "", listOf(it.message ?: tr("创建失败")))
                         }
                         if (result.success) {
                             statusMessage = "已创建技能 «${result.skillName}»"
@@ -167,19 +167,19 @@ fun SkillsPage(onBack: () -> Unit, onCloseSettings: (() -> Unit)? = null) {
                                 onCloseSettings?.invoke()
                             }
                         } else {
-                            statusMessage = result.errors.firstOrNull() ?: "创建失败"
+                            statusMessage = result.errors.firstOrNull() ?: tr("创建失败")
                         }
                     }
                 },
                 onInstallGit = { url ->
                     scope.launch {
                         val result = runCatching { installer.installFromGit(url) }.getOrElse {
-                            SkillInstaller.InstallResult(false, "", "", listOf(it.message ?: "安装失败"))
+                            SkillInstaller.InstallResult(false, "", "", listOf(it.message ?: tr("安装失败")))
                         }
                         statusMessage = if (result.success) {
                             "已安装 «${result.skillName}»"
                         } else {
-                            result.errors.firstOrNull() ?: "安装失败"
+                            result.errors.firstOrNull() ?: tr("安装失败")
                         }
                         refresh++
                     }
@@ -254,25 +254,25 @@ private fun SkillListView(
                 title = { Text(tr("技能")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
                     IconButton(onClick = { showCreate = true }) {
-                        Icon(Icons.Outlined.Add, "新建技能")
+                        Icon(Icons.Outlined.Add, tr("新建技能"))
                     }
                     IconButton(onClick = { showGit = true }) {
-                        Icon(Icons.Outlined.CloudDownload, "从 Git 安装")
+                        Icon(Icons.Outlined.CloudDownload, tr("从 Git 安装"))
                     }
                     IconButton(onClick = onRefresh, enabled = !refreshing) {
                         if (refreshing) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Outlined.Refresh, "刷新")
+                            Icon(Icons.Outlined.Refresh, tr("刷新"))
                         }
                     }
                     IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, "更多")
+                        Icon(Icons.Outlined.MoreVert, tr("更多"))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
@@ -306,7 +306,7 @@ private fun SkillListView(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showCreate = true }) {
-                Icon(Icons.Outlined.Add, "新建技能")
+                Icon(Icons.Outlined.Add, tr("新建技能"))
             }
         }
     ) { padding ->
@@ -342,12 +342,12 @@ private fun SkillListView(
                             ResourceSearchField(
                                 value = query,
                                 onValueChange = { query = it },
-                                placeholder = "搜索技能...",
+                                placeholder = tr("搜索技能..."),
                             )
                         },
                         filter = {
                             ResourceFilterDropdown(
-                                label = "全部",
+                                label = tr("全部"),
                                 options = SkillSourceFilter.entries.map { it.label },
                                 selected = sourceFilter.label,
                                 onSelect = { label ->
@@ -370,7 +370,7 @@ private fun SkillListView(
                 if (localFiltered.isNotEmpty()) {
                     item {
                         ResourceSectionHeader(
-                            title = "工作区与个人技能",
+                            title = tr("工作区与个人技能"),
                             count = localFiltered.size,
                         )
                     }
@@ -381,9 +381,9 @@ private fun SkillListView(
                                 ResourceListRow(
                                     icon = Icons.Outlined.Bolt,
                                     title = skill.name,
-                                    subtitle = skill.description.ifBlank { "暂无描述" },
+                                    subtitle = skill.description.ifBlank { tr("暂无描述") },
                                     onClick = { onOpenLocal(skill) },
-                                    trailing = { ResourceBadge("用户") },
+                                    trailing = { ResourceBadge(tr("用户")) },
                                 )
                             }
                         }
@@ -392,9 +392,9 @@ private fun SkillListView(
                 if (pluginFiltered.isNotEmpty()) {
                     item {
                         ResourceSectionHeader(
-                            title = "Plugin 技能",
+                            title = tr("Plugin 技能"),
                             count = pluginFiltered.size,
-                            hint = "由插件注册，修改请到对应插件中进行。",
+                            hint = tr("由插件注册，修改请到对应插件中进行。"),
                         )
                     }
                     item {
@@ -404,7 +404,7 @@ private fun SkillListView(
                                 ResourceListRow(
                                     icon = Icons.Outlined.Extension,
                                     title = skill.name,
-                                    subtitle = skill.description.ifBlank { "暂无描述" },
+                                    subtitle = skill.description.ifBlank { tr("暂无描述") },
                                     trailing = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(

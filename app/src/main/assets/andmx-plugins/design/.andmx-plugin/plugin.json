@@ -1,0 +1,24 @@
+{
+  "name": "design",
+  "version": "0.1.0",
+  "description": "AndMX 设计资源插件：配色/字阶/间距 token 与生成脚本，对齐 ui2/theme 的 AndMXType 与 Motion 体系。",
+  "author": "AndMX",
+  "license": "MIT",
+  "skills": [
+    "skills/design-guide/SKILL.md"
+  ],
+  "commands": [],
+  "tools": [
+    "runtime/design_palette.sh",
+    "runtime/design_tokens.sh"
+  ],
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "command": "/bin/sh runtime/session_summary.sh",
+      "timeoutMs": 5000,
+      "name": "design:session-tokens"
+    }
+  ],
+  "enabled": true
+}

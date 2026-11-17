@@ -1,5 +1,7 @@
 package com.andmx.ui2.settings.pages
 
+import com.andmx.ui2.settings.tr
+
 internal enum class AddModelProblem { BLANK_ID, DUPLICATE_ID, INVALID_CONTEXT }
 
 internal fun validateNewModel(
@@ -58,8 +60,8 @@ internal fun isValidTokenCount(raw: String): Boolean {
 internal fun metadataTokenText(value: Int): String = if (value > 0) value.toString() else ""
 
 internal fun modelMetadataProblemText(problem: ModelMetadataProblem): String = when (problem) {
-    ModelMetadataProblem.ID -> "模型 ID 不能为空"
-    ModelMetadataProblem.CONTEXT_WINDOW -> "上下文窗口必须是正整数"
-    ModelMetadataProblem.MAX_OUTPUT_TOKENS -> "最大输出 Token 必须是正整数"
-    ModelMetadataProblem.INPUT_MODALITIES -> "输入类型必须包含文本"
+    ModelMetadataProblem.ID -> tr("模型 ID 不能为空")
+    ModelMetadataProblem.CONTEXT_WINDOW -> tr("上下文窗口必须是正整数")
+    ModelMetadataProblem.MAX_OUTPUT_TOKENS -> tr("最大输出 Token 必须是正整数")
+    ModelMetadataProblem.INPUT_MODALITIES -> tr("输入类型必须包含文本")
 }

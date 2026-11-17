@@ -166,18 +166,18 @@ private fun ModelListView(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        topBar = { backAppBar("模型设置", onBack) },
+        topBar = { backAppBar(tr("模型设置"), onBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {
-                Icon(Icons.Outlined.Add, "添加供应商")
+                Icon(Icons.Outlined.Add, tr("添加供应商"))
             }
         }
     ) { padding ->
         if (providers.isEmpty()) {
             EmptyState(
                 icon = Icons.Outlined.Add,
-                title = "暂无自定义模型供应商",
-                message = "配置后可在聊天时选择使用。点击右下角添加。",
+                title = tr("暂无自定义模型供应商"),
+                message = tr("配置后可在聊天时选择使用。点击右下角添加。"),
                 modifier = Modifier.padding(padding)
             )
         } else {
@@ -256,7 +256,7 @@ private fun ProviderCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.DragHandle,
-                    "拖拽调整供应商顺序",
+                    tr("拖拽调整供应商顺序"),
                     Modifier
                         .size(20.dp)
                         .pointerInput(Unit) {
@@ -279,14 +279,14 @@ private fun ProviderCard(
                         if (isPrimary) {
                             Icon(
                                 Icons.Outlined.CheckCircle,
-                                "主要",
+                                tr("主要"),
                                 Modifier.padding(start = 6.dp).size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
                     Text(
-                        provider.baseUrl.ifBlank { "未设置地址" },
+                        provider.baseUrl.ifBlank { tr("未设置地址") },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
