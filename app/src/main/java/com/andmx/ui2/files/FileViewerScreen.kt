@@ -60,6 +60,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.collectAsState
+import com.andmx.ui2.ext.ExtensionSlotWebView
+import com.andmx.ui2.ext.LocalExtensionSlots
+import com.andmx.ui2.ext.fileViewerDeclaration
 import com.andmx.ui2.markdown.CodeBlockThemed
 import com.andmx.ui2.markdown.CodeThemes
 import com.andmx.ui2.markdown.LocalCodePreviewConfig
@@ -107,6 +111,10 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
     val context = LocalContext.current
     val file = remember(path) { File(path) }
     val kind = remember(path) { kindOf(file.name) }
+    val slotDeclarations by LocalExtensionSlots.current.collectAsState()
+    val pluginViewer = remember(slotDeclarations, path) {
+        fileViewerDeclaration(slotDeclarations, file.name)
+    }
     val activeReview = remember(review, path) {
         review?.takeIf { anchor ->
             anchor.path == null ||
@@ -316,6 +324,13 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                         OfficePreview(officeText!!)
                     kind == FileKind.OFFICE ->
                         CenterHint(tr("无法提取这个 Office 文档的文本。可能已加密，或文件结构不受支持。"))
+                    pluginViewer != null ->
+                        ExtensionSlotWebView(
+                            pluginViewer!!,
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                        )
                     kind == FileKind.BINARY ->
                         CenterHint(tr("当前文件看起来像二进制内容，暂不支持预览。"))
                     kind == FileKind.IMAGE && imageBitmap != null ->
