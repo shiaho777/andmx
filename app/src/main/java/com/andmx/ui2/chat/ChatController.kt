@@ -190,15 +190,16 @@ class ChatController private constructor(private val context: Context) {
     @Volatile private var hooksProjectStamp = -1L
     @Volatile private var hooksTrustRevision = -1L
     private val mcpManager = McpManager(context)
-    private val rolloutWriters = ConcurrentHashMap<Long, RolloutWriter>()
-    private val tokenTrackers = ConcurrentHashMap<Long, TokenUsageTracker>()
-    private val allowedPromptsByConversation = ConcurrentHashMap<Long, AllowedPrompts.Grants>()
-    private val orchestrators = ConcurrentHashMap<Long, SubAgentOrchestrator>()
-    private val backgroundTasksByConversation = ConcurrentHashMap<Long, com.andmx.agent.BackgroundTasks>()
-    private val readFileStates = ConcurrentHashMap<Long, com.andmx.agent.ReadFileState>()
-    private val toolSearchRegistries = ConcurrentHashMap<Long, com.andmx.agent.ToolSearchRegistry>()
-    private val shellWatchJobs = ConcurrentHashMap<Long, Job>()
-    private val titleSidecarAttempted = ConcurrentHashMap.newKeySet<Long>()
+    private val sessionControl = SessionControl()
+    private val rolloutWriters get() = sessionControl.rolloutWriters
+    private val tokenTrackers get() = sessionControl.tokenTrackers
+    private val allowedPromptsByConversation get() = sessionControl.allowedPromptsByConversation
+    private val orchestrators get() = sessionControl.orchestrators
+    private val backgroundTasksByConversation get() = sessionControl.backgroundTasksByConversation
+    private val readFileStates get() = sessionControl.readFileStates
+    private val toolSearchRegistries get() = sessionControl.toolSearchRegistries
+    private val shellWatchJobs get() = sessionControl.shellWatchJobs
+    private val titleSidecarAttempted get() = sessionControl.titleSidecarAttempted
 
     /**
      * 最近一次读到的设置快照。buildTools 是同步函数，拿不到 DataStore 的挂起读取，
@@ -353,9 +354,9 @@ class ChatController private constructor(private val context: Context) {
     }
 
 
-    private val sessions = ConcurrentHashMap<Long, Session>()
+    private val sessions get() = sessionControl.sessions
     private val approvalMutex = Mutex()
-    private val sessionAccessOrder = java.util.Collections.synchronizedList(mutableListOf<Long>())
+    private val sessionAccessOrder get() = sessionControl.sessionAccessOrder
     @Volatile private var pluginTools: List<Tool> = emptyList()
     @Volatile private var mobileDevTools: List<Tool> = emptyList()
     @Volatile private var mcpTools: List<Tool> = emptyList()
@@ -456,12 +457,12 @@ class ChatController private constructor(private val context: Context) {
         }
     }
 
-    private val subAgentWatchJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
-    private val approvalRulesByConversation = ConcurrentHashMap<Long, ConcurrentHashMap<String, ApprovalScope>>()
-    private val liveChatEvents = ConcurrentHashMap<Long, kotlinx.coroutines.flow.MutableSharedFlow<ChatEvent>>()
+    private val subAgentWatchJobs get() = sessionControl.subAgentWatchJobs
+    private val approvalRulesByConversation get() = sessionControl.approvalRulesByConversation
+    private val liveChatEvents get() = sessionControl.liveChatEvents
     private val cronStore = CronStore(context)
-    private val runningConversations = ConcurrentHashMap.newKeySet<Long>()
-    private val turnJobs = ConcurrentHashMap<Long, Job>()
+    private val runningConversations get() = sessionControl.runningConversations
+    private val turnJobs get() = sessionControl.turnJobs
     private val _runningIds = MutableStateFlow<Set<Long>>(emptySet())
     val runningIds: StateFlow<Set<Long>> = _runningIds.asStateFlow()
 
@@ -516,9 +517,9 @@ class ChatController private constructor(private val context: Context) {
         job.start()
         return job
     }
-    private val automationTurnIds = ConcurrentHashMap.newKeySet<Long>()
-    private val offPeakTurnIds = ConcurrentHashMap.newKeySet<Long>()
-    private val automationIdsByConversation = ConcurrentHashMap<Long, String>()
+    private val automationTurnIds get() = sessionControl.automationTurnIds
+    private val offPeakTurnIds get() = sessionControl.offPeakTurnIds
+    private val automationIdsByConversation get() = sessionControl.automationIdsByConversation
     private val workflowStore = com.andmx.data.WorkflowStore(context, guestFs)
     val workflowService = com.andmx.agent.workflow.WorkflowService(
         scope = controllerScope,
@@ -527,14 +528,14 @@ class ChatController private constructor(private val context: Context) {
     )
     private val workflowJournalStore = WorkflowJournalStore(context)
     private val workflowActorStore = com.andmx.data.WorkflowActorStore(context)
-    private val dynamicActorHistoryCache = ConcurrentHashMap<String, String>()
-    private val dynamicActorCounts = ConcurrentHashMap<String, Int>()
+    private val dynamicActorHistoryCache get() = sessionControl.dynamicActorHistoryCache
+    private val dynamicActorCounts get() = sessionControl.dynamicActorCounts
     private val workflowEscalations = com.andmx.agent.workflow.dynamic.WorkflowEscalationRegistry()
     private val dynamicActorJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     private val dynamicActorHistorySerializer =
         kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.ApiMessage.serializer())
-    private val dynamicAskJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
-    private val dynamicActorPersonas = ConcurrentHashMap<String, String>()
+    private val dynamicAskJobs get() = sessionControl.dynamicAskJobs
+    private val dynamicActorPersonas get() = sessionControl.dynamicActorPersonas
     private val dynamicWorkflowHost = object : DynamicWorkflowHost {
         override suspend fun createActor(
             runId: String,
@@ -637,28 +638,6 @@ class ChatController private constructor(private val context: Context) {
         val suggestions: List<com.andmx.agent.permission.PermissionSuggestion> = emptyList(),
     )
 
-    private class Session(
-        val conversationId: Long,
-        var engine: AgentEngine,
-        var providerId: String,
-        var model: String,
-        val planTool: UpdatePlanTool,
-        val goalState: GoalToolState,
-        val todoState: TodoState = TodoState(),
-        val planModeState: PlanModeState = PlanModeState(),
-        var approvalMode: ExecMode,
-        val permissions: com.andmx.agent.permission.PermissionService = com.andmx.agent.permission.PermissionService(),
-        var pending: CompletableDeferred<Boolean>? = null,
-        var pendingArgs: String? = null,
-        var pendingAnswer: CompletableDeferred<String>? = null,
-        var answerTimer: Job? = null,
-        var answerSnoozed: Boolean = false,
-        val turnToolOutputs: MutableList<Pair<String, String>> = mutableListOf(),
-        var lastUserText: String = "",
-        var lastAssistantText: String = "",
-        var lastAssistantTurnId: String? = null,
-    )
-
     /** 审批作用域（ZCode chat.permission 对齐）。 */
     enum class ApprovalScope { ONCE, SESSION_ALLOW, SESSION_DENY, PROJECT_ALLOW, PROJECT_DENY, PROJECT_ASK }
 
@@ -666,7 +645,7 @@ class ChatController private constructor(private val context: Context) {
     private val sessionEventStore = com.andmx.data.session.SessionEventStore(
         java.io.File(context.filesDir, "session-events"),
     )
-    private val sessionTraces = java.util.concurrent.ConcurrentHashMap<Long, String>()
+    private val sessionTraces get() = sessionControl.sessionTraces
 
     /**
      * AskUserQuestion 自动决议全局开关（上游 interaction-registry autoResolution 对齐）：
