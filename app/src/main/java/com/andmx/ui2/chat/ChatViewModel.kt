@@ -803,6 +803,28 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun loadCommitGraph(onDone: (List<com.andmx.ui2.files.CommitNode>) -> Unit) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            if (path == null) {
+                onDone(emptyList())
+                return@launch
+            }
+            onDone(runCatching { gitBaseline.commitGraph(path) }.getOrDefault(emptyList()))
+        }
+    }
+
+    fun loadCommitLog(onDone: (List<String>) -> Unit) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            if (path == null) {
+                onDone(emptyList())
+                return@launch
+            }
+            onDone(runCatching { gitBaseline.commitLogRaw(path) }.getOrDefault(emptyList()))
+        }
+    }
+
     fun remoteProfilesSnapshot(): List<com.andmx.workspace.RemoteWorkspaceSpec> = remoteStore.profiles.value
 
     fun saveRemoteProfile(spec: com.andmx.workspace.RemoteWorkspaceSpec) {

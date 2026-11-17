@@ -37,7 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.andmx.workspace.GitBaseline
 
-enum class GitActionMode { MENU, COMMIT, PUSH, IDENTITY }
+enum class GitActionMode { MENU, COMMIT, PUSH, IDENTITY, GRAPH }
 
 @Composable
 fun GitActionDialog(
@@ -57,6 +57,8 @@ fun GitActionDialog(
         cb("当前会话不支持读取文件差异")
     },
     onPickBranch: () -> Unit = {},
+    onLoadCommitGraph: (onDone: (List<com.andmx.ui2.files.CommitNode>) -> Unit) -> Unit = { cb -> cb(emptyList()) },
+    onLoadCommitLog: (onDone: (List<String>) -> Unit) -> Unit = { cb -> cb(emptyList()) },
     onDismiss: () -> Unit,
 ) {
     var mode by remember { mutableStateOf(GitActionMode.MENU) }
@@ -72,6 +74,26 @@ fun GitActionDialog(
     var diffTarget by remember { mutableStateOf<String?>(null) }
     var diffText by remember { mutableStateOf("") }
     var diffLoading by remember { mutableStateOf(false) }
+    var graphNodes by remember { mutableStateOf<List<com.andmx.ui2.files.CommitNode>>(emptyList()) }
+    var graphLoading by remember { mutableStateOf(false) }
+    var graphFallback by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    LaunchedEffect(mode) {
+        if (mode != GitActionMode.GRAPH) return@LaunchedEffect
+        graphLoading = true
+        onLoadCommitGraph { nodes ->
+            graphNodes = nodes
+            if (nodes.isEmpty()) {
+                onLoadCommitLog { lines ->
+                    graphFallback = lines
+                    graphLoading = false
+                }
+            } else {
+                graphFallback = emptyList()
+                graphLoading = false
+            }
+        }
+    }
 
     LaunchedEffect(diffTarget) {
         val target = diffTarget ?: return@LaunchedEffect
@@ -176,6 +198,17 @@ fun GitActionDialog(
                     ) {
                         Icon(Icons.Outlined.AccountTree, null, Modifier.size(18.dp))
                         Text(tr("切换分支"), Modifier.padding(start = 8.dp))
+                    }
+                    TextButton(
+                        enabled = !busy && gitInfo.isRepo,
+                        onClick = {
+                            message = null
+                            mode = GitActionMode.GRAPH
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.Commit, null, Modifier.size(18.dp))
+                        Text(tr("提交图"), Modifier.padding(start = 8.dp))
                     }
                     if (!gitInfo.hasIdentity) {
                         TextButton(
@@ -484,6 +517,56 @@ fun GitActionDialog(
                     enabled = !identityBusy,
                     onClick = { mode = GitActionMode.MENU },
                 ) { Text(tr("返回")) }
+            },
+        )
+
+        GitActionMode.GRAPH -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(tr("提交图")) },
+            text = {
+                Column {
+                    Text(
+                        tr("分支：${gitInfo.branch.ifBlank { "—" }}"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (graphNodes.isNotEmpty()) {
+                        com.andmx.ui2.files.CommitGraphView(
+                            nodes = graphNodes,
+                            loading = graphLoading,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    } else if (graphFallback.isNotEmpty()) {
+                        Text(
+                            tr("提交图不可用，已回退为列表。"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                        )
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                            items(graphFallback) { line ->
+                                Text(
+                                    line,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                )
+                            }
+                        }
+                    } else {
+                        com.andmx.ui2.files.CommitGraphView(
+                            nodes = emptyList(),
+                            loading = graphLoading,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { mode = GitActionMode.MENU }) { Text(tr("返回")) }
             },
         )
     }

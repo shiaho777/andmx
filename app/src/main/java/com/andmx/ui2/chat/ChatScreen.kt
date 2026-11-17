@@ -19,7 +19,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -77,6 +79,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
@@ -275,6 +278,10 @@ fun ChatScreen(
             }
             showSettings -> showSettings = false
         }
+    }
+    BackHandler(enabled = findOpen && !showTerminal && !showFiles && !showSettings) {
+        findOpen = false
+        findQuery = ""
     }
 
     var drawerOpen by remember { mutableStateOf(false) }
@@ -730,7 +737,6 @@ LaunchedEffect(Unit) {
                         }
                         SessionShortcuts.FIND_IN_TASK -> {
                             findOpen = true
-                            findTick++
                             true
                         }
                         SessionShortcuts.PREVIOUS_CONVERSATION -> {
@@ -1095,6 +1101,43 @@ LaunchedEffect(Unit) {
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
+                val findTargets = remember(timelineReversed) {
+                    timelineReversed.mapIndexedNotNull { i, item ->
+                        if (item is TimelineItem.Message && item.message.role != "compact") i to item.message else null
+                    }
+                }
+                val findHits = remember(findTargets, findQuery) {
+                    ChatFind.find(findTargets.map { it.second }, findQuery)
+                }
+                val findMessageIndexById = remember(findTargets) {
+                    findTargets.mapIndexed { mi, p -> p.second.id to mi }.toMap()
+                }
+                var findCurrent by remember { mutableIntStateOf(0) }
+                var findPrevTick by remember { mutableIntStateOf(0) }
+                val findScope = rememberCoroutineScope()
+                val findFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+                fun jumpToHit(hitIndex: Int) {
+                    val hit = findHits.getOrNull(hitIndex) ?: return
+                    val listIndex = findTargets.getOrNull(hit.messageIndex)?.first ?: return
+                    findScope.launch { listState.animateScrollToItem(listIndex) }
+                }
+                LaunchedEffect(findOpen) {
+                    if (findOpen) runCatching { findFocusRequester.requestFocus() }
+                }
+                LaunchedEffect(findQuery, findOpen) {
+                    findCurrent = 0
+                    if (findOpen && findHits.isNotEmpty()) jumpToHit(0)
+                }
+                LaunchedEffect(findTick) {
+                    if (findTick == 0 || !findOpen || findHits.isEmpty()) return@LaunchedEffect
+                    findCurrent = ChatFind.wrap(findCurrent + 1, findHits.size)
+                    jumpToHit(findCurrent)
+                }
+                LaunchedEffect(findPrevTick) {
+                    if (findPrevTick == 0 || !findOpen || findHits.isEmpty()) return@LaunchedEffect
+                    findCurrent = ChatFind.wrap(findCurrent - 1, findHits.size)
+                    jumpToHit(findCurrent)
+                }
                 if (findOpen) {
                     Row(
                         Modifier
@@ -1102,7 +1145,7 @@ LaunchedEffect(Unit) {
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         androidx.compose.foundation.text.BasicTextField(
@@ -1110,19 +1153,34 @@ LaunchedEffect(Unit) {
                             onValueChange = { findQuery = it },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(findFocusRequester)
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
+                                        event.key == androidx.compose.ui.input.key.Key.Enter
+                                    ) {
+                                        if (event.nativeKeyEvent.isShiftPressed) findPrevTick++ else findTick++
+                                        true
+                                    } else false
+                                },
                         )
-                        TextButton(onClick = { findTick++ }) { Text(tr("下一个")) }
+                        Text(
+                            text = if (findHits.isEmpty()) "0/0" else "${findCurrent + 1}/${findHits.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                        )
+                        TextButton(
+                            onClick = { findPrevTick++ },
+                            enabled = findHits.isNotEmpty(),
+                        ) { Text(tr("上一个")) }
+                        TextButton(
+                            onClick = { findTick++ },
+                            enabled = findHits.isNotEmpty(),
+                        ) { Text(tr("下一个")) }
                         TextButton(onClick = { findOpen = false; findQuery = "" }) { Text(tr("关闭")) }
                     }
-                }
-                LaunchedEffect(findTick) {
-                    if (!findOpen || findQuery.isBlank()) return@LaunchedEffect
-                    val q = findQuery.trim()
-                    val index = timelineReversed.indexOfFirst {
-                        it is TimelineItem.Message && it.message.content.contains(q, ignoreCase = true)
-                    }
-                    if (index >= 0) listState.scrollAnchorToTop(index)
                 }
                 LazyColumn(
                     state = listState,
@@ -1141,10 +1199,33 @@ LaunchedEffect(Unit) {
                                         CompactMarkerRow(item.message.content)
                                         return@Box
                                     }
+                                    val findMi = findMessageIndexById[item.message.id]
+                                    val bubbleHighlights = if (findOpen && findMi != null) {
+                                        ChatFind.highlightsFor(findHits, findMi, findCurrent)
+                                    } else emptyList()
                                     MessageBubble(
                                         message = item.message,
                                         fileExists = previewFileExists,
                                         mergedCodeComments = turnCodeComments[item.message.id],
+                                        highlightRanges = bubbleHighlights,
+                                        selectionActions = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
+                                            SelectionActions(
+                                                onCopy = { viewModel.copyMessage(it) },
+                                                onQuote = { text ->
+                                                    val quote = ChatFind.quote(text)
+                                                    if (quote.isNotEmpty()) {
+                                                        inputText = if (inputText.isBlank()) quote else inputText.trimEnd() + "\n" + quote
+                                                    }
+                                                },
+                                                onSideChat = if (
+                                                    item.message.role == "assistant" &&
+                                                    !item.message.isProcess &&
+                                                    !isLoading
+                                                ) {
+                                                    { sideChatExcerpt = it }
+                                                } else null,
+                                            )
+                                        } else null,
                                         onCopy = if (!item.message.isStreaming && item.message.content.isNotBlank()) {
                                             {
                                                 if (item.message.role == "user") {
@@ -1285,11 +1366,19 @@ LaunchedEffect(Unit) {
                         turnDelta = 0
                         jumpTo(rank + dir)
                     }
+                    val turnEntries = remember(timelineReversed) {
+                        val raw = TurnIndex.from(timelineReversed)
+                        raw.map { it.copy(number = raw.size - it.number + 1) }
+                    }
                     TurnNavigator(
                         turn = userAnchorIndices.size - rank,
                         total = userAnchorIndices.size,
                         onPrev = { jumpTo(rank + 1) },
                         onNext = { jumpTo(rank - 1) },
+                        turns = turnEntries,
+                        onJumpToTurn = { number ->
+                            jumpTo(userAnchorIndices.size - number)
+                        },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(end = 14.dp, bottom = 6.dp),
@@ -1697,6 +1786,8 @@ LaunchedEffect(Unit) {
                 onSetIdentity = { name, email, cb -> viewModel.setGitIdentity(name, email, cb) },
                 onFileDiff = { path, cb -> viewModel.fileDiff(path, cb) },
                 onPickBranch = { showBranchDialog = true },
+                onLoadCommitGraph = { cb -> viewModel.loadCommitGraph(cb) },
+                onLoadCommitLog = { cb -> viewModel.loadCommitLog(cb) },
                 onDismiss = { showGitActions = false },
             )
         }

@@ -57,7 +57,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +68,12 @@ import androidx.compose.ui.unit.sp
 import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.LocalMotion
 
+data class MarkdownHighlight(
+    val start: Int,
+    val endExclusive: Int,
+    val isCurrent: Boolean = false,
+)
+
 @Composable
 fun MarkdownView(
     markdown: String,
@@ -73,6 +81,8 @@ fun MarkdownView(
     streaming: Boolean = false,
     contentColor: Color = Color.Unspecified,
     bodySizeSp: Float = 0f,
+    highlightRanges: List<MarkdownHighlight> = emptyList(),
+    selectionActions: com.andmx.ui2.chat.SelectionActions? = null,
 ) {
     val parser = remember { IncrementalMarkdown.Parser() }
     val incremental = if (streaming) {
@@ -104,7 +114,7 @@ fun MarkdownView(
         MaterialTheme.typography.bodyLarge
     }
 
-    SelectionContainer {
+    val body = @Composable {
         Column(modifier = modifier.fillMaxWidth()) {
             positioned.forEachIndexed { index, positionedBlock ->
                 val block = positionedBlock.node
@@ -123,6 +133,7 @@ fun MarkdownView(
                                 style = style.copy(fontWeight = FontWeight.Bold),
                                 color = textColor,
                                 linkColor = linkColor,
+                                highlightRanges = blockHighlights(block.text, highlightRanges, positionedBlock.key),
                             )
                         }
 
@@ -136,6 +147,7 @@ fun MarkdownView(
                                     style = bodyStyle,
                                     color = textColor,
                                     linkColor = linkColor,
+                                    highlightRanges = blockHighlights(block.text, highlightRanges, positionedBlock.key),
                                 )
                             }
                         }
@@ -172,6 +184,7 @@ fun MarkdownView(
                                             color = textColor,
                                             linkColor = linkColor,
                                             modifier = Modifier.weight(1f),
+                                            highlightRanges = blockHighlights(item, highlightRanges, positionedBlock.key),
                                         )
                                     }
                                 }
@@ -194,6 +207,7 @@ fun MarkdownView(
                                     color = mutedColor,
                                     linkColor = linkColor,
                                     modifier = Modifier.weight(1f),
+                                    highlightRanges = blockHighlights(block.text, highlightRanges, positionedBlock.key),
                                 )
                             }
                         }
@@ -206,6 +220,41 @@ fun MarkdownView(
             }
         }
     }
+    if (selectionActions != null) {
+        com.andmx.ui2.chat.SelectableWithToolbar(actions = selectionActions) { body() }
+    } else {
+        SelectionContainer { body() }
+    }
+}
+
+private fun blockHighlights(
+    raw: String,
+    highlights: List<MarkdownHighlight>,
+    blockStart: Int,
+): List<MarkdownHighlight> {
+    if (highlights.isEmpty()) return emptyList()
+    val local = highlights.mapNotNull { h ->
+        val s = h.start - blockStart
+        val e = h.endExclusive - blockStart
+        if (e > 0 && s < raw.length) {
+            MarkdownHighlight(s.coerceAtLeast(0), e.coerceAtMost(raw.length), h.isCurrent)
+        } else null
+    }
+    if (local.isEmpty()) return emptyList()
+    val (plain, map) = InlineParser.renderMap(raw)
+    if (plain == raw) return local
+    val out = ArrayList<MarkdownHighlight>(local.size)
+    for (h in local) {
+        val needle = raw.substring(h.start, h.endExclusive)
+        val idx = plain.indexOf(needle, ignoreCase = true)
+        if (idx >= 0) {
+            out += MarkdownHighlight(idx, idx + needle.length, h.isCurrent)
+            continue
+        }
+        val ranges = InlineParser.mapRanges(listOf(h.start until h.endExclusive), map, plain.length)
+        ranges.firstOrNull()?.let { out += MarkdownHighlight(it.first, it.last + 1, h.isCurrent) }
+    }
+    return out
 }
 
 @Composable
@@ -328,10 +377,31 @@ fun MarkdownText(
     color: Color,
     linkColor: Color,
     modifier: Modifier = Modifier,
+    highlightRanges: List<MarkdownHighlight> = emptyList(),
 ) {
     val codeBackground = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    val annotated = remember(raw, color, linkColor, codeBackground) {
-        InlineParser.parse(raw, color, linkColor, codeBackground)
+    val currentHighlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+    val otherHighlight = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+    val annotated = remember(raw, color, linkColor, codeBackground, highlightRanges, currentHighlight, otherHighlight) {
+        val base = InlineParser.parse(raw, color, linkColor, codeBackground)
+        if (highlightRanges.isEmpty()) {
+            base
+        } else {
+            buildAnnotatedString {
+                append(base)
+                highlightRanges.forEach { h ->
+                    val start = h.start.coerceIn(0, base.length)
+                    val end = h.endExclusive.coerceIn(start, base.length)
+                    if (end > start) {
+                        addStyle(
+                            SpanStyle(background = if (h.isCurrent) currentHighlight else otherHighlight),
+                            start,
+                            end,
+                        )
+                    }
+                }
+            }
+        }
     }
     val hasLink = remember(annotated) {
         annotated.getStringAnnotations(InlineParser.UrlAnnotationTag, 0, annotated.length).any()
