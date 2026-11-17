@@ -52,10 +52,10 @@ import com.andmx.agent.UpdatePlanTool
 
 @Composable
 fun ApprovalBanner(
-    request: ChatController.ApprovalRequest,
+    request: ApprovalRequest,
     onAllow: () -> Unit,
     onDeny: () -> Unit,
-    onScope: (ChatController.ApprovalScope) -> Unit = {},
+    onScope: (ApprovalScope) -> Unit = {},
     suggestions: List<com.andmx.agent.permission.PermissionSuggestion> = emptyList(),
     onAcceptSuggestion: (com.andmx.agent.permission.PermissionSuggestion) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -153,19 +153,19 @@ fun ApprovalBanner(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_ALLOW) }) {
+                OutlinedButton(onClick = { onScope(ApprovalScope.SESSION_ALLOW) }) {
                     Text(tr("允许本会话"))
                 }
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ALLOW) }) {
+                OutlinedButton(onClick = { onScope(ApprovalScope.PROJECT_ALLOW) }) {
                     Text(tr("允许本项目"))
                 }
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_ASK) }) {
+                OutlinedButton(onClick = { onScope(ApprovalScope.PROJECT_ASK) }) {
                     Text(tr("每次询问"))
                 }
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.SESSION_DENY) }) {
+                OutlinedButton(onClick = { onScope(ApprovalScope.SESSION_DENY) }) {
                     Text(tr("始终拒绝"))
                 }
-                OutlinedButton(onClick = { onScope(ChatController.ApprovalScope.PROJECT_DENY) }) {
+                OutlinedButton(onClick = { onScope(ApprovalScope.PROJECT_DENY) }) {
                     Text(tr("拒绝本项目"))
                 }
             }

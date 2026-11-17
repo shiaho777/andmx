@@ -66,7 +66,7 @@ class SessionControlTest {
         control.titleSidecarAttempted.add(2L)
         control.approvalRulesByConversation
             .computeIfAbsent(1L) { java.util.concurrent.ConcurrentHashMap() }["shell:ls"] =
-            ChatController.ApprovalScope.SESSION_ALLOW
+            ApprovalScope.SESSION_ALLOW
 
         assertEquals("trace-a", control.sessionTraces[1L])
         assertEquals("trace-b", control.sessionTraces[2L])
@@ -79,7 +79,7 @@ class SessionControlTest {
         assertFalse(control.titleSidecarAttempted.contains(1L))
         assertTrue(control.titleSidecarAttempted.contains(2L))
         assertEquals(
-            ChatController.ApprovalScope.SESSION_ALLOW,
+            ApprovalScope.SESSION_ALLOW,
             control.approvalRulesByConversation[1L]?.get("shell:ls"),
         )
         assertNull(control.approvalRulesByConversation[2L])

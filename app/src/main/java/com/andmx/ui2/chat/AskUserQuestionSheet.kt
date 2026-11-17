@@ -50,7 +50,7 @@ import com.andmx.agent.zcode.AskUserQuestionParser
 
 @Composable
 fun AskUserQuestionPanel(
-    request: ChatController.ApprovalRequest,
+    request: ApprovalRequest,
     onSubmit: (String) -> Unit,
     onCancel: () -> Unit,
     onSnooze: () -> Unit,
@@ -431,7 +431,7 @@ private fun OtherRow(enabled: Boolean, onClick: () -> Unit) {
 
 @Composable
 fun ExitPlanApprovalPanel(
-    request: ChatController.ApprovalRequest,
+    request: ApprovalRequest,
     onAllow: () -> Unit,
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
