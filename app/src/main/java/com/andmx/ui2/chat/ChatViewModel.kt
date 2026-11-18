@@ -422,6 +422,16 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.settings.collect { followupMode = it.interactionBehavior }
         }
+        controller.setQueuedConversationIdsProvider {
+            val id = _currentConversationId.value
+            if (id > 0L && _queue.value.isNotEmpty()) setOf(id) else emptySet()
+        }
+        viewModelScope.launch {
+            _queue.collect { items ->
+                val id = _currentConversationId.value
+                if (id > 0L && items.isNotEmpty()) controller.noteSessionActivity(id)
+            }
+        }
         viewModelScope.launch {
             controller.pendingApproval.collect { req ->
                 if (req == null) return@collect

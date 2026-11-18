@@ -130,7 +130,6 @@ class ChatController private constructor(private val context: Context) {
     companion object {
         private const val TOOL_OUTPUT_DB_LIMIT = 12_000
         private const val TOOL_OUTPUT_MEMORY_LIMIT = 4_000
-        private const val MAX_CACHED_SESSIONS = 4
         private const val ASK_HIDDEN_GRACE_MS = 60_000L
         private const val ASK_AUTO_RESOLVE_MS = 300_000L
 
@@ -272,6 +271,7 @@ class ChatController private constructor(private val context: Context) {
                                 com.andmx.agent.SystemReminder.Source.TASK_STATUS,
                                 tasks.notificationBody(ev.task),
                             )
+                            touchSession(conversationId)
                         }
                     }
                 }
@@ -639,11 +639,18 @@ class ChatController private constructor(private val context: Context) {
                 }
             }
         }
+        sessionControl.focusedConversationIdProvider = { focusedConversationId }
         controllerScope.launch {
             while (true) {
                 delay(15_000L)
                 runCatching { cronTick() }
                 runCatching { scheduleAutomationWake() }
+            }
+        }
+        controllerScope.launch {
+            while (true) {
+                delay(60_000L)
+                runCatching { evictIdleSessions() }
             }
         }
         com.andmx.automation.AutomationWake.onDue = { cronTick() }
@@ -1341,6 +1348,7 @@ class ChatController private constructor(private val context: Context) {
         sessionControl.clearLiveEvents(conversationId)
         tokenTrackers.remove(conversationId)
         sessionAccessOrder.remove(conversationId)
+        sessionControl.lastAccessAt.remove(conversationId)
         sessionControl.clearPendingApprovalFor(conversationId)
         _subAgents.value = _subAgents.value.filterNot { it.conversationId == conversationId }
     }
@@ -1360,25 +1368,34 @@ class ChatController private constructor(private val context: Context) {
             sessionAccessOrder.remove(conversationId)
             sessionAccessOrder.add(conversationId)
         }
+        sessionControl.touchAccess(conversationId)
+        evictIdleSessions(keepId = conversationId)
+    }
+
+    fun noteSessionActivity(conversationId: Long) {
+        sessionControl.touchAccess(conversationId)
+    }
+
+    fun setQueuedConversationIdsProvider(provider: () -> Set<Long>) {
+        sessionControl.queuedConversationIdsProvider = provider
+    }
+
+    private fun evictIdleSessions(now: Long = System.currentTimeMillis(), keepId: Long? = null) {
+        val candidates = sessions.keys.map { id ->
+            val facts = sessionControl.protectedFacts(id)
+            SessionEvictionCandidate(
+                id = id,
+                lastAccessAt = sessionControl.lastAccessAt[id] ?: now,
+                protectedFacts = if (id == keepId) facts + "operation" else facts,
+            )
+        }
+        SessionEvictionPolicy.selectEvictions(candidates, now).forEach { id ->
+            if (id != keepId && sessionControl.protectedFacts(id).isEmpty()) clearSession(id)
+        }
     }
 
     private fun trimSessionCache(keepId: Long) {
-        val victims = mutableListOf<Long>()
-        synchronized(sessionAccessOrder) {
-            while (sessionAccessOrder.size > MAX_CACHED_SESSIONS) {
-                val oldest = sessionAccessOrder.firstOrNull { it != keepId } ?: break
-                sessionAccessOrder.remove(oldest)
-                victims += oldest
-            }
-        }
-        victims.forEach { id ->
-            if (id == keepId) return@forEach
-            if (_pendingApproval.value?.conversationId == id) return@forEach
-            if (isTurnRunning(id)) return@forEach
-            val session = sessions[id]
-            if (session?.pending != null) return@forEach
-            clearSession(id)
-        }
+        evictIdleSessions(keepId = keepId)
     }
 
     suspend fun focusConversation(conversationId: Long) {
