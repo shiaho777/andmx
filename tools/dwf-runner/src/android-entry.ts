@@ -59,17 +59,19 @@ async function createIframeRealm(): Promise<CellRealm> {
 ensureSetImmediate();
 const runner = new WorkflowRunner({ createRealm: createIframeRealm, bridge: __andmx });
 
-window.__DWF_RUNNER = {
-  start: (configJson) => runner.start(configJson),
-  evalSnippet: (configJson) => runner.evalSnippet(configJson),
-  askResult: (requestId, resultJson) => runner.askResult(requestId, resultJson),
-  worldResult: (requestId, ok, payloadJson, error) =>
+window.__DWF_RUNNER = Object.freeze({
+  start: (configJson: string) => runner.start(configJson),
+  evalSnippet: (configJson: string) => runner.evalSnippet(configJson),
+  askResult: (requestId: string, resultJson: string) => runner.askResult(requestId, resultJson),
+  worldResult: (requestId: string, ok: boolean, payloadJson: string, error?: string) =>
     runner.worldResult(requestId, ok, payloadJson, error),
-  artifactResult: (requestId, ok, payloadJson, error) =>
+  artifactResult: (requestId: string, ok: boolean, payloadJson: string, error?: string) =>
     runner.artifactResult(requestId, ok, payloadJson, error),
-  fillHole: (runId, fillJson) => runner.fillHole(runId, fillJson),
-  openHoles: (runId) => runner.openHoles(runId),
-  markMutating: (runId, siteId, ordinal) => runner.markMutating(runId, siteId, ordinal),
-  stop: (runId, reason, supersededBy) => runner.stop(runId, reason, supersededBy),
-  cancel: (runId) => runner.cancel(runId),
-};
+  fillHole: (runId: string, fillJson: string) => runner.fillHole(runId, fillJson),
+  openHoles: (runId: string) => runner.openHoles(runId),
+  markMutating: (runId: string, siteId: string, ordinal: number) =>
+    runner.markMutating(runId, siteId, ordinal),
+  stop: (runId: string, reason: string, supersededBy?: string) =>
+    runner.stop(runId, reason, supersededBy),
+  cancel: (runId: string) => runner.cancel(runId),
+});

@@ -100,6 +100,60 @@ fun decodeSnippetResult(raw: String): SnippetEvalOutcome {
     )
 }
 
+internal object DynamicWorkflowBridgeSecurity {
+    private val WORLD_READ_OPS = setOf(
+        "read", "glob", "grep", "git-changed-files", "git-diff", "git-status", "git-log", "run",
+    )
+    private val RUN_ID = Regex("[A-Za-z0-9._:-]{1,128}")
+
+    fun isAllowedWorldReadOp(op: String): Boolean = op in WORLD_READ_OPS
+
+    fun isSafeRunId(runId: String): Boolean = RUN_ID.matches(runId)
+
+    private fun escapesBase(raw: String, normalizedBase: String): Boolean {
+        val clean = raw.replace('\\', '/')
+        val baseParts = normalizedBase.split('/').filter { it.isNotEmpty() }
+        val stack = ArrayDeque<String>()
+        val absolute = clean.startsWith("/")
+        if (!absolute) stack.addAll(baseParts)
+        clean.split('/').forEach { part ->
+            when (part) {
+                "", "." -> Unit
+                ".." -> if (stack.isNotEmpty()) stack.removeLast()
+                else -> stack.addLast(part)
+            }
+        }
+        if (absolute) return false
+        if (stack.size < baseParts.size) return true
+        return baseParts.indices.any { stack[it] != baseParts[it] }
+    }
+
+    fun normalizeWorldReadArgs(op: String, argsJson: String, cwd: String): String? {
+        if (!isAllowedWorldReadOp(op)) return null
+        val array = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(argsJson) as? JsonArray
+        }.getOrNull() ?: JsonArray(emptyList())
+        val elements = mutableListOf<kotlinx.serialization.json.JsonElement>()
+        array.forEachIndexed { index, element ->
+            if (op == "read" && index == 0 && element is JsonPrimitive && element.isString) {
+                val raw = element.content.trim()
+                if (raw.isEmpty()) {
+                    elements.add(element)
+                    return@forEachIndexed
+                }
+                val base = cwd.trim().ifBlank { com.andmx.workspace.GuestPaths.DEFAULT_RELATIVE_BASE }
+                val normalizedBase = com.andmx.workspace.GuestPaths.normalize(base)
+                if (escapesBase(raw, normalizedBase)) return null
+                val normalized = com.andmx.workspace.GuestPaths.normalize(raw, normalizedBase)
+                elements.add(JsonPrimitive(normalized))
+            } else {
+                elements.add(element)
+            }
+        }
+        return JsonArray(elements).toString()
+    }
+}
+
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 private val artifactJson = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
@@ -149,6 +203,7 @@ class DynamicWorkflowRunner(
     private val pendingSnippets =
         java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<String>>()
     private val actorPersonas = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val runCwds = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var webView: WebView? = null
     @Volatile private var ready = false
     private val lock = kotlinx.coroutines.sync.Mutex()
@@ -205,6 +260,7 @@ class DynamicWorkflowRunner(
             definitionId = KIND,
         )
         runStore.writeRunRow(snapshot, conversationId)
+        runCwds[runId] = cwd
         val importedJournals = importJournalFrom?.let { loadJournalChain(it) }
         val config = configJson(
             runId = runId,
@@ -244,6 +300,7 @@ class DynamicWorkflowRunner(
         if (!analysis.ok) return false to "Workflow script no longer compiles."
         val lowered = loweredOf(analysis) ?: return false to "workflow analysis did not produce a lowered body"
         updateSnapshot(runId) { it.copy(status = WorkflowRunStatus.running, updatedAt = Instant.now().toString()) }
+        runCwds[runId] = cwd
         val config = configJson(
             runId = runId,
             analysis = analysis,
@@ -268,6 +325,7 @@ class DynamicWorkflowRunner(
         val runId = "dwfeval-${UUID.randomUUID()}"
         val settled = kotlinx.coroutines.CompletableDeferred<String>()
         pendingSnippets[runId] = settled
+        runCwds[runId] = cwd
         try {
             val config = buildJsonObject {
                 put("runId", runId)
@@ -292,11 +350,13 @@ class DynamicWorkflowRunner(
             return decodeSnippetResult(raw)
         } finally {
             pendingSnippets.remove(runId)
+            runCwds.remove(runId)
             if (!settled.isCompleted) scope.launch { cancel(runId) }
         }
     }
 
     suspend fun cancel(runId: String) {
+        runCwds.remove(runId)
         withContext(Dispatchers.Main.immediate) {
             webView?.evaluateJavascript(
                 "window.__DWF_RUNNER && window.__DWF_RUNNER.cancel(${JSONObject.quote(runId)})",
@@ -734,11 +794,13 @@ class DynamicWorkflowRunner(
     inner class Bridge {
         @JavascriptInterface
         fun saveJournal(runId: String, journal: String) {
+            if (!DynamicWorkflowBridgeSecurity.isSafeRunId(runId)) return
             runCatching { journalStore.saveBlocking(runId, journal) }
         }
 
         @JavascriptInterface
         fun emit(runId: String, eventJson: String) {
+            if (!DynamicWorkflowBridgeSecurity.isSafeRunId(runId)) return
             val event = runCatching { json.parseToJsonElement(eventJson).jsonObject }.getOrNull()
             val type = event?.get("type")?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "event" }
             val message = event?.get("message")?.jsonPrimitive?.contentOrNull
@@ -757,6 +819,7 @@ class DynamicWorkflowRunner(
             personaJson: String,
             seedJson: String,
         ) {
+            if (!DynamicWorkflowBridgeSecurity.isSafeRunId(runId)) return
             actorPersonas["$runId|$siteId|$ordinal"] = personaJson
             scope.launch {
                 runCatching { host.createActor(runId, siteId, ordinal, personaJson, seedJson) }
@@ -768,6 +831,7 @@ class DynamicWorkflowRunner(
 
         @JavascriptInterface
         fun startAsk(runId: String, requestId: String, requestJson: String) {
+            if (!DynamicWorkflowBridgeSecurity.isSafeRunId(runId)) return
             scope.launch {
                 val request = parseAsk(runId, requestId, requestJson) ?: return@launch
                 pendingAsks[requestId] = request
@@ -795,8 +859,20 @@ class DynamicWorkflowRunner(
 
         @JavascriptInterface
         fun worldRead(requestId: String, op: String, argsJson: String) {
+            val cwd = runCwds.entries.firstOrNull { requestId.startsWith("${it.key}:") }?.value.orEmpty()
+            val normalizedArgs = DynamicWorkflowBridgeSecurity.normalizeWorldReadArgs(op, argsJson, cwd)
+            if (normalizedArgs == null) {
+                postJsRaw(
+                    "worldResult",
+                    JSONObject.quote(requestId),
+                    "false",
+                    JSONObject.quote("null"),
+                    JSONObject.quote("world read rejected: $op"),
+                )
+                return
+            }
             scope.launch {
-                val result = runCatching { host.worldRead(op, argsJson) }
+                val result = runCatching { host.worldRead(op, normalizedArgs) }
                 result.onSuccess {
                     postJsRaw(
                         "worldResult",
@@ -822,6 +898,16 @@ class DynamicWorkflowRunner(
             scope.launch {
                 val parsed = runCatching { json.parseToJsonElement(requestJson).jsonObject }.getOrNull()
                 val runId = parsed?.get("runId")?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (!DynamicWorkflowBridgeSecurity.isSafeRunId(runId)) {
+                    postJsRaw(
+                        "artifactResult",
+                        JSONObject.quote(requestId),
+                        "false",
+                        JSONObject.quote("null"),
+                        JSONObject.quote("invalid run id"),
+                    )
+                    return@launch
+                }
                 val request = parsed?.get("request")?.toString() ?: requestJson
                 val result = runCatching { host.publishArtifact(runId, request) }
                 result.onSuccess { recordJson ->
@@ -847,6 +933,7 @@ class DynamicWorkflowRunner(
 
         @JavascriptInterface
         fun settled(runId: String, settlementJson: String) {
+            if (!DynamicWorkflowBridgeSecurity.isSafeRunId(runId)) return
             val settlement = runCatching { json.parseToJsonElement(settlementJson).jsonObject }.getOrNull()
             val statusText = settlement?.get("status")?.jsonPrimitive?.contentOrNull.orEmpty()
             val stopReason = settlement?.get("reason")?.jsonPrimitive?.contentOrNull

@@ -4,7 +4,8 @@
 // minify 会破坏它里面那句「只允许 import 类型、不得引用模块作用域绑定」的约束。
 // 这条限制对将来打进 WebView 的那份 bundle 同样成立。
 import { build } from "esbuild";
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, symlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,12 +19,25 @@ if (!existsSync(resolve(here, "node_modules"))) {
       + "先跑：cd tools/dwf-analyzer && npm install",
   );
 }
+
+const dwfPkg = resolve(cliPackages, "dynamic-workflow");
+const libsPath = resolve(dwfPkg, "src/compiler/libs.generated.ts");
+if (!existsSync(libsPath)) {
+  const upstreamModules = resolve(repo, "ZCode-main/node_modules");
+  if (!existsSync(upstreamModules)) {
+    symlinkSync(resolve(here, "node_modules"), upstreamModules, "dir");
+  }
+  execFileSync(process.execPath, [resolve(dwfPkg, "scripts/generate-libs.mjs")], {
+    stdio: "inherit",
+  });
+}
 if (!existsSync(resolve(repo, "app/src/main/assets/dwf/analyzer.js"))) {
   throw new Error("缺少 app/src/main/assets/dwf/analyzer.js。先跑：node tools/dwf-analyzer/build.mjs");
 }
 
 await build({
   alias: {
+    "typescript": resolve(here, "node_modules/typescript/lib/typescript.js"),
     "@zcode/dynamic-workflow": resolve(cliPackages, "dynamic-workflow/src/index.ts"),
     "@zcode/dynamic-workflow/engine/engine": resolve(cliPackages, "dynamic-workflow/src/engine/engine.ts"),
     "@zcode/dynamic-workflow/engine/errors": resolve(cliPackages, "dynamic-workflow/src/engine/errors.ts"),

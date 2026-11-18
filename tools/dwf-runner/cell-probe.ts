@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   const referenceTraces = new Map<string, Trace>();
 
   for (const testCase of CASES) {
-    const payload: ChildPayload = { args: { topic: "象棋" }, lowered: testCase.lowered };
+    const payload: ChildPayload = { args: { topic: "象棋" }, lowered: testCase.lowered, run: { id: "run" } };
     const left = await reference(payload);
     const right = await candidate(payload);
     referenceTraces.set(testCase.name, left);
@@ -247,6 +247,9 @@ async function main(): Promise<void> {
       ["postMessage", () => undefined],
       ["addEventListener", () => undefined],
       ["console", console],
+      ["window", { postMessage: () => undefined }],
+      ["document", { createElement: () => ({}) }],
+      ["frameElement", {}],
     ];
     for (const [name, value] of wakeSources) realm.global[name] = value;
 
@@ -268,7 +271,7 @@ async function main(): Promise<void> {
 
     const happy = CASES.find((item) => item.name === "happy");
     if (happy === undefined) throw new Error("缺少 happy 用例");
-    const payload: ChildPayload = { args: { topic: "象棋" }, lowered: happy.lowered };
+    const payload: ChildPayload = { args: { topic: "象棋" }, lowered: happy.lowered, run: { id: "run" } };
     const sanitized = await drive((port) =>
       startCell({ payload, port, realm, streamsBootstrap: CELL_STREAMS_BOOTSTRAP }),
     );

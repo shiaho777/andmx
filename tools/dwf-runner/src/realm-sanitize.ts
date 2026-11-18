@@ -34,7 +34,10 @@ export const CELL_REALM_SANITIZER = String.raw`(function () {
     "Worker", "SharedWorker", "ServiceWorker", "importScripts",
     "postMessage", "addEventListener", "removeEventListener", "dispatchEvent",
     "localStorage", "sessionStorage", "indexedDB", "caches", "navigator",
-    "console", "alert", "confirm", "prompt", "open", "close"
+    "console", "alert", "confirm", "prompt", "open", "close",
+    "window", "document", "frameElement", "location", "history",
+    "MessageChannel", "MessagePort", "BroadcastChannel", "Notification",
+    "performance", "crypto", "origin", "external"
   ];
   for (var i = 0; i < names.length; i++) {
     var name = names[i];

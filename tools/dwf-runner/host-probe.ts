@@ -341,7 +341,7 @@ async function main(): Promise<void> {
       caps: { maxConcurrency: 4 },
       cwd,
       endpoint: loopbackCell({
-        payload: { args: {}, lowered },
+        payload: { args: {}, lowered, run: { id: "run" } },
         streamsBootstrap: CELL_STREAMS_BOOTSTRAP,
       }),
       makeDriver: (sink) => {

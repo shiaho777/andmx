@@ -13,7 +13,9 @@ import type { CellRealm } from "./cell.js";
  * 之后，cell 的行为是否一模一样」，如果参照物本身不是真 realm，这个对照就没有意义。
  */
 export function nodeRealm(): CellRealm {
-  const sandbox: Record<string, unknown> = {};
+  // null 原型对齐上游 childMain 的沙箱构造：普通 `{}` 会让 context 全局的属性查找
+  // 落到外层 Object.prototype 上，globalThis.constructor.constructor 即外层 Function。
+  const sandbox = Object.create(null) as Record<string, unknown>;
   const contextified = vm.createContext(sandbox, { name: "cell-realm" }) as Record<string, unknown>;
   return {
     global: contextified,

@@ -47,7 +47,15 @@ export interface CellPort {
 }
 
 /** `childMain` 会从 sandbox 对象上读回的那些全局。 */
-const LINKED_KEYS = ["__deliver", "__execute", "__checkStalled", "__send", "__argsJson"] as const;
+const LINKED_KEYS = [
+  "__deliver",
+  "__execute",
+  "__checkStalled",
+  "__send",
+  "__finish",
+  "__argsJson",
+  "__runJson",
+] as const;
 
 type CellVm = Parameters<typeof childMain>[0]["vm"];
 
@@ -56,7 +64,8 @@ function createVm(realm: CellRealm): CellVm {
   const target = realm.global;
   return {
     createContext(sandbox, _options) {
-      // 入站属性（`__argsJson`、`__send`）落到 realm 全局，与 node 的 contextify 同效。
+      // 入站属性（`__argsJson`、`__runJson`、`__send`、`__finish`）落到 realm 全局，
+      // 与 node 的 contextify 同效。BOOTSTRAP 第一句就把两个宿主传输函数收进闭包并删掉全局。
       for (const key of Object.keys(sandbox)) {
         target[key] = (sandbox as Record<string, unknown>)[key];
       }
@@ -94,18 +103,42 @@ export interface CellOptions {
 export function startCell(options: CellOptions): Promise<void> {
   const { realm, port, payload, streamsBootstrap } = options;
   let closed = false;
+  // createContext 返回的是 realm 全局而不是注入用的 null 原型 sandbox（浏览器没有
+  // contextify），childMain 预取的入口因此可能取到 undefined。这里在 runInContext 的
+  // 接缝上重取一次真身（BOOTSTRAP 与 streams 之后、脚本编译之前），此后裸调——
+  // 否则脚本改写 __deliver 后，宿主会把 realm 全局当 this 递进脚本替换的函数。
+  let native: { deliver: (line: string) => void; checkStalled: () => boolean } | undefined;
+  const baseVm = createVm(realm);
+  const vm: CellVm = {
+    createContext: (sandbox, vmOptions) => baseVm.createContext(sandbox, vmOptions),
+    runInContext(code, sandbox, vmOptions) {
+      const value = baseVm.runInContext(code, sandbox, vmOptions);
+      if (vmOptions?.filename === "workflow-streams.js") {
+        native = realm.evaluate(
+          "({ deliver: globalThis.__deliver, checkStalled: globalThis.__checkStalled })",
+          "cell-entry-capture.js",
+        ) as { deliver: (line: string) => void; checkStalled: () => boolean };
+      }
+      return value;
+    },
+  };
 
   return childMain({
     createInterface: () => ({
       close: () => {
         closed = true;
       },
-      on: (event: "line", listener: (line: string) => void) => {
+      on: (event: "line", _received: (line: string) => void) => {
         if (event !== "line") return undefined;
         port.onLine((line) => {
           // 空行按上游同规丢弃——NDJSON 的帧之间允许有空行。
-          if (closed || line.trim() === "") return;
-          listener(line);
+          if (closed || line.trim() === "" || native === undefined) return;
+          const deliver = native.deliver;
+          const checkStalled = native.checkStalled;
+          deliver(line);
+          setImmediate(() => {
+            if (checkStalled()) closed = true;
+          });
         });
         return undefined;
       },
@@ -120,6 +153,6 @@ export function startCell(options: CellOptions): Promise<void> {
     },
     payload,
     streamsBootstrap,
-    vm: createVm(realm),
+    vm,
   });
 }

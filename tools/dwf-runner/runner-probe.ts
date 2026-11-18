@@ -129,6 +129,58 @@ async function runScript(
   return { settlement, journal, asks, events, actors, worldReads };
 }
 
+async function runLoweredBody(
+  lowered: string,
+  worldValue?: unknown,
+  worldRespond?: (runner: WorkflowRunner, requestId: string, op: string, argsJson: string) => void,
+): Promise<any> {
+  let runner!: WorkflowRunner;
+  let settle!: (value: any) => void;
+  const settled = new Promise<any>((resolve) => { settle = resolve; });
+  const unexpected = (member: string) => () => { throw new Error(`escape probe bridge received ${member}`); };
+  const bridge: RunnerBridge = {
+    saveJournal() {},
+    emit() {},
+    createActor: unexpected("createActor"),
+    actorMessageCount: () => 0,
+    startAsk: unexpected("startAsk"),
+    continueAsk: unexpected("continueAsk"),
+    cancelAsk() {},
+    worldRead(requestId, op, argsJson) {
+      queueMicrotask(() => {
+        if (worldRespond !== undefined) {
+          worldRespond(runner, requestId, op, argsJson);
+          return;
+        }
+        runner.worldResult(requestId, true, JSON.stringify(worldValue ?? []));
+      });
+    },
+    publishArtifact: unexpected("publishArtifact"),
+    settled(_runId, json) { settle(JSON.parse(json)); },
+    snippetSettled: unexpected("snippetSettled"),
+    log() {},
+  };
+  runner = new WorkflowRunner({ createRealm: async () => nodeRealm(), bridge });
+  await runner.start(JSON.stringify({
+    runId: `escape-probe-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+    lowered,
+    cwd: "/tmp/andmx-dwf-runner",
+    caps: { maxConcurrency: 4 },
+    timeoutMs: 30_000,
+  }));
+  return settled;
+}
+
+async function evalInCell(expr: string): Promise<unknown> {
+  const settlement = await runLoweredBody(`return ${expr};`);
+  if (settlement.status !== "completed") {
+    throw new Error(`escape probe did not complete: ${JSON.stringify(settlement)}`);
+  }
+  return settlement.artifact;
+}
+
+const FOREIGN = "(v) => (typeof v === 'function' || (typeof v === 'object' && v !== null)) && v.constructor !== undefined && v.constructor.constructor !== Function";
+
 interface SnippetRun {
   prepared: any;
   result: any;
@@ -174,6 +226,31 @@ async function runSnippet(code: string, worldValue?: unknown): Promise<SnippetRu
 }
 
 async function main(): Promise<void> {
+  const overflow = await runLoweredBody(`
+    const foreign = ${FOREIGN};
+    const line = JSON.stringify({ kind: "event", type: "log", message: "probe" });
+    let probes = 0;
+    let hits = 0;
+    let transportThrows = 0;
+    function dive() {
+      try { dive(); } catch (e) {
+        if (foreign(e)) hits++;
+        if (probes >= 64) return;
+        probes++;
+        try { __emitLine(line); } catch (e2) { transportThrows++; if (foreign(e2)) hits++; }
+        throw e;
+      }
+    }
+    dive();
+    return { probes, hits, transportThrows };
+  `);
+  check("escape: stack overflow at the transport stays context-native", overflow.status === "completed", overflow);
+  check(
+    "escape: overflow probe actually hit the transport",
+    overflow.artifact?.probes === 64 && overflow.artifact?.transportThrows > 0 && overflow.artifact?.hits === 0,
+    overflow.artifact,
+  );
+
   const snippet = await runSnippet(String.raw`
     const body = await files.read('a.txt');
     log('read ' + body.length);
@@ -294,11 +371,90 @@ async function main(): Promise<void> {
     warm.settlement.artifact,
   );
 
+  check(
+    "escape: transport globals are gone",
+    JSON.stringify(await evalInCell("[typeof globalThis.__send, typeof globalThis.__finish]")) ===
+      JSON.stringify(["undefined", "undefined"]),
+  );
+
+  check(
+    "escape: constructor chain cannot reach the host realm",
+    await evalInCell(
+      '(() => { try { return typeof globalThis.constructor.constructor("return process")(); } catch (e) { return "blocked"; } })()',
+    ) === "blocked",
+  );
+
+  const foreignHits = await evalInCell(
+    `(() => {
+      const foreign = ${FOREIGN};
+      const hits = [];
+      for (const k of Object.getOwnPropertyNames(globalThis)) {
+        let v; try { v = globalThis[k]; } catch (e) { continue; }
+        if (foreign(v)) hits.push(k);
+      }
+      for (const k of Object.keys(__host)) if (foreign(__host[k])) hits.push("__host." + k);
+      return hits;
+    })()`,
+  );
+  check("escape: no global or __host member is an outer-realm value", JSON.stringify(foreignHits) === "[]", foreignHits);
+
+  check(
+    "escape: transport failure throws a context-native error",
+    await evalInCell(
+      `(() => { const foreign = ${FOREIGN}; try { __emitLine(Symbol("x")); return "no-throw"; } catch (e) { return foreign(e) ? "FOREIGN" : "native"; } })()`,
+    ) !== "FOREIGN",
+  );
+
+  const swapped = await runLoweredBody(`
+    const foreign = ${FOREIGN};
+    const seen = [];
+    globalThis.__deliver = function () { seen.push(foreign(this) ? "FOREIGN-this" : "called"); };
+    globalThis.__checkStalled = function () { seen.push(foreign(this) ? "FOREIGN-this" : "called"); return false; };
+    const paths = await __host.worldRead("world-read#1", "glob", ["*"]);
+    return { paths, seen };
+  `, []);
+  check("escape: swapped entries are never called with a foreign this", swapped.status === "completed", swapped);
+  check(
+    "escape: entry swap has no effect",
+    JSON.stringify(swapped.artifact) === JSON.stringify({ paths: [], seen: [] }),
+    swapped.artifact,
+  );
+
+  check(
+    "escape: host never calls then() on a cell promise",
+    await runLoweredBody(`
+      const foreign = ${FOREIGN};
+      const origThen = Promise.prototype.then;
+      let leaked = "none";
+      Promise.prototype.then = function (a, b) {
+        if (foreign(a) || foreign(b)) leaked = "host";
+        return origThen.call(this, a, b);
+      };
+      await null;
+      await __host.worldRead("world-read#1", "glob", ["*"]);
+      Promise.prototype.then = origThen;
+      return leaked;
+    `, []).then((settlement) => settlement.status === "completed" && settlement.artifact === "none"),
+  );
+
+  const traversal = await runLoweredBody(`
+    let code = "none";
+    try { await __host.worldRead("world-read#1", "read", ["../../etc/passwd"]); } catch (e) { code = String(e.code); }
+    return code;
+  `, undefined, (runner, requestId) => {
+    runner.worldResult(requestId, false, "null", "路径越界: ../../etc/passwd");
+  });
+  check(
+    "escape: traversal path read surfaces a catchable rejection",
+    traversal.status === "completed" && traversal.artifact === "DriverError",
+    traversal,
+  );
+
   if (failures.length > 0) {
     process.stderr.write(`runner-probe failures:\n${failures.map((f) => `  - ${f}`).join("\n")}\n`);
     process.exit(1);
   }
-  process.stdout.write("runner-probe: snippet/sequential/worldread/errored/fanout/artifact/hole/warm passed\n");
+  process.stdout.write("runner-probe: snippet/sequential/worldread/errored/fanout/artifact/hole/warm/escape passed\n");
 }
 
 void main();
