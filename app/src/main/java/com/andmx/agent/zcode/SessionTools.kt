@@ -46,6 +46,7 @@ class SessionRequestLedger(private val maxEntries: Int = 512) {
 
     @Synchronized
     fun put(key: String, result: SessionSendResult) {
+        entries.remove(key)
         entries[key] = result
         while (entries.size > maxEntries) {
             val oldest = entries.keys.iterator().next()
