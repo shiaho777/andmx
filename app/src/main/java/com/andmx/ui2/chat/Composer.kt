@@ -101,6 +101,8 @@ import com.andmx.ui2.chat.voice.VoiceCapsuleState
 import com.andmx.ui2.chat.voice.VoiceInputManager
 import com.andmx.ui2.chat.voice.VoiceMicButton
 import com.andmx.ui2.chat.voice.VoicePhase
+import com.andmx.ui2.chat.voice.NativeWhisperBackend
+import com.andmx.ui2.chat.voice.WhisperModelManager
 import com.andmx.ui2.chat.voice.appendVoiceText
 import kotlinx.coroutines.delay
 
@@ -183,11 +185,18 @@ fun Composer(
     val latestValue by rememberUpdatedState(value)
     val latestOnValueChange by rememberUpdatedState(onValueChange)
     val voiceState = remember(voiceContext, voiceTranscribe) {
+        val whisperModels = WhisperModelManager(voiceContext)
         VoiceCapsuleState(
-            manager = VoiceInputManager(voiceContext, transcribe = voiceTranscribe),
+            manager = VoiceInputManager(
+                voiceContext,
+                transcribe = voiceTranscribe,
+                whisperModel = whisperModels,
+                whisperBackend = NativeWhisperBackend,
+            ),
             onInsertText = { spoken ->
                 latestOnValueChange(appendVoiceText(latestValue, spoken))
             },
+            modelManager = whisperModels,
         )
     }
     DisposableEffect(voiceState) {

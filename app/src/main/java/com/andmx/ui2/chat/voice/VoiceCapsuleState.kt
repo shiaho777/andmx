@@ -8,10 +8,13 @@ import java.io.File
 
 enum class VoicePhase { IDLE, RECORDING, TRANSCRIBING }
 
+enum class WhisperDownloadPhase { IDLE, DOWNLOADING, DONE, FAILED }
+
 class VoiceCapsuleState(
     private val manager: VoiceInputManager,
     private val onInsertText: (String) -> Unit,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    private val modelManager: WhisperModelManager? = null,
 ) {
     var phase by mutableStateOf(VoicePhase.IDLE)
         private set
@@ -23,11 +26,16 @@ class VoiceCapsuleState(
         private set
     var level by mutableStateOf(0f)
         private set
+    var downloadPhase by mutableStateOf(WhisperDownloadPhase.IDLE)
+        private set
+    var downloadProgress by mutableStateOf(0f)
+        private set
 
     private var engine = VoiceEngine.NONE
     private var startedAtMs = 0L
     private var recordingFile: File? = null
     private var session = 0
+    private var downloadRunning = false
 
     private val systemListener = object : VoiceInputManager.SystemListener {
         override fun onPartial(text: String) {}
@@ -61,7 +69,7 @@ class VoiceCapsuleState(
             engine = VoiceEngine.SYSTEM
             recordingFile = null
         } else {
-            val file = manager.startRecording()
+            val file = manager.startRecording(useWhisper = available == VoiceEngine.WHISPER_OFFLINE)
             if (file == null) {
                 showError(tr("录音启动失败，请检查麦克风权限"))
                 return false
@@ -86,7 +94,7 @@ class VoiceCapsuleState(
         if (phase != VoicePhase.RECORDING) return
         when (engine) {
             VoiceEngine.SYSTEM -> manager.stopSystem()
-            VoiceEngine.PROVIDER -> {
+            VoiceEngine.PROVIDER, VoiceEngine.WHISPER_OFFLINE -> {
                 val file = manager.stopRecording()
                 if (file == null) {
                     finishIdle()
@@ -113,15 +121,63 @@ class VoiceCapsuleState(
     suspend fun runTranscription() {
         val file = recordingFile ?: return
         val mySession = session
-        val text = manager.transcribeFile(file)
+        val whisper = engine == VoiceEngine.WHISPER_OFFLINE
+        val text = if (whisper) manager.transcribeWhisper(file) else manager.transcribeFile(file)
         if (mySession != session || phase != VoicePhase.TRANSCRIBING) return
         finishIdle()
-        if (text.isNullOrBlank()) {
-            messageIsError = false
-            message = manager.savedRecordingNotice()
-        } else {
-            onInsertText(text)
+        when {
+            !text.isNullOrBlank() -> onInsertText(text)
+            whisper -> showError(tr("离线转写失败，录音已保存"))
+            else -> {
+                messageIsError = false
+                message = manager.savedRecordingNotice()
+            }
         }
+    }
+
+    fun canOfferModelDownload(): Boolean =
+        modelManager != null && phase == VoicePhase.IDLE &&
+            downloadPhase != WhisperDownloadPhase.DOWNLOADING &&
+            manager.canOfferWhisperDownload()
+
+    fun startModelDownload() {
+        if (modelManager == null || downloadPhase == WhisperDownloadPhase.DOWNLOADING) return
+        if (phase != VoicePhase.IDLE) return
+        downloadProgress = 0f
+        message = null
+        downloadPhase = WhisperDownloadPhase.DOWNLOADING
+    }
+
+    suspend fun downloadModel() {
+        val models = modelManager ?: return
+        if (downloadRunning) return
+        downloadRunning = true
+        downloadPhase = WhisperDownloadPhase.DOWNLOADING
+        try {
+            val ok = models.download { progress ->
+                downloadProgress = if (progress.totalBytes > 0) {
+                    (progress.downloadedBytes.toFloat() / progress.totalBytes).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+            }
+            downloadPhase = if (ok) WhisperDownloadPhase.DONE else WhisperDownloadPhase.FAILED
+            if (ok) {
+                downloadProgress = 1f
+                messageIsError = false
+                message = tr("离线模型已就绪，可直接语音输入")
+            } else {
+                showError(tr("离线模型下载失败，请检查网络后重试"))
+            }
+        } finally {
+            downloadRunning = false
+        }
+    }
+
+    fun dismissDownloadPrompt() {
+        if (downloadPhase == WhisperDownloadPhase.DOWNLOADING) return
+        downloadPhase = WhisperDownloadPhase.IDLE
+        downloadProgress = 0f
     }
 
     fun cancel() {

@@ -1345,4 +1345,10 @@
     <string name="str_1342">" · 等待 "</string>
     <string name="str_1343">"… 正在准备授权（元数据发现 / 动态注册）"</string>
     <string name="str_1344">"✗ 配置无效，无法发起授权"</string>
+    <string name="str_1345">"离线转写失败，录音已保存"</string>
+    <string name="str_1346">"离线模型已就绪，可直接语音输入"</string>
+    <string name="str_1347">"离线模型下载失败，请检查网络后重试"</string>
+    <string name="str_1348">"启用离线转写需下载模型"</string>
+    <string name="str_1349">"离线模型下载中"</string>
+    <string name="str_1350">"下载离线模型（约75MB）"</string>
 </resources>

@@ -26,6 +26,39 @@ class VoiceEngineSelectorTest {
     }
 
     @Test
+    fun whisperReadyInsertsOfflineTier() {
+        assertEquals(
+            VoiceEngine.WHISPER_OFFLINE,
+            chooseVoiceEngine(false, false, true, whisperReady = true),
+        )
+    }
+
+    @Test
+    fun fullChainPriorityMatrix() {
+        assertEquals(
+            VoiceEngine.SYSTEM,
+            chooseVoiceEngine(true, true, true, whisperReady = true),
+        )
+        assertEquals(
+            VoiceEngine.PROVIDER,
+            chooseVoiceEngine(false, true, true, whisperReady = true),
+        )
+        assertEquals(
+            VoiceEngine.WHISPER_OFFLINE,
+            chooseVoiceEngine(false, false, true, whisperReady = true),
+        )
+        assertEquals(VoiceEngine.SAVE_ONLY, chooseVoiceEngine(false, false, true))
+        assertEquals(
+            VoiceEngine.NONE,
+            chooseVoiceEngine(false, true, false, whisperReady = true),
+        )
+        assertEquals(
+            VoiceEngine.NONE,
+            chooseVoiceEngine(false, false, false, whisperReady = true),
+        )
+    }
+
+    @Test
     fun noMicrophoneHidesWhenNoSystem() {
         assertEquals(VoiceEngine.NONE, chooseVoiceEngine(false, true, false))
         assertEquals(VoiceEngine.NONE, chooseVoiceEngine(false, false, false))

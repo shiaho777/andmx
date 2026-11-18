@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -83,6 +84,9 @@ fun VoiceCapsuleBar(state: VoiceCapsuleState) {
             VoicePhase.TRANSCRIBING -> TranscribingCapsule(state)
             VoicePhase.IDLE -> Spacer(Modifier.size(0.dp))
         }
+    }
+    if (state.downloadPhase == WhisperDownloadPhase.DOWNLOADING || state.canOfferModelDownload()) {
+        ModelDownloadCapsule(state)
     }
     state.message?.let { msg ->
         Row(
@@ -169,6 +173,48 @@ private fun RecordingCapsule(state: VoiceCapsuleState) {
                 contentDescription = tr("停止录音"),
                 modifier = Modifier.size(16.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun ModelDownloadCapsule(state: VoiceCapsuleState) {
+    val downloading = state.downloadPhase == WhisperDownloadPhase.DOWNLOADING
+    LaunchedEffect(downloading) {
+        if (downloading) state.downloadModel()
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (downloading) {
+                tr("离线模型下载中") + " ${(state.downloadProgress * 100).toInt()}%"
+            } else {
+                tr("启用离线转写需下载模型")
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (downloading) {
+            Text(
+                "${(state.downloadProgress * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            TextButton(onClick = state::dismissDownloadPrompt) {
+                Text(tr("取消"), style = MaterialTheme.typography.labelMedium)
+            }
+            TextButton(onClick = { state.startModelDownload() }) {
+                Text(tr("下载离线模型（约75MB）"), style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }

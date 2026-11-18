@@ -1345,4 +1345,10 @@
     <string name="str_1342">"· Waiting"</string>
     <string name="str_1343">"… Preparing authorization (metadata discovery / dynamic registration)"</string>
     <string name="str_1344">"✗ Invalid configuration; cannot start authorization"</string>
+    <string name="str_1345">"Offline transcription failed; recording saved"</string>
+    <string name="str_1346">"Offline model ready; voice input works offline"</string>
+    <string name="str_1347">"Offline model download failed; check network and retry"</string>
+    <string name="str_1348">"Offline transcription needs a model download"</string>
+    <string name="str_1349">"Downloading offline model"</string>
+    <string name="str_1350">"Download offline model (~75MB)"</string>
 </resources>
