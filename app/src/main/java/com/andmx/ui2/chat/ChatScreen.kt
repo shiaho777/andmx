@@ -265,6 +265,7 @@ fun ChatScreen(
     var showBranchDialog by remember { mutableStateOf(false) }
     var showWorkspacePicker by remember { mutableStateOf(false) }
     var showGitActions by remember { mutableStateOf(false) }
+    var showConflictResolver by remember { mutableStateOf(false) }
     var showRemoteDialog by remember { mutableStateOf(false) }
     var dirtyFilesCache by remember { mutableStateOf<List<com.andmx.workspace.GitBaseline.ChangedFile>>(emptyList()) }
 
@@ -1766,6 +1767,10 @@ LaunchedEffect(Unit) {
                 onGenerateCommitMessage = { target, cb ->
                     viewModel.generateCommitMessage(targetBranch = target, onDone = cb)
                 },
+                onResolveConflicts = {
+                    showBranchDialog = false
+                    showConflictResolver = true
+                },
                 onDismiss = { showBranchDialog = false },
             )
         }
@@ -1792,7 +1797,21 @@ LaunchedEffect(Unit) {
                 onPickBranch = { showBranchDialog = true },
                 onLoadCommitGraph = { cb -> viewModel.loadCommitGraph(cb) },
                 onLoadCommitLog = { cb -> viewModel.loadCommitLog(cb) },
+                onResolveConflicts = {
+                    showGitActions = false
+                    showConflictResolver = true
+                },
+                onCheckConflicts = { cb -> viewModel.hasGitConflicts(cb) },
                 onDismiss = { showGitActions = false },
+            )
+        }
+
+        if (showConflictResolver) {
+            com.andmx.ui2.files.ConflictResolverDialog(
+                workspacePath = viewModel.workspaceExecPath().orEmpty(),
+                ops = viewModel.conflictOps(),
+                onDismiss = { showConflictResolver = false },
+                onAllResolved = { viewModel.refreshGitInfo() },
             )
         }
 

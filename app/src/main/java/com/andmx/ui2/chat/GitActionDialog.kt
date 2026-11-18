@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Commit
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -59,6 +60,8 @@ fun GitActionDialog(
     onPickBranch: () -> Unit = {},
     onLoadCommitGraph: (onDone: (List<com.andmx.ui2.files.CommitNode>) -> Unit) -> Unit = { cb -> cb(emptyList()) },
     onLoadCommitLog: (onDone: (List<String>) -> Unit) -> Unit = { cb -> cb(emptyList()) },
+    onResolveConflicts: () -> Unit = {},
+    onCheckConflicts: ((Boolean) -> Unit) -> Unit = { cb -> cb(false) },
     onDismiss: () -> Unit,
 ) {
     var mode by remember { mutableStateOf(GitActionMode.MENU) }
@@ -77,6 +80,11 @@ fun GitActionDialog(
     var graphNodes by remember { mutableStateOf<List<com.andmx.ui2.files.CommitNode>>(emptyList()) }
     var graphLoading by remember { mutableStateOf(false) }
     var graphFallback by remember { mutableStateOf<List<String>>(emptyList()) }
+    var hasConflicts by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        onCheckConflicts { hasConflicts = it }
+    }
 
     LaunchedEffect(mode) {
         if (mode != GitActionMode.GRAPH) return@LaunchedEffect
@@ -134,6 +142,25 @@ fun GitActionDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
                     )
+                    if (hasConflicts) {
+                        TextButton(
+                            enabled = !busy,
+                            onClick = { onResolveConflicts() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                Icons.Outlined.WarningAmber,
+                                null,
+                                Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                tr("解决冲突"),
+                                Modifier.padding(start = 8.dp),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                     TextButton(
                         enabled = gitInfo.hasChanges,
                         onClick = {

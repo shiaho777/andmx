@@ -654,6 +654,40 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun hasGitConflicts(onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val path = workspaceExecPath()
+            val conflicts = if (path == null) emptyList()
+            else runCatching { gitBaseline.conflictedFiles(path) }.getOrDefault(emptyList())
+            onDone(conflicts.isNotEmpty())
+        }
+    }
+
+    fun conflictOps(): com.andmx.ui2.files.ConflictOps {
+        fun pathOrEmpty() = workspaceExecPath().orEmpty()
+        return com.andmx.ui2.files.ConflictOps(
+            listFiles = { gitBaseline.conflictedFiles(pathOrEmpty()) },
+            readFile = { p -> gitBaseline.readConflictFileText(pathOrEmpty(), p) },
+            resolveFile = { p, content -> gitBaseline.resolveFile(pathOrEmpty(), p, content) },
+            markResolved = { p ->
+                val result = gitBaseline.markResolved(pathOrEmpty(), p)
+                refreshGitInfo()
+                result
+            },
+            removeFile = { p ->
+                val result = gitBaseline.removeResolved(pathOrEmpty(), p)
+                refreshGitInfo()
+                result
+            },
+            continueOperation = {
+                val result = gitBaseline.continueOperation(pathOrEmpty())
+                refreshGitInfo()
+                result
+            },
+            operation = { gitBaseline.mergeOperation(pathOrEmpty()) },
+        )
+    }
+
     fun generateCommitMessage(
         targetBranch: String? = null,
         onDone: (Result<String>) -> Unit,

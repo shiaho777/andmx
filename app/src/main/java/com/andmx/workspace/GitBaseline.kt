@@ -485,6 +485,120 @@ class GitBaseline(
         }
     }
 
+    enum class MergeOperation { NONE, MERGE, REBASE, CHERRY_PICK, REVERT }
+
+    suspend fun conflictedFiles(workspacePath: String): List<ConflictFile> = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val script = "cd '$workspacePath' 2>/dev/null && git status --porcelain 2>/dev/null"
+        val res = runShell(workspacePath, script, login = false)
+        MergeConflicts.parsePorcelain(res.stdout)
+    }
+
+    suspend fun mergeOperation(workspacePath: String): MergeOperation = withContext(Dispatchers.IO) {
+        val script = buildString {
+            append("cd '$workspacePath' 2>/dev/null || exit 0; ")
+            append("GD=$(git rev-parse --git-dir 2>/dev/null) || exit 0; ")
+            append("if [ -d \"\$GD/rebase-merge\" ] || [ -d \"\$GD/rebase-apply\" ]; then echo OP=REBASE; ")
+            append("elif [ -f \"\$GD/MERGE_HEAD\" ]; then echo OP=MERGE; ")
+            append("elif [ -f \"\$GD/CHERRY_PICK_HEAD\" ]; then echo OP=CHERRY_PICK; ")
+            append("elif [ -f \"\$GD/REVERT_HEAD\" ]; then echo OP=REVERT; ")
+            append("else echo OP=NONE; fi")
+        }
+        val res = runShell(workspacePath, script, login = false)
+        when (extractVar(res.stdout, "OP=")) {
+            "REBASE" -> MergeOperation.REBASE
+            "MERGE" -> MergeOperation.MERGE
+            "CHERRY_PICK" -> MergeOperation.CHERRY_PICK
+            "REVERT" -> MergeOperation.REVERT
+            else -> MergeOperation.NONE
+        }
+    }
+
+    suspend fun readConflictFileText(workspacePath: String, path: String): String? = withContext(Dispatchers.IO) {
+        val script = "cd '$workspacePath' 2>/dev/null && cat -- ${shellEscape(path)} 2>/dev/null"
+        val res = runShell(workspacePath, script, login = false)
+        if (res.exitCode == 0) res.stdout else null
+    }
+
+    suspend fun resolveFile(
+        workspacePath: String,
+        path: String,
+        content: String,
+    ): BaselineResult = withContext(Dispatchers.IO) {
+        if (ConflictParser.hasConflictMarkers(content)) {
+            return@withContext BaselineResult(false, "文件仍包含冲突标记，请先处理全部冲突块。")
+        }
+        val b64 = android.util.Base64.encodeToString(content.toByteArray(), android.util.Base64.NO_WRAP)
+        val escapedPath = shellEscape(path)
+        val script = "cd '$workspacePath' 2>/dev/null && echo ${shellEscape(b64)} | base64 -d > $escapedPath && echo RESOLVE_WRITE_OK"
+        val res = runShell(workspacePath, script, login = true)
+        val ok = res.stdout.contains("RESOLVE_WRITE_OK")
+        BaselineResult(ok, if (ok) "已写入解决后的文件内容" else "写入失败：${res.stdout.take(200)}")
+    }
+
+    suspend fun markResolved(workspacePath: String, path: String): BaselineResult = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val current = runCatching { readConflictFileText(workspacePath, path) }.getOrNull()
+        if (current != null && !ConflictParser.canMarkResolved(current)) {
+            return@withContext BaselineResult(false, "文件仍包含冲突标记，请先处理全部冲突块再标记已解决。")
+        }
+        val escapedPath = shellEscape(path)
+        val script = "cd '$workspacePath' 2>/dev/null && git add -- $escapedPath 2>&1; echo ADD_EXIT=\$?"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr)
+        val ok = "ADD_EXIT=0" in out
+        BaselineResult(
+            ok = ok,
+            message = if (ok) "已标记为已解决：$path" else "标记失败：${out.take(300)}",
+            gitInfo = collectGitInfo(workspacePath),
+        )
+    }
+
+    suspend fun removeResolved(workspacePath: String, path: String): BaselineResult = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val escapedPath = shellEscape(path)
+        val script = "cd '$workspacePath' 2>/dev/null && git rm -- $escapedPath 2>&1; echo RM_EXIT=\$?"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr)
+        val ok = "RM_EXIT=0" in out
+        BaselineResult(
+            ok = ok,
+            message = if (ok) "已按删除标记为已解决：$path" else "标记失败：${out.take(300)}",
+            gitInfo = collectGitInfo(workspacePath),
+        )
+    }
+
+    suspend fun continueOperation(workspacePath: String): BaselineResult = withContext(Dispatchers.IO) {
+        ensureGit(workspacePath)
+        val remaining = conflictedFiles(workspacePath)
+        if (remaining.isNotEmpty()) {
+            return@withContext BaselineResult(false, "仍有 ${remaining.size} 个冲突文件未解决。")
+        }
+        val op = mergeOperation(workspacePath)
+        if (op == MergeOperation.NONE) {
+            return@withContext BaselineResult(false, "当前没有进行中的合并或变基操作。")
+        }
+        val gitArgs = when (op) {
+            MergeOperation.MERGE -> "merge --continue --no-edit"
+            MergeOperation.REBASE -> "rebase --continue"
+            MergeOperation.CHERRY_PICK -> "cherry-pick --continue --no-edit"
+            MergeOperation.REVERT -> "revert --continue --no-edit"
+            MergeOperation.NONE -> return@withContext BaselineResult(false, "当前没有进行中的操作。")
+        }
+        com.andmx.agent.GitSafety.check(gitArgs)?.let {
+            return@withContext BaselineResult(false, it)
+        }
+        val script = "cd '$workspacePath' 2>/dev/null && GIT_EDITOR=true git -c core.pager=cat $gitArgs 2>&1; echo CONTINUE_EXIT=\$?"
+        val res = runShell(workspacePath, script, login = true)
+        val out = combineOut(res.stdout, res.stderr)
+        val ok = "CONTINUE_EXIT=0" in out
+        BaselineResult(
+            ok = ok,
+            message = if (ok) "已继续完成当前操作" else "继续失败：${out.take(400)}",
+            gitInfo = collectGitInfo(workspacePath),
+        )
+    }
+
     /**
      * ZCode-aligned branch switch: attempts checkout/create; on overwrite risk
      * returns TRACKED_OVERWRITE / UNTRACKED_OVERWRITE with affected paths so UI
@@ -556,7 +670,7 @@ class GitBaseline(
         val message = when (issue) {
             SwitchIssue.ALREADY_EXISTS -> "该分支已存在，请换一个名称。"
             SwitchIssue.NOT_FOUND -> "目标分支不存在。"
-            SwitchIssue.CONFLICTS -> "仓库仍有未解决的冲突，请先处理再切换分支。"
+            SwitchIssue.CONFLICTS -> "仓库仍有未解决的冲突，请先点击「解决冲突」处理后再切换分支。"
             SwitchIssue.TRACKED_OVERWRITE -> "切换被阻止：已跟踪文件将被覆盖。"
             SwitchIssue.UNTRACKED_OVERWRITE -> "切换被阻止：未跟踪文件将被覆盖。"
             SwitchIssue.INVALID_NAME -> "分支名无效，请换一个名称。"
