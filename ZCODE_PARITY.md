@@ -593,3 +593,15 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 - whisper 真机转写效果：native 构建与单测已验证，真机实测待设备。
 - 收尾批（删除保护/名册/播种韧性/design 深度/i18n）：按用户指示停止本地编译（本机内存耗尽致 Kotlin daemon 反复 OOM），以静态审查核对全部类型/字段/导入/测试断言与源码一致，验证交由远端 CI 门禁。
 
+## 十一、2026-11-18 上游历史跟进（安全/性能/能力三项）
+
+上游 v3.18.2 后无新提交（HEAD=fec97590）。翻全部 11 个提交历史+官网 changelog，挑出三项高价值跟进，全部 CI 绿合入：
+
+| 项 | PR | 内容 |
+|---|---|---|
+| 工作流沙箱逃逸封堵（安全） | #272 | 上游 changelog 的沙箱安全修复对齐：realm null 原型+净化清单扩充（window/document/frameElement/MessageChannel/crypto 等）、传输全局捕获后删除（防 __deliver 替换 foreign this）、Kotlin 桥全入口 runId 守卫、worldRead 操作白名单+路径越界防护（相对路径禁出 cwd，绝对路径按 guest 根钳制与 Read 工具一致）、artifact runId 校验；逃逸回归探针（constructor 链/外 realm 值/传输全局/入口替换/栈溢出）+ 14 项桥安全单测 + 模拟器冒烟全绿。期间修复 iframe sandbox=allow-scripts 缺 allow-same-origin 导致宿主无法驱动 cell 的回归 |
+| 空闲会话内存回收（性能） | #273 | 对齐上游 session-idle-deactivation 规格：10min idle TTL + highWater16/lowWater8 LRU 迟滞；保护事实（运行/待交互/排队/后台任务/子代理/订阅者/焦点/在途操作/会话工具待发消息）永不回收；60s 周期+惰性评估，复用 clearSession 仅清内存，冷恢复走既有链路；14 项策略单测 |
+| Session 管理工具族（能力） | #274 | 移植上游 8 件中的 5 件模型可见工具：ListSessions/ReadSession/CreateSession/SendToSession/WaitSessions；工作区绑定、不抢焦点、busy 排队 drain、retryOf 幂等账本（512 LRU）、wait 250ms 轮询 120s 上限；子代理经 filterTools 禁用；23 项测试 |
+
+候选清单其余项（视频多模态/Worktree 并行/选中批注/Gen UI/多语言）按价值排序留待后续，见调研记录。
+
