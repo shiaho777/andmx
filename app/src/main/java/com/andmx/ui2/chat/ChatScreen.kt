@@ -1864,9 +1864,9 @@ private fun EmptyConversationState(
                 Text(
                     tr(
                         buildString {
-                            append(tr("开始在 "))
+                            append("开始在 ")
                             append(projectName)
-                            append(tr(" 项目新建任务"))
+                            append(" 项目新建任务")
                         },
                     ),
                     style = MaterialTheme.typography.bodyMedium,
