@@ -67,6 +67,46 @@ export interface RunnerEnv {
   bridge: RunnerBridge;
 }
 
+const BRIDGE_STRING_METHODS = [
+  "saveJournal",
+  "emit",
+  "startAsk",
+  "continueAsk",
+  "cancelAsk",
+  "worldRead",
+  "publishArtifact",
+  "settled",
+  "snippetSettled",
+  "log",
+] as const;
+
+const BRIDGE_METHODS = [...BRIDGE_STRING_METHODS, "createActor", "actorMessageCount"] as const;
+
+export function guardBridge(bridge: RunnerBridge): RunnerBridge {
+  const guarded: Record<string, unknown> = Object.create(null);
+  for (const name of BRIDGE_STRING_METHODS) {
+    guarded[name] = (...args: unknown[]) => {
+      const method = bridge[name] as (...inner: string[]) => void;
+      method.apply(bridge, args.map((arg) => String(arg)) as string[]);
+    };
+  }
+  guarded.createActor = (
+    runId: unknown,
+    siteId: unknown,
+    ordinal: unknown,
+    personaJson: unknown,
+    seedJson: unknown,
+  ) => {
+    bridge.createActor(String(runId), String(siteId), Number(ordinal) || 0, String(personaJson), String(seedJson));
+  };
+  guarded.actorMessageCount = (sessionId: unknown) => bridge.actorMessageCount(String(sessionId));
+  return guarded as unknown as RunnerBridge;
+}
+
+export function isBridgeMethod(name: string): boolean {
+  return (BRIDGE_METHODS as readonly string[]).includes(name);
+}
+
 export interface StartConfig {
   runId: string;
   lowered: string;
@@ -307,7 +347,10 @@ export class WorkflowRunner {
   >();
   private readonly snippets = new Map<string, { driver: SnippetDriver; endpoint: DeviceEndpoint }>();
 
-  constructor(private readonly env: RunnerEnv) {
+  private readonly env: RunnerEnv;
+
+  constructor(env: RunnerEnv) {
+    this.env = { createRealm: env.createRealm, bridge: guardBridge(env.bridge) };
     if (typeof structuredClone === "undefined") {
       (globalThis as unknown as { structuredClone: <T>(value: T) => T }).structuredClone =
         <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -338,6 +381,10 @@ export class WorkflowRunner {
     applyRealmSanitizer(realm);
     const payload: ChildPayload = {
       lowered: config.lowered,
+      run: {
+        id: config.runId,
+        ...(config.resumedFrom === undefined ? {} : { resumedFrom: config.resumedFrom }),
+      },
       ...(config.args === undefined ? {} : { args: config.args }),
     };
     const handle = startRun({
@@ -408,7 +455,7 @@ export class WorkflowRunner {
     const realm = await this.env.createRealm();
     endpoint.bindClose(() => realm.close?.());
     applyRealmSanitizer(realm);
-    const payload: ChildPayload = { lowered: config.lowered };
+    const payload: ChildPayload = { lowered: config.lowered, run: { id: config.runId } };
     const handle = startRun({
       runId: config.runId,
       endpoint,

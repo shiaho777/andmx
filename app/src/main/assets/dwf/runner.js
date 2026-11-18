@@ -567,6 +567,31 @@ globalThis.__host.future = __future;
     const BOOTSTRAP = String.raw`
 "use strict";
 
+// —— 传输（跨 realm 的唯一出口）——
+// 外层 realm 放在全局上的两个宿主函数 __send / __finish，必须在任何其他代码运行前收进闭包并从
+// 全局删掉。原因：脚本只要拿到一个外层函数，fn.constructor 就是外层 realm 的 Function，
+// Function("return process")() 即拿到宿主 process（vm 逃逸，零审批执行任意命令）。
+// 包装层还要吞掉宿主函数抛出的一切：宿主异常同样属于外层 realm（比如栈将满时进入宿主函数
+// 溢出的 RangeError），它的 .constructor.constructor 也是外层 Function。只有字符串过界。
+var __emitLine;
+var __finishExecution;
+(function (send, finish) {
+  __emitLine = function (line) {
+    try {
+      send(line);
+    } catch (hostError) {
+      throw new Error("workflow transport failed");
+    }
+  };
+  __finishExecution = function () {
+    try {
+      finish();
+    } catch (hostError) {}
+  };
+})(__send, __finish);
+delete globalThis.__send;
+delete globalThis.__finish;
+
 var __nextLocal = 0;
 var __nextReq = 0;
 var __pending = new Map();
@@ -574,7 +599,7 @@ var __pending = new Map();
 var __fills = new Map();
 
 function __emit(obj) {
-  __send(JSON.stringify(obj));
+  __emitLine(JSON.stringify(obj));
 }
 
 function __createActor(siteId, name, persona) {
@@ -672,9 +697,12 @@ function __report(siteId, item, artifactId) {
 // ⚠ Object.freeze 是**浅**冻结：嵌套对象未冻结，脚本仍能改动 args.foo.bar。v1 接受这个
 // 界限——它挡的是"手滑重新赋值 args"，不是一个安全边界（实参本来就是调用方给的）。
 var __args = Object.freeze(JSON.parse(__argsJson));
+// run 身份（facade 的 run 全局）同一种构造：context 内 JSON.parse、浅冻结（它本身就是平的）。
+var __run = Object.freeze(JSON.parse(__runJson));
 
 globalThis.__host = {
   args: __args,
+  run: __run,
   createActor: __createActor,
   ask: __ask,
   worldRead: __worldRead,
@@ -734,14 +762,22 @@ function __complete(ok, payload) {
   __emit({ kind: "complete", ok: false, error: wire });
 }
 
-// 外层 realm 调用它跑脚本；始终 resolve（错误已转成 complete 消息），便于外层收尾（关 stdin）。
+// 外层 realm 调用它跑脚本，收尾经 __finishExecution 通知外层（关 stdin）。外层不对这里返回的
+// promise 调 then：脚本能改写 Promise.prototype.then，从而收到外层传进来的回调（又一条逃逸路径）。
+// 所以本函数必须自己吞掉一切、无条件走到 __finishExecution。
 globalThis.__execute = async function (runFn) {
   try {
-    var value = await runFn(globalThis.__host);
-    __complete(true, value);
-  } catch (e) {
-    __complete(false, e);
+    try {
+      var value = await runFn(globalThis.__host);
+      __complete(true, value);
+    } catch (e) {
+      __complete(false, e);
+    }
+  } catch (completeError) {
+    // __complete 只在脚本改坏了 cell 的 intrinsics 时才会抛；run 仍要收尾，父进程据
+    // 「退出而未完成」把它判成 interrupted。
   }
+  __finishExecution();
 };
 
 // —— 运行期禁令（belt；编译诊断是 suspenders）：Date.now / argless new Date() / Math.random ——
@@ -767,16 +803,26 @@ Math.random = function () {
 };
 `;
     const payload = deps.payload;
-    const sandbox = {
-      __argsJson: JSON.stringify(payload.args ?? {})
-    };
+    const sandbox = /* @__PURE__ */ Object.create(null);
+    sandbox.__argsJson = JSON.stringify(payload.args ?? {});
+    sandbox.__runJson = JSON.stringify(payload.run);
     sandbox.__send = (line) => {
-      deps.stdout.write(`${line}
-`);
+      if (typeof line === "string") deps.stdout.write(line + "\n");
+    };
+    let settleExecution;
+    const execution = new Promise((resolve) => {
+      settleExecution = resolve;
+    });
+    sandbox.__finish = () => {
+      reader.close();
+      settleExecution?.();
     };
     deps.vm.createContext(sandbox, { name: "workflow-sandbox" });
     deps.vm.runInContext(BOOTSTRAP, sandbox, { filename: "workflow-bootstrap.js" });
     deps.vm.runInContext(deps.streamsBootstrap, sandbox, { filename: "workflow-streams.js" });
+    const deliver = sandbox.__deliver;
+    const execute = sandbox.__execute;
+    const checkStalled = sandbox.__checkStalled;
     let runFn;
     try {
       runFn = deps.vm.runInContext(`(async (__host) => {
@@ -803,24 +849,29 @@ ${payload.lowered}
     const reader = deps.createInterface({ input: deps.stdin });
     reader.on("line", (line) => {
       if (!line.trim()) return;
-      sandbox.__deliver(line);
+      deliver(line);
       setImmediate(() => {
-        if (sandbox.__checkStalled()) reader.close();
+        if (checkStalled()) reader.close();
       });
     });
-    const execution = sandbox.__execute(runFn).then(
-      () => reader.close(),
-      () => reader.close()
-    );
+    void execute(runFn);
     setImmediate(() => {
-      if (sandbox.__checkStalled()) reader.close();
+      if (checkStalled()) reader.close();
     });
     return execution;
   }
   __name(childMain, "childMain");
 
   // src/cell.ts
-  var LINKED_KEYS = ["__deliver", "__execute", "__checkStalled", "__send", "__argsJson"];
+  var LINKED_KEYS = [
+    "__deliver",
+    "__execute",
+    "__checkStalled",
+    "__send",
+    "__finish",
+    "__argsJson",
+    "__runJson"
+  ];
   function createVm(realm) {
     const target = realm.global;
     return {
@@ -848,16 +899,36 @@ ${payload.lowered}
   function startCell(options) {
     const { realm, port, payload, streamsBootstrap } = options;
     let closed = false;
+    let native;
+    const baseVm = createVm(realm);
+    const vm = {
+      createContext: /* @__PURE__ */ __name((sandbox, vmOptions) => baseVm.createContext(sandbox, vmOptions), "createContext"),
+      runInContext(code, sandbox, vmOptions) {
+        const value = baseVm.runInContext(code, sandbox, vmOptions);
+        if (vmOptions?.filename === "workflow-streams.js") {
+          native = realm.evaluate(
+            "({ deliver: globalThis.__deliver, checkStalled: globalThis.__checkStalled })",
+            "cell-entry-capture.js"
+          );
+        }
+        return value;
+      }
+    };
     return childMain({
       createInterface: /* @__PURE__ */ __name(() => ({
         close: /* @__PURE__ */ __name(() => {
           closed = true;
         }, "close"),
-        on: /* @__PURE__ */ __name((event, listener) => {
+        on: /* @__PURE__ */ __name((event, _received) => {
           if (event !== "line") return void 0;
           port.onLine((line) => {
-            if (closed || line.trim() === "") return;
-            listener(line);
+            if (closed || line.trim() === "" || native === void 0) return;
+            const deliver = native.deliver;
+            const checkStalled = native.checkStalled;
+            deliver(line);
+            setImmediate(() => {
+              if (checkStalled()) closed = true;
+            });
           });
           return void 0;
         }, "on")
@@ -872,7 +943,7 @@ ${payload.lowered}
       },
       payload,
       streamsBootstrap,
-      vm: createVm(realm)
+      vm
     });
   }
   __name(startCell, "startCell");
@@ -889,7 +960,10 @@ ${payload.lowered}
     "Worker", "SharedWorker", "ServiceWorker", "importScripts",
     "postMessage", "addEventListener", "removeEventListener", "dispatchEvent",
     "localStorage", "sessionStorage", "indexedDB", "caches", "navigator",
-    "console", "alert", "confirm", "prompt", "open", "close"
+    "console", "alert", "confirm", "prompt", "open", "close",
+    "window", "document", "frameElement", "location", "history",
+    "MessageChannel", "MessagePort", "BroadcastChannel", "Notification",
+    "performance", "crypto", "origin", "external"
   ];
   for (var i = 0; i < names.length; i++) {
     var name = names[i];
@@ -949,6 +1023,19 @@ ${payload.lowered}
   }
   __name(inputHash, "inputHash");
 
+  // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/ask-observation-types.ts
+  var INSTRUCTIONS_HEAD_MAX_CHARS = 240;
+
+  // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/types.ts
+  function refToString(ref) {
+    return `${ref.siteId}@${ref.ordinal}`;
+  }
+  __name(refToString, "refToString");
+  var MAX_WEB_SEARCH_BUDGET_PER_ASK = 1024;
+  var WORLD_READ_INPUT_MAX_BYTES = 4096;
+  var REPAIR_ATTEMPTS = 3;
+  var NUDGE_ATTEMPTS = 1;
+
   // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/persona.ts
   function normalizePersona(name, persona) {
     const base = {};
@@ -958,17 +1045,29 @@ ${payload.lowered}
       if (typeof persona.name === "string") base.name = persona.name;
       if (typeof persona.system === "string") base.system = persona.system;
       if (typeof persona.model === "string") base.model = persona.model;
+      const budget = normalizeBudget(persona.budget);
+      if (budget !== void 0) base.budget = budget;
     }
     if (base.name === void 0 && name !== void 0) base.name = name;
     return base;
   }
   __name(normalizePersona, "normalizePersona");
   function personaIdentity(persona) {
-    const { model: _model, ...identity } = persona;
+    const { model: _model, budget: _budget, ...identity } = persona;
     void _model;
+    void _budget;
     return identity;
   }
   __name(personaIdentity, "personaIdentity");
+  function normalizeBudget(budget) {
+    if (budget === null || typeof budget !== "object") return void 0;
+    const webSearch = budget.webSearch;
+    if (typeof webSearch !== "number" || !Number.isInteger(webSearch) || webSearch < 0 || webSearch > MAX_WEB_SEARCH_BUDGET_PER_ASK) {
+      return void 0;
+    }
+    return { webSearch };
+  }
+  __name(normalizeBudget, "normalizeBudget");
 
   // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/imported-cache.ts
   var _ImportedActorState = class _ImportedActorState {
@@ -1157,18 +1256,6 @@ ${payload.lowered}
     return record;
   }
   __name(importedAskRecord, "importedAskRecord");
-
-  // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/ask-observation-types.ts
-  var INSTRUCTIONS_HEAD_MAX_CHARS = 240;
-
-  // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/types.ts
-  function refToString(ref) {
-    return `${ref.siteId}@${ref.ordinal}`;
-  }
-  __name(refToString, "refToString");
-  var WORLD_READ_INPUT_MAX_BYTES = 4096;
-  var REPAIR_ATTEMPTS = 3;
-  var NUDGE_ATTEMPTS = 1;
 
   // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/engine/cached-ask-facts.ts
   function cachedAskFacts(actor, seq, instructions, imported) {
@@ -1781,6 +1868,8 @@ declare interface AgentPersona {
   system?: string;
   /** Model id literal or ModelRef; omitted = the run's subagent model. */
   model?: ModelRef | string;
+  /** WebSearch calls per ask (integer literal, at most 1024); omitted = 128. */
+  budget?: { webSearch?: number };
 }
 
 /**
@@ -1996,9 +2085,8 @@ declare const git: {
 declare interface WorldRunResult {
   /** The process exit code. Nonzero is a normal, returned outcome — branch on it. */
   exitCode: number;
-  /** Captured stdout (UTF-8). Capped at 256KB; over the cap the call rejects. */
+  /** Captured output (UTF-8), shaped by opts.output. */
   stdout: string;
-  /** Captured stderr (UTF-8). Same cap and rejection semantics as stdout. */
   stderr: string;
 }
 
@@ -2010,9 +2098,11 @@ declare interface WorldRunResult {
  * literal, shown to the user at confirmation. Fixed argv, never a shell: no pipes,
  * redirection or expansion. cwd is the workspace. Node builtins are reachable as
  * world.run("node", ["-e", code]).
+ * opts.output (both streams): "full" (default) rejects over 16 MiB; "discard" is "";
+ * { tail: n } keeps the last n bytes, n <= 16777216 (16 MiB). Neither bounds what the process prints.
  */
 declare const world: {
-  run(cmd: string, args?: string[], opts?: { timeoutMs?: number }): Promise<WorldRunResult>;
+  run(cmd: string, args?: string[], opts?: { timeoutMs?: number; output?: "full" | "discard" | { tail: number } }): Promise<WorldRunResult>;
 };
 `;
   var FACADE_ARGS_SEGMENT = String.raw`
@@ -2024,10 +2114,17 @@ declare const world: {
  */
 declare const args: Readonly<Record<string, unknown>>;
 `;
-  var FACADE_DTS = FACADE_ACTOR_SEGMENT + FACADE_ARGS_SEGMENT + FACADE_LOG_SEGMENT + FACADE_REPORT_SEGMENT + FACADE_ARTIFACT_SEGMENT + FACADE_PHASE_SEGMENT + // 留白段只进完整 facade（docs/dynamic-workflow/authoring.md「Holes」）：片段没有 run，也就
+  var FACADE_RUN_SEGMENT = String.raw`
+/**
+ * This run's id, and the run it amends. ResumeWorkflowRun keeps both; AmendWorkflow mints a
+ * new id. Keep them out of ask text, personas and world arguments: those are cache keys.
+ */
+declare const run: { readonly id: string; readonly resumedFrom?: string };
+`;
+  var FACADE_DTS = FACADE_ACTOR_SEGMENT + FACADE_ARGS_SEGMENT + FACADE_RUN_SEGMENT + FACADE_LOG_SEGMENT + FACADE_REPORT_SEGMENT + FACADE_ARTIFACT_SEGMENT + FACADE_PHASE_SEGMENT + // 留白段只进完整 facade（docs/dynamic-workflow/authoring.md「Holes」）：片段没有 run，也就
   // 没有可等主代理补全的东西，snippet 里的 `hole(...)` 得到 TS2304，教删除。
   FACADE_HOLE_SEGMENT + FACADE_WORLD_SEGMENT + FACADE_WORLD_RUN_SEGMENT + FACADE_STREAM_SEGMENT;
-  var SNIPPET_FACADE_DTS = FACADE_ARGS_SEGMENT + FACADE_LOG_SEGMENT + FACADE_WORLD_SEGMENT + FACADE_WORLD_RUN_SEGMENT + FACADE_STREAM_SEGMENT;
+  var SNIPPET_FACADE_DTS = FACADE_ARGS_SEGMENT + FACADE_RUN_SEGMENT + FACADE_LOG_SEGMENT + FACADE_WORLD_SEGMENT + FACADE_WORLD_RUN_SEGMENT + FACADE_STREAM_SEGMENT;
 
   // ../../ZCode-main/apps/zcode-cli/packages/dynamic-workflow/src/facade/registry.ts
   var WORLD_READ_REGISTRY = [
@@ -4041,6 +4138,34 @@ declare const args: Readonly<Record<string, unknown>>;
   __name(readSupersededBy, "readSupersededBy");
 
   // src/android-runner.ts
+  var BRIDGE_STRING_METHODS = [
+    "saveJournal",
+    "emit",
+    "startAsk",
+    "continueAsk",
+    "cancelAsk",
+    "worldRead",
+    "publishArtifact",
+    "settled",
+    "snippetSettled",
+    "log"
+  ];
+  var BRIDGE_METHODS = [...BRIDGE_STRING_METHODS, "createActor", "actorMessageCount"];
+  function guardBridge(bridge2) {
+    const guarded = /* @__PURE__ */ Object.create(null);
+    for (const name of BRIDGE_STRING_METHODS) {
+      guarded[name] = (...args) => {
+        const method = bridge2[name];
+        method.apply(bridge2, args.map((arg) => String(arg)));
+      };
+    }
+    guarded.createActor = (runId, siteId, ordinal, personaJson, seedJson) => {
+      bridge2.createActor(String(runId), String(siteId), Number(ordinal) || 0, String(personaJson), String(seedJson));
+    };
+    guarded.actorMessageCount = (sessionId) => bridge2.actorMessageCount(String(sessionId));
+    return guarded;
+  }
+  __name(guardBridge, "guardBridge");
   var SNIPPET_MAX_LOGS = 100;
   var SNIPPET_MAX_LOG_CHARS = 2048;
   var SNIPPET_MAX_ARTIFACT_BYTES = 256 * 1024;
@@ -4168,9 +4293,10 @@ declare const args: Readonly<Record<string, unknown>>;
   __name(importedCacheFromJournal, "importedCacheFromJournal");
   var _WorkflowRunner = class _WorkflowRunner {
     constructor(env) {
-      __publicField(this, "env", env);
       __publicField(this, "runs", /* @__PURE__ */ new Map());
       __publicField(this, "snippets", /* @__PURE__ */ new Map());
+      __publicField(this, "env");
+      this.env = { createRealm: env.createRealm, bridge: guardBridge(env.bridge) };
       if (typeof structuredClone === "undefined") {
         globalThis.structuredClone = (value) => JSON.parse(JSON.stringify(value));
       }
@@ -4194,6 +4320,10 @@ declare const args: Readonly<Record<string, unknown>>;
       applyRealmSanitizer(realm);
       const payload = {
         lowered: config.lowered,
+        run: {
+          id: config.runId,
+          ...config.resumedFrom === void 0 ? {} : { resumedFrom: config.resumedFrom }
+        },
         ...config.args === void 0 ? {} : { args: config.args }
       };
       const handle = startRun({
@@ -4260,7 +4390,7 @@ declare const args: Readonly<Record<string, unknown>>;
       const realm = await this.env.createRealm();
       endpoint.bindClose(() => realm.close?.());
       applyRealmSanitizer(realm);
-      const payload = { lowered: config.lowered };
+      const payload = { lowered: config.lowered, run: { id: config.runId } };
       const handle = startRun({
         runId: config.runId,
         endpoint,
@@ -4746,6 +4876,7 @@ declare const args: Readonly<Record<string, unknown>>;
   async function createIframeRealm() {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
+    iframe.setAttribute("sandbox", "allow-scripts");
     iframe.style.display = "none";
     iframe.src = "about:blank";
     const loaded = new Promise((resolve, reject) => {
@@ -4768,7 +4899,7 @@ declare const args: Readonly<Record<string, unknown>>;
   __name(createIframeRealm, "createIframeRealm");
   ensureSetImmediate();
   var runner = new WorkflowRunner({ createRealm: createIframeRealm, bridge: __andmx });
-  window.__DWF_RUNNER = {
+  window.__DWF_RUNNER = Object.freeze({
     start: /* @__PURE__ */ __name((configJson) => runner.start(configJson), "start"),
     evalSnippet: /* @__PURE__ */ __name((configJson) => runner.evalSnippet(configJson), "evalSnippet"),
     askResult: /* @__PURE__ */ __name((requestId, resultJson) => runner.askResult(requestId, resultJson), "askResult"),
@@ -4779,5 +4910,5 @@ declare const args: Readonly<Record<string, unknown>>;
     markMutating: /* @__PURE__ */ __name((runId, siteId, ordinal) => runner.markMutating(runId, siteId, ordinal), "markMutating"),
     stop: /* @__PURE__ */ __name((runId, reason, supersededBy) => runner.stop(runId, reason, supersededBy), "stop"),
     cancel: /* @__PURE__ */ __name((runId) => runner.cancel(runId), "cancel")
-  };
+  });
 })();
