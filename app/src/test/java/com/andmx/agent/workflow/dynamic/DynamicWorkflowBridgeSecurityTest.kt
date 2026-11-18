@@ -62,20 +62,24 @@ class DynamicWorkflowBridgeSecurityTest {
     }
 
     @Test
-    fun absolutePathOutsideCwdIsRejected() {
-        assertNull(
-            DynamicWorkflowBridgeSecurity.normalizeWorldReadArgs(
-                "read",
-                "[\"/etc/passwd\"]",
-                "/root/project",
-            ),
+    fun absolutePathClampsAtGuestRootLikeReadTool() {
+        val escaped = DynamicWorkflowBridgeSecurity.normalizeWorldReadArgs(
+            "read",
+            "[\"/root/project/../../../../etc/passwd\"]",
+            "/root/project",
+        )!!
+        assertEquals(
+            "/etc/passwd",
+            Json.parseToJsonElement(escaped).jsonArray[0].jsonPrimitive.content,
         )
-        assertNull(
-            DynamicWorkflowBridgeSecurity.normalizeWorldReadArgs(
-                "read",
-                "[\"/root/project/../secrets.txt\"]",
-                "/root/project",
-            ),
+        val sibling = DynamicWorkflowBridgeSecurity.normalizeWorldReadArgs(
+            "read",
+            "[\"/root/project/../secrets.txt\"]",
+            "/root/project",
+        )!!
+        assertEquals(
+            "/root/secrets.txt",
+            Json.parseToJsonElement(sibling).jsonArray[0].jsonPrimitive.content,
         )
     }
 

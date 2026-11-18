@@ -114,17 +114,16 @@ internal object DynamicWorkflowBridgeSecurity {
         val clean = raw.replace('\\', '/')
         val baseParts = normalizedBase.split('/').filter { it.isNotEmpty() }
         val stack = ArrayDeque<String>()
-        if (!clean.startsWith("/")) stack.addAll(baseParts)
+        val absolute = clean.startsWith("/")
+        if (!absolute) stack.addAll(baseParts)
         clean.split('/').forEach { part ->
             when (part) {
                 "", "." -> Unit
-                ".." -> {
-                    if (stack.isEmpty()) return true
-                    stack.removeLast()
-                }
+                ".." -> if (stack.isNotEmpty()) stack.removeLast()
                 else -> stack.addLast(part)
             }
         }
+        if (absolute) return false
         if (stack.size < baseParts.size) return true
         return baseParts.indices.any { stack[it] != baseParts[it] }
     }
