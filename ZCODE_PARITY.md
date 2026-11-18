@@ -1,16 +1,18 @@
 # AndMX ↔ ZCode 1:1 对标报告
 
-对标时间：2026-11-10
+对标时间：2026-11-18（最新）；2026-11-10（首轮）
 上游基线：`github.com/zai-org/ZCode`
 
-## 一、上游同步结论：已同步到 3.17.2
+## 一、上游同步结论：已同步到 3.18.2
 
 | 项 | 值 |
 |----|-----|
-| 本地快照 | `ZCode-main/`，commit `a9fe401e`（2026-11-03 `chore: sync ZCode source v3.17.2`） |
-| 上一轮基线 | `3c5b227`（2026-10-20，`3.16.2`） |
-| 根版本号 | `package.json` → `3.17.2` |
-| 中间同步 | `a60ba6a7`（2026-10-30）、`a9fe401e`（2026-11-03） |
+| 本地快照 | `ZCode-main/`，tag `v3.18.2`，commit `fec97590`（2026-11-16 发布，`chore: sync ZCode source v3.18.2`；2026-11-18 经 git 浅克隆整目录替换） |
+| 上一轮基线 | `a9fe401e`（2026-11-03，`3.17.2`） |
+| 根版本号 | `package.json` → `3.18.2` |
+| 中间同步 | `a60ba6a7`（2026-10-30）、`a9fe401e`（2026-11-03）、`fec97590`（2026-11-18） |
+
+v3.17.2 → v3.18.2 增量与 AndMX 覆盖情况见第九、十节。以下 3.16.2 → 3.17.2 审计保留为历史记录。
 
 ### 3.16.2 → 3.17.2 更新审计
 
@@ -28,7 +30,7 @@
 | 运行时/协议 | session features header、local TTFT、stale revision 恢复、MCP node fallback/isolation、project config scope、official command endpoint | **评估后 N/A / 暂缓**：前几项属桌面/服务端统计或投影协议；MCP isolation 需 per-session 连接池，AndMX 全局 MCP manager 暂不改造 |
 | Desktop/远程/Electron | Electron 44、remote daemon lifecycle、remote tickets、数据同步、发布链 | N/A：桌面/远程宿主专属，不进入 Android 移植 |
 
-后续对标仍以 `ZCode-main/` 的 `a9fe401e` 为准；新移植项在上表更新状态并附 Issue/PR。
+（历史）该轮对标以 `ZCode-main/` 的 `a9fe401e` 为准；当前基线已推进到 `fec97590`（v3.18.2），见第九、十节。
 
 ## 二、判定口径
 
@@ -547,16 +549,47 @@ journal 写入的次数就是「同步桥可行性」的答案：**每次 ask �
 | Extension Host（上游 v3.18 新增） | P9 | Application 级宿主 + 受限 WebView JSON-RPC 桥 + 5 类 UI 插槽 + Keystore plugin-secrets + 15s 启动预算降级 |
 | canonical Agent 工具名（报告旧待核项） | — | 已补齐（ZCodeAgentTool reportedName="Agent"），销项 |
 
-### 仍留尾巴（如实记录，不假装闭环）
+### 仍留尾巴（已于 2026-11-18 收尾全部闭环，见第十节）
 
-1. **合并冲突交互解决**：仍仅检测+提示（GitBaseline），无解决 UI。
-2. **whisper.cpp 离线转写**：语音第三级为「仅录音+如实提示」，NDK 离线模型未集成。
-3. **Extension Host 宿主实例 API**：UI 插槽当前用占位 WebView 渲染 htmlAsset，宿主 acquire 实例开放后替换（ExtensionSlotWebView 处）。
-4. **上游 v3.18 其余增量**：session-control 包边界（oxlint 规则）、归档永久删除的物理清理细节、插件启动预算的细粒度指标，按 Android 形态做了等价实现而非逐行对齐。
-5. **快照版本**：ZCode-main/ 仍为 v3.17.2，建议下次同步到 v3.18.2 并重跑对标。
+1. ~~合并冲突交互解决~~ → 已闭环（#267）。
+2. ~~whisper.cpp 离线转写~~ → 已闭环（#269）。
+3. ~~Extension Host 宿主实例 API~~ → 已闭环（#268）。
+4. 上游 v3.18 其余增量：session-control 包边界（oxlint 规则）属工程形态差异；归档删除保护与插件缓存韧性已在第十节补齐。
+5. ~~快照版本~~ → 已同步 v3.18.2（fec97590）。
 
 ### 验证口径
 
 每阶段：双 flavor（lite/proot）Kotlin 编译 + 全量 Robolectric/JUnit 单测 + GitHub CI/build 门禁绿后合入。
 最终基线：1751 项单测 0 失败。新增测试覆盖：高亮快照/SGR/diff/查找/回合/提交图/SSH 死锁回归/DCR 双路径/持久化恢复/BM25/Office 回读/语音决策矩阵/i18n 资源往返/桥渗透（越权方法/文件 URL/网络/超限）。
+
+## 十、2026-11-18 收尾：尾巴全清 + 旧 Issue 修复 + 上游同步 v3.18.2
+
+### 已闭环
+
+| 项 | PR | 说明 |
+|---|---|---|
+| #241 二次长按选择崩溃 | #266 | 根因：链接长按菜单/Mermaid 对话框/选择工具条弹窗文本继承消息 SelectionRegistrar 但跨 layout 层级，sort 求公共祖先抛异常。修复：三处弹窗内容包 DisableSelection（对齐 JetBrains CMP-9161 官方建议） |
+| #189 空状态英文文案 | #266 | 副标题双重 tr 导致整句模板永不命中；去内层 tr 后命中 UiPhrases 模板。建议卡/执行模式经核实 P7 已双语齐全 |
+| 合并冲突交互解决 UI | #267 | porcelain 状态解析 + ConflictParser（ours/theirs/diff3 base、行号、malformed 防护）+ 四种解决策略 + ConflictResolverScreen（对照块/标记已解决/继续 merge/rebase/cherry-pick/revert，经 GitSafety）+ 三处入口 |
+| Extension Host 实例 API | #268 | acquireForSlot（每插件单实例、degraded 返 null 回退占位）+ attach/detachWebView（防多 parent）；UI 插槽接宿主沙箱 WebView（带 JSON-RPC 桥） |
+| whisper.cpp 离线转写 | #269 | vendored v1.9.5-dev（8302b819，MIT，CPU 后端 6.6MB）；CMake andmxwhisper（arm64-v8a）；JNI init/transcribe/release；ggml-tiny.bin 运行时下载（SHA256+大小+魔数三重校验）；AudioRecord 16kHz PCM；引擎链 system→provider→whisper-offline→save-only→hidden；native 构建产物验证 |
+| 上游快照同步 | 本地 | ZCode-main/ v3.17.2→v3.18.2（git 浅克隆整目录替换，codeload tarball 不支持 Range 续传故弃用）；旧快照备份 /tmp/zcode-sync/ZCode-main-v3.17.2-backup |
+
+### v3.18.2 重跑对标新发现 → 本轮补齐
+
+| 缺口 | 现状 |
+|---|---|
+| 删除无并发保护/预览（上游 permanent-deletion 两阶段） | DeletionGuard：运行中阻断+删除中防重复+级联清理预览（消息数/rollout/topics）；DeleteDialog 两阶段；DeleteBlockedDialog |
+| GetWorkflowRunRoster 被引用未注册 | WorkflowRoster.kt 结构化名册（actorId/role/status/model/name/phase/nodeId/attempt）+ GetRunRoster 工具注册 + GetWorkflowRun format=text/json |
+| 内置插件播种无重试/回滚 | BuiltinSeedPolicy：3 次重试+manifest 健康检查+暂存原子替换失败回滚保留旧版+SeedReport 如实报失败 |
+| design 插件深度不足 | design-lint 脚本工具（token 一致性检查）+ design-rules SessionStart hook + DESIGN.md 设计体系 + radius/shadow token（与 UI 源码数值断言一致） |
+| DrawerParts 删除确认文案硬编码 | 包 tr() + 模板/资源补齐（str_1351–1355） |
+
+### 如实保留（平台性/待确认，不算缺口）
+
+- design-runtime 的 elementInspector/pageRuntime：桌面 IDE 形态，Android N/A。
+- ReplyToChannel：需飞书宿主，半平台性，未实现。
+- 旧版 "Workflow" 独立工具别名：语义由 CreateWorkflow 覆盖，是否需别名待维护者确认。
+- whisper 真机转写效果：native 构建与单测已验证，真机实测待设备。
+- 收尾批（删除保护/名册/播种韧性/design 深度/i18n）：按用户指示停止本地编译（本机内存耗尽致 Kotlin daemon 反复 OOM），以静态审查核对全部类型/字段/导入/测试断言与源码一致，验证交由远端 CI 门禁。
 

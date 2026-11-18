@@ -66,11 +66,45 @@ class DesignTokensAssetTest {
     fun spacingTokensMatchChromeSource() {
         val chrome = assetFile("src/main/java/com/andmx/ui2/theme/Chrome.kt").readText()
         val spacing = tokens["spacing"]!!.jsonObject
+        val radius = tokens["radius"]!!.jsonObject
         val gutter = Regex("""gutter\s*=\s*(\d+)\.dp""").find(chrome)!!.groupValues[1].toInt()
         val bubble = Regex("""bubble\s*=\s*RoundedCornerShape\((\d+)\.dp\)""").find(chrome)!!.groupValues[1].toInt()
+        val sheet = Regex("""sheet\s*=\s*RoundedCornerShape\(topStart\s*=\s*(\d+)\.dp""").find(chrome)!!.groupValues[1].toInt()
         assertEquals(gutter, spacing["gutterDp"]!!.jsonPrimitive.content.toInt())
-        assertEquals(bubble, spacing["bubbleRadiusDp"]!!.jsonPrimitive.content.toInt())
-        assertEquals(bubble, spacing["sheetRadiusDp"]!!.jsonPrimitive.content.toInt())
+        assertEquals(bubble, radius["bubbleDp"]!!.jsonPrimitive.content.toInt())
+        assertEquals(sheet, radius["sheetDp"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun spacingScaleIsFourDpGrid() {
+        val spacing = tokens["spacing"]!!.jsonObject
+        val scale = listOf("xsDp", "smDp", "mdDp", "lgDp", "xlDp")
+        assertEquals(listOf(4, 8, 12, 16, 24), scale.map { spacing[it]!!.jsonPrimitive.content.toInt() })
+        scale.forEach { assertEquals(0, spacing[it]!!.jsonPrimitive.content.toInt() % 4) }
+        assertEquals(spacing["lgDp"]!!.jsonPrimitive.content, spacing["gutterDp"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun radiusTokensMatchUiSource() {
+        val radius = tokens["radius"]!!.jsonObject
+        assertEquals(listOf(2, 8, 12), listOf("xsDp", "smDp", "mdDp").map { radius[it]!!.jsonPrimitive.content.toInt() })
+        val markdown = assetFile("src/main/java/com/andmx/ui2/markdown/MarkdownView.kt").readText()
+        val themeCard = assetFile("src/main/java/com/andmx/ui2/settings/ThemeCard.kt").readText()
+        assertTrue(markdown.contains("RoundedCornerShape(${radius["xsDp"]!!.jsonPrimitive.content}.dp)"))
+        assertTrue(markdown.contains("RoundedCornerShape(${radius["smDp"]!!.jsonPrimitive.content}.dp)"))
+        assertTrue(themeCard.contains("RoundedCornerShape(${radius["mdDp"]!!.jsonPrimitive.content}.dp)"))
+    }
+
+    @Test
+    fun shadowTokensMatchUiSource() {
+        val shadow = tokens["shadow"]!!.jsonObject
+        val modelPage = assetFile("src/main/java/com/andmx/ui2/settings/pages/ModelPage.kt").readText()
+        val toolbar = assetFile("src/main/java/com/andmx/ui2/chat/SelectionToolbar.kt").readText()
+        val drag = Regex("""if\s*\(dragging\)\s*(\d+)\.dp\s*else\s*(\d+)\.dp""").find(modelPage)!!
+        assertEquals(drag.groupValues[2].toInt(), shadow["restDp"]!!.jsonPrimitive.content.toInt())
+        assertEquals(drag.groupValues[1].toInt(), shadow["dragDp"]!!.jsonPrimitive.content.toInt())
+        val raised = Regex("""shadowElevation\s*=\s*(\d+)\.dp""").find(toolbar)!!
+        assertEquals(raised.groupValues[1].toInt(), shadow["raisedDp"]!!.jsonPrimitive.content.toInt())
     }
 
     @Test
@@ -103,13 +137,20 @@ class DesignTokensAssetTest {
         val tools = manifest["tools"]!!.jsonArray.map { it.jsonPrimitive.content }
         assertTrue(tools.contains("runtime/design_palette.sh"))
         assertTrue(tools.contains("runtime/design_tokens.sh"))
+        assertTrue(tools.contains("runtime/design_lint.sh"))
         val hook = manifest["hooks"]!!.jsonArray[0].jsonObject
         assertEquals("SessionStart", hook["event"]!!.jsonPrimitive.content)
         assertTrue(hook["command"]!!.jsonPrimitive.content.contains("session_summary.sh"))
+        assertEquals("design:design-rules", hook["name"]!!.jsonPrimitive.content)
         val base = "src/main/assets/andmx-plugins/design"
         assertTrue(assetFile("$base/skills/design-guide/SKILL.md").readText().startsWith("---"))
         assertTrue(assetFile("$base/runtime/design_palette.sh").isFile)
         assertTrue(assetFile("$base/runtime/design_tokens.sh").isFile)
         assertTrue(assetFile("$base/runtime/session_summary.sh").isFile)
+        assertTrue(assetFile("$base/runtime/design_lint.sh").isFile)
+        val designDoc = assetFile("$base/DESIGN.md").readText()
+        assertTrue(designDoc.contains("#0EA5E9"))
+        assertTrue(designDoc.contains("design_lint"))
+        assertTrue(designDoc.contains("cubic-bezier(0.22, 0.61, 0.36, 1)"))
     }
 }

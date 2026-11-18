@@ -552,28 +552,55 @@ fun RenameDialog(
 fun DeleteDialog(
     title: String,
     archived: Boolean = false,
+    deleting: Boolean = false,
+    previewSummary: String? = null,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!deleting) onDismiss() },
         title = { Text(if (archived) tr("删除这个归档任务？") else tr("删除这个任务？")) },
         text = {
-            Text(
-                if (archived) {
-                    tr("该任务会从归档中移除，并清理本地会话数据。不会删除工作区中的文件。")
-                } else {
-                    "任务“$title”会从当前工作区移除，现有记录无法恢复。"
-                },
-            )
+            Column {
+                Text(
+                    if (archived) {
+                        tr("该任务会从归档中移除，并清理本地会话数据。不会删除工作区中的文件。")
+                    } else {
+                        tr("任务“$title”会从当前工作区移除，现有记录无法恢复。")
+                    },
+                )
+                if (!previewSummary.isNullOrBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        tr("将同时清理：$previewSummary"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(tr("删除"), color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = onConfirm, enabled = !deleting) {
+                Text(
+                    if (deleting) tr("删除中") else tr("删除"),
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(tr("取消")) }
+            TextButton(onClick = onDismiss, enabled = !deleting) { Text(tr("取消")) }
+        },
+    )
+}
+
+@Composable
+fun DeleteBlockedDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(tr("无法删除")) },
+        text = { Text(tr("任务运行中，请先停止再删除")) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(tr("知道了")) }
         },
     )
 }

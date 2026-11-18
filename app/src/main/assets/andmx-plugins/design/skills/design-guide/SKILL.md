@@ -5,16 +5,17 @@ description: AndMX 设计资源指引：配色、字阶、间距与动效原则�
 
 # AndMX 设计指引
 
-为 AndMX 相关的界面、HTML 页面、图表与视觉产出提供统一设计语言。**唯一事实来源是 `runtime/tokens.json`**，其数值与 `com.andmx.ui2.theme` 的 `AndMXType`（Type.kt）、`Motion`（Motion.kt）、`Theme.kt` 色板、`Chrome` 间距保持一致。不要凭空发明字号、颜色或时长。
+为 AndMX 相关的界面、HTML 页面、图表与视觉产出提供统一设计语言。**唯一事实来源是 `runtime/tokens.json`**，其数值与 `com.andmx.ui2.theme` 的 `AndMXType`（Type.kt）、`Motion`（Motion.kt）、`Theme.kt` 色板、`Chrome` 间距保持一致。完整设计体系见插件根目录 `DESIGN.md`。不要凭空发明字号、颜色或时长。
 
 ## 工具
 
 | 工具 | 用途 |
 |------|------|
 | `design_palette` | 读 token 色板，输出 CSS 变量或 Compose Color 常量。args 传 `css`（默认）或 `compose` |
-| `design_tokens` | 读字阶/间距/动效 token，输出 CSS 变量+字阶类或 Compose TextStyle/dp 常量。args 传 `css`（默认）或 `compose` |
+| `design_tokens` | 读字阶/间距/圆角/阴影/动效 token，输出 CSS 变量+字阶类或 Compose TextStyle/dp 常量。args 传 `css`（默认）或 `compose` |
+| `design_lint` | 检查产出的 CSS/Compose 片段是否用 token（字号/行高/间距/圆角/颜色/时长）。args 传 `{"code": "片段"}` 或 `{"file": "/guest/绝对路径"}`，输出 JSON 违规清单与最近 token 建议 |
 
-会话开始时 SessionStart 钩子会注入 token 摘要；需要精确数值时读 `runtime/tokens.json` 或调用上述工具，不要背摘要近似值。
+会话开始时 design-rules SessionStart 钩子会注入 token 与设计规则摘要；需要精确数值时读 `runtime/tokens.json` 或调用上述工具，不要背摘要近似值。
 
 ## 配色原则
 
@@ -41,10 +42,12 @@ description: AndMX 设计资源指引：配色、字阶、间距与动效原则�
 - 层级靠字号+字重表达，不靠颜色堆叠；一屏最多 3 个字号层级。
 - 行高已随字号给定，不要另行压缩；中文正文不小于 13sp。
 
-## 间距原则
+## 间距与圆角原则
 
 - 页面左右留白（gutter）16dp；卡片与气泡圆角 20dp、底部弹层顶部圆角 20dp。
-- 间距用 4dp 网格（4/8/12/16/24）；同级元素间距一致，组间距大于组内距。
+- 间距用 4dp 网格（xs 4 / sm 8 / md 12 / lg 16 / xl 24）；同级元素间距一致，组间距大于组内距。
+- 圆角四档：xs 2dp（行内标记）、sm 8dp（代码块/列表项）、md 12dp（卡片/弹层）、bubble/sheet 20dp。
+- 阴影三档：rest 1dp（静置卡片）、raised 6dp（悬浮工具栏）、drag 8dp（拖拽态）；阴影表达层级不做装饰。
 
 ## 动效原则（与 Motion 一致）
 
@@ -56,4 +59,5 @@ description: AndMX 设计资源指引：配色、字阶、间距与动效原则�
 
 1. 明确产出目标（Compose 界面 / HTML 页面 / 图表配色）。
 2. 调 `design_palette` 与 `design_tokens`（选 css 或 compose）拿片段，直接复用变量名。
-3. 按上述原则组合；偏离 token 体系需在回复中说明理由。
+3. 按上述原则组合；产出后调 `design_lint` 检查 token 一致性，修掉违规。
+4. 偏离 token 体系需在回复中说明理由。

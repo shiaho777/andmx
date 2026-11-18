@@ -127,6 +127,7 @@ fun ConversationDrawer(
     var renameTarget by remember { mutableStateOf<ConversationEntity?>(null) }
     var deleteTarget by remember { mutableStateOf<ConversationEntity?>(null) }
     var deleteArchived by remember { mutableStateOf(false) }
+    var deleteBlockedTarget by remember { mutableStateOf<ConversationEntity?>(null) }
     var archiveTarget by remember { mutableStateOf<ConversationEntity?>(null) }
     var createGroupOpen by remember { mutableStateOf(false) }
     var moveTarget by remember { mutableStateOf<ConversationEntity?>(null) }
@@ -144,6 +145,15 @@ fun ConversationDrawer(
     fun closeFileTree() {
         fileTreeOpen = false
         fileTreePath = null
+    }
+
+    fun requestDelete(conversation: ConversationEntity, archived: Boolean) {
+        if (!com.andmx.data.DeletionGuard.canDelete(conversation.id in streamingConversationIds)) {
+            deleteBlockedTarget = conversation
+            return
+        }
+        deleteArchived = archived
+        deleteTarget = conversation
     }
 
     fun toggleUnread(conversation: ConversationEntity) {
@@ -353,10 +363,7 @@ fun ConversationDrawer(
                                     streaming = conv.id in streamingConversationIds,
                                     onClick = { closeAnd { onSelectConversation(conv.id) } },
                                     onRename = { renameTarget = conv },
-                                    onDelete = {
-                                        deleteArchived = true
-                                        deleteTarget = conv
-                                    },
+                                    onDelete = { requestDelete(conv, archived = true) },
                                     onArchive = {
                                         scope.launch { dao.setArchived(conv.id, false) }
                                     },
@@ -400,10 +407,7 @@ fun ConversationDrawer(
                             onToggleCollapse = ::toggleCollapse,
                             onSelect = { id -> closeAnd { onSelectConversation(id) } },
                             onRename = { renameTarget = it },
-                            onDelete = {
-                                deleteArchived = false
-                                deleteTarget = it
-                            },
+                            onDelete = { requestDelete(it, archived = false) },
                             onArchive = { archiveTarget = it },
                             onTogglePin = {
                                 scope.launch { dao.setPinned(it.id, !it.pinned) }
@@ -441,23 +445,45 @@ fun ConversationDrawer(
         )
     }
     deleteTarget?.let { target ->
+        var deleting by remember(target.id) { mutableStateOf(false) }
+        var previewSummary by remember(target.id) { mutableStateOf<String?>(null) }
+        LaunchedEffect(target.id) {
+            val paths = com.andmx.data.purgePathsFor(context.filesDir, target)
+            val preview = com.andmx.data.DeletionGuard.previewFor(dao.messageCount(target.id), paths)
+            previewSummary = com.andmx.data.DeletionGuard.previewSummary(preview)
+        }
         DeleteDialog(
             title = target.title.ifBlank { tr("新任务") },
             archived = deleteArchived,
+            deleting = deleting,
+            previewSummary = previewSummary,
             onDismiss = {
-                deleteTarget = null
-                deleteArchived = false
+                if (!deleting) {
+                    deleteTarget = null
+                    deleteArchived = false
+                }
             },
             onConfirm = {
+                if (deleting) return@DeleteDialog
+                if (!com.andmx.data.DeletionGuard.canDelete(target.id in streamingConversationIds)) {
+                    deleteTarget = null
+                    deleteArchived = false
+                    deleteBlockedTarget = target
+                    return@DeleteDialog
+                }
+                deleting = true
                 scope.launch {
                     com.andmx.data.ConversationRepository(context).delete(target.id)
                     ChangeTracker.clear(target.id)
+                    com.andmx.agent.JsReplRuntime.dispose("conv-${target.id}")
+                    deleteTarget = null
+                    deleteArchived = false
                 }
-                com.andmx.agent.JsReplRuntime.dispose("conv-${target.id}")
-                deleteTarget = null
-                deleteArchived = false
             },
         )
+    }
+    deleteBlockedTarget?.let {
+        DeleteBlockedDialog(onDismiss = { deleteBlockedTarget = null })
     }
     archiveTarget?.let { target ->
         ArchiveConfirmDialog(

@@ -16,6 +16,7 @@ const val LIST_SAVED_WORKFLOWS_TOOL_NAME = "ListSavedWorkflows"
 const val EVAL_WORKFLOW_SNIPPET_TOOL_NAME = "EvalWorkflowSnippet"
 const val LIST_WORKFLOW_RUNS_TOOL_NAME = "ListWorkflowRuns"
 const val GET_WORKFLOW_RUN_TOOL_NAME = "GetWorkflowRun"
+const val GET_WORKFLOW_RUN_ROSTER_TOOL_NAME = "GetWorkflowRunRoster"
 const val RESUME_WORKFLOW_RUN_TOOL_NAME = "ResumeWorkflowRun"
 const val RESOLVE_WORKFLOW_QUESTION_TOOL_NAME = "ResolveWorkflowQuestion"
 const val FILL_WORKFLOW_HOLE_TOOL_NAME = "FillWorkflowHole"
@@ -31,6 +32,7 @@ val DYNAMIC_WORKFLOW_TOOL_NAMES: Set<String> = setOf(
     EVAL_WORKFLOW_SNIPPET_TOOL_NAME,
     LIST_WORKFLOW_RUNS_TOOL_NAME,
     GET_WORKFLOW_RUN_TOOL_NAME,
+    GET_WORKFLOW_RUN_ROSTER_TOOL_NAME,
     RESUME_WORKFLOW_RUN_TOOL_NAME,
     RESOLVE_WORKFLOW_QUESTION_TOOL_NAME,
     FILL_WORKFLOW_HOLE_TOOL_NAME,
@@ -60,6 +62,7 @@ const val SAVE_WORKFLOW_TIMEOUT_MS = 15_000L
 const val EVAL_WORKFLOW_SNIPPET_TIMEOUT_MS = 660_000L
 const val LIST_WORKFLOW_RUNS_TIMEOUT_MS = 10_000L
 const val GET_WORKFLOW_RUN_TIMEOUT_MS = 10_000L
+const val GET_WORKFLOW_RUN_ROSTER_TIMEOUT_MS = 10_000L
 const val RESUME_WORKFLOW_RUN_TIMEOUT_MS = 15_000L
 const val RESOLVE_WORKFLOW_QUESTION_TIMEOUT_MS = 15_000L
 const val FILL_WORKFLOW_HOLE_TIMEOUT_MS = 15_000L
@@ -201,6 +204,17 @@ val GET_WORKFLOW_RUN_DESCRIPTION = listOf(
     "- Three terminal states: `completed`; `errored` (the script itself failed — not resumable, amend it); `stopped` with a stop reason — `user` (cancelled on purpose: resume only when the user asks), `model` (your own TaskStop), `provider` (a provider-side error such as an expired sign-in, a model missing from the plan or a quota cap — the `<error>` block names the cause and the fix; resolve it with the user, then resume), `interrupted` (the process that owned the run exited — continuing it is usually what the user wants), `superseded` (an AmendWorkflow replaced it; `<superseded_by>` names the successor — read that run instead, never resume this one).",
     "- A stopped run (other than a superseded one) can be continued with ResumeWorkflowRun — no rebuild needed, same run ID, same script.",
     "- ANY run — completed, stopped, errored, or still running — can instead be revised with AmendWorkflow: pass its run ID and the corrected script, and the finished work is imported as cache. When the script itself errored, that is the move — fix the script and keep the work that already succeeded, rather than rewriting from scratch.",
+    "- `format` selects the output shape: `text` (default) keeps the human-readable summary; `json` returns a structured object with the run status, the actor roster (actorId/role/status/model per actor) and any pending questions. Use GetWorkflowRunRoster when you only need the roster.",
+).joinToString("\n")
+
+val GET_WORKFLOW_RUN_ROSTER_DESCRIPTION = listOf(
+    "Returns the structured actor roster of one dynamic-workflow run as JSON: for every actor that ran (or is running) it gives actorId, role, status and model, plus phase, node and attempt when known, alongside the run status and any pending escalation questions.",
+    "",
+    WORKFLOW_RUN_INTROSPECTION_STEERING,
+    "",
+    "- Takes run_id — from CreateWorkflow's or AmendWorkflow's result, from a completion notification, or from ListWorkflowRuns.",
+    "- This is an instant snapshot and never waits. The output is a JSON object: `runId`, `status`, `kind`, `roster` (array of { actorId, role, status, model, name?, phase?, nodeId?, attempt? }) and `pendingQuestions`.",
+    "- Use GetWorkflowRun for the full progress narrative, artifacts and failure detail; this tool is the machine-readable who-did-what view.",
 ).joinToString("\n")
 
 val RESUME_WORKFLOW_RUN_DESCRIPTION = listOf(
@@ -510,6 +524,24 @@ val LIST_WORKFLOW_RUNS_PARAMETERS = dwfSchema {
 
 val GET_WORKFLOW_RUN_PARAMETERS = dwfSchema(required = listOf("run_id")) {
     put("run_id", str("The workflow run ID to inspect (as returned by CreateWorkflow or ListWorkflowRuns)", min = 1))
+    put(
+        "format",
+        buildJsonObject {
+            put("type", "string")
+            putJsonArray("enum") {
+                add("text")
+                add("json")
+            }
+            put(
+                "description",
+                "Output shape. `text` (default) is the readable summary; `json` returns the run status, the structured actor roster and pending questions as one JSON object.",
+            )
+        },
+    )
+}
+
+val GET_WORKFLOW_RUN_ROSTER_PARAMETERS = dwfSchema(required = listOf("run_id")) {
+    put("run_id", str("The workflow run ID whose actor roster to read (as returned by CreateWorkflow or ListWorkflowRuns)", min = 1))
 }
 
 val RESUME_WORKFLOW_RUN_PARAMETERS = dwfSchema(required = listOf("run_id")) {

@@ -238,6 +238,8 @@ internal val phraseTemplates: List<PhraseTemplate> = listOf(
     "导出失败（guest 写入失败）\n\n{*}" to "Export failed (guest write failed)\n\n{}",
     "已生成交接检查点并压缩历史。\n\n{*}" to "Created a handoff checkpoint and compacted the history.\n\n{}",
     "所有 {*} 调用" to "All {} calls",
+    "将同时清理：{*}" to "Also cleaned up: {}",
+    "{*} 条消息 · {*} 个会话记录文件 · {*} 个话题文件" to "{} messages · {} rollout files · {} topic files",
 ).map { (zh, en) ->
     val parts = zh.split("{*}")
     val pattern = parts.joinToString("(.+?)") { Regex.escape(it) }.replace("""\(\.\+\?\)(?!.)""".toRegex(), "(.+)")
