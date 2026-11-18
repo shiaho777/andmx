@@ -4876,7 +4876,6 @@ declare const run: { readonly id: string; readonly resumedFrom?: string };
   async function createIframeRealm() {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
-    iframe.setAttribute("sandbox", "allow-scripts");
     iframe.style.display = "none";
     iframe.src = "about:blank";
     const loaded = new Promise((resolve, reject) => {

@@ -32,7 +32,6 @@ function ensureSetImmediate(): void {
 async function createIframeRealm(): Promise<CellRealm> {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
-  iframe.setAttribute("sandbox", "allow-scripts");
   iframe.style.display = "none";
   iframe.src = "about:blank";
   const loaded = new Promise<void>((resolve, reject) => {
