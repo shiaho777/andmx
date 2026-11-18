@@ -2,6 +2,7 @@ package com.andmx.agent.ext
 
 import android.content.Context
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.WebView
 import com.andmx.agent.plugins.PluginSystem
 import com.andmx.workspace.GuestPaths
@@ -94,6 +95,37 @@ object ExtensionHost {
             startInstance(context, instance)
             instance
         }
+    }
+
+    suspend fun acquireForSlot(pluginId: String, slotId: String): ExtensionInstance? {
+        if (!isInstalled()) return null
+        if (slotId !in ExtensionSlotRegistry.KNOWN_SLOTS) return null
+        if (ExtensionSlotRegistry.forSlot(slotId).none { it.pluginId == pluginId }) return null
+        val instance = runCatching { acquire(pluginId) }.getOrNull() ?: return null
+        if (instance.webView == null) return null
+        if (instance.state == ExtensionState.DEGRADED || instance.state == ExtensionState.DISPOSED) return null
+        return instance
+    }
+
+    fun attachWebView(instance: ExtensionInstance, container: ViewGroup): Boolean {
+        val view = instance.webView ?: return false
+        if (instance.state == ExtensionState.DISPOSED) return false
+        if (view.parent === container) return true
+        (view.parent as? ViewGroup)?.removeView(view)
+        container.addView(
+            view,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        return true
+    }
+
+    fun detachWebView(instance: ExtensionInstance, container: ViewGroup? = null) {
+        val view = instance.webView ?: return
+        val parent = view.parent as? ViewGroup ?: return
+        if (container == null || parent === container) parent.removeView(view)
     }
 
     suspend fun statusOf(pluginId: String): ExtensionStatus? =

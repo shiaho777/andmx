@@ -2,6 +2,7 @@ package com.andmx.agent.ext
 
 import android.app.Application
 import android.content.Context
+import android.widget.FrameLayout
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import kotlinx.coroutines.delay
@@ -139,5 +140,113 @@ class ExtensionHostTest {
         assertNull(ExtensionHost.loadAssetHtml(context, "reader", "../../escape.html"))
         assertNull(ExtensionHost.loadAssetHtml(context, "reader", "/etc/passwd"))
         assertNull(ExtensionHost.loadAssetHtml(context, "reader", "file:///etc/passwd"))
+    }
+
+    @Test
+    fun acquireForSlotReturnsNullWhenNotInstalled() = runBlocking {
+        ExtensionHost.resetForTest()
+        assertNull(ExtensionHost.acquireForSlot("slot-plugin", ExtensionSlotRegistry.NAV_PRIMARY))
+    }
+
+    @Test
+    fun acquireForSlotReturnsNullForUnknownSlotOrUnregisteredPlugin() = runBlocking {
+        seedPlugin("slot-plugin", withBridge = true)
+        ExtensionHost.probeOverride = { true }
+        assertNull(ExtensionHost.acquireForSlot("slot-plugin", "unknown.slot"))
+        assertNull(ExtensionHost.acquireForSlot("slot-plugin", ExtensionSlotRegistry.NAV_PRIMARY))
+        assertEquals(0, ExtensionHost.activeCount())
+    }
+
+    @Test
+    fun acquireForSlotReturnsNullWhenDegraded() = runBlocking {
+        ExtensionHost.probeOverride = { true }
+        assertTrue(
+            ExtensionSlotRegistry.register(
+                SlotDeclaration("missing", ExtensionSlotRegistry.NAV_PRIMARY, "t", "assets/index.html"),
+            ),
+        )
+        assertNull(ExtensionHost.acquireForSlot("missing", ExtensionSlotRegistry.NAV_PRIMARY))
+        assertEquals(ExtensionState.DEGRADED, ExtensionHost.statusOf("missing")!!.state)
+    }
+
+    @Test
+    fun acquireForSlotReturnsActiveInstanceAndReusesIt() = runBlocking {
+        seedPlugin("slot-plugin", withBridge = true)
+        ExtensionHost.probeOverride = { true }
+        assertTrue(
+            ExtensionSlotRegistry.register(
+                SlotDeclaration("slot-plugin", ExtensionSlotRegistry.NAV_PRIMARY, "t", "assets/index.html"),
+            ),
+        )
+        val first = ExtensionHost.acquireForSlot("slot-plugin", ExtensionSlotRegistry.NAV_PRIMARY)
+        val second = ExtensionHost.acquireForSlot("slot-plugin", ExtensionSlotRegistry.NAV_PRIMARY)
+        assertNotNull(first)
+        assertTrue(first === second)
+        assertEquals(ExtensionState.ACTIVE, first!!.state)
+        assertNotNull(first.webView)
+        assertEquals(1, ExtensionHost.activeCount())
+    }
+
+    @Test
+    fun slotWebViewKeepsSandboxBoundaries() = runBlocking {
+        seedPlugin("secure-slot", withBridge = true)
+        ExtensionHost.probeOverride = { true }
+        assertTrue(
+            ExtensionSlotRegistry.register(
+                SlotDeclaration("secure-slot", ExtensionSlotRegistry.NAV_PRIMARY, "t", "assets/index.html"),
+            ),
+        )
+        val instance = ExtensionHost.acquireForSlot("secure-slot", ExtensionSlotRegistry.NAV_PRIMARY)
+        assertNotNull(instance)
+        val settings = instance!!.webView!!.settings
+        assertTrue(settings.javaScriptEnabled)
+        assertFalse(settings.allowFileAccess)
+        assertFalse(settings.allowContentAccess)
+        assertFalse(settings.allowFileAccessFromFileURLs)
+        assertFalse(settings.allowUniversalAccessFromFileURLs)
+        assertTrue(settings.blockNetworkLoads)
+        assertFalse(settings.domStorageEnabled)
+        assertFalse(settings.databaseEnabled)
+        assertTrue(ExtensionSandbox.shouldBlock("https://evil.example/x", emptySet()))
+        assertTrue(ExtensionSandbox.shouldBlock("file:///etc/passwd", emptySet()))
+        assertTrue(ExtensionSandbox.CSP.contains("default-src 'none'"))
+        assertTrue(ExtensionSandbox.CSP.contains("connect-src 'none'"))
+    }
+
+    @Test
+    fun attachMovesWebViewBetweenContainersWithoutDuplicateParent() = runBlocking {
+        seedPlugin("attach-plugin", withBridge = true)
+        ExtensionHost.probeOverride = { true }
+        val instance = ExtensionHost.acquire("attach-plugin")
+        val first = FrameLayout(context)
+        val second = FrameLayout(context)
+        assertTrue(ExtensionHost.attachWebView(instance, first))
+        assertTrue(instance.webView!!.parent === first)
+        assertTrue(ExtensionHost.attachWebView(instance, first))
+        assertEquals(1, first.childCount)
+        assertTrue(ExtensionHost.attachWebView(instance, second))
+        assertTrue(instance.webView!!.parent === second)
+        assertEquals(0, first.childCount)
+        ExtensionHost.detachWebView(instance, second)
+        assertNull(instance.webView!!.parent)
+        ExtensionHost.detachWebView(instance, second)
+        assertNull(instance.webView!!.parent)
+    }
+
+    @Test
+    fun detachRespectsForeignContainerAndDisposedInstanceRejectsAttach() = runBlocking {
+        seedPlugin("detach-plugin", withBridge = true)
+        ExtensionHost.probeOverride = { true }
+        val instance = ExtensionHost.acquire("detach-plugin")
+        val owner = FrameLayout(context)
+        val other = FrameLayout(context)
+        assertTrue(ExtensionHost.attachWebView(instance, owner))
+        ExtensionHost.detachWebView(instance, other)
+        assertTrue(instance.webView!!.parent === owner)
+        ExtensionHost.detachWebView(instance)
+        assertNull(instance.webView!!.parent)
+        ExtensionHost.dispose("detach-plugin")
+        assertFalse(ExtensionHost.attachWebView(instance, owner))
+        assertEquals(0, owner.childCount)
     }
 }
