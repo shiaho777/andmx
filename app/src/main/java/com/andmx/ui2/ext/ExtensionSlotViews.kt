@@ -1,6 +1,7 @@
 package com.andmx.ui2.ext
 
 import android.content.Context
+import android.widget.FrameLayout
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -24,6 +25,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
@@ -38,6 +41,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.andmx.agent.ext.ExtensionHost
+import com.andmx.agent.ext.ExtensionInstance
 import com.andmx.agent.ext.ExtensionSlotRegistry
 import com.andmx.agent.ext.SlotDeclaration
 import com.andmx.ui2.settings.tr
@@ -237,6 +242,28 @@ fun ExtensionSlotWebView(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var instance by remember(declaration.pluginId, declaration.slotId) {
+        mutableStateOf<ExtensionInstance?>(null)
+    }
+    LaunchedEffect(declaration.pluginId, declaration.slotId) {
+        instance = ExtensionHost.acquireForSlot(declaration.pluginId, declaration.slotId)
+    }
+    val hostInstance = instance
+    if (hostInstance != null) {
+        DisposableEffect(hostInstance) {
+            onDispose { ExtensionHost.detachWebView(hostInstance) }
+        }
+        AndroidView(
+            modifier = modifier.heightIn(min = 80.dp, max = 400.dp),
+            factory = { ctx -> attachInstanceToContainer(hostInstance, FrameLayout(ctx)) },
+            update = { container -> ExtensionHost.attachWebView(hostInstance, container) },
+            onRelease = { container ->
+                ExtensionHost.detachWebView(hostInstance, container)
+                container.removeAllViews()
+            },
+        )
+        return
+    }
     val html = remember(declaration.htmlAsset) {
         runCatching {
             context.assets.open(declaration.htmlAsset).use { input ->
@@ -258,6 +285,14 @@ fun ExtensionSlotWebView(
         factory = { ctx -> createSlotWebView(ctx, html) },
         onRelease = { view -> view.destroy() },
     )
+}
+
+internal fun attachInstanceToContainer(
+    instance: ExtensionInstance,
+    container: FrameLayout,
+): FrameLayout {
+    if (!ExtensionHost.attachWebView(instance, container)) container.removeAllViews()
+    return container
 }
 
 internal fun createSlotWebView(context: Context, html: String): WebView =
