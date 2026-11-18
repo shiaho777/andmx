@@ -1351,4 +1351,9 @@
     <string name="str_1348">"启用离线转写需下载模型"</string>
     <string name="str_1349">"离线模型下载中"</string>
     <string name="str_1350">"下载离线模型（约75MB）"</string>
+    <string name="str_1351">"任务运行中，请先停止再删除"</string>
+    <string name="str_1352">"无法删除"</string>
+    <string name="str_1353">"条消息"</string>
+    <string name="str_1354">"个会话记录文件"</string>
+    <string name="str_1355">"个话题文件"</string>
 </resources>

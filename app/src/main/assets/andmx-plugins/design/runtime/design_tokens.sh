@@ -62,6 +62,10 @@ if fmt == "compose":
         print("    )")
     for name, value in tokens["spacing"].items():
         print("    val %s = %s.dp" % (name, value))
+    for name, value in tokens.get("radius", {}).items():
+        print("    val radius%s = %s.dp" % (name[0].upper() + name[1:], value))
+    for name, value in tokens.get("shadow", {}).items():
+        print("    val shadow%s = %s.dp" % (name[0].upper() + name[1:], value))
     for name, value in tokens["motion"].items():
         if isinstance(value, (int, float)):
             print("    val %s = %s" % (name, value))
@@ -75,6 +79,10 @@ else:
         print("  --andmx-weight-%s: %s;" % (slug, WEIGHTS[style["weight"]]))
     for name, value in tokens["spacing"].items():
         print("  --andmx-%s: %spx;" % (css_class(name).replace("-dp", ""), value))
+    for name, value in tokens.get("radius", {}).items():
+        print("  --andmx-radius-%s: %spx;" % (css_class(name).replace("-dp", ""), value))
+    for name, value in tokens.get("shadow", {}).items():
+        print("  --andmx-shadow-%s: %spx;" % (css_class(name).replace("-dp", ""), value))
     for name, value in tokens["motion"].items():
         if isinstance(value, (int, float)):
             print("  --andmx-motion-%s: %s;" % (css_class(name).replace("-ms", "-ms"), value))

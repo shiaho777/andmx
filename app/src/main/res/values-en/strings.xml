@@ -1351,4 +1351,9 @@
     <string name="str_1348">"Offline transcription needs a model download"</string>
     <string name="str_1349">"Downloading offline model"</string>
     <string name="str_1350">"Download offline model (~75MB)"</string>
+    <string name="str_1351">"The task is running. Stop it before deleting."</string>
+    <string name="str_1352">"Can't delete"</string>
+    <string name="str_1353">"messages"</string>
+    <string name="str_1354">"rollout files"</string>
+    <string name="str_1355">"topic files"</string>
 </resources>

@@ -13,6 +13,8 @@ import com.andmx.agent.workflow.WorkflowRunStatus
 import com.andmx.agent.workflow.WorkflowScriptFrontmatter
 import com.andmx.agent.workflow.WorkflowScriptNotes
 import com.andmx.agent.workflow.WorkflowService
+import com.andmx.agent.workflow.parseWorkflowRunFormat
+import com.andmx.agent.workflow.workflowRunRosterJson
 import com.andmx.agent.workflow.dynamic.DynamicWorkflowRunner
 import com.andmx.agent.workflow.dynamic.RESOLVE_WORKFLOW_QUESTION_DELIVERED
 import com.andmx.agent.workflow.dynamic.ResolveQuestionResult
@@ -559,10 +561,15 @@ class WorkflowTools(
     ) {
         override suspend fun execute(args: JsonObject): ToolResult {
             val runId = text(args, "run_id") ?: return absent("run_id is required")
+            val format = parseWorkflowRunFormat(text(args, "format"))
+                ?: return absent("format must be \"text\" or \"json\"")
             val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
             val snapshot = svc.getRun(runId)
                 ?: return absent("Workflow run $runId was not found.")
             val pending = escalations?.pendingFor(runId).orEmpty()
+            if (format == "json") {
+                return ToolResult(workflowRunRosterJson(snapshot, pending).toString())
+            }
             return ToolResult(
                 buildString {
                     append(renderRun(snapshot))
@@ -576,6 +583,29 @@ class WorkflowTools(
                     }
                 },
             )
+        }
+    }
+
+    inner class GetRunRoster : Declaration(
+        name = GET_WORKFLOW_RUN_ROSTER_TOOL_NAME,
+        description = GET_WORKFLOW_RUN_ROSTER_DESCRIPTION,
+        parameters = GET_WORKFLOW_RUN_ROSTER_PARAMETERS,
+        readOnly = true,
+        concurrentSafe = true,
+        needsApproval = false,
+        timeoutMs = GET_WORKFLOW_RUN_ROSTER_TIMEOUT_MS,
+        maxOutputBytes = GET_WORKFLOW_RUN_MODEL_BYTES,
+        sideEffectScope = "none",
+        riskLevel = "low",
+        permissionName = "getWorkflowRun",
+    ) {
+        override suspend fun execute(args: JsonObject): ToolResult {
+            val runId = text(args, "run_id") ?: return absent("run_id is required")
+            val svc = service ?: return absent(WORKFLOW_INTROSPECTION_UNAVAILABLE)
+            val snapshot = svc.getRun(runId)
+                ?: return absent("Workflow run $runId was not found.")
+            val pending = escalations?.pendingFor(runId).orEmpty()
+            return ToolResult(workflowRunRosterJson(snapshot, pending).toString())
         }
     }
 
@@ -858,6 +888,7 @@ class WorkflowTools(
         Eval(),
         ListRuns(),
         GetRun(),
+        GetRunRoster(),
         Resume(),
         Resolve(),
         Fill(),
