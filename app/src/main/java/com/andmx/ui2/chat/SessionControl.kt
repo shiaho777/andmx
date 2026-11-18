@@ -75,6 +75,9 @@ internal class SessionControl {
     val liveChatEvents = ConcurrentHashMap<Long, MutableSharedFlow<ChatEvent>>()
     val runningConversations = ConcurrentHashMap.newKeySet<Long>()
     val turnJobs = ConcurrentHashMap<Long, Job>()
+    val sessionToolQueues = ConcurrentHashMap<Long, MutableList<String>>()
+    val sessionToolDrainJobs = ConcurrentHashMap<Long, Job>()
+    val sessionSendLedger = com.andmx.agent.zcode.SessionRequestLedger()
 
     private val _runningIds = MutableStateFlow<Set<Long>>(emptySet())
     val runningIds: StateFlow<Set<Long>> = _runningIds.asStateFlow()

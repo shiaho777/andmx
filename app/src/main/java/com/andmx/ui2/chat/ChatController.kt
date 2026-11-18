@@ -36,6 +36,12 @@ import com.andmx.agent.zcode.PlanModeState
 import com.andmx.agent.zcode.TodoState
 import com.andmx.agent.zcode.AskUserQuestionParser
 import com.andmx.agent.zcode.ZCodePrompts
+import com.andmx.agent.zcode.SessionControlHost
+import com.andmx.agent.zcode.SessionContextRead
+import com.andmx.agent.zcode.SessionCreateResult
+import com.andmx.agent.zcode.SessionSendResult
+import com.andmx.agent.zcode.SessionSummary
+import com.andmx.agent.zcode.SessionWaitState
 import com.andmx.agent.CreateGoalTool
 import com.andmx.agent.UpdateGoalTool
 import com.andmx.agent.GetGoalTool
@@ -133,6 +139,7 @@ class ChatController private constructor(private val context: Context) {
         private const val MAX_CACHED_SESSIONS = 4
         private const val ASK_HIDDEN_GRACE_MS = 60_000L
         private const val ASK_AUTO_RESOLVE_MS = 300_000L
+        private const val SESSION_TOOL_DRAIN_POLL_MS = 250L
 
         @Volatile private var instance: ChatController? = null
 
@@ -459,6 +466,9 @@ class ChatController private constructor(private val context: Context) {
     private val cronStore = CronStore(context)
     private val runningConversations get() = sessionControl.runningConversations
     private val turnJobs get() = sessionControl.turnJobs
+    private val sessionToolQueues get() = sessionControl.sessionToolQueues
+    private val sessionToolDrainJobs get() = sessionControl.sessionToolDrainJobs
+    private val sessionSendLedger get() = sessionControl.sessionSendLedger
     val runningIds: StateFlow<Set<Long>> get() = sessionControl.runningIds
 
     fun isTurnRunning(conversationId: Long): Boolean = sessionControl.isTurnRunning(conversationId)
@@ -2400,6 +2410,7 @@ class ChatController private constructor(private val context: Context) {
             },
             onShell = onShell,
             conversationId = conversationId,
+            sessionTools = sessionControlHost(conversationId),
         ) + CronTools(
             store = cronStore,
             conversationId = { conversationId },
@@ -2545,6 +2556,178 @@ class ChatController private constructor(private val context: Context) {
         if (sessionId == conversationId.toString() || sessionId == "sess_$conversationId") return true
         val conv = repo.conversation(conversationId) ?: return false
         return conv.sessionId.isNotBlank() && (conv.sessionId == sessionId || conv.sessionId == sessionId.removePrefix("sess_"))
+    }
+
+    private fun sessionControlHost(rootConversationId: Long): SessionControlHost = object : SessionControlHost {
+        override suspend fun listSessions(query: String?, includeArchived: Boolean): List<SessionSummary> {
+            val rows = if (includeArchived) {
+                repo.conversationsByArchived(false) + repo.conversationsByArchived(true)
+            } else {
+                repo.conversationsByArchived(false)
+            }
+            val needle = query?.trim().orEmpty()
+            return rows
+                .filter { conv -> rootConversationId <= 0L || sessionToolInWorkspace(rootConversationId, conv) }
+                .filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
+                .sortedByDescending { it.updatedAt }
+                .map { conv ->
+                    SessionSummary(
+                        id = conv.id,
+                        sessionId = conv.sessionId.ifBlank { conv.id.toString() },
+                        title = conv.title,
+                        archived = conv.archived,
+                        running = isTurnRunning(conv.id),
+                        lastActivity = conv.updatedAt,
+                    )
+                }
+        }
+
+        override suspend fun readSession(sessionId: String, maxTokens: Int): SessionContextRead {
+            val conv = resolveSessionToolTarget(rootConversationId, sessionId)
+                ?: return SessionContextRead(
+                    status = "not_found",
+                    sessionId = sessionId,
+                    content = "No persisted session was found for $sessionId.",
+                )
+            return readSessionContext(rootConversationId, conv.id.toString(), "", "handoff", maxTokens)
+        }
+
+        override suspend fun createSession(title: String, task: String?, workspace: String?): SessionCreateResult {
+            val project = sessionToolProject(rootConversationId)
+            if (workspace != null && workspace != project) {
+                throw IllegalArgumentException(
+                    "CreateSession can only create sessions in the current workspace ($project).",
+                )
+            }
+            val id = repo.createConversation(project = project, title = title)
+            var firstMessage = "none"
+            if (task != null) {
+                firstMessage = dispatchSessionToolMessage(id, task).status
+            }
+            return SessionCreateResult(
+                id = id,
+                sessionId = id.toString(),
+                title = title,
+                firstMessageStatus = firstMessage,
+            )
+        }
+
+        override suspend fun sendToSession(sessionId: String, message: String, requestId: String): SessionSendResult {
+            val key = "$sessionId:$requestId"
+            sessionSendLedger.get(key)?.let { return it }
+            val conv = resolveSessionToolTarget(rootConversationId, sessionId)
+            val result = if (conv == null) {
+                SessionSendResult(
+                    requestId = requestId,
+                    sessionId = sessionId,
+                    status = "failed",
+                    error = "Session $sessionId was not found in this workspace.",
+                )
+            } else {
+                dispatchSessionToolMessage(conv.id, message).copy(requestId = requestId)
+            }
+            sessionSendLedger.put(key, result)
+            return result
+        }
+
+        override suspend fun waitState(sessionId: String): SessionWaitState? {
+            val conv = resolveSessionToolTarget(rootConversationId, sessionId) ?: return null
+            val queued = synchronized(sessionToolQueues) {
+                sessionToolQueues[conv.id]?.size ?: 0
+            }
+            return SessionWaitState(
+                sessionId = sessionId,
+                running = isTurnRunning(conv.id),
+                queued = queued,
+                lastActivity = conv.updatedAt,
+                taskStatus = conv.taskStatus,
+            )
+        }
+    }
+
+    private suspend fun sessionToolProject(rootConversationId: Long): String =
+        repo.conversation(rootConversationId)?.project
+            ?: projectManager.hostPath.value
+            ?: projectManager.guestMountPath
+
+    private suspend fun sessionToolInWorkspace(
+        rootConversationId: Long,
+        conv: com.andmx.data.ConversationEntity,
+    ): Boolean {
+        if (conv.id == rootConversationId) return true
+        val project = repo.conversation(rootConversationId)?.project ?: return true
+        return conv.project == project
+    }
+
+    private suspend fun resolveSessionToolTarget(
+        rootConversationId: Long,
+        sessionId: String,
+    ): com.andmx.data.ConversationEntity? {
+        val raw = sessionId.removePrefix("sess_").removePrefix("#")
+        val direct = raw.toLongOrNull()?.let { repo.conversation(it) }
+        val conv = direct ?: (repo.conversationsByArchived(false) + repo.conversationsByArchived(true))
+            .firstOrNull { it.sessionId.isNotBlank() && (it.sessionId == sessionId || it.sessionId == raw) }
+            ?: return null
+        return if (sessionToolInWorkspace(rootConversationId, conv)) conv else null
+    }
+
+    private suspend fun dispatchSessionToolMessage(conversationId: Long, message: String): SessionSendResult {
+        val sid = conversationId.toString()
+        val queued = synchronized(sessionToolQueues) {
+            val busy = com.andmx.agent.zcode.SessionToolLogic.busyDecision(
+                running = isTurnRunning(conversationId),
+                queued = sessionToolQueues[conversationId]?.size ?: 0,
+            ) == "queued"
+            if (busy) {
+                sessionToolQueues.getOrPut(conversationId) { mutableListOf() } += message
+            }
+            busy
+        }
+        if (queued) {
+            ensureSessionToolDrain(conversationId)
+            return SessionSendResult(requestId = "", sessionId = sid, status = "queued")
+        }
+        launchTurn(conversationId, message)
+        ensureSessionToolDrain(conversationId)
+        return SessionSendResult(requestId = "", sessionId = sid, status = "sent")
+    }
+
+    private fun ensureSessionToolDrain(conversationId: Long) {
+        synchronized(sessionToolDrainJobs) {
+            val active = sessionToolDrainJobs[conversationId]
+            if (active != null && active.isActive) return
+            val job = controllerScope.launch { drainSessionToolQueue(conversationId) }
+            sessionToolDrainJobs[conversationId] = job
+            job.invokeOnCompletion { sessionToolDrainJobs.remove(conversationId, job) }
+        }
+    }
+
+    private suspend fun drainSessionToolQueue(conversationId: Long) {
+        while (true) {
+            if (isTurnRunning(conversationId)) {
+                delay(SESSION_TOOL_DRAIN_POLL_MS)
+                continue
+            }
+            val next = synchronized(sessionToolQueues) {
+                val queue = sessionToolQueues[conversationId]
+                val item = queue?.firstOrNull()
+                if (item != null) {
+                    queue.removeAt(0)
+                    if (queue.isEmpty()) sessionToolQueues.remove(conversationId)
+                }
+                item
+            } ?: return
+            val before = sessionControl.activeTurnJob(conversationId)
+            val job = launchTurn(conversationId, next)
+            if (before != null && job === before) {
+                runCatching { before.join() }
+                synchronized(sessionToolQueues) {
+                    sessionToolQueues.getOrPut(conversationId) { mutableListOf() }.add(0, next)
+                }
+                continue
+            }
+            runCatching { job.join() }
+        }
     }
 
     private suspend fun invokeSkillTool(skill: String): String {
