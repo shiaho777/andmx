@@ -69,6 +69,33 @@ internal class SessionControl {
 
     val sessions = ConcurrentHashMap<Long, Session>()
     val sessionAccessOrder = java.util.Collections.synchronizedList(mutableListOf<Long>())
+    val lastAccessAt = ConcurrentHashMap<Long, Long>()
+    var focusedConversationIdProvider: () -> Long = { 0L }
+    var queuedConversationIdsProvider: () -> Set<Long> = { emptySet() }
+
+    fun touchAccess(conversationId: Long, now: Long = System.currentTimeMillis()) {
+        lastAccessAt[conversationId] = now
+    }
+
+    fun protectedFacts(conversationId: Long): Set<String> {
+        val facts = mutableSetOf<String>()
+        if (isTurnRunning(conversationId)) facts += "running"
+        if (pendingApprovalState.value?.conversationId == conversationId) facts += "interaction"
+        val session = sessions[conversationId]
+        if (session?.pending != null || session?.pendingAnswer != null) facts += "interaction"
+        if (conversationId in queuedConversationIdsProvider()) facts += "queued"
+        if (backgroundTasksByConversation[conversationId]?.list()
+                ?.any { it.state == com.andmx.agent.BackgroundTasks.TaskState.RUNNING } == true
+        ) facts += "background"
+        if (orchestrators[conversationId]?.listAgents()?.any { (_, state) ->
+                state == SubAgentOrchestrator.AgentState.RUNNING ||
+                    state == SubAgentOrchestrator.AgentState.WAITING
+            } == true
+        ) facts += "subagent"
+        if ((liveChatEvents[conversationId]?.subscriptionCount?.value ?: 0) > 0) facts += "subscriber"
+        if (focusedConversationIdProvider() == conversationId) facts += "focused"
+        return facts
+    }
 
     val subAgentWatchJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
     val approvalRulesByConversation = ConcurrentHashMap<Long, ConcurrentHashMap<String, ApprovalScope>>()
@@ -108,11 +135,13 @@ internal class SessionControl {
 
     fun beginTurn(conversationId: Long) {
         runningConversations += conversationId
+        touchAccess(conversationId)
         publishRunning()
     }
 
     fun endTurn(conversationId: Long) {
         runningConversations -= conversationId
+        touchAccess(conversationId)
         publishRunning()
     }
 
@@ -258,6 +287,7 @@ internal class SessionControl {
         val deferred = CompletableDeferred<Boolean>()
         session.pending = deferred
         session.pendingArgs = args.toString()
+        touchAccess(conversationId)
         val summary = buildApprovalSummary(tool, args) + (reason?.let { "（$it）" } ?: "")
         pendingApprovalState.value = ApprovalRequest(
             conversationId = conversationId,
@@ -291,6 +321,7 @@ internal class SessionControl {
     ) {
         val req = pendingApprovalState.value
         pendingApprovalState.value = null
+        req?.let { touchAccess(it.conversationId) }
         val session = req?.let { sessions[it.conversationId] }
         val allowed = allow && scope != ApprovalScope.SESSION_DENY && scope != ApprovalScope.PROJECT_DENY
         if (req != null && session != null && scope != ApprovalScope.ONCE) {
@@ -346,6 +377,7 @@ internal class SessionControl {
     fun resolveUserQuestion(answersJson: String) {
         val req = pendingApprovalState.value
         pendingApprovalState.value = null
+        req?.let { touchAccess(it.conversationId) }
         val session = req?.let { sessions[it.conversationId] }
         session?.pendingAnswer?.complete(answersJson)
         session?.pendingAnswer = null
@@ -393,6 +425,7 @@ internal class SessionControl {
         val deferred = CompletableDeferred<String>()
         session.pendingAnswer = deferred
         session.answerSnoozed = false
+        touchAccess(session.conversationId)
         val summary = questions.joinToString(" · ") { q ->
             q.header.ifBlank { q.question.take(24) }
         }.ifBlank { tr("需要你的决定") }
@@ -436,6 +469,7 @@ internal class SessionControl {
     ): CompletableDeferred<Boolean> {
         val deferred = CompletableDeferred<Boolean>()
         session.pending = deferred
+        touchAccess(session.conversationId)
         pendingApprovalState.value = ApprovalRequest(
             conversationId = session.conversationId,
             toolName = toolName,
@@ -455,6 +489,7 @@ internal class SessionControl {
     ): CompletableDeferred<String> {
         val deferred = CompletableDeferred<String>()
         session.pendingAnswer = deferred
+        touchAccess(session.conversationId)
         pendingApprovalState.value = ApprovalRequest(
             conversationId = session.conversationId,
             toolName = "escalate",
