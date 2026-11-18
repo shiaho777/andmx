@@ -84,6 +84,7 @@ internal class SessionControl {
         val session = sessions[conversationId]
         if (session?.pending != null || session?.pendingAnswer != null) facts += "interaction"
         if (conversationId in queuedConversationIdsProvider()) facts += "queued"
+        if (sessionToolQueues[conversationId]?.isNotEmpty() == true) facts += "queued"
         if (backgroundTasksByConversation[conversationId]?.list()
                 ?.any { it.state == com.andmx.agent.BackgroundTasks.TaskState.RUNNING } == true
         ) facts += "background"
