@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -476,23 +477,25 @@ private fun LinkAwareText(
             expanded = menuUrl != null,
             onDismissRequest = { menuUrl = null },
         ) {
-            val url = menuUrl ?: return@DropdownMenu
-            DropdownMenuItem(
-                text = {
-                    Text(tr(if (localFilePath(url) != null) tr("打开文件") else tr("在浏览器中打开")))
-                },
-                onClick = {
-                    menuUrl = null
-                    open(url)
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(tr("复制链接")) },
-                onClick = {
-                    menuUrl = null
-                    clipboard.setText(AnnotatedString(url))
-                },
-            )
+            DisableSelection {
+                val url = menuUrl ?: return@DisableSelection
+                DropdownMenuItem(
+                    text = {
+                        Text(tr(if (localFilePath(url) != null) "打开文件" else "在浏览器中打开"))
+                    },
+                    onClick = {
+                        menuUrl = null
+                        open(url)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(tr("复制链接")) },
+                    onClick = {
+                        menuUrl = null
+                        clipboard.setText(AnnotatedString(url))
+                    },
+                )
+            }
         }
     }
 }
@@ -602,8 +605,9 @@ private fun MermaidDiagramDialog(code: String, onDismiss: () -> Unit) {
     var renderError by remember { mutableStateOf<String?>(null) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(tr("Mermaid 图表")) },
+        title = { DisableSelection { Text(tr("Mermaid 图表")) } },
         text = {
+            DisableSelection {
             if (renderError != null) {
                 Column {
                     Text(tr("渲染失败：$renderError"),
@@ -651,8 +655,9 @@ private fun MermaidDiagramDialog(code: String, onDismiss: () -> Unit) {
                     },
                 )
             }
+            }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(tr("关闭")) } },
+        confirmButton = { DisableSelection { TextButton(onClick = onDismiss) { Text(tr("关闭")) } } },
     )
 }
 

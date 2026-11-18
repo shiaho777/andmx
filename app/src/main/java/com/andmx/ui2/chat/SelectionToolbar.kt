@@ -81,21 +81,23 @@ fun SelectableWithToolbar(
             ),
             onDismissRequest = { active = null },
         ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                shadowElevation = 6.dp,
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            androidx.compose.foundation.text.selection.DisableSelection {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shadowElevation = 6.dp,
                 ) {
-                    TextButton(onClick = { actions.onCopy(selection.text); active = null }) { Text(tr("复制")) }
-                    TextButton(onClick = { actions.onQuote(selection.text); active = null }) { Text(tr("引用")) }
-                    val side = actions.onSideChat
-                    if (side != null) {
-                        TextButton(onClick = { side(selection.text); active = null }) { Text(tr("侧聊")) }
+                    Row(
+                        Modifier.padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = { actions.onCopy(selection.text); active = null }) { Text(tr("复制")) }
+                        TextButton(onClick = { actions.onQuote(selection.text); active = null }) { Text(tr("引用")) }
+                        val side = actions.onSideChat
+                        if (side != null) {
+                            TextButton(onClick = { side(selection.text); active = null }) { Text(tr("侧聊")) }
+                        }
                     }
                 }
             }
