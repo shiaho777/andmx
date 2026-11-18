@@ -21,6 +21,12 @@ class VoiceFilesTest {
     }
 
     @Test
+    fun fileNameSupportsWavExtension() {
+        val name = VoiceFiles.fileName(0L, ".wav")
+        assertTrue(name.matches(Regex("voice-\\d{8}-\\d{6}\\.wav")))
+    }
+
+    @Test
     fun cleanupKeepsNewestWhenUnderLimit() {
         val now = 1_000_000L
         val entries = listOf(

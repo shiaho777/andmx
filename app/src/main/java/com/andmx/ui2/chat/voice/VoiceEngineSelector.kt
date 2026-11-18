@@ -2,16 +2,18 @@ package com.andmx.ui2.chat.voice
 
 import java.util.Locale
 
-enum class VoiceEngine { SYSTEM, PROVIDER, SAVE_ONLY, NONE }
+enum class VoiceEngine { SYSTEM, PROVIDER, WHISPER_OFFLINE, SAVE_ONLY, NONE }
 
 fun chooseVoiceEngine(
     systemAvailable: Boolean,
     providerAvailable: Boolean,
     canRecord: Boolean,
+    whisperReady: Boolean = false,
 ): VoiceEngine = when {
     systemAvailable -> VoiceEngine.SYSTEM
     !canRecord -> VoiceEngine.NONE
     providerAvailable -> VoiceEngine.PROVIDER
+    whisperReady -> VoiceEngine.WHISPER_OFFLINE
     else -> VoiceEngine.SAVE_ONLY
 }
 

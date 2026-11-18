@@ -1,0 +1,7 @@
+upstream: https://github.com/ggml-org/whisper.cpp
+commit: 8302b819fc3096c03cedbc91ef1fe982cc6ebb77
+date: 2026-11-17
+version: 1.9.5-dev
+pruned: .git bindings ci examples grammars media models samples scripts tests
+        src/coreml src/openvino src/vitisai ggml/src/ggml-{blas,cann,cuda,et,hexagon,hip,metal,musa,opencl,openvino,rpc,sycl,virtgpu,vulkan,webgpu,zdnn,zendnn}
+kept: CMakeLists.txt cmake include src ggml (CPU backend only)
