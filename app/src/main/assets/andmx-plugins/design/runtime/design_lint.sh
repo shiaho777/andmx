@@ -58,11 +58,12 @@ for cand in (payload, args):
             source = obj["code"]
         elif isinstance(obj.get("file"), str):
             target = obj["file"]
+            source = ""
         if obj.get("mode") in ("css", "compose"):
             mode = obj["mode"]
         break
 
-if target and not source.strip():
+if target:
     try:
         with open(target, encoding="utf-8", errors="replace") as f:
             source = f.read()
