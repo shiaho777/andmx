@@ -110,6 +110,25 @@ internal object DynamicWorkflowBridgeSecurity {
 
     fun isSafeRunId(runId: String): Boolean = RUN_ID.matches(runId)
 
+    private fun escapesBase(raw: String, normalizedBase: String): Boolean {
+        val clean = raw.replace('\\', '/')
+        val baseParts = normalizedBase.split('/').filter { it.isNotEmpty() }
+        val stack = ArrayDeque<String>()
+        if (!clean.startsWith("/")) stack.addAll(baseParts)
+        clean.split('/').forEach { part ->
+            when (part) {
+                "", "." -> Unit
+                ".." -> {
+                    if (stack.isEmpty()) return true
+                    stack.removeLast()
+                }
+                else -> stack.addLast(part)
+            }
+        }
+        if (stack.size < baseParts.size) return true
+        return baseParts.indices.any { stack[it] != baseParts[it] }
+    }
+
     fun normalizeWorldReadArgs(op: String, argsJson: String, cwd: String): String? {
         if (!isAllowedWorldReadOp(op)) return null
         val array = runCatching {
@@ -124,8 +143,9 @@ internal object DynamicWorkflowBridgeSecurity {
                     return@forEachIndexed
                 }
                 val base = cwd.trim().ifBlank { com.andmx.workspace.GuestPaths.DEFAULT_RELATIVE_BASE }
-                val normalized = com.andmx.workspace.GuestPaths.normalize(raw, base)
-                if (normalized.contains("..")) return null
+                val normalizedBase = com.andmx.workspace.GuestPaths.normalize(base)
+                if (escapesBase(raw, normalizedBase)) return null
+                val normalized = com.andmx.workspace.GuestPaths.normalize(raw, normalizedBase)
                 elements.add(JsonPrimitive(normalized))
             } else {
                 elements.add(element)
