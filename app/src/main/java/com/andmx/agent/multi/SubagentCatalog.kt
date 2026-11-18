@@ -200,9 +200,10 @@ Complete the user's search request efficiently and report your findings clearly.
             val aliases = allowed.flatMap { toolAliases(it) }.toSet()
             all.filter { it.name in aliases || it.name in allowed }
         }
-        if (disallowed.isEmpty()) return afterAllow
+        val afterSessionControl = afterAllow.filter { it.name !in com.andmx.agent.zcode.SESSION_CONTROL_TOOL_NAMES }
+        if (disallowed.isEmpty()) return afterSessionControl
         val ban = disallowed.flatMap { toolAliases(it) }.toSet() + disallowed
-        return afterAllow.filter { it.name !in ban }
+        return afterSessionControl.filter { it.name !in ban }
     }
 
     fun toolAliases(name: String): Set<String> = when (name) {

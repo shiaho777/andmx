@@ -752,6 +752,7 @@ fun buildZCodeToolSurface(
     pluginCatalog: (suspend () -> List<com.andmx.agent.plugins.PluginMarketplace.CatalogPlugin>)? = null,
     pluginInstalledNames: (suspend () -> Set<String>)? = null,
     pluginAutoRecommend: () -> Boolean = { false },
+    sessionTools: SessionControlHost? = null,
 ): List<Tool> {
     val access = WorkspaceAccess(context)
     val shell = ShellTool(context, cwdProvider = cwdProvider, backgroundTasks = backgroundTasks, shellRuntime = shellRuntime)
@@ -797,6 +798,9 @@ fun buildZCodeToolSurface(
     if (pluginCatalog != null && pluginInstalledNames != null) {
         zcode += com.andmx.agent.plugins.SearchPluginsTool(pluginCatalog, pluginInstalledNames, pluginAutoRecommend)
         zcode += com.andmx.agent.plugins.SuggestPluginInstallTool(pluginCatalog, pluginInstalledNames)
+    }
+    if (sessionTools != null) {
+        zcode += SessionTools(sessionTools).all()
     }
     if (includeGoals) {
         zcode += CreateGoalTool(goalState)

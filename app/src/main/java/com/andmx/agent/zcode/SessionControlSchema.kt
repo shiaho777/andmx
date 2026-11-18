@@ -2,8 +2,10 @@ package com.andmx.agent.zcode
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -489,7 +491,7 @@ private fun todoItemsJson(items: List<TodoState.Item>): JsonArray =
 
 private fun emptyStrictObject(): JsonObject = strictObject { }
 
-private fun strictObject(
+internal fun strictObject(
     required: List<String> = emptyList(),
     properties: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit,
 ): JsonObject = buildJsonObject {
@@ -500,4 +502,271 @@ private fun strictObject(
     if (required.isNotEmpty()) {
         putJsonArray("required") { required.forEach { add(it) } }
     }
+}
+
+val SESSION_CONTROL_TOOL_NAMES: Set<String> = setOf(
+    "ListSessions",
+    "ReadSession",
+    "CreateSession",
+    "SendToSession",
+    "WaitSessions",
+)
+
+internal const val SESSION_CONTROL_MODEL_BYTES = 32_768
+internal const val SESSION_CONTROL_TIMEOUT_MS = 60_000L
+internal const val SESSION_WAIT_DEFAULT_TIMEOUT_MS = 30_000L
+internal const val SESSION_WAIT_MAX_TIMEOUT_MS = 120_000L
+internal const val SESSION_WAIT_TIMEOUT_MS = 130_000L
+internal const val SESSION_WAIT_POLL_MS = 250L
+
+data class SessionSummary(
+    val id: Long,
+    val sessionId: String,
+    val title: String,
+    val archived: Boolean,
+    val running: Boolean,
+    val lastActivity: Long,
+)
+
+data class SessionCreateResult(
+    val id: Long,
+    val sessionId: String,
+    val title: String,
+    val firstMessageStatus: String,
+)
+
+data class SessionSendResult(
+    val requestId: String,
+    val sessionId: String,
+    val status: String,
+    val error: String? = null,
+)
+
+data class SessionWaitState(
+    val sessionId: String,
+    val running: Boolean,
+    val queued: Int,
+    val lastActivity: Long,
+    val taskStatus: String,
+)
+
+interface SessionControlHost {
+    suspend fun listSessions(query: String?, includeArchived: Boolean): List<SessionSummary>
+    suspend fun readSession(sessionId: String, maxTokens: Int): SessionContextRead
+    suspend fun createSession(title: String, task: String?, workspace: String?): SessionCreateResult
+    suspend fun sendToSession(sessionId: String, message: String, requestId: String): SessionSendResult
+    suspend fun waitState(sessionId: String): SessionWaitState?
+}
+
+internal val SESSION_LIST_PARAMETERS = strictObject {
+    putJsonObject("query") {
+        put("type", "string")
+        put("maxLength", 200)
+        put("description", "Case-insensitive title substring. Omit to list all sessions in this workspace.")
+    }
+    putJsonObject("includeArchived") {
+        put("type", "boolean")
+        put("default", false)
+        put("description", "Include archived sessions in the listing.")
+    }
+}
+
+internal val SESSION_READ_PARAMETERS = strictObject(required = listOf("sessionId")) {
+    putJsonObject("sessionId") {
+        put("type", "string")
+        put("minLength", 1)
+        put("maxLength", 128)
+        put("description", "Target session id or sess_* reference from ListSessions. Never infer identity from a title.")
+    }
+    putJsonObject("maxTokens") {
+        put("type", "integer")
+        put("minimum", 1)
+        put("maximum", READ_SESSION_CONTEXT_MAX_TOKENS)
+        put("default", READ_SESSION_CONTEXT_DEFAULT_MAX_TOKENS)
+        put("description", "Approximate maximum tokens of history to return.")
+    }
+}
+
+internal val SESSION_CREATE_PARAMETERS = strictObject(required = listOf("title")) {
+    putJsonObject("title") {
+        put("type", "string")
+        put("minLength", 1)
+        put("maxLength", 200)
+        put("description", "Title for the new session.")
+    }
+    putJsonObject("task") {
+        put("type", "string")
+        put("minLength", 1)
+        put("maxLength", 20_000)
+        put("description", "Optional first prompt submitted to the new session.")
+    }
+    putJsonObject("workspace") {
+        put("type", "string")
+        put("maxLength", 512)
+        put("description", "Workspace project path. Omit to keep the current workspace; other workspaces are rejected.")
+    }
+}
+
+internal val SESSION_SEND_PARAMETERS = strictObject(required = listOf("sessionId", "message")) {
+    putJsonObject("sessionId") {
+        put("type", "string")
+        put("minLength", 1)
+        put("maxLength", 128)
+        put("description", "Target session id or sess_* reference from ListSessions.")
+    }
+    putJsonObject("message") {
+        put("type", "string")
+        put("minLength", 1)
+        put("maxLength", 20_000)
+        put("description", "Prompt to submit. Busy targets queue it without interrupting the running turn.")
+    }
+    putJsonObject("retryOf") {
+        put("type", "string")
+        put("minLength", 1)
+        put("maxLength", 128)
+        put("description", "requestId of an inconclusive earlier call. Re-submitting it returns the original result instead of sending again.")
+    }
+}
+
+internal val SESSION_WAIT_PARAMETERS = strictObject(required = listOf("sessionIds")) {
+    putJsonObject("sessionIds") {
+        put("type", "array")
+        put("minItems", 1)
+        put("maxItems", 16)
+        putJsonObject("items") {
+            put("type", "string")
+            put("minLength", 1)
+            put("maxLength", 128)
+        }
+        put("description", "Sessions to wait for until their turns and queues settle.")
+    }
+    putJsonObject("timeoutMs") {
+        put("type", "integer")
+        put("minimum", 0)
+        put("maximum", SESSION_WAIT_MAX_TIMEOUT_MS)
+        put("default", SESSION_WAIT_DEFAULT_TIMEOUT_MS)
+        put("description", "Wait budget in milliseconds; 0 queries the current state immediately.")
+    }
+}
+
+internal const val SESSION_CONTROL_SHARED_INSTRUCTIONS =
+    "\n\nTarget an existing session by its sessionId; when you do not know the id, find it with ListSessions by title substring and never infer identity from a title. " +
+        "Create or send work only when authorized by the user or an existing delegation; the target session keeps its own permissions and this tool never approves its later permission requests. " +
+        "Accepted or queued means admitted, not completed: wait for the operation with WaitSessions and surface anything needing attention to the user."
+
+internal const val SESSION_RETRY_INSTRUCTION =
+    " An inconclusive result needs reconciliation, not a fresh call: take the requestId from that result and pass it as `retryOf`. Otherwise leave `retryOf` out."
+
+internal const val SESSION_LIST_DESCRIPTION =
+    "List sessions in the bound workspace by case-insensitive title substring without resuming or navigating." +
+        " Each row reports id, sessionId, title, archived, running and lastActivity." +
+        " Archived sessions are excluded unless includeArchived is true." +
+        SESSION_CONTROL_SHARED_INSTRUCTIONS
+
+internal const val SESSION_READ_DESCRIPTION =
+    "Read a bounded handoff summary of a session's persisted history without execution, navigation or marking it read." +
+        SESSION_CONTROL_SHARED_INSTRUCTIONS
+
+internal const val SESSION_CREATE_DESCRIPTION =
+    "Create an independent session in the current workspace and optionally submit its first prompt." +
+        " Creation and first-prompt admission are reported separately. Does not steal focus." +
+        SESSION_CONTROL_SHARED_INSTRUCTIONS
+
+internal const val SESSION_SEND_DESCRIPTION =
+    "Submit a prompt to an existing session. Busy targets queue it without interrupting the running turn; idle targets start a turn." +
+        " The target keeps its model, mode and permissions. Does not steal focus." +
+        SESSION_CONTROL_SHARED_INSTRUCTIONS + SESSION_RETRY_INSTRUCTION
+
+internal const val SESSION_WAIT_DESCRIPTION =
+    "Wait until the given sessions finish their running turns and queued inputs, then report each session's terminal state." +
+        " timeoutMs=0 queries now. Cancelling this wait does not stop target execution. Never wait for your own session's completion." +
+        SESSION_CONTROL_SHARED_INSTRUCTIONS
+
+internal fun sessionIdFromArgs(args: JsonObject): String? =
+    (args["sessionId"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+
+internal fun requestIdentity(callId: String, retryOf: String?): String =
+    retryOf?.takeIf { it.isNotBlank() } ?: callId
+
+internal fun formatSessionList(sessions: List<SessionSummary>): String = buildJsonObject {
+    putJsonArray("sessions") {
+        sessions.forEach { s ->
+            add(buildJsonObject {
+                put("id", s.id)
+                put("sessionId", s.sessionId)
+                put("title", s.title)
+                put("archived", s.archived)
+                put("running", s.running)
+                put("lastActivity", s.lastActivity)
+            })
+        }
+    }
+}.toString()
+
+internal fun formatSessionRead(read: SessionContextRead, sessionId: String): String {
+    if (read.status == "not_found") return "Session $sessionId was not found."
+    if (read.status == "failed") {
+        return listOfNotNull(
+            "ReadSession failed for $sessionId.",
+            read.error?.let { "Error: $it" },
+            read.content.takeIf { it.isNotEmpty() },
+        ).joinToString("\n")
+    }
+    val shown = read.sessionId ?: sessionId
+    return listOfNotNull(
+        "ReadSession returned ${read.source} history for $shown.",
+        read.title?.let { "Title: $it" },
+        if (read.truncated) "The returned history is truncated." else null,
+        read.content.takeIf { it.isNotEmpty() },
+    ).joinToString("\n")
+}
+
+internal fun formatSessionCreated(result: SessionCreateResult): String = buildJsonObject {
+    put("id", result.id)
+    put("sessionId", result.sessionId)
+    put("title", result.title)
+    put("firstMessage", result.firstMessageStatus)
+    put("focus", "unchanged")
+}.toString()
+
+internal fun formatSessionSend(result: SessionSendResult): String = buildJsonObject {
+    put("requestId", result.requestId)
+    put("sessionId", result.sessionId)
+    put("status", result.status)
+    result.error?.let { put("error", it) }
+}.toString()
+
+internal fun sessionWaitStatus(state: SessionWaitState?, timedOut: Boolean): String = when {
+    state == null -> "not_found"
+    state.running || state.queued > 0 -> if (timedOut) "timeout" else "pending"
+    else -> "completed"
+}
+
+internal fun formatSessionWait(
+    requested: List<String>,
+    states: Map<String, SessionWaitState?>,
+    timedOut: Boolean,
+    waitedMs: Long,
+): String {
+    val rows = requested.map { id -> id to sessionWaitStatus(states[id], timedOut) }
+    return buildJsonObject {
+        put("allSettled", rows.all { it.second == "completed" })
+        put("timedOut", timedOut)
+        put("waitedMs", waitedMs)
+        putJsonArray("sessions") {
+            rows.forEach { (id, status) ->
+                val state = states[id]
+                add(buildJsonObject {
+                    put("sessionId", id)
+                    put("status", status)
+                    if (state != null) {
+                        put("running", state.running)
+                        put("queued", state.queued)
+                        put("lastActivity", state.lastActivity)
+                        put("taskStatus", state.taskStatus)
+                    }
+                })
+            }
+        }
+    }.toString()
 }
