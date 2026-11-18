@@ -42,6 +42,7 @@ private enum class BranchDialogStep {
     CREATE,
     BLOCKED,
     COMMIT,
+    CONFLICTS,
 }
 
 @Composable
@@ -65,6 +66,7 @@ fun BranchSwitchDialog(
         targetBranch: String,
         onDone: (Result<String>) -> Unit,
     ) -> Unit = { _, cb -> cb(Result.failure(IllegalStateException("未实现"))) },
+    onResolveConflicts: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var step by remember { mutableStateOf(BranchDialogStep.LIST) }
@@ -94,6 +96,10 @@ fun BranchSwitchDialog(
             -> {
                 blocked = result
                 step = BranchDialogStep.BLOCKED
+            }
+            GitBaseline.SwitchIssue.CONFLICTS -> {
+                blocked = result
+                step = BranchDialogStep.CONFLICTS
             }
             else -> message = result.message
         }
@@ -136,6 +142,25 @@ fun BranchSwitchDialog(
                 step = BranchDialogStep.COMMIT
                 message = null
                 commitMessage = ""
+            },
+            onCancel = {
+                if (!busy) {
+                    step = if (pendingCreate) BranchDialogStep.CREATE else BranchDialogStep.LIST
+                    blocked = null
+                    message = null
+                }
+            },
+        )
+
+        BranchDialogStep.CONFLICTS -> ConflictsBlockedDialog(
+            result = blocked,
+            targetBranch = pendingName,
+            busy = busy,
+            onResolveConflicts = {
+                if (!busy) {
+                    onResolveConflicts()
+                    onDismiss()
+                }
             },
             onCancel = {
                 if (!busy) {
@@ -480,6 +505,72 @@ private fun BlockedDialog(
         confirmButton = {
             TextButton(enabled = !busy, onClick = onCommitAndSwitch) {
                 Text(tr("提交并切换分支..."))
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !busy, onClick = onCancel) { Text(tr("取消")) }
+        },
+    )
+}
+
+@Composable
+private fun ConflictsBlockedDialog(
+    result: GitBaseline.SwitchResult?,
+    targetBranch: String,
+    busy: Boolean,
+    onResolveConflicts: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val files = result?.affectedFiles.orEmpty().ifEmpty {
+        result?.dirtyFiles.orEmpty().map { it.path }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onCancel() },
+        icon = {
+            Icon(
+                Icons.Outlined.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+        },
+        title = { Text(tr("存在未解决的合并冲突")) },
+        text = {
+            Column {
+                Text(
+                    tr("仓库仍有未解决的冲突，请先处理再切换到 $targetBranch。"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                if (files.isNotEmpty()) {
+                    Text(tr("受影响文件"),
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 180.dp)) {
+                        items(files.take(30)) { path ->
+                            Text(
+                                path,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
+                    }
+                    if (files.size > 30) {
+                        Text(tr("以及其他 ${files.size - 30} 个文件"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = onResolveConflicts) {
+                Text(tr("解决冲突"))
             }
         },
         dismissButton = {

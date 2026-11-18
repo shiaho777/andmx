@@ -3,7 +3,9 @@ package com.andmx.ui2.files
 import com.andmx.ui2.settings.tr
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,6 +48,7 @@ import com.andmx.ui2.chat.ChatComposerBus
 import com.andmx.ui2.icons.FileTypeIcons
 import com.andmx.workspace.ChangeTracker
 import java.io.File
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -63,9 +67,29 @@ fun FileBrowser(
     conversationId: Long = 0L,
     guestRootPath: String = "",
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val changes by ChangeTracker.changesFor(conversationId).collectAsState()
     val changedMap = remember(changes) {
         changes.associate { it.path to it }
+    }
+
+    var conflictFiles by remember { mutableStateOf<List<com.andmx.workspace.ConflictFile>>(emptyList()) }
+    var conflictWorkspace by remember { mutableStateOf<String?>(null) }
+    var showConflictResolver by remember { mutableStateOf(false) }
+    val conflictOps = remember(rootPath) { buildHostConflictOps(context, rootPath) }
+
+    androidx.compose.runtime.LaunchedEffect(rootPath, refreshKey) {
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val root = findGitRoot(File(rootPath)) ?: return@runCatching null
+                val baseline = com.andmx.workspace.GitBaseline(context)
+                val files = baseline.conflictedFiles(root.absolutePath)
+                if (files.isEmpty()) null else root.absolutePath to files
+            }.getOrNull()
+        }
+        conflictWorkspace = result?.first
+        conflictFiles = result?.second.orEmpty()
     }
 
     var newFileDialog by remember { mutableStateOf(false) }
@@ -136,6 +160,29 @@ fun FileBrowser(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
             )
+            if (conflictFiles.isNotEmpty() && conflictWorkspace != null) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .background(
+                            MaterialTheme.colorScheme.errorContainer,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Text(
+                        tr("检测到 ${conflictFiles.size} 个冲突文件"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { showConflictResolver = true }) {
+                        Text(tr("解决冲突"))
+                    }
+                }
+            }
             if (files.isEmpty()) {
                 Text(
                     when {
@@ -232,6 +279,64 @@ fun FileBrowser(
             }
         )
     }
+    if (showConflictResolver && conflictWorkspace != null) {
+        ConflictResolverDialog(
+            workspacePath = conflictWorkspace!!,
+            ops = conflictOps,
+            onDismiss = { showConflictResolver = false },
+            onAllResolved = {
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val root = conflictWorkspace ?: return@launch
+                    val remaining = runCatching {
+                        com.andmx.workspace.GitBaseline(context).conflictedFiles(root)
+                    }.getOrDefault(emptyList())
+                    conflictFiles = remaining
+                    onRefresh()
+                }
+            },
+        )
+    }
+}
+
+internal fun findGitRoot(start: File): File? {
+    var cursor: File? = start
+    var depth = 0
+    while (cursor != null && depth < 24) {
+        if (File(cursor, ".git").exists()) return cursor
+        val parent = cursor.parentFile
+        if (parent == null || parent == cursor) break
+        cursor = parent
+        depth++
+    }
+    return null
+}
+
+internal fun buildHostConflictOps(
+    context: android.content.Context,
+    rootPath: String,
+): ConflictOps {
+    fun workspace(): String = findGitRoot(File(rootPath))?.absolutePath ?: rootPath
+    return ConflictOps(
+        listFiles = { com.andmx.workspace.GitBaseline(context).conflictedFiles(workspace()) },
+        readFile = { path ->
+            com.andmx.workspace.GitBaseline(context).readConflictFileText(workspace(), path)
+        },
+        resolveFile = { path, content ->
+            com.andmx.workspace.GitBaseline(context).resolveFile(workspace(), path, content)
+        },
+        markResolved = { path ->
+            com.andmx.workspace.GitBaseline(context).markResolved(workspace(), path)
+        },
+        removeFile = { path ->
+            com.andmx.workspace.GitBaseline(context).removeResolved(workspace(), path)
+        },
+        continueOperation = {
+            com.andmx.workspace.GitBaseline(context).continueOperation(workspace())
+        },
+        operation = {
+            com.andmx.workspace.GitBaseline(context).mergeOperation(workspace())
+        },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
