@@ -4,6 +4,7 @@ import com.andmx.ui2.settings.tr
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -39,6 +40,7 @@ data class SelectionActions(
     val onCopy: (String) -> Unit,
     val onQuote: (String) -> Unit,
     val onSideChat: ((String) -> Unit)? = null,
+    val onAnnotate: ((String) -> Unit)? = null,
 )
 
 private data class ActiveSelection(val text: String, val anchor: Offset)
@@ -71,6 +73,7 @@ fun SelectableWithToolbar(
             }
         }
     }
+    var annotating by remember { mutableStateOf<String?>(null) }
     val selection = active
     if (selection != null) {
         Popup(
@@ -94,6 +97,10 @@ fun SelectableWithToolbar(
                     ) {
                         TextButton(onClick = { actions.onCopy(selection.text); active = null }) { Text(tr("复制")) }
                         TextButton(onClick = { actions.onQuote(selection.text); active = null }) { Text(tr("引用")) }
+                        val annotate = actions.onAnnotate
+                        if (annotate != null) {
+                            TextButton(onClick = { annotating = selection.text }) { Text(tr("批注")) }
+                        }
                         val side = actions.onSideChat
                         if (side != null) {
                             TextButton(onClick = { side(selection.text); active = null }) { Text(tr("侧聊")) }
@@ -102,6 +109,46 @@ fun SelectableWithToolbar(
                 }
             }
         }
+    }
+    val annotateText = annotating
+    if (annotateText != null) {
+        var comment by remember(annotateText) { mutableStateOf("") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { annotating = null },
+            title = { Text(tr("批注选中内容")) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(
+                        ChatFind.quote(annotateText).lineSequence().take(4).joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 4,
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = comment,
+                        onValueChange = { comment = it },
+                        placeholder = { Text(tr("写下你的点评…")) },
+                        minLines = 2,
+                        maxLines = 6,
+                        modifier = androidx.compose.foundation.layout.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        actions.onAnnotate?.invoke(ChatFind.annotate(annotateText, comment))
+                        annotating = null
+                        active = null
+                    },
+                    enabled = comment.isNotBlank(),
+                ) { Text(tr("插入批注")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { annotating = null }) { Text(tr("取消")) }
+            },
+        )
     }
 }
 

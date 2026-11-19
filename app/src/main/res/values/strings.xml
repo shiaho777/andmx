@@ -1356,4 +1356,8 @@
     <string name="str_1353">"条消息"</string>
     <string name="str_1354">"个会话记录文件"</string>
     <string name="str_1355">"个话题文件"</string>
+    <string name="str_1356">"批注"</string>
+    <string name="str_1357">"批注选中内容"</string>
+    <string name="str_1358">"写下你的点评…"</string>
+    <string name="str_1359">"插入批注"</string>
 </resources>

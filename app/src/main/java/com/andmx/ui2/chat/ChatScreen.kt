@@ -1222,6 +1222,11 @@ LaunchedEffect(Unit) {
                                                         inputText = if (inputText.isBlank()) quote else inputText.trimEnd() + "\n" + quote
                                                     }
                                                 },
+                                                onAnnotate = { annotated ->
+                                                    if (annotated.isNotEmpty()) {
+                                                        inputText = if (inputText.isBlank()) annotated else inputText.trimEnd() + "\n" + annotated
+                                                    }
+                                                },
                                                 onSideChat = if (
                                                     item.message.role == "assistant" &&
                                                     !item.message.isProcess &&

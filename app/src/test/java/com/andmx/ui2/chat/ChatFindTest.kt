@@ -142,4 +142,29 @@ class ChatFindTest {
         assertEquals("", ChatFind.quote(""))
         assertEquals("", ChatFind.quote("   \n  "))
     }
+
+    @Test
+    fun annotateCombinesQuoteAndComment() {
+        assertEquals("> hello\nlooks wrong\n", ChatFind.annotate("hello", "looks wrong"))
+    }
+
+    @Test
+    fun annotateTrimsComment() {
+        assertEquals("> hello\nnote\n", ChatFind.annotate("hello", "  note  "))
+    }
+
+    @Test
+    fun annotateBlankCommentReturnsQuoteOnly() {
+        assertEquals("> hello\n", ChatFind.annotate("hello", "   "))
+    }
+
+    @Test
+    fun annotateBlankTextReturnsCommentOnly() {
+        assertEquals("note", ChatFind.annotate("  ", "note"))
+    }
+
+    @Test
+    fun annotateMultilineQuoteKeepsAllLines() {
+        assertEquals("> a\n> b\nfix both\n", ChatFind.annotate("a\nb", "fix both"))
+    }
 }
