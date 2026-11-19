@@ -29,6 +29,7 @@ import com.andmx.agent.ToolRisk
 import com.andmx.agent.TurnContext
 import com.andmx.agent.UpdatePlanTool
 import com.andmx.agent.zcode.WorkflowTools
+import com.andmx.agent.zcode.CREATE_WORKFLOW_TOOL_NAME
 import com.andmx.agent.zcode.applyDynamicWorkflowGate
 import com.andmx.agent.zcode.buildZCodeToolSurface
 import com.andmx.agent.zcode.CronTools
@@ -2332,7 +2333,11 @@ class ChatController private constructor(private val context: Context) {
                 cwd = cwd,
                 dynamicRunner = dynamicWorkflowRunner,
                 escalations = workflowEscalations,
-            ).all()
+            ).all().let { tools ->
+                tools + com.andmx.agent.zcode.WorkflowAliasTool(
+                    tools.first { it.name == CREATE_WORKFLOW_TOOL_NAME },
+                )
+            }
         } else {
             emptyList()
         }

@@ -69,4 +69,12 @@ object ChatFind {
         if (body.isEmpty()) return ""
         return body.lines().joinToString("\n") { "> $it" } + "\n"
     }
+
+    fun annotate(text: String, comment: String): String {
+        val quoted = quote(text)
+        val note = comment.trim()
+        if (quoted.isEmpty()) return note
+        if (note.isEmpty()) return quoted
+        return quoted + note + "\n"
+    }
 }

@@ -24,6 +24,7 @@ const val SUBMIT_RESULT_TOOL_NAME = "submit_result"
 const val ESCALATE_TOOL_NAME = "escalate"
 
 val DYNAMIC_WORKFLOW_TOOL_NAMES: Set<String> = setOf(
+    "Workflow",
     CREATE_WORKFLOW_TOOL_NAME,
     AMEND_WORKFLOW_TOOL_NAME,
     SAVE_WORKFLOW_TOOL_NAME,

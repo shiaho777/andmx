@@ -1356,4 +1356,8 @@
     <string name="str_1353">"messages"</string>
     <string name="str_1354">"rollout files"</string>
     <string name="str_1355">"topic files"</string>
+    <string name="str_1356">"Annotate"</string>
+    <string name="str_1357">"Annotate selection"</string>
+    <string name="str_1358">"Write your comment…"</string>
+    <string name="str_1359">"Insert annotation"</string>
 </resources>

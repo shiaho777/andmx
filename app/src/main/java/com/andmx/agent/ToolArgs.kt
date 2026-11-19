@@ -82,7 +82,7 @@ object ToolArgs {
             "SendMessage" -> "send"
             "CronCreate", "CronList", "CronUpdate", "CronDelete", "CronPauseSelf" -> "cron"
             "OffPeakCreate", "OffPeakList" -> "offpeak"
-            "CreateWorkflow", "AmendWorkflow", "SaveWorkflow", "ListSavedWorkflows",
+            "Workflow", "CreateWorkflow", "AmendWorkflow", "SaveWorkflow", "ListSavedWorkflows",
             "ListWorkflowRuns", "GetWorkflowRun", "GetWorkflowRunRoster",
             "ResumeWorkflowRun", "CancelWorkflowRun", "EvalWorkflowSnippet" -> "workflow"
             else -> if (isMcpName(n)) "mcp" else n.lowercase()
