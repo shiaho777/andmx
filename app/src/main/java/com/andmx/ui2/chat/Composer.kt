@@ -1446,7 +1446,11 @@ data class ConversationPick(
     val subtitle: String = "",
 )
 
-data class Attachment(val name: String, val uri: String)
+data class Attachment(
+    val name: String,
+    val uri: String,
+    val video: com.andmx.llm.VideoAttachment? = null,
+)
 
 /** $ 技能联想项（解耦自 agent 层 SkillInstaller，Composer 只认这个）。 */
 data class SkillSuggestion(

@@ -115,6 +115,17 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
             }
 
+            SettingsGroup(tr("回复语言")) {
+                OutlinedTextField(
+                    value = s.replyLanguage,
+                    onValueChange = { save(s.copy(replyLanguage = it.take(64))) },
+                    label = { Text(tr("模型回复语言")) },
+                    placeholder = { Text(tr("留空时由模型根据对话决定")) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             SettingsGroup(tr("消息流")) {
                 SwitchRow(
                     title = tr("显示思考过程"),

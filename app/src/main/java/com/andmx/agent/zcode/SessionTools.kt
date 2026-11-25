@@ -4,11 +4,14 @@ import com.andmx.agent.ExecutionAwareTool
 import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 
 internal object SessionToolLogic {
     fun busyDecision(running: Boolean, queued: Int): String =
@@ -263,6 +266,60 @@ class WaitSessionsTool(private val host: SessionControlHost) : Tool {
     }
 }
 
+enum class SessionMutation(
+    val toolName: String,
+    val summary: String,
+    val argument: String? = null,
+    val argumentType: String = "string",
+) {
+    FORK("ForkSession", "Copy a session in this workspace into a separate conversation."),
+    INTERRUPT("InterruptSession", "Stop the current turn of another session in this workspace."),
+    RENAME("RenameSession", "Change the title of a session in this workspace.", "title"),
+    ARCHIVE("SetSessionArchived", "Set the archive state of a session in this workspace.", "archived", "boolean"),
+    PIN("SetSessionPinned", "Set the pinned state of a session in this workspace.", "pinned", "boolean"),
+}
+
+private class SessionMutationTool(
+    private val host: SessionControlHost,
+    private val action: SessionMutation,
+) : Tool {
+    override val name = action.toolName
+    override val description = action.summary
+    override val shouldDefer = true
+    override val risk = ToolRisk.WRITE
+    override val needsApproval = true
+    override val concurrentSafe = false
+    override val timeoutMs = SESSION_CONTROL_TIMEOUT_MS
+    override val permissionName = "session_control.${name.replaceFirstChar { it.lowercaseChar() }}"
+    override val parameters = strictObject(required = listOfNotNull("sessionId", action.argument)) {
+        putJsonObject("sessionId") { put("type", "string") }
+        action.argument?.let { field ->
+            putJsonObject(field) { put("type", action.argumentType) }
+        }
+    }
+
+    override suspend fun execute(args: JsonObject): ToolResult {
+        val id = sessionIdFromArgs(args)
+        SessionToolLogic.validateSessionId(name, id)?.let { return it }
+        if (id == null) return ToolResult(missingParameter(name, "sessionId"), isError = true)
+        val value = action.argument?.let { field ->
+            val arg = args[field] as? JsonPrimitive
+                ?: return ToolResult(missingParameter(name, field), isError = true)
+            when (action.argumentType) {
+                "boolean" -> arg.takeUnless { it.isString }?.contentOrNull?.toBooleanStrictOrNull()?.toString()
+                else -> arg.takeIf { it.isString }?.contentOrNull?.trim()?.takeIf { it.length in 1..200 }
+            } ?: return ToolResult("$name input failed inputSchema validation", isError = true)
+        }
+        return try {
+            ToolResult(host.mutateSession(action, id, value))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IllegalArgumentException) {
+            ToolResult("$name failed: ${e.message}", isError = true)
+        }
+    }
+}
+
 class SessionTools(private val host: SessionControlHost) {
     private val ledger = SessionRequestLedger()
 
@@ -272,5 +329,5 @@ class SessionTools(private val host: SessionControlHost) {
         CreateSessionTool(host),
         SendToSessionTool(host, ledger),
         WaitSessionsTool(host),
-    )
+    ) + SessionMutation.entries.map { SessionMutationTool(host, it) }
 }

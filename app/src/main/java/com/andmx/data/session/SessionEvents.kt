@@ -1,6 +1,9 @@
 package com.andmx.data.session
 
 import com.andmx.llm.ApiMessage
+import com.andmx.llm.ApiToolCall
+import com.andmx.llm.VideoAttachment
+import com.andmx.llm.VideoAttachments
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.json.Json
@@ -153,6 +156,7 @@ object ConversationProjection {
             content = event.payload["summary"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: "compact_boundary",
         )
         SessionEventType.REWIND_TRIGGERED -> ApiMessage(role = "system", content = "rewind_triggered")
+        SessionEventType.TOOL_CALL_SCHEDULED -> null
         else -> toModelMessage(event)
     }
 
@@ -160,14 +164,22 @@ object ConversationProjection {
         val text = event.payload["text"]?.jsonPrimitive?.content
             ?: event.payload["output"]?.jsonPrimitive?.content
             ?: ""
+        val videos = VideoAttachments.decode(event.payload["videos"]?.toString().orEmpty())
         return when (event.type) {
-            SessionEventType.USER_MESSAGE -> ApiMessage(role = "user", content = text)
+            SessionEventType.USER_MESSAGE -> ApiMessage(role = "user", content = text, videos = videos)
             SessionEventType.ASSISTANT_MESSAGE -> ApiMessage(role = "assistant", content = text)
+            SessionEventType.TOOL_CALL_SCHEDULED -> {
+                val calls = runCatching {
+                    Json.decodeFromString<List<ApiToolCall>>(event.payload["calls"]?.toString().orEmpty())
+                }.getOrDefault(emptyList())
+                if (calls.isEmpty()) null else ApiMessage(role = "assistant", content = text.ifBlank { null }, toolCalls = calls)
+            }
             SessionEventType.TOOL_CALL_RESULT, SessionEventType.TOOL_CALL_ERROR -> ApiMessage(
                 role = "tool",
                 content = text,
                 toolCallId = event.payload["id"]?.jsonPrimitive?.content,
                 name = event.payload["name"]?.jsonPrimitive?.content,
+                videos = videos,
             )
             else -> null
         }
@@ -246,7 +258,7 @@ class SessionEventStore(private val dir: File) {
         for (message in messages) {
             val type = when (message.role) {
                 "user" -> SessionEventType.USER_MESSAGE
-                "assistant" -> SessionEventType.ASSISTANT_MESSAGE
+                "assistant" -> if (message.toolCalls.isNullOrEmpty()) SessionEventType.ASSISTANT_MESSAGE else SessionEventType.TOOL_CALL_SCHEDULED
                 "tool" -> SessionEventType.TOOL_CALL_RESULT
                 else -> continue
             }
@@ -257,8 +269,12 @@ class SessionEventStore(private val dir: File) {
                 buildJsonObject {
                     put("text", message.content.orEmpty())
                     put("output", message.content.orEmpty())
+                    message.toolCalls?.let {
+                        put("calls", Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(ApiToolCall.serializer()), it))
+                    }
                     message.toolCallId?.let { put("id", it) }
                     message.name?.let { put("name", it) }
+                    if (message.videos.isNotEmpty()) put("videos", Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(VideoAttachment.serializer()), message.videos))
                 },
             )
         }

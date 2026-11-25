@@ -82,7 +82,7 @@ class LlmClient(
     }
 
     private fun doChat(request: ChatRequest): ApiMessage {
-        val body = adapter.encodeRequest(request.copy(stream = false), def)
+        val body = adapter.encodeRequest(VideoAttachments.project(request.copy(stream = false), def), def)
         val text = doPost(body, stream = false)
         tracker?.let {
             adapter.extractUsage(text)?.let { usage -> it.recordTurn(TokenUsageTracker.parseUsage(usage)) }
@@ -131,7 +131,7 @@ class LlmClient(
     }
 
     private fun doChatStream(request: ChatRequest): Flow<LlmStreamEvent> = flow {
-        val body = adapter.encodeRequest(request.copy(stream = true), def)
+        val body = adapter.encodeRequest(VideoAttachments.project(request.copy(stream = true), def), def)
         val conn = openConnection(body, stream = true)
         val code = conn.responseCode
         tracker?.updateRateLimit(TokenUsageTracker.parseRateLimit(conn))

@@ -510,7 +510,7 @@ val SESSION_CONTROL_TOOL_NAMES: Set<String> = setOf(
     "CreateSession",
     "SendToSession",
     "WaitSessions",
-)
+) + SessionMutation.entries.map { it.toolName }
 
 internal const val SESSION_CONTROL_MODEL_BYTES = 32_768
 internal const val SESSION_CONTROL_TIMEOUT_MS = 60_000L
@@ -556,6 +556,7 @@ interface SessionControlHost {
     suspend fun createSession(title: String, task: String?, workspace: String?): SessionCreateResult
     suspend fun sendToSession(sessionId: String, message: String, requestId: String): SessionSendResult
     suspend fun waitState(sessionId: String): SessionWaitState?
+    suspend fun mutateSession(action: SessionMutation, sessionId: String, value: String?): String
 }
 
 internal val SESSION_LIST_PARAMETERS = strictObject {

@@ -40,6 +40,9 @@ class SessionToolsTest {
         var sendError: String? = null
         var createError: String? = null
 
+        override suspend fun mutateSession(action: SessionMutation, sessionId: String, value: String?): String =
+            "${action.toolName}/$sessionId/$value"
+
         override suspend fun listSessions(query: String?, includeArchived: Boolean): List<SessionSummary> {
             listCalls++
             lastQuery = query
@@ -119,7 +122,7 @@ class SessionToolsTest {
         all.forEach { t ->
             assertEquals("https://json-schema.org/draft/2020-12/schema", t.parameters["\$schema"]!!.jsonPrimitive.content)
             assertTrue(t.shouldDefer)
-            assertTrue(t.description.contains("ListSessions"))
+            assertTrue(t.description.isNotBlank())
         }
     }
 

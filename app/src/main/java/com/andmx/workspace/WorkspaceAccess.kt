@@ -17,13 +17,14 @@ class WorkspaceAccess(context: Context) {
     private val localEnv = LocalProotEnvironment(appContext, runtime)
     private val localFs = GuestFs(runtime)
 
-    val isRemote: Boolean get() = projectManager.isRemote
+    val isRemote: Boolean get() = LocalWorktree.current() == null && projectManager.isRemote
 
     val projectName: String get() = projectManager.projectName
 
-    val hostPath: String? get() = projectManager.hostPath.value
+    val hostPath: String? get() = LocalWorktree.current()?.hostDirectory(appContext)?.path ?: projectManager.hostPath.value
 
     fun guestCwd(): String {
+        LocalWorktree.current()?.let { return it.path }
         if (isRemote) {
             return projectManager.currentRemoteSpec()?.remotePath?.ifBlank { "~" } ?: "~"
         }
@@ -80,7 +81,8 @@ class WorkspaceAccess(context: Context) {
         val env = environment(timeoutMs)
         val work = cwd?.takeIf { it.isNotBlank() } ?: guestCwd()
         val sh = shellBinary()
-        val script = "cd ${q(work)} 2>/dev/null || cd ~ 2>/dev/null || true; $command"
+        val script = if (LocalWorktree.current() != null) "cd ${q(work)} || exit 125; $command"
+        else "cd ${q(work)} 2>/dev/null || cd ~ 2>/dev/null || true; $command"
         return env.execute(
             ProcessSpec(
                 argv = listOf(sh, "-lc", script),
@@ -297,10 +299,10 @@ class WorkspaceAccess(context: Context) {
         if (path.startsWith(projectManager.guestMountPath)) return path
         // Absolute host path under selected project → map into guest mount
         val host = hostPath
-        if (host != null && path.startsWith(host)) {
+        if (host != null && (path == host || path.startsWith("$host/"))) {
             val rel = path.removePrefix(host).trimStart('/')
-            return if (rel.isEmpty()) projectManager.guestMountPath
-            else "${projectManager.guestMountPath}/$rel"
+            val mount = LocalWorktree.current()?.path ?: projectManager.guestMountPath
+            return if (rel.isEmpty()) mount else "$mount/$rel"
         }
         if (path.startsWith("/")) return path
         return resolvePath(path)

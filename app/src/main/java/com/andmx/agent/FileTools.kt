@@ -107,7 +107,7 @@ private val READ_PROVIDER_DESCRIPTION = listOf(
     "- When you already know which part of the file you need, only read that part. This can be important for larger files.",
     "- Results are returned using cat -n format, with line numbers starting at 1",
     "- Reads images (PNG, JPG, …) and presents them visually. Reads PDFs via the `pages` parameter (e.g. \"1-5\", max 20 pages/request; defaults to the first 20 pages).",
-    "- Reads videos (MP4, MOV, WEBM, …). This Android build has no video input block, so videos are sampled as frames. That is a substitution, not the upstream video block.",
+    "- Reads videos as video attachments on compatible models and samples frames for other vision models.",
     "- Reading a directory, a missing file, or an empty file returns an error or system reminder rather than content.",
     "- Do NOT re-read a file you just edited to verify — Edit/Write would have errored if the change failed, and the harness tracks file state for you.",
 ).joinToString("\n")
@@ -369,10 +369,15 @@ class ReadFileTool(private val context: Context, private val readFileState: Read
         return (lo..hi).toList().take(MAX_PDF_PAGES)
     }
 
-    /** 本地视频抽 3 帧（头/中/尾）为 PNG——上游 read-video 的移动端等价。 */
     private fun readVideo(resolved: String, host: java.io.File): ToolResult {
         if (!host.exists()) return ToolResult("文件不存在: $resolved", isError = true)
         return runCatching {
+            val name = resolved.substringAfterLast('/')
+            val video = com.andmx.llm.VideoAttachments.mimeFor(name)?.let { mime ->
+                runCatching {
+                    host.inputStream().use { com.andmx.llm.VideoAttachments.save(context, name, mime, it) }
+                }.getOrNull()
+            }
             val mmr = android.media.MediaMetadataRetriever()
             val images = mutableListOf<String>()
             try {
@@ -395,13 +400,16 @@ class ReadFileTool(private val context: Context, private val readFileState: Read
                     if (scaled !== bmp) bmp.recycle()
                     scaled.recycle()
                 }
+            } catch (failure: RuntimeException) {
+                if (video == null) throw failure
             } finally {
                 runCatching { mmr.release() }
             }
-            if (images.isEmpty()) return ToolResult("视频抽帧失败: $resolved", isError = true)
+            if (images.isEmpty() && video == null) return ToolResult("视频读取失败: $resolved", isError = true)
             ToolResult(
-                "[video ${resolved.substringAfterLast('/')} · ${images.size} 帧]",
+                "[video $name]",
                 imageUrls = images,
+                videos = listOfNotNull(video),
             )
         }.getOrElse { ToolResult("视频读取失败: ${it.message}", isError = true) }
     }

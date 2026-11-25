@@ -64,6 +64,8 @@ data class ApiMessage(
      * never serialized. Drives the auto-compact provider_usage override.
      */
     val tokenUsage: TokenUsage? = null,
+    val videos: List<VideoAttachment> = emptyList(),
+    internal val wireVideoUrls: List<String> = emptyList(),
 )
 
 object ApiMessageSerializer : KSerializer<ApiMessage> {
@@ -74,13 +76,19 @@ object ApiMessageSerializer : KSerializer<ApiMessage> {
         val obj = buildJsonObject {
             put("role", value.role)
             val imgs = value.imageUrls
-            if (!imgs.isNullOrEmpty()) {
+            if (!imgs.isNullOrEmpty() || value.wireVideoUrls.isNotEmpty()) {
                 put("content", buildJsonArray {
                     value.content?.let { addJsonObject { put("type", "text"); put("text", it) } }
-                    imgs.forEach { url ->
+                    imgs.orEmpty().forEach { url ->
                         addJsonObject {
                             put("type", "image_url")
                             putJsonObject("image_url") { put("url", url) }
+                        }
+                    }
+                    value.wireVideoUrls.forEach { url ->
+                        addJsonObject {
+                            put("type", "video_url")
+                            putJsonObject("video_url") { put("url", url) }
                         }
                     }
                 })

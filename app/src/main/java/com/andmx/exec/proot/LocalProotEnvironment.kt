@@ -46,10 +46,12 @@ class LocalProotEnvironment(
             return ProcessResult(-1, "", "", 0, error = install.message)
         }
         val useRootfs = runtime.rootfsDir.takeIf { it.exists() && it.isDirectory }
-        val argv = runtime.prootArgv(spec.argv, rootfs = useRootfs)
+        val guestCwd = spec.workingDir ?: com.andmx.workspace.LocalWorktree.current()?.path ?: "/root"
+        val argv = runtime.prootArgv(spec.argv, rootfs = useRootfs, guestCwd = guestCwd)
         return host.execute(
             spec.copy(
                 argv = argv,
+                workingDir = if (useRootfs != null) context.filesDir.path else spec.workingDir,
                 env = runtime.env() + spec.env,
                 redirectErrorStream = true,
             ),

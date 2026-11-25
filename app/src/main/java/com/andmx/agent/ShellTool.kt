@@ -179,7 +179,7 @@ class ShellTool(
         }
         val quotedCwd = "'${cwd.replace("'", "'\"'\"'")}'"
         val cdCommand = when {
-            strictCwd -> "cd $quotedCwd || exit 125; $prepared"
+            strictCwd || com.andmx.workspace.LocalWorktree.current() != null -> "cd $quotedCwd || exit 125; $prepared"
             cwd.isNotBlank() -> "cd $quotedCwd 2>/dev/null || cd ~; $prepared"
             else -> prepared
         }

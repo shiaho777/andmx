@@ -154,10 +154,14 @@ fun MarkdownView(
                         }
 
                         is MdBlock.Code -> {
-                            if (block.lang.trim().lowercase() == "mermaid") {
-                                MermaidBlock(block.code)
-                            } else {
-                                CodeBlock(
+                            val lang = block.lang.trim().lowercase()
+                            val card = if (!streaming && lang == "andmx-ui") {
+                                remember(block.code) { InteractiveCardSpec.parse(block.code) }
+                            } else null
+                            when {
+                                lang == "mermaid" -> MermaidBlock(block.code)
+                                card != null -> InteractiveCard(card)
+                                else -> CodeBlock(
                                     code = block.code,
                                     language = block.lang,
                                     isDark = isDark,

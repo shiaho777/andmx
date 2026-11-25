@@ -56,6 +56,7 @@ fun FilesScreen(
     initialPath: String? = null,
     review: FileReviewAnchor? = null,
     conversationId: Long = 0L,
+    worktree: com.andmx.workspace.LocalWorktree? = null,
 ) {
     val context = LocalContext.current
     val projectManager = remember { ProjectManager(context) }
@@ -63,7 +64,7 @@ fun FilesScreen(
     val kind by projectManager.workspaceKind.collectAsState()
     val remoteSpec = remember(hostPath, kind) { projectManager.currentRemoteSpec() }
 
-    if (kind == WorkspaceKind.REMOTE && remoteSpec != null) {
+    if (worktree == null && kind == WorkspaceKind.REMOTE && remoteSpec != null) {
         RemoteFilesScreen(
             rootPath = remoteSpec.remotePath.ifBlank { "~" },
             spec = remoteSpec,
@@ -73,11 +74,13 @@ fun FilesScreen(
         return
     }
 
-    val rootPath = hostPath
+    val sessionHostPath = worktree?.hostDirectory(context)?.path ?: hostPath
+    val guestMount = worktree?.path ?: projectManager.guestMountPath
+    val rootPath = sessionHostPath
         ?: android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
     val rootfsRoot = remember { com.andmx.exec.proot.ProotRuntime(context).rootfsDir.absolutePath }
     val resolved = remember(initialPath, rootPath, hostPath) {
-        resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath, rootfsRoot)
+        resolveLocalBrowseTarget(initialPath, rootPath, sessionHostPath, guestMount, rootfsRoot)
     }
 
     var currentPath by remember(rootPath, resolved.dir) { mutableStateOf(resolved.dir) }
@@ -87,7 +90,7 @@ fun FilesScreen(
     var changedOnly by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialPath, rootPath, hostPath) {
-        val target = resolveLocalBrowseTarget(initialPath, rootPath, hostPath, projectManager.guestMountPath, rootfsRoot)
+        val target = resolveLocalBrowseTarget(initialPath, rootPath, sessionHostPath, guestMount, rootfsRoot)
         currentPath = target.dir
         openFile = target.file
     }
@@ -119,7 +122,7 @@ fun FilesScreen(
                 onOpenFile = { openFile = it },
                 onRefresh = { refresh++ },
                 conversationId = conversationId,
-                guestRootPath = projectManager.guestMountPath,
+                guestRootPath = guestMount,
             )
         }
     }

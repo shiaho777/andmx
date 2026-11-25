@@ -102,6 +102,7 @@ data class ProviderSettings(
     val outputStyleName: String = "",
     /** 输出风格正文，进入动态系统段。 */
     val outputStylePrompt: String = "",
+    val replyLanguage: String = "",
     /** 关闭后新会话不再提供网页抓取和搜索。 */
     val browserControlEnabled: Boolean = true,
     /** 开启后 WebFetch / 搜索不再校验 HTTPS 证书。 */
@@ -141,6 +142,7 @@ class SettingsStore(
     private val reasoningKey = stringPreferencesKey("reasoning_effort")
     private val mcpKey = stringPreferencesKey("mcp_servers")
     private val localeKey = stringPreferencesKey("locale")
+    private val replyLanguageKey = stringPreferencesKey("reply_language")
     private val terminalFontKey = stringPreferencesKey("terminal_font_family")
     private val notificationKey = androidx.datastore.preferences.core.booleanPreferencesKey("notification")
     private val notificationSoundKey = androidx.datastore.preferences.core.booleanPreferencesKey("notification_sound")
@@ -198,6 +200,7 @@ class SettingsStore(
             reasoningEffort = p[reasoningKey] ?: def.reasoningEffort,
             mcpServers = p[mcpKey] ?: def.mcpServers,
             locale = p[localeKey] ?: def.locale,
+            replyLanguage = p[replyLanguageKey] ?: def.replyLanguage,
             terminalFontFamily = p[terminalFontKey] ?: def.terminalFontFamily,
             notification = p[notificationKey] ?: def.notification,
             notificationSound = p[notificationSoundKey] ?: def.notificationSound,
@@ -250,6 +253,7 @@ class SettingsStore(
             p[reasoningKey] = settings.reasoningEffort
             p[mcpKey] = settings.mcpServers
             p[localeKey] = settings.locale
+            p[replyLanguageKey] = settings.replyLanguage
             p[terminalFontKey] = settings.terminalFontFamily
             p[notificationKey] = settings.notification
             p[notificationSoundKey] = settings.notificationSound

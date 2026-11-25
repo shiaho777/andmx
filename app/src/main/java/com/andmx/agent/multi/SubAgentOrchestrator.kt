@@ -40,6 +40,8 @@ import com.andmx.exec.files.GuestFs
 import com.andmx.llm.ApiMessage
 import com.andmx.settings.CustomSubAgent
 import com.andmx.settings.ProviderSettings
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -231,6 +233,32 @@ class SubAgentOrchestrator(
         return spawn(SpawnSpec(task = task, systemHint = systemHint, agentId = agentId))
     }
 
+    private val foregroundAgents = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+
+    suspend fun spawnUntilBackgrounded(spec: SpawnSpec): String? {
+        val promoted = CompletableDeferred<Unit>()
+        foregroundAgents[spec.agentId] = promoted
+        val run = scope.async(com.andmx.workspace.LocalWorktree.inherit()) { spawn(spec) }
+        return try {
+            select {
+                run.onAwait { it }
+                promoted.onAwait { null }
+            }
+        } finally {
+            foregroundAgents.remove(spec.agentId, promoted)
+            if (!promoted.isCompleted && run.isActive) run.cancel()
+        }
+    }
+
+    suspend fun backgroundForegroundAgents() = agentLock.withLock {
+        foregroundAgents.forEach { (id, signal) ->
+            val agent = activeAgents[id] ?: return@forEach
+            if (agent.state == AgentState.RUNNING && signal.complete(Unit)) {
+                activeAgents[id] = agent.copy(background = true)
+            }
+        }
+    }
+
     suspend fun spawn(spec: SpawnSpec): String {
         val agentId = spec.agentId
         _events.tryEmit(SubAgentEvent.Started(agentId, spec.task))
@@ -292,8 +320,10 @@ class SubAgentOrchestrator(
         }
         val startedAt = System.currentTimeMillis()
 
+        var acquired = false
         return try {
             semaphore.acquire()
+            acquired = true
             val result = StringBuilder()
             var toolUseCount = 0
             engine.runTurn(settings, turn, spec.task).collect { event ->
@@ -314,12 +344,12 @@ class SubAgentOrchestrator(
                 }
             }
             val finalResult = result.toString()
-            agentLock.withLock {
-                activeAgents[agentId]?.let { info ->
-                    activeAgents[agentId] = info.copy(state = AgentState.COMPLETED, result = finalResult)
-                }
+            val background = agentLock.withLock {
+                val info = activeAgents[agentId]
+                if (info != null) activeAgents[agentId] = info.copy(state = AgentState.COMPLETED, result = finalResult)
+                info?.background ?: spec.background
             }
-            emitTerminated(agentId, "completed", finalResult, spec.background, spec.agentName, spec.task, startedAt, toolUseCount)
+            emitTerminated(agentId, "completed", finalResult, background, spec.agentName, spec.task, startedAt, toolUseCount)
             finalResult
         } catch (t: Throwable) {
             _events.tryEmit(SubAgentEvent.Failed(agentId, t.message ?: "未知错误"))
@@ -328,11 +358,13 @@ class SubAgentOrchestrator(
                     activeAgents[agentId] = info.copy(state = AgentState.FAILED, result = "失败: ${t.message}")
                 }
             }
-            emitTerminated(agentId, "failed", "失败: ${t.message}", spec.background, spec.agentName, spec.task, startedAt)
+            val background = agentLock.withLock { activeAgents[agentId]?.background ?: spec.background }
+            emitTerminated(agentId, "failed", "失败: ${t.message}", background, spec.agentName, spec.task, startedAt)
+            if (t is kotlinx.coroutines.CancellationException) throw t
             "子代理失败: ${t.message}"
         } finally {
             agentJobs.remove(agentId)
-            semaphore.release()
+            if (acquired) semaphore.release()
         }
     }
 
@@ -442,7 +474,7 @@ class SubAgentOrchestrator(
             true
         }
         if (!accepted) return false
-        val job = scope.launch {
+        val job = scope.launch(com.andmx.workspace.LocalWorktree.inherit()) {
             try {
                 resume(agentId, input)
             } finally {
@@ -512,7 +544,7 @@ class SubAgentOrchestrator(
      */
     suspend fun fanout(tasks: List<Pair<String, String>>): List<String> {
         val deferred = tasks.map { (task, hint) ->
-            scope.async { spawn(task, hint) }
+            scope.async(com.andmx.workspace.LocalWorktree.inherit()) { spawn(task, hint) }
         }
         return deferred.awaitAll()
     }
@@ -528,7 +560,7 @@ class SubAgentOrchestrator(
     fun spawnAsync(spec: SpawnSpec): String {
         val agentId = spec.agentId.ifBlank { "subagent-${System.currentTimeMillis()}" }
         val fixed = if (spec.agentId == agentId) spec else spec.copy(agentId = agentId)
-        val job = scope.launch {
+        val job = scope.launch(com.andmx.workspace.LocalWorktree.inherit()) {
             try {
                 spawn(fixed)
             } finally {
@@ -853,7 +885,12 @@ class ZCodeAgentTool(
             val canRead = names.contains("Read") || names.contains("Bash")
             return ToolResult(formatAgentBackgroundModelContent(agentId, spec.outputFile, canRead))
         }
-        val result = orchestrator.spawn(spec)
+        val result = orchestrator.spawnUntilBackgrounded(spec)
+        if (result == null) {
+            val names = callerToolNames().toSet()
+            val canRead = names.contains("Read") || names.contains("Bash")
+            return ToolResult(formatAgentBackgroundModelContent(agentId, spec.outputFile, canRead))
+        }
         val stats = orchestrator.runStatsFor(agentId)
         return ToolResult(
             formatAgentCompletedModelContent(

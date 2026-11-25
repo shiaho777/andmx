@@ -108,6 +108,7 @@ private fun kindOf(name: String): FileKind {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor? = null) {
+    var showingHtml by remember(path) { mutableStateOf(false) }
     val context = LocalContext.current
     val file = remember(path) { File(path) }
     val kind = remember(path) { kindOf(file.name) }
@@ -240,6 +241,18 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
         chunkIndex = (offset / CHUNK).coerceIn(0, chunkCount - 1)
     }
 
+    if (showingHtml) {
+        com.andmx.ui2.chat.BrowserDialog(
+            initialUrl = file.name,
+            onClose = { showingHtml = false },
+            onPage = {},
+            onElement = {
+                com.andmx.ui2.chat.ChatComposerBus.insert(it)
+                showingHtml = false
+            },
+            localDocument = file,
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -258,6 +271,11 @@ fun FileViewerScreen(path: String, onBack: () -> Unit, review: FileReviewAnchor?
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("返回")) }
                 },
                 actions = {
+                    if (file.extension.lowercase() in setOf("html", "htm")) {
+                        IconButton(onClick = { showingHtml = true }) {
+                            Icon(Icons.Outlined.OpenInNew, tr("预览网页"))
+                        }
+                    }
                     if (kind == FileKind.OFFICE) {
                         IconButton(onClick = { openFileExternally(context, file) }) {
                             Icon(Icons.Outlined.OpenInNew, tr("用其他应用打开"))

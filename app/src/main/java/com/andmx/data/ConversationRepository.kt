@@ -1,6 +1,7 @@
 package com.andmx.data
 
 import android.content.Context
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -8,15 +9,26 @@ import kotlinx.serialization.json.Json
 /** Thin repository over the Room DAO for conversations and messages. */
 class ConversationRepository(context: Context) {
     private val appContext = context.applicationContext
-    private val dao = AndmxDatabase.get(context).dao()
+    private val database = AndmxDatabase.get(context)
+    private val dao = database.dao()
 
     fun observeConversations(): Flow<List<ConversationEntity>> = dao.observeConversations()
 
     suspend fun search(query: String): List<ConversationEntity> =
         if (query.isBlank()) emptyList() else dao.search(query.trim())
 
-    suspend fun createConversation(project: String, title: String): Long =
-        dao.insertConversation(ConversationEntity(project = project, title = title))
+    suspend fun createConversation(project: String, title: String, worktreePath: String = ""): Long =
+        dao.insertConversation(ConversationEntity(project = project, title = title, worktreePath = worktreePath))
+
+    internal suspend fun importConversation(project: String, transfer: ConversationTransfer): Long = database.withTransaction {
+        val id = createConversation(project, transfer.title.ifBlank { "导入的对话" })
+        transfer.messages.forEach { message ->
+            dao.insertMessage(MessageEntity(conversationId = id, role = message.role, content = message.text))
+        }
+        id
+    }
+
+    suspend fun setBrowserUrl(id: Long, url: String) = dao.setBrowserUrl(id, url)
 
     suspend fun conversation(id: Long): ConversationEntity? = dao.getConversation(id)
 
@@ -27,8 +39,12 @@ class ConversationRepository(context: Context) {
      * every message verbatim. Returns the new conversation id, or null when the
      * source does not exist.
      */
-    suspend fun forkConversation(fromId: Long, untilMessageId: Long = Long.MAX_VALUE): Long? {
-        val src = dao.getConversation(fromId) ?: return null
+    suspend fun forkConversation(
+        fromId: Long,
+        untilMessageId: Long = Long.MAX_VALUE,
+        worktreePath: String? = null,
+    ): Long? = database.withTransaction {
+        val src = dao.getConversation(fromId) ?: return@withTransaction null
         val now = System.currentTimeMillis()
         val newId = dao.insertConversation(
             src.copy(
@@ -40,13 +56,18 @@ class ConversationRepository(context: Context) {
                 sessionId = "",
                 archived = false,
                 pinned = false,
+                taskStatus = "idle",
+                pendingQueueJson = "",
+                worktreePath = worktreePath ?: src.worktreePath,
+                permissionGrantsJson = "",
+                unreadAt = null,
             ),
         )
         dao.messagesFor(fromId).filter { it.id < untilMessageId }.forEach { m ->
             dao.insertMessage(m.copy(id = 0, conversationId = newId))
         }
         dao.touchConversation(newId, src.title.ifBlank { "未命名会话" } + " · 分叉", now)
-        return newId
+        newId
     }
 
     suspend fun addMessage(
@@ -60,6 +81,7 @@ class ConversationRepository(context: Context) {
         approvalModeLabel: String = "",
         approvalRiskDescription: String = "",
         imageUrls: List<String> = emptyList(),
+        videos: List<com.andmx.llm.VideoAttachment> = emptyList(),
     ) {
         val safeId = if (conversationId > 0 && dao.getConversation(conversationId) != null) {
             conversationId
@@ -83,6 +105,7 @@ class ConversationRepository(context: Context) {
                 approvalModeLabel = approvalModeLabel,
                 approvalRiskDescription = approvalRiskDescription,
                 imageUrlsJson = Json.encodeToString(imageUrls),
+                videosJson = if (videos.isEmpty()) "" else Json.encodeToString(videos),
             ),
         )
         dao.touchConversation(safeId, titleKeep(safeId), System.currentTimeMillis())

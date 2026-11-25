@@ -57,6 +57,39 @@ internal object ChatControllerLogic {
         return bytes.copyOfRange(0, cut).toString(Charsets.UTF_8) to true
     }
 
+    fun repairToolHistory(messages: List<ApiMessage>): List<ApiMessage> = buildList {
+        var index = 0
+        while (index < messages.size) {
+            val message = messages[index]
+            val originalCalls = message.toolCalls.orEmpty()
+            if (message.role != "tool" && originalCalls.isEmpty()) {
+                add(message)
+                index++
+                continue
+            }
+            if (originalCalls.isNotEmpty()) index++
+            val results = mutableListOf<ApiMessage>()
+            while (index < messages.size && messages[index].role == "tool") {
+                val result = messages[index]
+                val id = result.toolCallId?.takeIf { it.isNotBlank() } ?: "restored-$index"
+                if (results.none { it.toolCallId == id }) results += result.copy(toolCallId = id)
+                index++
+            }
+            val calls = results.map { result ->
+                originalCalls.firstOrNull { it.id == result.toolCallId }
+                    ?: ApiToolCall(
+                        id = requireNotNull(result.toolCallId),
+                        function = ApiFunctionCall(result.name.orEmpty().ifBlank { "Read" }, "{}"),
+                    )
+            }
+            val text = message.content.takeUnless { message.role == "tool" || it.isNullOrBlank() }
+            if (calls.isNotEmpty() || text != null) {
+                add(ApiMessage(role = "assistant", content = text, toolCalls = calls.ifEmpty { null }))
+            }
+            addAll(results)
+        }
+    }
+
     fun rebuildHistory(msgs: List<MessageEntity>): List<ApiMessage> {
         val out = mutableListOf<ApiMessage>()
         var i = 0
@@ -64,7 +97,7 @@ internal object ChatControllerLogic {
             val m = msgs[i]
             when (m.role) {
                 "user" -> {
-                    out += ApiMessage(role = "user", content = m.content)
+                    out += ApiMessage(role = "user", content = m.content, videos = com.andmx.llm.VideoAttachments.decode(m.videosJson))
                     i++
                 }
                 "assistant" -> {
@@ -89,6 +122,7 @@ internal object ChatControllerLogic {
                             content = tm.content,
                             toolCallId = callId,
                             name = tm.toolName,
+                            videos = com.andmx.llm.VideoAttachments.decode(tm.videosJson),
                         )
                         i++
                     }

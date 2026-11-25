@@ -63,6 +63,7 @@ data class ConversationEntity(
     val unreadAt: Long? = null,
     /** idle | running | completed | failed。归档只收 completed。 */
     val taskStatus: String = "idle",
+    val worktreePath: String = "",
 )
 
 @Entity(tableName = "task_groups")
@@ -106,6 +107,7 @@ data class MessageEntity(
     /** Snapshot for approval messages: user-facing risk explanation at the time of the prompt. */
     val approvalRiskDescription: String = "",
     val imageUrlsJson: String = "",
+    val videosJson: String = "",
     /** 上游 assistant-feedback：0 无, 1 赞, -1 踩。 */
     val feedback: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),

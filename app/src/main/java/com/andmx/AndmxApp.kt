@@ -15,6 +15,7 @@ import dagger.hilt.android.HiltAndroidApp
 class AndmxApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        com.andmx.llm.VideoAttachments.initialize(this)
         val pm = ProjectManager(this)
         pm.restoreBinding()
         ChangeTracker.install(this)

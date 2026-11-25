@@ -65,4 +65,17 @@ class SmokeTest {
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithContentDescription("切换侧边栏").assertIsDisplayed()
     }
+
+    @Test
+    fun builtInBrowserRejectsFileSchemes() {
+        compose.onNodeWithContentDescription("更多操作").assertIsDisplayed().performClick()
+        compose.onNodeWithText("浏览器").assertIsDisplayed().performClick()
+        compose.onNode(hasSetTextAction() and hasText("网址"))
+            .assertIsDisplayed()
+            .performTextInput("file:///data/local/tmp/index.html")
+        compose.onNodeWithText("打开").performClick()
+        compose.onNodeWithText("无法打开网址或保存页面。").assertIsDisplayed()
+        compose.onNodeWithText("关闭").performClick()
+        compose.onNodeWithContentDescription("更多操作").assertIsDisplayed()
+    }
 }

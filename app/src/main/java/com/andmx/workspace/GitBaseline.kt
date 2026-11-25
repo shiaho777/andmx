@@ -27,6 +27,7 @@ import kotlinx.serialization.json.Json
  */
 class GitBaseline(
     context: Context,
+    private val worktreeProvider: () -> LocalWorktree? = { LocalWorktree.current() },
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false; explicitNulls = false },
 ) {
     companion object {
@@ -125,13 +126,14 @@ class GitBaseline(
         } else {
             script
         }
-        return target.env.execute(
-            ProcessSpec(
+        val spec = ProcessSpec(
                 argv = listOf(target.sh, flag, rewritten),
                 workingDir = actual,
                 redirectErrorStream = true,
-            ),
         )
+        val worktree = worktreeProvider()?.takeIf { it.path == workspacePath }
+        return if (worktree == null) target.env.execute(spec)
+        else withContext(worktree.context()) { target.env.execute(spec) }
     }
 
 
@@ -362,7 +364,7 @@ class GitBaseline(
     /** Check if a git baseline has been initialized. */
     fun isInitialized(): Boolean = java.io.File(baselineDir, ".git").exists()
 
-    private suspend fun ensureGit(workspacePath: String? = null) {
+    internal suspend fun ensureGit(workspacePath: String? = null) {
         val script =
             "command -v git >/dev/null 2>&1 || " +
                 "(command -v apk >/dev/null 2>&1 && apk add --no-cache git >/dev/null 2>&1) || true"
