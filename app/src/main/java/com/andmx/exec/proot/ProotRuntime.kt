@@ -101,6 +101,7 @@ class ProotRuntime(private val context: Context) {
         command: List<String>,
         rootfs: File? = null,
         fakeRoot: Boolean = true,
+        guestCwd: String = "/root",
     ): List<String> = buildList {
         add(prootBin.path)
         if (fakeRoot) add("-0")
@@ -115,10 +116,11 @@ class ProotRuntime(private val context: Context) {
             add("-b"); add("/apex")
         } else {
             // Working dir inside the guest.
-            add("-w"); add("/root")
+            add("-w"); add(guestCwd)
             // Bind-mount the user's chosen project directory (phone storage)
             // into the guest so the agent operates on real files.
-            extraBind?.let { (host, guest) ->
+            val worktree = com.andmx.workspace.LocalWorktree.current()
+            (worktree?.let { it.project to "/root/project" } ?: extraBind)?.let { (host, guest) ->
                 add("-b"); add("$host:$guest")
             }
         }

@@ -231,7 +231,24 @@ object AnthropicMessagesAdapter : WireAdapter {
             buildJsonObject {
                 put("role", m.role.ifBlank { "user" })
                 putJsonArray("content") {
-                    addJsonObject { put("type", "text"); put("text", m.content.orEmpty()) }
+                    m.content?.takeIf { it.isNotBlank() }?.let { text ->
+                        addJsonObject { put("type", "text"); put("text", text) }
+                    }
+                    m.imageUrls.orEmpty().forEach { url ->
+                        addJsonObject {
+                            put("type", "image")
+                            putJsonObject("source") { dataUrlToSource(url) }
+                        }
+                    }
+                    m.wireVideoUrls.forEach { url ->
+                        addJsonObject {
+                            put("type", "video")
+                            putJsonObject("source") { dataUrlToSource(url) }
+                        }
+                    }
+                    if (m.content.isNullOrBlank() && m.imageUrls.isNullOrEmpty() && m.wireVideoUrls.isEmpty()) {
+                        addJsonObject { put("type", "text"); put("text", "") }
+                    }
                 }
             }
         }

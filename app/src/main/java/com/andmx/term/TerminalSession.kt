@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets
 class TerminalSession(
     private val context: Context,
     private val runtime: ProotRuntime = ProotRuntime(context),
+    private val worktree: com.andmx.workspace.LocalWorktree? = null,
 ) {
     val sessionId: String = java.util.UUID.randomUUID().toString()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -53,9 +54,9 @@ class TerminalSession(
 
     fun start() {
         if (process != null) return
-        scope.launch {
+        scope.launch(worktree?.context() ?: kotlin.coroutines.EmptyCoroutineContext) {
             val projectManager = ProjectManager(context)
-            if (projectManager.workspaceKind.value == WorkspaceKind.REMOTE) {
+            if (worktree == null && projectManager.workspaceKind.value == WorkspaceKind.REMOTE) {
                 startRemoteSsh(projectManager)
                 return@launch
             }
@@ -74,7 +75,11 @@ class TerminalSession(
             }
 
             val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
-            val argv = runtime.prootArgv(listOf(sh, "-l"), rootfs = runtime.rootfsDir.takeIf { it.exists() })
+            val argv = runtime.prootArgv(
+                listOf(sh, "-l"),
+                rootfs = runtime.rootfsDir.takeIf { it.exists() },
+                guestCwd = worktree?.path ?: "/root",
+            )
             val envp = (runtime.env() + mapOf("PS1" to "\\w \\$ ")).map { "${it.key}=${it.value}" }.toTypedArray()
 
             val p = try {

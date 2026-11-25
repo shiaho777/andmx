@@ -53,6 +53,7 @@ sealed interface AgentEvent {
         val imageUrls: List<String>? = null,
         /** 工具执行耗时（上游 CommandExecutionTelemetry.runMs 对齐）。 */
         val durationMs: Long = 0,
+        val videos: List<com.andmx.llm.VideoAttachment> = emptyList(),
     ) : AgentEvent
     data class Failed(
         val message: String,
@@ -145,12 +146,13 @@ class AgentEngine(
      * 所有工具定义一次性注入。非 null 时 `shouldDefer` 的工具改为按需加载。
      */
     private val toolSearch: ToolSearchRegistry? = null,
+    private val runtimeTools: () -> List<Tool> = { emptyList() },
 ) {
     private val history = mutableListOf<ApiMessage>().also { h ->
         baseSystemBlocks().forEach { h += ApiMessage(role = "system", content = it) }
     }
     private var extraTools: List<Tool> = emptyList()
-    private val allTools get() = tools + extraTools
+    private val allTools get() = tools + extraTools + runtimeTools()
     private val toolsByName get() = allTools.associateBy { it.name }
     private var systemSuffix: String = ""
     private var persona: String = ""
@@ -350,6 +352,12 @@ class AgentEngine(
      * model step sees it alongside tool results, steering the current work
      * without waiting for the turn to end (ZCode 对齐).
      */
+    fun steerActiveTurn(text: String): Boolean = synchronized(pendingInputLock) {
+        if (!turnLoopActive || text.isBlank()) return@synchronized false
+        injectUserMessage(text)
+        true
+    }
+
     fun injectUserMessage(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
@@ -447,7 +455,13 @@ class AgentEngine(
         return result.summary
     }
 
-    fun runTurn(settings: ProviderSettings, turn: TurnContext, userInput: String, images: List<String> = emptyList()): Flow<AgentEvent> = flow {
+    fun runTurn(
+        settings: ProviderSettings,
+        turn: TurnContext,
+        userInput: String,
+        images: List<String> = emptyList(),
+        videos: List<com.andmx.llm.VideoAttachment> = emptyList(),
+    ): Flow<AgentEvent> = flow {
         if (!acquireTurnLoop()) return@flow
         toolSearch?.attach({ allTools }, hiddenTools)
         try {
@@ -458,11 +472,14 @@ class AgentEngine(
             } else {
                 userInput
             }
-            history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null })
+            history += ApiMessage(role = "user", content = effectiveInput, imageUrls = images.ifEmpty { null }, videos = videos)
             turnCount += 1
             sessionEvents?.invoke(
                 com.andmx.data.session.SessionEventType.USER_MESSAGE,
-                buildJsonObject { put("text", userInput) },
+                buildJsonObject {
+                    put("text", userInput)
+                    if (videos.isNotEmpty()) put("videos", json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.VideoAttachment.serializer()), videos))
+                },
             )
             sessionEvents?.invoke(
                 com.andmx.data.session.SessionEventType.TURN_INPUT_RECEIVED,
@@ -982,7 +999,11 @@ class AgentEngine(
             machine.scheduleTools(calls.map { it.id to it.function.name })
             sessionEvents?.invoke(
                 com.andmx.data.session.SessionEventType.TOOL_CALL_SCHEDULED,
-                buildJsonObject { put("count", calls.size) },
+                buildJsonObject {
+                    put("count", calls.size)
+                    put("calls", json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.ApiToolCall.serializer()), calls))
+                    msg.content?.let { put("text", it) }
+                },
             )
             val displayCalls = calls.associate { it.id to displayToolCall(it) }
             calls.forEach { call ->
@@ -1033,6 +1054,7 @@ class AgentEngine(
                 if (wave.any { it.second.first.stopTurn }) stopTurn = true
             }
             val relayImagesToUser = turn.provider.kind == ProviderKind.OPENAI
+            val supportsVideo = com.andmx.llm.VideoAttachments.supportedBy(turn.provider, turn.model)
             for ((call, timed) in results) {
                 val result = timed.first
                 val displayName = displayCalls[call.id]?.function?.name ?: call.function.name
@@ -1047,6 +1069,7 @@ class AgentEngine(
                         put("id", call.id)
                         put("name", call.function.name)
                         put("output", result.output)
+                        if (result.videos.isNotEmpty()) put("videos", json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(com.andmx.llm.VideoAttachment.serializer()), result.videos))
                         if (result.isError) put("errorType", toolErrorType(result.output))
                     },
                 )
@@ -1065,18 +1088,21 @@ class AgentEngine(
                         )
                     }
                 }
-                emit(AgentEvent.ToolFinished(call.id, displayName, result.output, result.isError, result.imageUrls, timed.second))
+                emit(AgentEvent.ToolFinished(call.id, displayName, result.output, result.isError, result.imageUrls, timed.second, result.videos))
                 history += ApiMessage(
                     role = "tool",
                     content = trimToolOutput(resolvedToolName(call), result.output),
                     toolCallId = call.id,
                     name = call.function.name,
-                    imageUrls = if (relayImagesToUser) null else result.imageUrls,
+                    imageUrls = if (relayImagesToUser || supportsVideo && result.videos.isNotEmpty()) null else result.imageUrls,
+                    videos = result.videos,
                 )
                 noteRepeat(call)
             }
             if (relayImagesToUser) {
-                val shots = results.flatMap { it.second.first.imageUrls.orEmpty() }
+                val shots = results.flatMap { (_, timed) ->
+                    timed.first.imageUrls.orEmpty().takeUnless { supportsVideo && timed.first.videos.isNotEmpty() }.orEmpty()
+                }
                 if (shots.isNotEmpty()) {
                     history += ApiMessage(
                         role = "user",

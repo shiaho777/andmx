@@ -45,6 +45,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Commit
@@ -53,7 +54,6 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -206,6 +206,7 @@ fun ChatScreen(
     val timelineReversed = remember(visibleTimeline) { visibleTimeline.asReversed() }
     val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
+    val worktree by viewModel.activeWorktree.collectAsState()
     val queuePaused by viewModel.queuePaused.collectAsState()
     val steeringMessage by viewModel.steeringMessage.collectAsState()
     val config by viewModel.composerConfig.collectAsState()
@@ -245,6 +246,9 @@ fun ChatScreen(
     }
 
     var showTerminal by remember { mutableStateOf(false) }
+    val lastBrowserUrl by viewModel.lastBrowserUrl.collectAsState()
+    var browserTarget by remember(currentConversationId) { mutableStateOf<String?>(null) }
+    var showActionsMenu by remember { mutableStateOf(false) }
     var showBackgroundTasks by remember { mutableStateOf(false) }
     var selectionError by remember { mutableStateOf<String?>(null) }
     var sideChatExcerpt by remember { mutableStateOf<String?>(null) }
@@ -364,7 +368,13 @@ fun ChatScreen(
         TaskAutoArchive.runIfEnabled(context, appSettings)
     }
 
-LaunchedEffect(Unit) {
+    val sessionFilePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) viewModel.importPortableConversation(uri)
+    }
+
+    LaunchedEffect(Unit) {
         ChatActionBus.actions.collect { action ->
             when (action) {
                 is ChatActionBus.Action.OpenFile -> {
@@ -376,14 +386,9 @@ LaunchedEffect(Unit) {
                     showFiles = true
                 }
                 ChatActionBus.Action.OpenTerminal -> showTerminal = true
+                ChatActionBus.Action.OpenSessionImport -> sessionFilePicker.launch(arrayOf("application/json", "application/octet-stream"))
                 is ChatActionBus.Action.OpenUrl -> {
-                    runCatching {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(action.url),
-                        )
-                        context.startActivity(intent)
-                    }
+                    browserUrl(action.url)?.let { browserTarget = it }
                 }
                 ChatActionBus.Action.OpenSettings -> {
                     settingsInitialPage = SettingsPage.HOME
@@ -998,8 +1003,45 @@ LaunchedEffect(Unit) {
                     }) {
                         Icon(Icons.Outlined.FolderOpen, tr("查看文件"))
                     }
-                    IconButton(onClick = { viewModel.shareConversation() }) {
-                        Icon(Icons.Outlined.Share, tr("分享对话"))
+                    Box {
+                        IconButton(onClick = { showActionsMenu = true }) {
+                            Icon(Icons.Outlined.MoreVert, tr("更多操作"))
+                        }
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = showActionsMenu,
+                            onDismissRequest = { showActionsMenu = false },
+                        ) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(tr("浏览器")) },
+                                onClick = {
+                                    showActionsMenu = false
+                                    browserTarget = lastBrowserUrl
+                                },
+                            )
+                            if (currentConversationId > 0L) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(tr("分享对话")) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        viewModel.shareConversation()
+                                    },
+                                )
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(tr("分享对话文本文件")) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        viewModel.sharePortableConversation()
+                                    },
+                                )
+                            }
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(tr("从文件导入对话并继续")) },
+                                onClick = {
+                                    showActionsMenu = false
+                                    sessionFilePicker.launch(arrayOf("application/json", "application/octet-stream"))
+                                },
+                            )
+                        }
                     }
                     if (gitInfo?.isRepo == true) {
                         IconButton(onClick = {
@@ -1220,6 +1262,11 @@ LaunchedEffect(Unit) {
                                                     val quote = ChatFind.quote(text)
                                                     if (quote.isNotEmpty()) {
                                                         inputText = if (inputText.isBlank()) quote else inputText.trimEnd() + "\n" + quote
+                                                    }
+                                                },
+                                                onAnnotate = { annotated ->
+                                                    if (annotated.isNotEmpty()) {
+                                                        inputText = if (inputText.isBlank()) annotated else inputText.trimEnd() + "\n" + annotated
                                                     }
                                                 },
                                                 onSideChat = if (
@@ -1506,7 +1553,7 @@ LaunchedEffect(Unit) {
                     compactResult = compactNotice?.takeIf { !it.running }?.text,
                 )
                 PendingCommandRecoveryBanner(
-                    items = recoverableQueue,
+                    items = recoverableQueue.map { it.text },
                     onRecover = { viewModel.recoverPendingQueue() },
                     onDiscard = { viewModel.discardPendingQueue() },
                 )
@@ -1610,16 +1657,20 @@ LaunchedEffect(Unit) {
 
                 if (queue.isNotEmpty()) {
                     QueueStrip(
-                        queue = queue,
+                        queue = queue.map { it.text },
                         paused = queuePaused,
                         onResume = { viewModel.resumeQueue() },
                         onRemove = { viewModel.removeFromQueue(it) },
                         onSendNow = { viewModel.sendQueuedNow(it) },
                         onEdit = { i ->
-                            viewModel.takeQueuedForEdit(i)?.let { inputText = it }
+                            viewModel.takeQueuedForEdit(i)?.let { item ->
+                                inputText = item.text
+                                attachments = item.images.map { Attachment(tr("图片"), it) } +
+                                    item.videos.map { Attachment(it.name, it.id, video = it) }
+                            }
                         },
                         onMove = { index, delta -> viewModel.moveQueued(index, delta) },
-                        canSendNow = !isLoading,
+                        canSendNow = true,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp),
@@ -1649,6 +1700,7 @@ LaunchedEffect(Unit) {
                     initialPath = filesInitialPath,
                     review = fileReview,
                     conversationId = currentConversationId,
+                    worktree = worktree,
                 )
             }
             androidx.compose.animation.AnimatedVisibility(
@@ -1722,6 +1774,19 @@ LaunchedEffect(Unit) {
             )
         } // end Box
 
+        browserTarget?.let { url ->
+            val browserConversation = currentConversationId
+            BrowserDialog(
+                initialUrl = url,
+                onClose = { browserTarget = null },
+                onPage = { viewModel.rememberBrowserUrl(browserConversation, it) },
+                onElement = { element ->
+                    inputText = listOf(inputText.trimEnd(), element).filter { it.isNotEmpty() }.joinToString("\n")
+                    browserTarget = null
+                },
+            )
+        }
+
         if (showTerminal) {
             val terminalColors = rememberTerminalColors()
             val terminalSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1740,6 +1805,7 @@ LaunchedEffect(Unit) {
                         .height(terminalHeight),
                     onClose = { showTerminal = false },
                     colors = terminalColors,
+                    worktree = worktree,
                 )
             }
         }

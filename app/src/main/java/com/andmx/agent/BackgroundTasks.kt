@@ -176,7 +176,7 @@ class BackgroundTasks(
         tasks[id] = task
         refresh()
         persist(task)
-        task.job = scope.launch { runTask(task, hostFile) }
+        task.job = scope.launch(com.andmx.workspace.LocalWorktree.inherit()) { runTask(task, hostFile) }
         return task
     }
 

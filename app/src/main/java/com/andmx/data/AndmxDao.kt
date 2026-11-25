@@ -16,6 +16,9 @@ interface AndmxDao {
     @Update
     suspend fun updateConversation(c: ConversationEntity)
 
+    @Query("UPDATE conversations SET browserUrl = :url WHERE id = :id")
+    suspend fun setBrowserUrl(id: Long, url: String)
+
     @Query("SELECT * FROM conversations WHERE archived = 0 ORDER BY pinned DESC, updatedAt DESC")
     fun observeConversations(): Flow<List<ConversationEntity>>
 

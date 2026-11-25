@@ -1,5 +1,8 @@
 package com.andmx.ui.conversation
 
+import com.andmx.llm.VideoAttachment
+import com.andmx.llm.VideoAttachments
+
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -18,6 +21,7 @@ data class Attachment(
     val imageMeta: ImageAttachmentMeta? = null,
     /** Relative path in app-private storage for long-lived UI screenshot evidence. */
     val imageAssetPath: String? = null,
+    val video: VideoAttachment? = null,
 ) {
     val isImage: Boolean get() = imageDataUrl != null
     val isUiReference: Boolean get() = isImage && name.looksLikeUiReferenceName()
@@ -52,6 +56,13 @@ object Attachments {
         val name = displayName(context, uri) ?: uri.lastPathSegment ?: "file"
         val mime = context.contentResolver.getType(uri)?.takeIf { it.isNotBlank() }
             ?: mimeFromName(name)
+        val videoMime = VideoAttachments.mimeFor(name, mime)
+        if (videoMime != null) {
+            val video = context.contentResolver.openInputStream(uri)?.use {
+                VideoAttachments.save(context, name, videoMime, it)
+            } ?: return null
+            return Attachment(name, "(video)", video = video)
+        }
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         if (mime.startsWith("image/") && bytes.size <= IMAGE_LIMIT) {
             val prepared = compressImageForModel(bytes, mime)

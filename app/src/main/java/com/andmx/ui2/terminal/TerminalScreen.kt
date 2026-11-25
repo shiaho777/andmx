@@ -79,6 +79,7 @@ fun TerminalScreen(
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
     colors: TerminalColors = rememberTerminalColors(),
+    worktree: com.andmx.workspace.LocalWorktree? = null,
 ) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
@@ -86,20 +87,21 @@ fun TerminalScreen(
     val terminalFontFamily = remember(appSettings.terminalFontFamily) {
         resolveTerminalFontFamily(appSettings.terminalFontFamily)
     }
-    val sessions = TerminalSessionRegistry.sessions
-    val activeIndex = TerminalSessionRegistry.activeIndex
+    val registry = remember(worktree) { TerminalSessionRegistry.forWorktree(worktree) }
+    val sessions = registry.sessions
+    val activeIndex = registry.activeIndex
 
     fun newSession() {
-        TerminalSessionRegistry.newSession(context)
+        registry.newSession(context)
     }
 
     fun closeSession(index: Int) {
-        TerminalSessionRegistry.close(index)
-        if (TerminalSessionRegistry.sessions.isEmpty()) newSession()
+        registry.close(index)
+        if (registry.sessions.isEmpty()) newSession()
     }
 
-    LaunchedEffect(Unit) {
-        TerminalSessionRegistry.ensureSession(context)
+    LaunchedEffect(registry) {
+        registry.ensureSession(context)
     }
 
     val tabCount = sessions.size
@@ -159,7 +161,7 @@ fun TerminalScreen(
                     repeat(tabCount) { i ->
                         Tab(
                             selected = i == selectedTab,
-                            onClick = { TerminalSessionRegistry.activeIndex = i },
+                            onClick = { registry.activeIndex = i },
                             selectedContentColor = colors.chromeContent,
                             unselectedContentColor = colors.chromeMuted,
                             text = {

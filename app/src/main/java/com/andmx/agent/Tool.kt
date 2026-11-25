@@ -114,4 +114,5 @@ data class ToolResult(
     val isError: Boolean = false,
     val imageUrls: List<String>? = null,
     val stopTurn: Boolean = false,
+    val videos: List<com.andmx.llm.VideoAttachment> = emptyList(),
 )

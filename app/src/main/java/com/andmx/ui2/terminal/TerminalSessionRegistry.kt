@@ -11,7 +11,14 @@ import com.andmx.term.TerminalSession
  * 进程级终端会话表。TerminalScreen 是浮层，关掉它不应该杀掉 PTY；
  * 会话活到进程结束，用户重新打开终端还能接上。
  */
-object TerminalSessionRegistry {
+object TerminalSessionRegistry : TerminalSessions() {
+    private val worktrees = mutableMapOf<com.andmx.workspace.LocalWorktree, TerminalSessions>()
+
+    fun forWorktree(worktree: com.andmx.workspace.LocalWorktree?): TerminalSessions =
+        if (worktree == null) this else worktrees.getOrPut(worktree) { TerminalSessions(worktree) }
+}
+
+open class TerminalSessions(private val worktree: com.andmx.workspace.LocalWorktree? = null) {
     private val _sessions = mutableStateListOf<TerminalSession>()
     val sessions: List<TerminalSession> get() = _sessions
 
@@ -22,7 +29,7 @@ object TerminalSessionRegistry {
     }
 
     fun newSession(context: Context): TerminalSession {
-        val session = TerminalSession(context.applicationContext)
+        val session = TerminalSession(context.applicationContext, worktree = worktree)
         _sessions.add(session)
         activeIndex = _sessions.lastIndex
         runCatching { session.start() }

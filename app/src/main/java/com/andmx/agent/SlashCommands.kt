@@ -12,7 +12,11 @@ sealed interface SlashResult {
     data object Tools : SlashResult
     data object Handoff : SlashResult
     data object Export : SlashResult
+    data object ExportSession : SlashResult
+    data object ImportSession : SlashResult
     data class Fork(val target: String) : SlashResult
+    data object Worktree : SlashResult
+    data object ForkWorktree : SlashResult
     data class Rewind(val target: String) : SlashResult
     data class Resume(val sessionId: String) : SlashResult
     data object ContinueLatest : SlashResult
@@ -59,9 +63,13 @@ object SlashCommands {
         Spec("/tools", "显示工具能力", aliases = listOf("/capabilities"), keywords = listOf("工具")),
         Spec("/handoff", "生成交接摘要", aliases = listOf("/summary"), keywords = listOf("交接")),
         Spec("/export", "导出当前对话", keywords = listOf("导出")),
+        Spec("/export-session", "分享可导入的对话文本文件", keywords = listOf("导出", "会话")),
+        Spec("/import-session", "从文件导入对话并继续", keywords = listOf("导入", "会话")),
         Spec("/regen", "重新生成上一轮回复", aliases = listOf("/retry", "/regenerate"), keywords = listOf("重试")),
         Spec("/checkpoint", "生成交接检查点", aliases = listOf("/handoff-checkpoint"), keywords = listOf("检查点")),
         Spec("/fork", "分叉当前对话为新会话", aliases = listOf("/branch"), keywords = listOf("分叉", "分支")),
+        Spec("/fork-worktree", "分叉到独立 Worktree 并带上未提交改动", keywords = listOf("分叉", "工作树")),
+        Spec("/worktree", "在独立 Git Worktree 中开始新任务", keywords = listOf("分支", "并行")),
         Spec("/rewind", "回滚到某个检查点（对话+文件改动）", aliases = listOf("/rollback"), keywords = listOf("回滚", "回退")),
         Spec("/resume", "恢复历史会话", aliases = listOf("/sessions"), keywords = listOf("恢复", "历史")),
         Spec("/continue", "恢复最近的会话", keywords = listOf("继续", "continue")),
@@ -139,8 +147,12 @@ object SlashCommands {
             "/goal", "/target", "/objective" -> parseGoal(t)
             "/handoff", "/summary" -> SlashResult.Handoff
             "/export" -> SlashResult.Export
+            "/export-session" -> SlashResult.ExportSession
+            "/import-session" -> SlashResult.ImportSession
             "/fork", "/branch" ->
                 SlashResult.Fork(t.substringAfter(' ', missingDelimiterValue = "").trim())
+            "/worktree" -> SlashResult.Worktree
+            "/fork-worktree" -> SlashResult.ForkWorktree
             "/rewind", "/rollback" ->
                 SlashResult.Rewind(t.substringAfter(' ', missingDelimiterValue = "").trim())
             "/resume", "/sessions" ->

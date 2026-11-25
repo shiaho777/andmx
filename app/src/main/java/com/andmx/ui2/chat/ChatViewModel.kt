@@ -24,7 +24,11 @@ import com.andmx.settings.ProviderStore
 import com.andmx.settings.SettingsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,7 +56,7 @@ class ChatViewModel @Inject constructor(
     private val settingsStore = SettingsStore(context)
     private val providerStore = ProviderStore(context)
     private val repo = ConversationRepository(context)
-    private val gitBaseline = com.andmx.workspace.GitBaseline(context)
+    private val gitBaseline = com.andmx.workspace.GitBaseline(context, worktreeProvider = { activeWorktree.value })
     private val projectManager = com.andmx.workspace.ProjectManager(context)
     private val commitMessageGenerator = com.andmx.workspace.CommitMessageGenerator()
     private val remoteStore = com.andmx.workspace.RemoteWorkspaceStore(context)
@@ -135,8 +139,8 @@ class ChatViewModel @Inject constructor(
     private val _pendingYoloConfirmation = MutableStateFlow(false)
     val pendingYoloConfirmation: StateFlow<Boolean> = _pendingYoloConfirmation.asStateFlow()
 
-    private val _queue = MutableStateFlow<List<String>>(emptyList())
-    val queue: StateFlow<List<String>> = _queue.asStateFlow()
+    private val _queue = MutableStateFlow<List<QueuedMessage>>(emptyList())
+    val queue: StateFlow<List<QueuedMessage>> = _queue.asStateFlow()
 
     /** 队列暂停原因（ZCode 对齐：停止/出错后队列不丢，等用户手动继续）。 */
     enum class QueuePause { NONE, STOPPED, ERROR }
@@ -267,6 +271,21 @@ class ChatViewModel @Inject constructor(
     private var turnStepCount = 0
 
     /** 切换到指定会话：更新当前 id + 加载历史消息到 messages。 */
+    val lastBrowserUrl = _currentConversationId.flatMapLatest { id ->
+        if (id > 0L) repo.observeConversation(id).map { it?.browserUrl.orEmpty() }
+        else kotlinx.coroutines.flow.flowOf("")
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun rememberBrowserUrl(conversationId: Long, url: String) {
+        if (conversationId > 0L) viewModelScope.launch { repo.setBrowserUrl(conversationId, url) }
+    }
+
+    val activeWorktree = _currentConversationId.flatMapLatest { id ->
+        if (id > 0L) repo.observeConversation(id).map { row ->
+            row?.let { com.andmx.workspace.LocalWorktree.restore(it.project, it.worktreePath) }
+        } else kotlinx.coroutines.flow.flowOf(null)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     fun switchToConversation(id: Long) {
         if (id == _currentConversationId.value) return
         // 队列属于当前 task；切走前落盘，切回时再从该 task 读取。
@@ -508,7 +527,7 @@ class ChatViewModel @Inject constructor(
     fun refreshGitInfo() {
         viewModelScope.launch {
             val execPath = workspaceExecPath()
-            val host = projectManager.hostPath.value
+            val host = projectManager.hostPath.value.takeIf { activeWorktree.value == null }
             if (host == null && execPath == null) {
                 _gitInfo.value = null
                 return@launch
@@ -616,6 +635,7 @@ class ChatViewModel @Inject constructor(
 
     /** 选择工作区目录（侧边栏工作区选择器调用）。 */
     fun workspaceExecPath(): String? {
+        activeWorktree.value?.let { return it.path }
         if (projectManager.hostPath.value == null) return null
         return if (projectManager.isRemote) {
             projectManager.currentRemoteSpec()?.remotePath?.ifBlank { null }
@@ -951,20 +971,26 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendMessage(text: String, attachments: List<Attachment> = emptyList()) {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { submitMessage(text, attachments) }
+    }
+
+    private suspend fun submitMessage(text: String, attachments: List<Attachment>) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() && _contextChips.value.isEmpty() && attachments.isEmpty()) return
-        val resolvedAttachments = attachments.mapNotNull { attachment ->
-            runCatching {
-                com.andmx.ui.conversation.Attachments.fromUri(
-                    context,
-                    android.net.Uri.parse(attachment.uri),
-                )
-            }.getOrNull()
+        val conversationId = _currentConversationId.value
+        val preparedText = buildMessageWithContext(trimmed, attachments)
+        val rawAttachments = attachments.filter { it.video == null && !it.uri.startsWith("data:image") }
+        val resolvedAttachments = if (rawAttachments.isEmpty()) emptyList() else withContext(Dispatchers.IO) {
+            rawAttachments.map { attachment ->
+                com.andmx.ui.conversation.Attachments.fromUri(context, android.net.Uri.parse(attachment.uri))
+            }
         }
-        val withContext = com.andmx.ui.conversation.Attachments.augmentText(
-            buildMessageWithContext(trimmed, attachments),
-            resolvedAttachments,
-        )
+        if (_currentConversationId.value != conversationId) return
+        if (resolvedAttachments.any { it == null }) {
+            _error.value = tr("无法读取附件，请检查文件类型和大小。")
+            return
+        }
+        val withContext = com.andmx.ui.conversation.Attachments.augmentText(preparedText, resolvedAttachments.filterNotNull())
         if (attachments.isEmpty()) {
             val slashText = when {
                 trimmed.startsWith("/") -> trimmed
@@ -979,18 +1005,20 @@ class ChatViewModel @Inject constructor(
                 return
             }
         }
-        val images = resolvedAttachments.mapNotNull { it.imageDataUrl } +
+        val images = resolvedAttachments.mapNotNull { it?.imageDataUrl } +
             attachments.mapNotNull { it.uri.takeIf { uri -> uri.startsWith("data:image") } }
+        val videos = resolvedAttachments.mapNotNull { it?.video } + attachments.mapNotNull { it.video }
+        val pending = QueuedMessage(withContext, images, videos)
         if (compactJob?.isActive == true) {
-            _queue.value = _queue.value + withContext
+            _queue.value = _queue.value + pending
             persistQueue()
             return
         }
         if (_isLoading.value || controller.isTurnRunning(_currentConversationId.value)) {
-            if (followupMode == "guide") {
+            if (followupMode == "guide" && images.isEmpty() && videos.isEmpty()) {
                 admitGuide(withContext)
             } else {
-                _queue.value = _queue.value + withContext
+                _queue.value = _queue.value + pending
                 persistQueue()
             }
             return
@@ -1003,7 +1031,7 @@ class ChatViewModel @Inject constructor(
             _steeringMessage.value = null
         }
         _isLoading.value = true
-        runTurn(withContext, images, editMessageId = editId)
+        runTurn(withContext, images, editMessageId = editId, videos = videos)
     }
 
     /** turnSteer（ZCode 对齐）：任务运行中把消息直接注入当前轮。 */
@@ -1017,7 +1045,7 @@ class ChatViewModel @Inject constructor(
         admitGuide(buildMessageWithContext(trimmed))
     }
 
-    private fun admitGuide(withContext: String) {
+    private fun admitGuide(withContext: String, promoteAgents: Boolean = false) {
         _contextChips.value = emptyList()
         _steeringMessage.value = withContext
         viewModelScope.launch {
@@ -1030,7 +1058,8 @@ class ChatViewModel @Inject constructor(
                         content = withContext,
                     )
                 }
-                controller.injectUserMessage(id, withContext)
+                if (promoteAgents) controller.backgroundForegroundAgents(id)
+                else controller.injectUserMessage(id, withContext)
             }
         }
     }
@@ -1159,11 +1188,27 @@ class ChatViewModel @Inject constructor(
                 }
                 return true
             }
+            SlashResult.ExportSession -> {
+                sharePortableConversation()
+                return true
+            }
+            SlashResult.ImportSession -> {
+                ChatActionBus.openSessionImport()
+                return true
+            }
             SlashResult.Export -> {
                 viewModelScope.launch {
                     val id = ensureConversationReady()
                     appendLocalAssistant(controller.exportConversationMarkdown(id))
                 }
+                return true
+            }
+            SlashResult.ForkWorktree -> {
+                forkConversation(newWorktree = true)
+                return true
+            }
+            SlashResult.Worktree -> {
+                createWorktreeTask()
                 return true
             }
             is SlashResult.Fork -> {
@@ -1469,6 +1514,49 @@ class ChatViewModel @Inject constructor(
                             tr("用 `/expert status` 或 /workflows 查看进度。"),
                     )
                 }
+            }
+        }
+    }
+
+    fun importPortableConversation(uri: android.net.Uri) {
+        val project = projectManager.hostPath.value ?: projectManager.guestMountPath
+        viewModelScope.launch {
+            runCatching {
+                val payload = withContext(Dispatchers.IO) {
+                    requireNotNull(context.contentResolver.openInputStream(uri)).use {
+                        com.andmx.data.ConversationTransfer.read(it)
+                    }
+                }
+                repo.importConversation(project, payload)
+            }.onSuccess(::switchToConversation).onFailure {
+                _error.value = tr("无法导入会话，请检查文件格式和大小。")
+            }
+        }
+    }
+
+    fun sharePortableConversation() {
+        val id = currentConversationId.value.takeIf { it > 0L } ?: return
+        viewModelScope.launch {
+            runCatching {
+                val conv = requireNotNull(repo.conversation(id))
+                val contents = com.andmx.data.ConversationTransfer.serialize(conv.title, repo.messages(id))
+                withContext(Dispatchers.IO) {
+                    val folder = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+                    java.io.File(folder, "andmx-session-$id.json").apply { writeText(contents) }
+                }
+            }.onSuccess { file ->
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context, "${context.packageName}.fileprovider", file,
+                )
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = android.content.ClipData.newUri(context.contentResolver, "conversation", uri)
+                }
+                startChooser(intent, tr("分享对话文本文件"))
+            }.onFailure {
+                _error.value = tr("无法导出会话。文件为空或超过大小上限。")
             }
         }
     }
@@ -1833,7 +1921,12 @@ class ChatViewModel @Inject constructor(
         runCatching { controller.reseedFromDb(conversationId) }
     }
 
-    private fun runTurn(text: String, images: List<String> = emptyList(), editMessageId: Long? = null) {
+    private fun runTurn(
+        text: String,
+        images: List<String> = emptyList(),
+        editMessageId: Long? = null,
+        videos: List<com.andmx.llm.VideoAttachment> = emptyList(),
+    ) {
         viewModelScope.launch {
             _error.value = null
             turnStartedAtMs = 0L
@@ -1848,7 +1941,7 @@ class ChatViewModel @Inject constructor(
                 truncateFromUserMessage(conversationId, editMessageId)
             }
             _isLoading.value = true
-            controller.launchTurn(conversationId, text, images)
+            controller.launchTurn(conversationId, text, images, videos)
         }
     }
 
@@ -2247,9 +2340,21 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** 分叉当前会话为独立副本（复制全部消息，记录 spawn 边）。 */
-    /** /fork [latest|checkpointId]：无参整段分叉；带参从该检查点分叉（上游对齐）。 */
-    fun forkConversation(target: String = "") {
+    private fun createWorktreeTask() {
+        val project = projectManager.hostPath.value?.takeUnless { projectManager.isRemote }
+            ?: run {
+                _error.value = tr("请先选择本地 Git 项目。")
+                return
+            }
+        viewModelScope.launch {
+            runCatching {
+                val worktree = com.andmx.workspace.LocalWorktree.create(context, project)
+                repo.createConversation(project, tr("Worktree 任务"), worktree.path)
+            }.onSuccess(::switchToConversation).onFailure { _error.value = it.message }
+        }
+    }
+
+    fun forkConversation(target: String = "", newWorktree: Boolean = false) {
         if (_isLoading.value) return
         viewModelScope.launch {
             val id = ensureConversationReady()
@@ -2265,12 +2370,18 @@ class ChatViewModel @Inject constructor(
                 appendLocalAssistant("找不到检查点 `$target`。")
                 return@launch
             }
-            val newId = runCatching { repo.forkConversation(id, until) }.getOrNull()
-            if (newId == null) {
-                _error.value = tr("分叉失败")
+            val newId = runCatching {
+                val worktreePath = if (newWorktree) {
+                    val task = requireNotNull(repo.conversation(id))
+                    val source = com.andmx.workspace.LocalWorktree.restore(task.project, task.worktreePath)
+                    com.andmx.workspace.LocalWorktree.create(context, task.project, source, carryChanges = true).path
+                } else null
+                requireNotNull(repo.forkConversation(id, until, worktreePath))
+            }.getOrElse {
+                _error.value = it.message?.takeIf { message -> message.isNotBlank() } ?: tr("分叉失败")
                 return@launch
             }
-            runCatching { com.andmx.workspace.ChangeTracker.copy(id, newId) }
+            if (!newWorktree) runCatching { com.andmx.workspace.ChangeTracker.copy(id, newId) }
             runCatching { repo.recordSpawnEdge(id, newId, "completed") }
             runCatching {
                 repo.addMessage(
@@ -2506,7 +2617,7 @@ class ChatViewModel @Inject constructor(
         val next = _queue.value.firstOrNull() ?: return
         _queue.value = _queue.value.drop(1)
         persistQueue()
-        runTurn(next)
+        runTurn(next.text, next.images, videos = next.videos)
     }
 
     /** ZCode 对齐：stop 后队列不丢，进入暂停态等用户手动继续。 */
@@ -2526,7 +2637,7 @@ class ChatViewModel @Inject constructor(
     }
 
     /** ZCode 队列面板编辑对齐：取出排队消息回填输入框。 */
-    fun takeQueuedForEdit(index: Int): String? {
+    fun takeQueuedForEdit(index: Int): QueuedMessage? {
         val item = _queue.value.getOrNull(index) ?: return null
         _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
         persistQueue()
@@ -2535,10 +2646,25 @@ class ChatViewModel @Inject constructor(
 
     fun sendQueuedNow(index: Int) {
         val item = _queue.value.getOrNull(index) ?: return
-        if (_isLoading.value) return
+        val id = _currentConversationId.value
+        if (compactJob?.isActive == true || (_isLoading.value || controller.isTurnRunning(id)) &&
+            (item.images.isNotEmpty() || item.videos.isNotEmpty())
+        ) {
+            moveQueued(index, -index)
+            return
+        }
         _queue.value = _queue.value.filterIndexed { i, _ -> i != index }
         persistQueue()
-        runTurn(item)
+        if (_isLoading.value || controller.isTurnRunning(id)) {
+            if (controller.steerActiveTurn(id, item.text)) {
+                admitGuide(item.text, promoteAgents = true)
+            } else {
+                _queue.value = listOf(item) + _queue.value
+                persistQueue()
+            }
+        } else {
+            runTurn(item.text, item.images, videos = item.videos)
+        }
     }
 
     fun moveQueued(index: Int, delta: Int) {
@@ -2565,33 +2691,27 @@ class ChatViewModel @Inject constructor(
     private fun persistQueue() {
         val id = _currentConversationId.value
         if (id <= 0L) return
-        val json = if (_queue.value.isEmpty()) "" else
-            kotlinx.serialization.json.JsonArray(
-                _queue.value.map { kotlinx.serialization.json.JsonPrimitive(it) },
-            ).toString()
+        val json = if (_queue.value.isEmpty()) "" else kotlinx.serialization.json.Json.encodeToString(_queue.value)
         viewModelScope.launch {
             runCatching { repo.setPendingQueue(id, json) }
         }
     }
 
-    private val _recoverableQueue = MutableStateFlow<List<String>>(emptyList())
-    val recoverableQueue: StateFlow<List<String>> = _recoverableQueue.asStateFlow()
+    private val _recoverableQueue = MutableStateFlow<List<QueuedMessage>>(emptyList())
+    val recoverableQueue: StateFlow<List<QueuedMessage>> = _recoverableQueue.asStateFlow()
 
     private suspend fun loadQueueFor(conversationId: Long) {
-        _queue.value = readQueue(conversationId)
-        _recoverableQueue.value = emptyList()
+        val restored = readQueue(conversationId)
+        if (_currentConversationId.value == conversationId) {
+            _queue.value = restored
+            _recoverableQueue.value = emptyList()
+        }
     }
 
-    private suspend fun readQueue(conversationId: Long): List<String> {
+    private suspend fun readQueue(conversationId: Long): List<QueuedMessage> {
         val raw = runCatching { repo.conversation(conversationId)?.pendingQueueJson.orEmpty() }
             .getOrDefault("")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            (kotlinx.serialization.json.Json.parseToJsonElement(raw)
-                as? kotlinx.serialization.json.JsonArray)
-                ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                .orEmpty()
-        }.getOrDefault(emptyList())
+        return QueuedMessage.decode(raw)
     }
 
     fun recoverPendingQueue() {

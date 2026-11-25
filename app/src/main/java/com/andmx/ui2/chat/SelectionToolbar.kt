@@ -3,11 +3,17 @@ package com.andmx.ui2.chat
 import com.andmx.ui2.settings.tr
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +45,7 @@ data class SelectionActions(
     val onCopy: (String) -> Unit,
     val onQuote: (String) -> Unit,
     val onSideChat: ((String) -> Unit)? = null,
+    val onAnnotate: ((String) -> Unit)? = null,
 )
 
 private data class ActiveSelection(val text: String, val anchor: Offset)
@@ -71,6 +78,7 @@ fun SelectableWithToolbar(
             }
         }
     }
+    var annotating by remember { mutableStateOf<String?>(null) }
     val selection = active
     if (selection != null) {
         Popup(
@@ -94,6 +102,10 @@ fun SelectableWithToolbar(
                     ) {
                         TextButton(onClick = { actions.onCopy(selection.text); active = null }) { Text(tr("复制")) }
                         TextButton(onClick = { actions.onQuote(selection.text); active = null }) { Text(tr("引用")) }
+                        val annotate = actions.onAnnotate
+                        if (annotate != null) {
+                            TextButton(onClick = { annotating = selection.text; active = null }) { Text(tr("批注")) }
+                        }
                         val side = actions.onSideChat
                         if (side != null) {
                             TextButton(onClick = { side(selection.text); active = null }) { Text(tr("侧聊")) }
@@ -102,6 +114,46 @@ fun SelectableWithToolbar(
                 }
             }
         }
+    }
+    val annotateText = annotating
+    if (annotateText != null) {
+        var comment by remember(annotateText) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { annotating = null },
+            title = { Text(tr("批注选中内容")) },
+            text = {
+                Column {
+                    Text(
+                        ChatFind.quote(annotateText).lineSequence().take(4).joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 4,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = comment,
+                        onValueChange = { comment = it },
+                        placeholder = { Text(tr("写下你的点评…")) },
+                        minLines = 2,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        actions.onAnnotate?.invoke(ChatFind.annotate(annotateText, comment))
+                        annotating = null
+                        active = null
+                    },
+                    enabled = comment.isNotBlank(),
+                ) { Text(tr("插入批注")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { annotating = null }) { Text(tr("取消")) }
+            },
+        )
     }
 }
 

@@ -183,6 +183,7 @@ object ChatActionBus {
             val review: com.andmx.ui2.files.FileReviewAnchor? = null,
         ) : Action()
         data object OpenTerminal : Action()
+        data object OpenSessionImport : Action()
         data class OpenUrl(val url: String) : Action()
         data object OpenSettings : Action()
         data object OpenSkillsSettings : Action()
@@ -214,6 +215,8 @@ object ChatActionBus {
             ),
         )
     }
+
+    fun openSessionImport() = _actions.tryEmit(Action.OpenSessionImport)
 
     fun openDrawer() = _actions.tryEmit(Action.OpenDrawer)
 

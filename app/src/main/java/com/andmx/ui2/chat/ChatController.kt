@@ -37,6 +37,7 @@ import com.andmx.agent.zcode.TodoState
 import com.andmx.agent.zcode.AskUserQuestionParser
 import com.andmx.agent.zcode.ZCodePrompts
 import com.andmx.agent.zcode.SessionControlHost
+import com.andmx.agent.zcode.SessionMutation
 import com.andmx.agent.zcode.SessionContextRead
 import com.andmx.agent.zcode.SessionCreateResult
 import com.andmx.agent.zcode.SessionSendResult
@@ -87,6 +88,7 @@ import com.andmx.exec.policy.NetworkPolicy
 import com.andmx.exec.proot.ProotRuntime
 import com.andmx.llm.ApiFunctionCall
 import com.andmx.llm.ApiMessage
+import com.andmx.llm.VideoAttachment
 import com.andmx.llm.ApiToolCall
 import com.andmx.llm.LlmClient
 import com.andmx.llm.TokenUsage
@@ -105,6 +107,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -364,13 +367,18 @@ class ChatController private constructor(private val context: Context) {
     @Volatile private var mobileDevTools: List<Tool> = emptyList()
     @Volatile private var mcpTools: List<Tool> = emptyList()
     @Volatile private var mcpContextTools: List<Tool> = emptyList()
-    @Volatile private var mcpConfigLoaded: String? = null
+    private var requestedMcpConfig: String? = null
+    private var mcpLoadJob: Job? = null
+    private val mcpConfigMutex = Mutex()
     @Volatile private var pluginsLoaded = false
     @Volatile private var lastPluginReloadToken = -1L
     @Volatile private var lastHooksReloadToken = -1L
 
     private val sharedExtraTools: List<Tool>
-        get() = pluginTools + mobileDevTools + mcpTools + mcpContextTools
+        get() = pluginTools + mobileDevTools + activeMcpTools
+
+    private val activeMcpTools: List<Tool>
+        get() = mcpTools + mcpContextTools
 
     private val _pendingApproval get() = sessionControl.pendingApprovalState
     val pendingApproval: StateFlow<ApprovalRequest?> get() = sessionControl.pendingApproval
@@ -474,11 +482,18 @@ class ChatController private constructor(private val context: Context) {
     fun isTurnRunning(conversationId: Long): Boolean = sessionControl.isTurnRunning(conversationId)
 
     /** 回合跑在进程级作用域里，切换会话或退出界面都不会取消它。 */
-    fun launchTurn(conversationId: Long, text: String, images: List<String> = emptyList()): Job {
+    fun launchTurn(
+        conversationId: Long,
+        text: String,
+        images: List<String> = emptyList(),
+        videos: List<VideoAttachment> = emptyList(),
+    ): Job {
         sessionControl.activeTurnJob(conversationId)?.let { return it }
         return startTurnJob(conversationId) {
-            sendMessage(conversationId, text, images).collect { ev ->
-                sessionControl.emitLiveEvent(conversationId, ev)
+            runInTaskWorkspace(conversationId) {
+                sendMessage(conversationId, text, images, videos).collect { ev ->
+                    sessionControl.emitLiveEvent(conversationId, ev)
+                }
             }
         }
     }
@@ -486,10 +501,27 @@ class ChatController private constructor(private val context: Context) {
     fun launchRegenerate(conversationId: Long): Job {
         sessionControl.activeTurnJob(conversationId)?.let { return it }
         return startTurnJob(conversationId) {
-            regenerateTurn(conversationId).collect { ev ->
-                sessionControl.emitLiveEvent(conversationId, ev)
+            runInTaskWorkspace(conversationId) {
+                regenerateTurn(conversationId).collect { ev ->
+                    sessionControl.emitLiveEvent(conversationId, ev)
+                }
             }
         }
+    }
+
+    private suspend fun runInTaskWorkspace(conversationId: Long, block: suspend () -> Unit) {
+        val task = repo.conversation(conversationId)
+        if (task == null || task.worktreePath.isBlank()) {
+            block()
+            return
+        }
+        val worktree = com.andmx.workspace.LocalWorktree.restore(task.project, task.worktreePath)
+        if (worktree == null || !worktree.hostDirectory(context).isDirectory) {
+            repo.setTaskStatus(conversationId, "failed")
+            sessionControl.emitLiveEvent(conversationId, ChatEvent.Error(tr("任务的 Worktree 已不可用。")))
+            return
+        }
+        kotlinx.coroutines.withContext(worktree.context()) { block() }
     }
 
     fun cancelTurn(conversationId: Long) {
@@ -633,6 +665,7 @@ class ChatController private constructor(private val context: Context) {
                     s.dynamicWorkflowToolsEnabled != settingsSnapshot.dynamicWorkflowToolsEnabled ||
                         s.embeddedSearch != settingsSnapshot.embeddedSearch
                 settingsSnapshot = s
+                scheduleMcpLoad(s.mcpServers)
                 if (dynamicWorkflowChanged) {
                     // 工具面在会话建立时装配，切换开关后必须重建空闲会话才能生效。
                     sessions.keys.toList()
@@ -1340,6 +1373,13 @@ class ChatController private constructor(private val context: Context) {
         sessions[conversationId]?.engine?.injectSystemReminder(source, body)
     }
 
+    fun steerActiveTurn(conversationId: Long, text: String): Boolean =
+        sessions[conversationId]?.engine?.steerActiveTurn(text) == true
+
+    suspend fun backgroundForegroundAgents(conversationId: Long) {
+        orchestrators[conversationId]?.backgroundForegroundAgents()
+    }
+
     fun injectUserMessage(conversationId: Long, text: String) {
         val session = sessions[conversationId] ?: return
         session.engine.injectUserMessage(text)
@@ -1431,15 +1471,17 @@ class ChatController private constructor(private val context: Context) {
         conversationId: Long,
         text: String,
         images: List<String> = emptyList(),
-    ): Flow<ChatEvent> = sendMessageFlow(conversationId, text, images)
+        videos: List<VideoAttachment> = emptyList(),
+    ): Flow<ChatEvent> = sendMessageFlow(conversationId, text, images, videos)
 
     private fun sendMessageFlow(
         conversationId: Long,
         text: String,
         images: List<String> = emptyList(),
+        videos: List<VideoAttachment> = emptyList(),
     ): Flow<ChatEvent> = flow {
         emit(ChatEvent.UserMessage(text, images))
-        repo.addMessage(conversationId, "user", text, imageUrls = images)
+        repo.addMessage(conversationId, "user", text, imageUrls = images, videos = videos)
         runCatching {
             topicArchive.append(
                 conversationId.toString(),
@@ -1487,7 +1529,7 @@ class ChatController private constructor(private val context: Context) {
             launchTitleSidecar(conversationId, text, provider, settings.model)
         }
 
-        ensureExtraTools(settings, conversationId)
+        ensureExtraTools()
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         session.lastUserText = text
@@ -1548,7 +1590,7 @@ class ChatController private constructor(private val context: Context) {
         }
 
         try {
-            session.engine.runTurn(settings, turn, modelInput, images = images).collect { event ->
+            session.engine.runTurn(settings, turn, modelInput, images = images, videos = videos).collect { event ->
                 handleAgentEvent(
                     conversationId = conversationId,
                     session = session,
@@ -1616,6 +1658,7 @@ class ChatController private constructor(private val context: Context) {
                     toolArgs = args,
                     toolError = event.isError,
                     imageUrls = event.imageUrls.orEmpty(),
+                    videos = event.videos,
                 )
                 if (event.name == "update_plan") {
                     _planSteps.value = session.planTool.state.value
@@ -1729,7 +1772,7 @@ class ChatController private constructor(private val context: Context) {
             ?: providerStore.primary.firstOrNull()
             ?: return@flow emit(ChatEvent.Error(tr("未配置提供商")))
         if (!provider.isUsable) return@flow emit(ChatEvent.Error(tr("当前提供商不可用，请检查 API Key")))
-        ensureExtraTools(settings, conversationId)
+        ensureExtraTools()
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         session.turnToolOutputs.clear()
@@ -1781,7 +1824,7 @@ class ChatController private constructor(private val context: Context) {
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
             ?: return tr("未配置提供商")
-        ensureExtraTools(settings, conversationId)
+        ensureExtraTools()
         ensureHooksLoaded()
         val session = obtainSession(conversationId, provider, settings)
         val msg = session.engine.compactNow(settings, TurnContext(provider, settings.model), instructions)
@@ -1933,7 +1976,7 @@ class ChatController private constructor(private val context: Context) {
         }
     }
 
-    private suspend fun ensureExtraTools(settings: ProviderSettings, conversationId: Long = 0L) {
+    private suspend fun ensureExtraTools() {
         val token = pluginSystem.currentReloadToken()
         if (!pluginsLoaded || lastPluginReloadToken != token) {
             pluginsLoaded = true
@@ -1962,18 +2005,26 @@ class ChatController private constructor(private val context: Context) {
                 }
             }.getOrDefault(emptyList())
         }
-        val mcpText = settings.mcpServers
-        if (mcpText != mcpConfigLoaded) {
-            mcpConfigLoaded = mcpText
-            mcpTools = if (mcpText.isNotBlank()) {
-                runCatching {
-                    mcpManager.connectAll(mcpText, sessionId = conversationId.takeIf { it > 0L }?.toString())
-                }.getOrDefault(emptyList())
-            } else {
-                emptyList()
+    }
+
+    private fun scheduleMcpLoad(config: String) {
+        if (requestedMcpConfig == config) return
+        requestedMcpConfig = config
+        mcpLoadJob?.cancel()
+        mcpLoadJob = controllerScope.launch {
+            mcpConfigMutex.withLock {
+                mcpManager.close()
+                mcpTools = emptyList()
+                mcpContextTools = emptyList()
+                _mcpStatus.value = emptyList()
+                for (server in com.andmx.mcp.McpServerConfig.parse(config)) {
+                    val tools = mcpManager.connectOne(server)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    mcpTools = (mcpTools + tools).distinctBy { it.name }
+                    mcpContextTools = mcpContextToolsFor(mcpManager)
+                    _mcpStatus.value = mcpManager.connected
+                }
             }
-            mcpContextTools = mcpContextToolsFor(mcpManager)
-            _mcpStatus.value = mcpManager.connected
         }
     }
 
@@ -1985,23 +2036,24 @@ class ChatController private constructor(private val context: Context) {
         val settings = settingsStore.settings.firstOrNull() ?: return tr("设置不可用。")
         val cfg = com.andmx.mcp.McpServerConfig.parse(settings.mcpServers)
             .firstOrNull { it.name == name } ?: return "未配置服务器 `$name`。"
-        if (mcpManager.connected.any { it.name == name }) return "`$name` 已连接。"
-        val added = runCatching { mcpManager.connectOne(cfg) }
-            .getOrElse { return "连接失败：${it.message}" }
-        if (added.isEmpty()) return tr("连接失败：未获得工具（查看日志）。")
-        mcpTools = mcpTools + added
-        mcpContextTools = mcpContextToolsFor(mcpManager)
-        _mcpStatus.value = mcpManager.connected
-        return "已连接 `$name` · ${added.size} tools"
+        return mcpConfigMutex.withLock {
+            if (mcpManager.connected.any { it.name == name }) return@withLock "`$name` 已连接。"
+            val added = mcpManager.connectOne(cfg)
+            mcpTools = (mcpTools + added).distinctBy { it.name }
+            mcpContextTools = mcpContextToolsFor(mcpManager)
+            _mcpStatus.value = mcpManager.connected
+            if (mcpManager.connected.none { it.name == name }) tr("连接失败：未获得工具（查看日志）。")
+            else "已连接 `$name` · ${added.size} tools"
+        }
     }
 
     /** /mcp disconnect <server>：断开并按 `name__` 前缀摘掉该服务器的工具。 */
-    fun mcpDisconnect(name: String): String {
-        if (!mcpManager.disconnect(name)) return "`$name` 未连接。"
+    suspend fun mcpDisconnect(name: String): String = mcpConfigMutex.withLock {
+        if (!mcpManager.disconnect(name)) return@withLock "`$name` 未连接。"
         mcpTools = mcpTools.filterNot { it.name.startsWith("${name}__") }
         mcpContextTools = mcpContextToolsFor(mcpManager)
         _mcpStatus.value = mcpManager.connected
-        return "已断开 `$name`。"
+        "已断开 `$name`。"
     }
 
     /** /plugins enable|disable <id>：持久化开关并重载插件工具面。 */
@@ -2049,9 +2101,9 @@ class ChatController private constructor(private val context: Context) {
             existing.engine.setPlanModeProvider {
                 existing.approvalMode.collaboration == com.andmx.agent.permission.CollaborationMode.PLAN
             }
-            if (sharedExtraTools.isNotEmpty()) {
+            if (pluginTools.isNotEmpty() || mobileDevTools.isNotEmpty()) {
                 val known = existing.engine.listTools().map { it.first }.toSet()
-                val missing = sharedExtraTools.filter { it.name !in known }
+                val missing = (pluginTools + mobileDevTools).filter { it.name !in known }
                 if (missing.isNotEmpty()) existing.engine.addTools(missing)
             }
             if (!orchestrators.containsKey(conversationId)) {
@@ -2162,13 +2214,12 @@ class ChatController private constructor(private val context: Context) {
                 sessionEventStore.append(conversationId, trace, type, payload)
             },
             toolSearch = toolSearchRegistry,
+            runtimeTools = { activeMcpTools },
         )
         engine.addTools(toolSearchRegistry.controlTools())
         engine.setMetaUserContext(metaUser)
         engine.setTodoItemsProvider { todoItemsJson(todoState) }
-        if (sharedExtraTools.isNotEmpty()) {
-            engine.addTools(sharedExtraTools)
-        }
+        engine.addTools(pluginTools + mobileDevTools)
         val orch = SubAgentOrchestrator(
             toolsFactory = {
                 buildTools(planTool, goalState, todoState, planModeState, conversationId).filter { it.name != "spawn_agent" && it.name != "Agent" && it.name != "multi_agent" && it.name != "Task" && it.name != "TaskOutput" && it.name != "TaskStop" } + sharedExtraTools
@@ -2250,7 +2301,7 @@ class ChatController private constructor(private val context: Context) {
 
     private suspend fun loadHistoryForEngine(conversationId: Long): List<ApiMessage> {
         val projected = sessionEventStore.replayMessages(conversationId)
-        if (projected.isNotEmpty()) return projected
+        if (projected.isNotEmpty()) return ChatControllerLogic.repairToolHistory(projected)
         val legacy = loadLegacyHistory(conversationId)
         if (legacy.isNotEmpty()) {
             val trace = sessionTraces.computeIfAbsent(conversationId) {
@@ -2647,6 +2698,39 @@ class ChatController private constructor(private val context: Context) {
             return result
         }
 
+        override suspend fun mutateSession(action: SessionMutation, sessionId: String, value: String?): String {
+            val target = requireNotNull(resolveSessionToolTarget(rootConversationId, sessionId)) {
+                "Session $sessionId was not found in this workspace."
+            }
+            return when (action) {
+                SessionMutation.FORK -> {
+                    val newId = requireNotNull(repo.forkConversation(target.id)) { "Session no longer exists." }
+                    "Created a fork of session $sessionId. New sessionId: $newId."
+                }
+                SessionMutation.INTERRUPT -> {
+                    require(target.id != rootConversationId) { "Cannot interrupt the calling session." }
+                    val job = requireNotNull(sessionControl.activeTurnJob(target.id)) { "Session has no active turn." }
+                    job.cancel()
+                    sessionControl.cancelSessionApproval(sessions[target.id])
+                    "Stop requested for session $sessionId."
+                }
+                SessionMutation.RENAME -> {
+                    repo.rename(target.id, requireNotNull(value))
+                    "Renamed session $sessionId."
+                }
+                SessionMutation.ARCHIVE -> {
+                    val archived = requireNotNull(value).toBooleanStrict()
+                    require(!archived || !isTurnRunning(target.id)) { "Cannot archive a running session." }
+                    repo.setArchived(target.id, archived)
+                    "Updated the archive state of session $sessionId."
+                }
+                SessionMutation.PIN -> {
+                    repo.setPinned(target.id, requireNotNull(value).toBooleanStrict())
+                    "Updated the pinned state of session $sessionId."
+                }
+            }
+        }
+
         override suspend fun waitState(sessionId: String): SessionWaitState? {
             val conv = resolveSessionToolTarget(rootConversationId, sessionId) ?: return null
             val queued = synchronized(sessionToolQueues) {
@@ -2951,14 +3035,9 @@ class ChatController private constructor(private val context: Context) {
         settings: ProviderSettings,
         provider: ProviderDefinition,
     ): Pair<List<String>, String> {
-        val gitPath = if (projectManager.isRemote) {
-            projectManager.currentRemoteSpec()?.remotePath
-                ?: projectManager.hostPath.value
-        } else {
-            projectManager.guestMountPath
-        }
+        val gitPath = access.guestCwd()
         val git = runCatching {
-            gitPath?.let { com.andmx.workspace.GitBaseline(context).collectGitInfo(it) }
+            com.andmx.workspace.GitBaseline(context).collectGitInfo(gitPath)
         }.getOrNull()
         val host = projectManager.hostPath.value
         val gitStatus = when {
@@ -3016,6 +3095,7 @@ class ChatController private constructor(private val context: Context) {
         }.getOrDefault(emptyList())
         val memory = if (!settings.memoryEnabled) "" else runCatching { memorySystem.promptFragment() }.getOrDefault("")
         val extra = buildString {
+            appendLine("When a small form would help the user choose options, return an andmx-ui fenced JSON block with a title and fields. Each field has an id, label, and type (text, toggle, or choice). Choice fields also have an options array of strings. The user can review the values in the composer before sending them. Never put credentials in these cards.")
             if (sharedExtraTools.isNotEmpty()) {
                 appendLine("# 扩展工具")
                 appendLine("已加载 ${sharedExtraTools.size} 个 MCP/插件工具。名称带服务器前缀时表示来自 MCP。")
@@ -3043,7 +3123,11 @@ class ChatController private constructor(private val context: Context) {
         val userInstructions = runCatching {
             guestFs.readText("/root/.zcode/AGENTS.md", 100 * 1024)
         }.getOrNull().orEmpty()
-        val customInstructions = listOf(settings.customInstructions.trim(), userInstructions.trim())
+        val replyLanguage = settings.replyLanguage.trim().takeIf { it.isNotEmpty() }
+        val languageInstruction = replyLanguage?.let {
+            "Use ${kotlinx.serialization.json.JsonPrimitive(it)} as the default language for user-facing replies unless the user asks for a different language."
+        }.orEmpty()
+        val customInstructions = listOf(settings.customInstructions.trim(), userInstructions.trim(), languageInstruction)
             .filter { it.isNotEmpty() }
             .joinToString("\n\n")
         val system = ZCodePrompts.assembleBlocks(
@@ -3354,7 +3438,7 @@ class ChatController private constructor(private val context: Context) {
         val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled }
             ?: providerStore.primary.firstOrNull()
             ?: return tr("未配置提供商")
-        ensureExtraTools(settings, conversationId)
+        ensureExtraTools()
         val session = obtainSession(conversationId, provider, settings)
         val summary = session.engine.checkpointNow(
             settings,

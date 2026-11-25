@@ -39,6 +39,7 @@ class SessionToolsSurfaceTest {
         override suspend fun sendToSession(sessionId: String, message: String, requestId: String): SessionSendResult =
             SessionSendResult(requestId, sessionId, "sent")
         override suspend fun waitState(sessionId: String): SessionWaitState? = null
+        override suspend fun mutateSession(action: SessionMutation, sessionId: String, value: String?): String = "ok"
     }
 
     @Test
@@ -48,11 +49,11 @@ class SessionToolsSurfaceTest {
     }
 
     @Test
-    fun injectedHostRegistersAllFiveTools() {
+    fun injectedHostRegistersAllSessionTools() {
         val tools = surface(fakeHost())
         val sessionTools = tools.filter { it.name in SESSION_CONTROL_TOOL_NAMES }
         assertEquals(SESSION_CONTROL_TOOL_NAMES, sessionTools.map { it.name }.toSet())
-        assertEquals(5, sessionTools.size)
-        assertEquals(5, tools.count { it.name in SESSION_CONTROL_TOOL_NAMES })
+        assertEquals(SESSION_CONTROL_TOOL_NAMES.size, sessionTools.size)
+        assertEquals(SESSION_CONTROL_TOOL_NAMES.size, tools.count { it.name in SESSION_CONTROL_TOOL_NAMES })
     }
 }

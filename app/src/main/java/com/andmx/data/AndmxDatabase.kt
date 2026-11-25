@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DiscoveredToolEntity::class,
         BackgroundTaskEntity::class,
     ],
-    version = 24,
+    version = 25,
     exportSchema = false,
 )
 abstract class AndmxDatabase : RoomDatabase() {
@@ -61,6 +61,7 @@ abstract class AndmxDatabase : RoomDatabase() {
                     MIGRATION_21_22,
                     MIGRATION_22_23,
                     MIGRATION_23_24,
+                    MIGRATION_24_25,
                 )
                 .build()
                 .also { instance = it }
@@ -71,6 +72,13 @@ abstract class AndmxDatabase : RoomDatabase() {
             synchronized(this) {
                 instance?.close()
                 instance = null
+            }
+        }
+
+        private val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN videosJson TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN worktreePath TEXT NOT NULL DEFAULT ''")
             }
         }
 
