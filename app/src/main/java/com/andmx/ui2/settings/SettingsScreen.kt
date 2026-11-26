@@ -2,11 +2,15 @@ package com.andmx.ui2.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
+import com.andmx.ui2.theme.blockSurface
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -47,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -105,9 +110,12 @@ fun SettingsScreen(
     LaunchedEffect(initialPage) {
         page = initialPage
     }
-    val backToHome = { page = SettingsPage.HOME }
+    val backFromPage = {
+        if (page == SettingsPage.MODEL && initialPage == SettingsPage.MODEL) onClose()
+        else page = SettingsPage.HOME
+    }
     BackHandler(enabled = true) {
-        if (page != SettingsPage.HOME) backToHome() else onClose()
+        if (page != SettingsPage.HOME) backFromPage() else onClose()
     }
 
     val motion = LocalMotion.current
@@ -121,26 +129,26 @@ fun SettingsScreen(
     ) { target ->
         when (target) {
             SettingsPage.HOME -> SettingsHome(onOpen = { page = it }, onClose = onClose)
-            SettingsPage.GENERAL -> GeneralPage(backToHome)
-            SettingsPage.PERSONALIZATION -> PersonalizationPage(backToHome)
-            SettingsPage.CODE_PREVIEW -> CodePreviewPage(backToHome)
-            SettingsPage.MODEL -> ModelPage(backToHome)
-            SettingsPage.SKILLS -> SkillsPage(onBack = backToHome, onCloseSettings = onClose)
-            SettingsPage.SUBAGENT -> SubAgentPage(backToHome)
-            SettingsPage.MCP -> McpPage(backToHome)
-            SettingsPage.PLUGIN -> PluginPage(backToHome)
-            SettingsPage.COMMAND -> CommandPage(backToHome)
-            SettingsPage.AUTOMATIONS -> AutomationsPage(backToHome)
-            SettingsPage.HOOKS -> HooksPage(backToHome)
-            SettingsPage.BROWSER -> BrowserSettingsPage(backToHome)
-            SettingsPage.COMPUTER -> ComputerUsePage(backToHome)
-            SettingsPage.SHORTCUTS -> ShortcutsPage(backToHome)
-            SettingsPage.WORKSPACE_SEARCH -> WorkspaceIgnorePage(backToHome)
-            SettingsPage.INDEX -> IndexPage(backToHome)
-            SettingsPage.USAGE -> UsagePage(backToHome)
-            SettingsPage.MODEL_TRAJECTORY -> ModelTrajectoryPage(backToHome)
-            SettingsPage.MEMORY -> MemoryViewerPage(backToHome)
-            SettingsPage.ABOUT -> AboutPage(backToHome)
+            SettingsPage.GENERAL -> GeneralPage(backFromPage)
+            SettingsPage.PERSONALIZATION -> PersonalizationPage(backFromPage)
+            SettingsPage.CODE_PREVIEW -> CodePreviewPage(backFromPage)
+            SettingsPage.MODEL -> ModelPage(backFromPage)
+            SettingsPage.SKILLS -> SkillsPage(onBack = backFromPage, onCloseSettings = onClose)
+            SettingsPage.SUBAGENT -> SubAgentPage(backFromPage)
+            SettingsPage.MCP -> McpPage(backFromPage)
+            SettingsPage.PLUGIN -> PluginPage(backFromPage)
+            SettingsPage.COMMAND -> CommandPage(backFromPage)
+            SettingsPage.AUTOMATIONS -> AutomationsPage(backFromPage)
+            SettingsPage.HOOKS -> HooksPage(backFromPage)
+            SettingsPage.BROWSER -> BrowserSettingsPage(backFromPage)
+            SettingsPage.COMPUTER -> ComputerUsePage(backFromPage)
+            SettingsPage.SHORTCUTS -> ShortcutsPage(backFromPage)
+            SettingsPage.WORKSPACE_SEARCH -> WorkspaceIgnorePage(backFromPage)
+            SettingsPage.INDEX -> IndexPage(backFromPage)
+            SettingsPage.USAGE -> UsagePage(backFromPage)
+            SettingsPage.MODEL_TRAJECTORY -> ModelTrajectoryPage(backFromPage)
+            SettingsPage.MEMORY -> MemoryViewerPage(backFromPage)
+            SettingsPage.ABOUT -> AboutPage(backFromPage)
         }
     }
 }
@@ -193,7 +201,7 @@ private fun SettingsHome(
     val filtered = filterSettingsGroups(query, groups, descriptions)
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onSurface,
         topBar = {
             TopAppBar(
@@ -207,55 +215,63 @@ private fun SettingsHome(
             )
         },
     ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier
+                    .widthIn(max = Chrome.maxReadingWidth)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                singleLine = true,
-                placeholder = { Text(tr("搜索设置")) },
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Outlined.Close, contentDescription = tr("清除"))
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 20.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    singleLine = true,
+                    shape = Chrome.inset,
+                    placeholder = { Text(tr("搜索设置")) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Outlined.Close, contentDescription = tr("清除"))
+                            }
                         }
-                    }
-                },
-            )
-            if (filtered.isEmpty()) {
-                Text(
-                    tr("没有找到相关设置"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
+                    },
                 )
-            } else {
-                filtered.forEach { (title, items) ->
+                if (filtered.isEmpty()) {
                     Text(
-                        tr(title),
-                        style = MaterialTheme.typography.titleSmall,
+                        tr("没有找到相关设置"),
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
                     )
-                    items.forEach { item ->
-                        SettingsItem(
-                            icon = item.icon,
-                            title = item.title,
-                            subtitle = descriptions[item],
-                            onClick = { onOpen(item) },
+                } else {
+                    filtered.forEach { (title, items) ->
+                        Text(
+                            tr(title),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                         )
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = Chrome.gutter).blockSurface(),
+                        ) {
+                            items.forEachIndexed { index, item ->
+                                if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                                SettingsItem(
+                                    icon = item.icon,
+                                    title = item.title,
+                                    subtitle = descriptions[item],
+                                    onClick = { onOpen(item) },
+                                )
+                            }
+                        }
                     }
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
         }
     }
 }

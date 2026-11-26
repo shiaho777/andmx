@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,7 +34,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,7 +50,7 @@ import com.andmx.ui2.theme.LocalMotion
 
 @Composable
 fun VoiceMicButton(state: VoiceCapsuleState) {
-    val engine = remember(state) { state.engine() }
+    val engine = remember(state, state.downloadPhase) { state.engine() }
     if (engine == VoiceEngine.NONE || state.phase != VoicePhase.IDLE) return
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
@@ -55,13 +58,39 @@ fun VoiceMicButton(state: VoiceCapsuleState) {
     ) { granted ->
         if (granted) state.begin() else state.permissionDenied()
     }
-    IconButton(onClick = {
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO,
-        ) == PackageManager.PERMISSION_GRANTED
+    var offerDownload by remember(state) { mutableStateOf(false) }
+    var useCurrentEngine by remember(state) { mutableStateOf(false) }
+    fun record() {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
         if (granted) state.begin() else launcher.launch(Manifest.permission.RECORD_AUDIO)
-    }, modifier = Modifier.size(36.dp)) {
+    }
+    if (offerDownload) {
+        AlertDialog(
+            onDismissRequest = { offerDownload = false },
+            title = { Text(tr("语音输入")) },
+            text = { Text(tr("启用离线转写需下载模型")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    offerDownload = false
+                    state.startModelDownload()
+                }) { Text(tr("下载离线模型（约75MB）")) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    offerDownload = false
+                    useCurrentEngine = true
+                    record()
+                }) { Text(tr("继续录音")) }
+            },
+        )
+    }
+    IconButton(
+        onClick = {
+            if (!useCurrentEngine && state.canOfferModelDownload()) offerDownload = true else record()
+        },
+        modifier = Modifier.size(44.dp),
+    ) {
         Icon(
             Icons.Outlined.Mic,
             contentDescription = tr("语音输入"),
@@ -85,7 +114,7 @@ fun VoiceCapsuleBar(state: VoiceCapsuleState) {
             VoicePhase.IDLE -> Spacer(Modifier.size(0.dp))
         }
     }
-    if (state.downloadPhase == WhisperDownloadPhase.DOWNLOADING || state.canOfferModelDownload()) {
+    if (state.downloadPhase == WhisperDownloadPhase.DOWNLOADING) {
         ModelDownloadCapsule(state)
     }
     state.message?.let { msg ->
@@ -179,43 +208,21 @@ private fun RecordingCapsule(state: VoiceCapsuleState) {
 
 @Composable
 private fun ModelDownloadCapsule(state: VoiceCapsuleState) {
-    val downloading = state.downloadPhase == WhisperDownloadPhase.DOWNLOADING
-    LaunchedEffect(downloading) {
-        if (downloading) state.downloadModel()
-    }
+    LaunchedEffect(state) { state.downloadModel() }
     Row(
         Modifier
             .fillMaxWidth()
             .padding(bottom = 6.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (downloading) {
-                tr("离线模型下载中") + " ${(state.downloadProgress * 100).toInt()}%"
-            } else {
-                tr("启用离线转写需下载模型")
-            },
+            tr("离线模型下载中") + " ${(state.downloadProgress * 100).toInt()}%",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
         )
-        if (downloading) {
-            Text(
-                "${(state.downloadProgress * 100).toInt()}%",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            TextButton(onClick = state::dismissDownloadPrompt) {
-                Text(tr("取消"), style = MaterialTheme.typography.labelMedium)
-            }
-            TextButton(onClick = { state.startModelDownload() }) {
-                Text(tr("下载离线模型（约75MB）"), style = MaterialTheme.typography.labelMedium)
-            }
-        }
     }
 }
 

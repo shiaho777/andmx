@@ -361,7 +361,6 @@ class ChatController private constructor(private val context: Context) {
 
 
     private val sessions get() = sessionControl.sessions
-    private val approvalMutex = Mutex()
     private val sessionAccessOrder get() = sessionControl.sessionAccessOrder
     @Volatile private var pluginTools: List<Tool> = emptyList()
     @Volatile private var mobileDevTools: List<Tool> = emptyList()
@@ -380,8 +379,7 @@ class ChatController private constructor(private val context: Context) {
     private val activeMcpTools: List<Tool>
         get() = mcpTools + mcpContextTools
 
-    private val _pendingApproval get() = sessionControl.pendingApprovalState
-    val pendingApproval: StateFlow<ApprovalRequest?> get() = sessionControl.pendingApproval
+    val pendingApprovals: StateFlow<Map<Long, ApprovalRequest>> get() = sessionControl.pendingApprovals
 
     private val _planSteps = MutableStateFlow<List<UpdatePlanTool.PlanStep>>(emptyList())
     val planSteps: StateFlow<List<UpdatePlanTool.PlanStep>> = _planSteps.asStateFlow()
@@ -656,7 +654,7 @@ class ChatController private constructor(private val context: Context) {
     }
 
     /** 用户点「稍后」：停掉倒计时，问题无限期挂起直到作答或取消。 */
-    fun snoozeUserQuestion() = sessionControl.snoozeUserQuestion()
+    fun snoozeUserQuestion(request: ApprovalRequest) = sessionControl.snoozeUserQuestion(request)
 
     init {
         controllerScope.launch {
@@ -1277,20 +1275,17 @@ class ChatController private constructor(private val context: Context) {
     ): String {
         val session = sessions[conversationId]
             ?: return com.andmx.agent.workflow.EscalateTool.DEFERRED
-        val deferred = sessionControl.beginWorkflowEscalationApproval(session, input.runId, question)
-        notifyIfBackground(conversationId, tr("工作流等待确认"), question)
-        return try {
-            val raw = deferred.await()
-            val (answers, _) = AskUserQuestionParser.parseAnswersJson(raw)
-            answers.values.firstOrNull()?.jsonPrimitive?.contentOrNull
-                ?: com.andmx.agent.workflow.EscalateTool.DEFERRED
-        } finally {
-            session.pendingAnswer = null
+        return session.interactionLock.withLock {
+            val deferred = sessionControl.beginWorkflowEscalationApproval(session, input.runId, question)
+            try {
+                notifyIfBackground(conversationId, tr("工作流等待确认"), question)
+                val (answers, _) = AskUserQuestionParser.parseAnswersJson(deferred.await())
+                answers.values.firstOrNull()?.jsonPrimitive?.contentOrNull
+                    ?: com.andmx.agent.workflow.EscalateTool.DEFERRED
+            } finally {
+                sessionControl.cancelSessionApproval(session)
+            }
         }
-    }
-
-    fun resolveApproval(allow: Boolean) {
-        resolveApprovalScoped(allow, ApprovalScope.ONCE)
     }
 
     /**
@@ -1298,14 +1293,31 @@ class ChatController private constructor(private val context: Context) {
      * 后续相同 (tool, key) 的请求不再弹窗；PROJECT_ALLOW 额外写入持久存储
      * （ZCode allowForProject 对齐），跨会话生效。
      */
-    fun resolveApprovalScoped(allow: Boolean, scope: ApprovalScope) {
-        sessionControl.resolveApprovalScoped(
+    fun resolveApproval(
+        request: ApprovalRequest,
+        allow: Boolean,
+        scope: ApprovalScope = ApprovalScope.ONCE,
+        suggestion: com.andmx.agent.permission.PermissionSuggestion? = null,
+    ): Boolean {
+        if (suggestion != null && (suggestion !in request.suggestions || request.projectKey == null)) return false
+        return sessionControl.resolveApprovalScoped(
+            request,
             allow,
             scope,
             persistProjectRule = { toolCanonical, ruleKey, behavior ->
-                approvalRuleStore.add(projectKey(), toolCanonical, ruleKey, behavior)
+                request.projectKey?.let { approvalRuleStore.add(it, toolCanonical, ruleKey, behavior) }
             },
             persistGrants = { persistPermissionGrants(it) },
+            onAcceptedSuggestion = suggestion?.let {
+                {
+                    approvalRuleStore.add(
+                        requireNotNull(request.projectKey),
+                        it.toolCanonical,
+                        it.ruleKey,
+                        com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW,
+                    )
+                }
+            },
         )
     }
 
@@ -1313,11 +1325,8 @@ class ChatController private constructor(private val context: Context) {
     fun projectKey(): String =
         com.andmx.agent.ApprovalRuleStore.projectKeyOf(projectManager.hostPath.value)
 
-    fun resolveUserQuestion(answersJson: String) = sessionControl.resolveUserQuestion(answersJson)
-
-    fun resolvePlanApproval(allow: Boolean) {
-        resolveApproval(allow)
-    }
+    fun resolveUserQuestion(request: ApprovalRequest, answersJson: String) =
+        sessionControl.resolveUserQuestion(request, answersJson)
 
     fun reloadPlugins() {
         controllerScope.launch {
@@ -1331,7 +1340,6 @@ class ChatController private constructor(private val context: Context) {
 
 
     fun stopTurn(conversationId: Long) {
-        resolveApproval(false)
         orchestrators[conversationId]?.cancelAll(tr("用户停止"))
         backgroundTasksByConversation[conversationId]?.cancelAll()
         refreshSubAgents(conversationId)
@@ -1461,9 +1469,13 @@ class ChatController private constructor(private val context: Context) {
             return
         }
         val restored = restoreGoalFromDb(conversationId)
+        kotlin.coroutines.coroutineContext.ensureActive()
+        if (focusedConversationId != conversationId) return
         _goal.value = restored
         val planTool = UpdatePlanTool()
         restorePlanFromHistory(conversationId, planTool)
+        kotlin.coroutines.coroutineContext.ensureActive()
+        if (focusedConversationId != conversationId) return
         _planSteps.value = planTool.state.value
     }
 
@@ -2413,25 +2425,26 @@ class ChatController private constructor(private val context: Context) {
             currentMode = { sessions[conversationId]?.approvalMode ?: planMode.mode },
             askUser = ask@{ questions, rawArgs ->
                 val session = sessions[conversationId] ?: return@ask tr("会话不可用")
-                val autoResolve = _questionAutoResolve.value
-                val (deferred, summary) = sessionControl.beginAskApproval(
-                    session = session,
-                    questions = questions,
-                    autoResolve = autoResolve,
-                    hiddenGraceMs = ASK_HIDDEN_GRACE_MS,
-                    autoResolveMs = ASK_AUTO_RESOLVE_MS,
-                )
-                notifyIfBackground(conversationId, tr("等待你的回答"), summary)
-                if (autoResolve) {
-                    session.answerTimer = controllerScope.launch {
-                        sessionControl.autoResolveAnswer(conversationId, session, deferred, ASK_AUTO_RESOLVE_MS)
+                session.interactionLock.withLock {
+                    try {
+                        val autoResolve = _questionAutoResolve.value
+                        val (deferred, summary) = sessionControl.beginAskApproval(
+                            session = session,
+                            questions = questions,
+                            autoResolve = autoResolve,
+                            hiddenGraceMs = ASK_HIDDEN_GRACE_MS,
+                            autoResolveMs = ASK_AUTO_RESOLVE_MS,
+                        )
+                        notifyIfBackground(conversationId, tr("等待你的回答"), summary)
+                        if (autoResolve) {
+                            session.answerTimer = controllerScope.launch {
+                                sessionControl.autoResolveAnswer(conversationId, session, deferred, ASK_AUTO_RESOLVE_MS)
+                            }
+                        }
+                        deferred.await()
+                    } finally {
+                        sessionControl.cancelSessionApproval(session)
                     }
-                }
-                try {
-                    deferred.await()
-                } finally {
-                    sessionControl.clearAnswerTimer(session)
-                    session.pendingAnswer = null
                 }
             },
             readSession = { sessionId, query, strategy, maxTokens ->
@@ -2442,25 +2455,37 @@ class ChatController private constructor(private val context: Context) {
             },
             requestEnterPlanApproval = enter@{ reason ->
                 val session = sessions[conversationId] ?: return@enter false
-                val deferred = sessionControl.beginPlanApproval(
-                    session = session,
-                    toolName = "EnterPlanMode",
-                    summary = reason.ifBlank { tr("进入计划模式") },
-                    kind = "enter_plan",
-                )
-                deferred.await()
+                session.interactionLock.withLock {
+                    try {
+                        val deferred = sessionControl.beginPlanApproval(
+                            session = session,
+                            toolName = "EnterPlanMode",
+                            summary = reason.ifBlank { tr("进入计划模式") },
+                            kind = "enter_plan",
+                        )
+                        deferred.await()
+                    } finally {
+                        sessionControl.cancelSessionApproval(session)
+                    }
+                }
             },
             requestExitPlanApproval = exit@{ plan ->
                 val session = sessions[conversationId] ?: return@exit false
-                val deferred = sessionControl.beginPlanApproval(
-                    session = session,
-                    toolName = "ExitPlanMode",
-                    summary = plan.take(240),
-                    kind = "exit_plan",
-                    planText = plan,
-                )
-                deferred.await().also { approved ->
-                    if (approved) writePlanFile(conversationId, plan)
+                session.interactionLock.withLock {
+                    try {
+                        val deferred = sessionControl.beginPlanApproval(
+                            session = session,
+                            toolName = "ExitPlanMode",
+                            summary = plan.take(240),
+                            kind = "exit_plan",
+                            planText = plan,
+                        )
+                        deferred.await().also { approved ->
+                            if (approved) writePlanFile(conversationId, plan)
+                        }
+                    } finally {
+                        sessionControl.cancelSessionApproval(session)
+                    }
                 }
             },
             allowedPromptsSink = { entries ->
@@ -2975,7 +3000,8 @@ class ChatController private constructor(private val context: Context) {
         } else {
             emptyList()
         }
-        val rules = approvalRuleStore.ruleset(projectKey()).let { it.copy(allow = it.allow + grantRules) }
+        val project = projectKey()
+        val rules = approvalRuleStore.ruleset(project).let { it.copy(allow = it.allow + grantRules) }
         val decision = (sessions[conversationId]?.permissions ?: com.andmx.agent.permission.PermissionService()).checkPermission(
             com.andmx.agent.permission.PermissionContext(
                 toolName = tool.name,
@@ -2994,9 +3020,9 @@ class ChatController private constructor(private val context: Context) {
             denyPrompts -> ApprovalOutcome.Rejected("Subagent permission mode dontAsk denies prompts")
             tool.name == "ExitPlanMode" && decision.ruleId == "tool.userInteraction" ->
                 ApprovalOutcome.AllowedOnce
-            else -> approvalMutex.withLock {
-                prompt(conversationId, tool, args, labelMode, decision.reason)
-            }
+            else -> sessions[conversationId]?.interactionLock?.withLock {
+                prompt(conversationId, tool, args, labelMode, decision.reason, project)
+            } ?: ApprovalOutcome.Unavailable(tr("会话不可用"))
         }
     }
 
@@ -3006,12 +3032,14 @@ class ChatController private constructor(private val context: Context) {
         args: JsonObject,
         mode: ExecMode,
         reason: String? = null,
+        projectKey: String,
     ): ApprovalOutcome = sessionControl.prompt(
         conversationId = conversationId,
         tool = tool,
         args = args,
         mode = mode,
         reason = reason,
+        projectKey = projectKey,
         notify = { id, title, body -> notifyIfBackground(id, title, body) },
         launchPermissionHook = { toolName, toolArgs ->
             if (hookSystem.hasHooksFor(com.andmx.agent.hooks.HookSystem.HookEvent.PERMISSION_REQUEST)) {

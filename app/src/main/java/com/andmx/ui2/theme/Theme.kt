@@ -3,7 +3,9 @@ package com.andmx.ui2.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -12,108 +14,121 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-val ZCodeBrand = Color(0xFF0EA5E9)
-val ZCodeBrandSoft = Color(0xFFE0F2FE)
 val ZCodeSuccess = Color(0xFF46BF72)
 val ZCodeWarning = Color(0xFFFF8A30)
 val ZCodeDestructive = Color(0xFFFF5C5C)
 
-private val ZCodeBgLight = Color(0xFFF8F8F8)
-private val ZCodeSidebarLight = Color(0xFFF0F0F0)
-private val ZCodeWinAltLight = Color(0xFFECECEE)
-private val ZCodeFgLight = Color(0xFF262626)
-private val ZCodeFgSubtleLight = Color(0x99262626)
-private val ZCodeBorderLight = Color(0x1A0D0D0D)
-
-private val ZCodeBgDark = Color(0xFF161616)
-private val ZCodeHeaderDark = Color(0xFF202020)
-private val ZCodeCardDark = Color(0xFF2B2B2B)
-private val ZCodeSecondaryDark = Color(0xFF363636)
-private val ZCodeFgDark = Color(0xFFD4D4D4)
-private val ZCodeFgSubtleDark = Color(0x99D4D4D4)
-private val ZCodeBorderDark = Color(0x1AFFFFFF)
-private val ZCodeSurfaceDark = Color(0x0DFFFFFF)
-private val ZCodeSurfaceHoverDark = Color(0x1AFFFFFF)
+private val WorkspaceInk = Color(0xFF0D0D0D)
+private val WorkspaceSelection = Color(0xFFEAEAEA)
+private val WorkspaceAccent = Color(0xFF0066DD)
+private val WorkspaceCanvasLight = Color(0xFFF8F8F8)
+private val WorkspaceCanvasDark = Color(0xFF161616)
+private val WorkspaceCardDark = Color(0xFF2B2B2B)
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF000000),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFE5E5E5),
-    onPrimaryContainer = Color(0xFF0D0D0D),
-    secondary = Color(0xFF525252),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0x0D0D0D0D),
-    onSecondaryContainer = Color(0xFF171717),
-    tertiary = Color(0xFF404040),
-    onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = ZCodeWinAltLight,
-    onTertiaryContainer = Color(0xFF171717),
-    background = ZCodeBgLight,
-    onBackground = ZCodeFgLight,
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF0D0D0D),
-    surfaceVariant = ZCodeSidebarLight,
-    onSurfaceVariant = Color(0xFF525252),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = ZCodeBgLight,
-    surfaceContainer = ZCodeSidebarLight,
-    surfaceContainerHigh = ZCodeWinAltLight,
+    primary = WorkspaceInk,
+    onPrimary = Color.White,
+    primaryContainer = WorkspaceSelection,
+    onPrimaryContainer = WorkspaceInk,
+    secondary = Color(0xFF28704D),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE4F1E9),
+    onSecondaryContainer = Color(0xFF153F2A),
+    tertiary = Color(0xFF79551F),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFF8EEE0),
+    onTertiaryContainer = Color(0xFF513713),
+    background = WorkspaceCanvasLight,
+    onBackground = WorkspaceInk,
+    surface = Color.White,
+    onSurface = WorkspaceInk,
+    surfaceVariant = Color(0xFFF0F0F0),
+    onSurfaceVariant = Color(0xFF555555),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = WorkspaceCanvasLight,
+    surfaceContainer = Color(0xFFF0F0F0),
+    surfaceContainerHigh = Color(0xFFECECEE),
     surfaceContainerHighest = Color(0xFFE5E5E5),
-    outline = ZCodeBorderLight,
-    outlineVariant = Color(0x140D0D0D),
-    inverseSurface = Color(0xFF171717),
+    outline = Color(0xFF767676),
+    outlineVariant = Color(0xFFDEDEDE),
+    surfaceTint = WorkspaceInk,
+    inverseSurface = Color(0xFF262626),
     inverseOnSurface = Color(0xFFF8F8F8),
-    inversePrimary = Color(0xFFFFFFFF),
-    error = Color(0xFFE03131),
-    onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFEE2E2),
-    onErrorContainer = Color(0xFF7F1D1D),
+    inversePrimary = Color(0xFFF2F2F2),
+    error = Color(0xFFAC2E35),
+    onError = Color.White,
+    errorContainer = Color(0xFFF8E5E6),
+    onErrorContainer = Color(0xFF771B24),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFFFFFF),
-    onPrimary = Color(0xFF000000),
-    primaryContainer = ZCodeSecondaryDark,
-    onPrimaryContainer = Color(0xFFF8F8F8),
-    secondary = Color(0xFFADADAD),
-    onSecondary = Color(0xFF161616),
-    secondaryContainer = ZCodeSurfaceHoverDark,
-    onSecondaryContainer = Color(0xFFE5E5E5),
-    tertiary = Color(0xFFD4D4D4),
-    onTertiary = Color(0xFF161616),
-    tertiaryContainer = ZCodeHeaderDark,
-    onTertiaryContainer = Color(0xFFE5E5E5),
-    background = ZCodeBgDark,
-    onBackground = ZCodeFgDark,
-    surface = ZCodeHeaderDark,
-    onSurface = Color(0xFFFFFFFF),
-    surfaceVariant = ZCodeCardDark,
-    onSurfaceVariant = ZCodeFgSubtleDark,
+    primary = Color(0xFFF2F2F2),
+    onPrimary = WorkspaceInk,
+    primaryContainer = Color(0xFF343434),
+    onPrimaryContainer = Color(0xFFF2F2F2),
+    secondary = Color(0xFF9AD0AC),
+    onSecondary = Color(0xFF143621),
+    secondaryContainer = Color(0xFF263D2D),
+    onSecondaryContainer = Color(0xFFC4E7CE),
+    tertiary = Color(0xFFDCBD8D),
+    onTertiary = Color(0xFF493416),
+    tertiaryContainer = Color(0xFF413429),
+    onTertiaryContainer = Color(0xFFF4D9AE),
+    background = WorkspaceCanvasDark,
+    onBackground = Color(0xFFF2F2F2),
+    surface = Color(0xFF202020),
+    onSurface = Color(0xFFF2F2F2),
+    surfaceVariant = WorkspaceCardDark,
+    onSurfaceVariant = Color(0xFFB5B5B5),
     surfaceContainerLowest = Color(0xFF121212),
-    surfaceContainerLow = ZCodeBgDark,
-    surfaceContainer = ZCodeHeaderDark,
-    surfaceContainerHigh = ZCodeCardDark,
-    surfaceContainerHighest = ZCodeSecondaryDark,
-    outline = ZCodeBorderDark,
-    outlineVariant = Color(0x14FFFFFF),
-    inverseSurface = Color(0xFFE5E5E5),
-    inverseOnSurface = Color(0xFF161616),
-    inversePrimary = Color(0xFF0D0D0D),
-    error = ZCodeDestructive,
-    onError = Color(0xFF450A0A),
-    errorContainer = Color(0xFF7F1D1D),
-    onErrorContainer = Color(0xFFFEE2E2),
+    surfaceContainerLow = WorkspaceCanvasDark,
+    surfaceContainer = Color(0xFF202020),
+    surfaceContainerHigh = WorkspaceCardDark,
+    surfaceContainerHighest = Color(0xFF363636),
+    outline = Color(0xFF909090),
+    outlineVariant = Color(0xFF3C3C3C),
+    surfaceTint = Color(0xFFF2F2F2),
+    inverseSurface = Color(0xFFEAEAEA),
+    inverseOnSurface = WorkspaceInk,
+    inversePrimary = WorkspaceInk,
+    error = Color(0xFFF4ADB0),
+    onError = Color(0xFF54171C),
+    errorContainer = Color(0xFF4E292C),
+    onErrorContainer = Color(0xFFFBD9DC),
+)
+
+@Composable
+internal fun workspaceLinkColor(): Color =
+    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF8BC1FF) else WorkspaceAccent
+
+private val WorkspaceShapes = Shapes(
+    extraSmall = Chrome.tile,
+    small = Chrome.control,
+    medium = Chrome.inset,
+    large = Chrome.panel,
+    extraLarge = Chrome.sheet,
+)
+
+private fun ColorScheme.withWallpaper(wallpaper: ColorScheme): ColorScheme = copy(
+    background = lerp(background, wallpaper.background, 0.24f),
+    surface = lerp(surface, wallpaper.surface, 0.24f),
+    surfaceContainerLow = lerp(surfaceContainerLow, wallpaper.surfaceContainerLow, 0.24f),
+    surfaceContainer = lerp(surfaceContainer, wallpaper.surfaceContainer, 0.24f),
+    surfaceContainerHigh = lerp(surfaceContainerHigh, wallpaper.surfaceContainerHigh, 0.24f),
+    surfaceContainerHighest = lerp(surfaceContainerHighest, wallpaper.surfaceContainerHighest, 0.24f),
 )
 
 @Composable
 fun AndMX2Theme(
     themeMode: String = "system",
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -122,12 +137,11 @@ fun AndMX2Theme(
         else -> isSystemInDarkTheme()
     }
     val context = LocalContext.current
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColors
-        else -> LightColors
+    val base = if (darkTheme) DarkColors else LightColors
+    val colorScheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        base.withWallpaper(if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context))
+    } else {
+        base
     }
 
     val view = LocalView.current
@@ -148,6 +162,7 @@ fun AndMX2Theme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = AndMXTypography,
+            shapes = WorkspaceShapes,
             content = content,
         )
     }

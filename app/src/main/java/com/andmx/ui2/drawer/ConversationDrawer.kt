@@ -3,7 +3,9 @@ package com.andmx.ui2.drawer
 import com.andmx.ui2.settings.tr
 
 import android.content.Context
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Search
@@ -22,8 +24,10 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -39,22 +43,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import kotlin.math.min
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.ConversationEntity
+import com.andmx.data.ConversationMessageMatch
 import com.andmx.data.TaskGroupEntity
 import com.andmx.ui2.ext.ExtensionSlotHost
 import com.andmx.ui2.ext.ExtensionSlotIds
 import com.andmx.ui2.files.WorkspaceFileTree
+import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.chat.ChatActionBus
 import com.andmx.workspace.ChangeTracker
 import com.andmx.workspace.ProjectManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 private const val VISIBLE_LIMIT = 20
 
@@ -82,6 +94,8 @@ fun ConversationDrawer(
     fileTreeRequestKey: Int = 0,
     currentConversationId: Long = 0L,
     streamingConversationIds: Set<Long> = emptySet(),
+    approvalConversationIds: Set<Long> = emptySet(),
+    onSelectSearchMatch: (Long, Long, String) -> Unit = { id, _, _ -> onSelectConversation(id) },
     content: @Composable () -> Unit,
 ) {
     val drawerState = rememberDrawerState(if (open) DrawerValue.Open else DrawerValue.Closed)
@@ -98,6 +112,10 @@ fun ConversationDrawer(
     }
     var query by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
+    var searchFocused by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var viewMode by remember {
         mutableStateOf(
             runCatching {
@@ -120,6 +138,7 @@ fun ConversationDrawer(
     }
     var collapsedGroups by remember { mutableStateOf(setOf<String>()) }
     var showArchived by remember { mutableStateOf(false) }
+    var showRunningOnly by remember { mutableStateOf(false) }
     var showAllPinned by remember { mutableStateOf(false) }
     var showAllArchived by remember { mutableStateOf(false) }
     var expandedSections by remember { mutableStateOf(setOf<String>()) }
@@ -133,13 +152,32 @@ fun ConversationDrawer(
     var moveTarget by remember { mutableStateOf<ConversationEntity?>(null) }
     var fileTreeOpen by remember { mutableStateOf(false) }
     var fileTreePath by remember { mutableStateOf<String?>(null) }
+    val searchTerm = query.trim()
+    var messageMatches by remember(searchTerm, showArchived) {
+        mutableStateOf<Map<Long, ConversationMessageMatch>?>(null)
+    }
+    LaunchedEffect(searchTerm, showArchived) {
+        if (searchTerm.isBlank()) return@LaunchedEffect
+        delay(160)
+        dao.observeConversationMessageMatches(searchTerm, showArchived).collect { matches ->
+            messageMatches = matches.associateBy { it.conversationId }
+        }
+    }
+
+    fun clearSearch() {
+        if (searchFocused) {
+            focusManager.clearFocus()
+            keyboard?.hide()
+        }
+        searchOpen = false
+        query = ""
+    }
 
     fun openFileTree(path: String? = null) {
+        clearSearch()
         fileTreePath = path
         fileTreeOpen = true
         showArchived = false
-        searchOpen = false
-        query = ""
     }
 
     fun closeFileTree() {
@@ -177,7 +215,15 @@ fun ConversationDrawer(
         else if (!open && drawerState.isOpen) drawerState.close()
     }
     LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Closed && open) onDismiss()
+        if (drawerState.isClosed) {
+            clearSearch()
+            if (open) onDismiss()
+        }
+    }
+    LaunchedEffect(drawerState.isOpen, searchOpen, showArchived) {
+        if (drawerState.isOpen && searchOpen && !showArchived) {
+            searchFocus.requestFocus()
+        }
     }
 
     fun toggleCollapse(key: String) {
@@ -193,6 +239,7 @@ fun ConversationDrawer(
     }
 
     fun closeAnd(action: () -> Unit) {
+        clearSearch()
         action()
         scope.launch {
             drawerState.close()
@@ -211,6 +258,9 @@ fun ConversationDrawer(
         }
     }
 
+    val runningCount = remember(conversations, streamingConversationIds) {
+        conversations.count { it.id in streamingConversationIds }
+    }
     val groupKeys = remember(conversations, taskGroups, viewMode) {
         buildGroupKeys(conversations, taskGroups, viewMode)
     }
@@ -220,7 +270,7 @@ fun ConversationDrawer(
         gesturesEnabled = open || drawerState.isOpen,
         drawerContent = {
             ModalDrawerSheet(
-                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                 drawerShape = RectangleShape,
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 modifier = Modifier.width(drawerWidth()),
@@ -248,13 +298,13 @@ fun ConversationDrawer(
                             guestRootPath = projectManager.guestMountPath,
                         )
                     } else {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .padding(top = 12.dp, bottom = 6.dp),
-                    ) {
-                        if (!showArchived) {
+                    if (!showArchived && !searchOpen) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                                .padding(top = 12.dp, bottom = 6.dp),
+                        ) {
                             NewTaskButton(onClick = ::newTask)
                             Spacer(Modifier.height(2.dp))
                             DrawerQuickAction(
@@ -294,15 +344,13 @@ fun ConversationDrawer(
                         },
                         showArchived = showArchived,
                         onToggleArchived = {
+                            clearSearch()
                             showArchived = !showArchived
-                            searchOpen = showArchived
-                            query = ""
                             showAllArchived = false
                         },
                         searchOpen = searchOpen,
                         onToggleSearch = {
-                            searchOpen = !searchOpen
-                            if (!searchOpen) query = ""
+                            if (searchOpen) clearSearch() else searchOpen = true
                         },
                         onNewGroup = if (!showArchived && viewMode == ViewMode.GROUPED) {
                             { createGroupOpen = true }
@@ -316,56 +364,103 @@ fun ConversationDrawer(
                             query = query,
                             archived = showArchived,
                             onQueryChange = { query = it },
-                            onClose = if (!showArchived) {
-                                {
-                                    searchOpen = false
-                                    query = ""
-                                }
-                            } else {
-                                null
-                            },
+                            modifier = Modifier
+                                .focusRequester(searchFocus)
+                                .onFocusChanged { searchFocused = it.isFocused },
+                            onClose = if (!showArchived) ::clearSearch else null,
                         )
                         Spacer(Modifier.height(2.dp))
                     }
 
-                    val source = if (showArchived) archived else conversations
-                    val filtered = remember(source, query) {
-                        filterConversations(source, query)
+                    if (!showArchived) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            FilterChip(
+                                selected = !showRunningOnly,
+                                onClick = { showRunningOnly = false },
+                                label = { Text(tr("全部")) },
+                                shape = Chrome.control,
+                            )
+                            FilterChip(
+                                selected = showRunningOnly,
+                                onClick = { showRunningOnly = true },
+                                label = { Text(tr("进行中") + " · " + runningCount) },
+                                shape = Chrome.control,
+                            )
+                        }
                     }
-                    val effectiveCollapsedGroups = remember(query, collapsedGroups) {
-                        searchCollapsedGroups(query, collapsedGroups)
+                    val source = if (showArchived) archived else conversations
+                    val onlyRunning = !showArchived && showRunningOnly
+                    val filtered = remember(source, searchTerm, messageMatches, onlyRunning, streamingConversationIds, sortMode) {
+                        val active = if (onlyRunning) source.filter { it.id in streamingConversationIds } else source
+                        if (searchTerm.isBlank()) {
+                            active
+                        } else {
+                            filterConversations(active, searchTerm, messageMatches.orEmpty().keys)
+                                .sortedWith(conversationComparator(sortMode))
+                        }
                     }
 
                     if (filtered.isEmpty()) {
                         Box(Modifier.weight(1f).fillMaxWidth()) {
-                            DrawerEmpty(searching = query.isNotBlank(), archived = showArchived)
+                            if (searchTerm.isNotBlank() && messageMatches == null) {
+                                Text(
+                                    tr("搜索中"),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                            } else if (onlyRunning && searchTerm.isBlank()) {
+                                Text(
+                                    tr("没有正在运行的任务"),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                            } else {
+                                DrawerEmpty(searching = query.isNotBlank(), archived = showArchived)
+                            }
                         }
-                    } else if (showArchived) {
-                        val visible = if (showAllArchived || filtered.size <= VISIBLE_LIMIT) {
+                    } else if (showArchived || searchTerm.isNotBlank()) {
+                        val canPaginate = showArchived && searchTerm.isBlank() && filtered.size > VISIBLE_LIMIT
+                        val visible = if (!canPaginate || showAllArchived) {
                             filtered
                         } else {
                             filtered.take(VISIBLE_LIMIT)
                         }
+                        val searchList = rememberLazyListState()
+                        LaunchedEffect(searchTerm, showArchived) { searchList.scrollToItem(0) }
                         LazyColumn(
                             Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp),
+                            state = searchList,
                         ) {
                             items(visible, key = { it.id }) { conv ->
+                                val match = messageMatches?.get(conv.id)
                                 ConversationRow(
                                     conversation = conv,
                                     selected = conv.id == currentConversationId,
                                     sortMode = sortMode,
                                     compact = false,
                                     showWorkspaceMeta = true,
-                                    archivedMode = true,
+                                    archivedMode = showArchived,
                                     streaming = conv.id in streamingConversationIds,
-                                    onClick = { closeAnd { onSelectConversation(conv.id) } },
+                                    awaitingApproval = conv.id in approvalConversationIds,
+                                    onClick = {
+                                        closeAnd {
+                                            if (match == null) onSelectConversation(conv.id)
+                                            else onSelectSearchMatch(conv.id, match.messageId, searchTerm)
+                                        }
+                                    },
                                     onRename = { renameTarget = conv },
-                                    onDelete = { requestDelete(conv, archived = true) },
+                                    onDelete = { requestDelete(conv, archived = showArchived) },
                                     onArchive = {
-                                        scope.launch { dao.setArchived(conv.id, false) }
+                                        if (showArchived) scope.launch { dao.setArchived(conv.id, false) }
+                                        else archiveTarget = conv
                                     },
                                     onUnarchive = {
                                         scope.launch { dao.setArchived(conv.id, false) }
@@ -374,9 +469,11 @@ fun ConversationDrawer(
                                         scope.launch { dao.setPinned(conv.id, !conv.pinned) }
                                     },
                                     onToggleUnread = { toggleUnread(conv) },
+                                    onMoveToGroup = { moveTarget = conv },
+                                    searchExcerpt = match?.excerpt?.replace(Regex("\\s+"), " "),
                                 )
                             }
-                            if (filtered.size > VISIBLE_LIMIT) {
+                            if (canPaginate) {
                                 item(key = "show_more_archived") {
                                     ShowMoreButton(
                                         expanded = showAllArchived,
@@ -391,9 +488,10 @@ fun ConversationDrawer(
                             taskGroups = taskGroups,
                             viewMode = viewMode,
                             sortMode = sortMode,
-                            collapsedGroups = effectiveCollapsedGroups,
+                            collapsedGroups = if (onlyRunning) emptySet() else collapsedGroups,
                             currentConversationId = currentConversationId,
                             streamingConversationIds = streamingConversationIds,
+                            approvalConversationIds = approvalConversationIds,
                             showAllPinned = showAllPinned,
                             expandedSections = expandedSections,
                             onToggleShowAllPinned = { showAllPinned = !showAllPinned },
@@ -537,6 +635,7 @@ private fun TaskList(
     collapsedGroups: Set<String>,
     currentConversationId: Long,
     streamingConversationIds: Set<Long>,
+    approvalConversationIds: Set<Long>,
     showAllPinned: Boolean,
     expandedSections: Set<String>,
     onToggleShowAllPinned: () -> Unit,
@@ -580,6 +679,7 @@ private fun TaskList(
                     compact = true,
                     showWorkspaceMeta = showWorkspaceMeta,
                     streaming = conv.id in streamingConversationIds,
+                    awaitingApproval = conv.id in approvalConversationIds,
                     onClick = { onSelect(conv.id) },
                     onRename = { onRename(conv) },
                     onDelete = { onDelete(conv) },
@@ -638,6 +738,7 @@ private fun TaskList(
                                 compact = false,
                                 showWorkspaceMeta = true,
                                 streaming = conv.id in streamingConversationIds,
+                                awaitingApproval = conv.id in approvalConversationIds,
                                 onClick = { onSelect(conv.id) },
                                 onRename = { onRename(conv) },
                                 onDelete = { onDelete(conv) },
@@ -695,6 +796,7 @@ private fun TaskList(
                                 compact = true,
                                 showWorkspaceMeta = false,
                                 streaming = conv.id in streamingConversationIds,
+                                awaitingApproval = conv.id in approvalConversationIds,
                                 onClick = { onSelect(conv.id) },
                                 onRename = { onRename(conv) },
                                 onDelete = { onDelete(conv) },
@@ -774,6 +876,7 @@ private fun TaskList(
                                 compact = true,
                                 showWorkspaceMeta = false,
                                 streaming = conv.id in streamingConversationIds,
+                                awaitingApproval = conv.id in approvalConversationIds,
                                 onClick = { onSelect(conv.id) },
                                 onRename = { onRename(conv) },
                                 onDelete = { onDelete(conv) },

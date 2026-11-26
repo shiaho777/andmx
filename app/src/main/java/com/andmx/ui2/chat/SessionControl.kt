@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.ConcurrentHashMap
@@ -37,7 +39,7 @@ data class ApprovalRequest(
     val risk: ToolRisk,
     val summary: String,
     val modeLabel: String,
-    val id: String = "appr-${System.currentTimeMillis()}",
+    val id: String = "appr-${java.util.UUID.randomUUID()}",
     val createdAt: Long = System.currentTimeMillis(),
     val kind: String = "tool",
     val questions: List<AskQuestion> = emptyList(),
@@ -51,6 +53,8 @@ data class ApprovalRequest(
     /** 审批原因（plan 模式拒绝等场景的描述字段）。 */
     val reason: String = "",
     val suggestions: List<com.andmx.agent.permission.PermissionSuggestion> = emptyList(),
+    val arguments: String = "",
+    val projectKey: String? = null,
 )
 
 /** 审批作用域（ZCode chat.permission 对齐）。 */
@@ -80,7 +84,7 @@ internal class SessionControl {
     fun protectedFacts(conversationId: Long): Set<String> {
         val facts = mutableSetOf<String>()
         if (isTurnRunning(conversationId)) facts += "running"
-        if (pendingApprovalState.value?.conversationId == conversationId) facts += "interaction"
+        if (pendingApprovals.value.containsKey(conversationId)) facts += "interaction"
         val session = sessions[conversationId]
         if (session?.pending != null || session?.pendingAnswer != null) facts += "interaction"
         if (conversationId in queuedConversationIdsProvider()) facts += "queued"
@@ -121,8 +125,21 @@ internal class SessionControl {
 
     val sessionTraces = ConcurrentHashMap<Long, String>()
 
-    val pendingApprovalState = MutableStateFlow<ApprovalRequest?>(null)
-    val pendingApproval: StateFlow<ApprovalRequest?> = pendingApprovalState.asStateFlow()
+    private val pendingApprovalState = MutableStateFlow<Map<Long, ApprovalRequest>>(emptyMap())
+    val pendingApprovals: StateFlow<Map<Long, ApprovalRequest>> = pendingApprovalState.asStateFlow()
+
+    internal fun publishApproval(request: ApprovalRequest) {
+        pendingApprovalState.update { it + (request.conversationId to request) }
+    }
+
+    private fun takeApproval(conversationId: Long, requestId: String? = null): ApprovalRequest? {
+        while (true) {
+            val current = pendingApprovalState.value
+            val request = current[conversationId] ?: return null
+            if (requestId != null && request.id != requestId) return null
+            if (pendingApprovalState.compareAndSet(current, current - conversationId)) return request
+        }
+    }
 
     fun isTurnRunning(conversationId: Long): Boolean =
         turnJobs[conversationId]?.isActive == true || runningConversations.contains(conversationId)
@@ -277,6 +294,7 @@ internal class SessionControl {
         args: JsonObject,
         mode: ExecMode,
         reason: String? = null,
+        projectKey: String? = null,
         notify: suspend (Long, String, String) -> Unit,
         launchPermissionHook: (String, String) -> Unit,
     ): ApprovalOutcome {
@@ -290,7 +308,7 @@ internal class SessionControl {
         session.pendingArgs = args.toString()
         touchAccess(conversationId)
         val summary = buildApprovalSummary(tool, args) + (reason?.let { "（$it）" } ?: "")
-        pendingApprovalState.value = ApprovalRequest(
+        val request = ApprovalRequest(
             conversationId = conversationId,
             toolName = tool.name,
             risk = tool.risk,
@@ -302,11 +320,21 @@ internal class SessionControl {
             suggestions = runCatching {
                 com.andmx.agent.permission.PermissionSuggestions.suggest(tool.name, args)
             }.getOrDefault(emptyList()),
+            arguments = args.toString(),
+            projectKey = projectKey,
         )
-        notify(conversationId, tr("等待确认"), summary)
-        // 上游 PermissionRequest hook：与审批 UI 并行触发（外部审批桥接语义），不阻塞 deferred
-        launchPermissionHook(tool.name, args.toString())
-        return if (deferred.await()) ApprovalOutcome.AllowedOnce else ApprovalOutcome.Rejected()
+        publishApproval(request)
+        return try {
+            notify(conversationId, tr("等待确认"), summary)
+            launchPermissionHook(tool.name, args.toString())
+            if (deferred.await()) ApprovalOutcome.AllowedOnce else ApprovalOutcome.Rejected()
+        } finally {
+            takeApproval(conversationId, request.id)
+            if (session.pending === deferred) {
+                session.pending = null
+                session.pendingArgs = null
+            }
+        }
     }
 
     /**
@@ -315,18 +343,27 @@ internal class SessionControl {
      * （ZCode allowForProject 对齐），跨会话生效。
      */
     fun resolveApprovalScoped(
+        request: ApprovalRequest,
         allow: Boolean,
         scope: ApprovalScope,
         persistProjectRule: (String, String, ApprovalRuleStore.RuleBehavior) -> Unit,
         persistGrants: (Long) -> Unit,
-    ) {
-        val req = pendingApprovalState.value
-        pendingApprovalState.value = null
-        req?.let { touchAccess(it.conversationId) }
-        val session = req?.let { sessions[it.conversationId] }
+        onAcceptedSuggestion: (() -> Unit)? = null,
+    ): Boolean {
+        val session = sessions[request.conversationId] ?: return false
+        val req = takeApproval(request.conversationId, request.id) ?: return false
+        touchAccess(req.conversationId)
+        val pending = session.pending
+        val answer = session.pendingAnswer
+        val rawArgs = session.pendingArgs.orEmpty()
+        session.pending = null
+        session.pendingArgs = null
+        session.pendingAnswer = null
+        clearAnswerTimer(session)
         val allowed = allow && scope != ApprovalScope.SESSION_DENY && scope != ApprovalScope.PROJECT_DENY
-        if (req != null && session != null && scope != ApprovalScope.ONCE) {
-            val rule = approvalRuleKey(req.toolName, session.pendingArgs.orEmpty())
+        if (allowed) onAcceptedSuggestion?.invoke()
+        if (scope != ApprovalScope.ONCE && req.kind == "tool") {
+            val rule = approvalRuleKey(req.toolName, rawArgs)
             if (rule != null) {
                 approvalRulesByConversation
                     .computeIfAbsent(req.conversationId) { ConcurrentHashMap() }[rule] = scope
@@ -363,44 +400,46 @@ internal class SessionControl {
                 }
             }
         }
-        session?.pending?.complete(allowed)
-        session?.pending = null
-        session?.pendingArgs = null
-        if (session?.pendingAnswer != null) {
-            session.pendingAnswer?.complete(
-                if (allowed) """{"answers":{"__default__":"approved"}}""" else """{"answers":{"__default__":"rejected"}}"""
-            )
-            session.pendingAnswer = null
-            clearAnswerTimer(session)
-        }
+        pending?.complete(allowed)
+        answer?.complete(
+            if (allowed) """{"answers":{"__default__":"approved"}}""" else """{"answers":{"__default__":"rejected"}}"""
+        )
+        return true
     }
 
-    fun resolveUserQuestion(answersJson: String) {
-        val req = pendingApprovalState.value
-        pendingApprovalState.value = null
-        req?.let { touchAccess(it.conversationId) }
-        val session = req?.let { sessions[it.conversationId] }
-        session?.pendingAnswer?.complete(answersJson)
-        session?.pendingAnswer = null
+    fun resolveUserQuestion(request: ApprovalRequest, answersJson: String): Boolean {
+        if (request.kind != "ask_user") return false
+        val session = sessions[request.conversationId] ?: return false
+        val req = takeApproval(request.conversationId, request.id) ?: return false
+        touchAccess(req.conversationId)
+        val answer = session.pendingAnswer
+        val pending = session.pending
+        session.pendingAnswer = null
+        session.pending = null
         clearAnswerTimer(session)
-        session?.pending?.complete(true)
-        session?.pending = null
+        answer?.complete(answersJson)
+        pending?.complete(true)
+        return true
     }
 
     /** 用户点「稍后」：停掉倒计时，问题无限期挂起直到作答或取消。 */
-    fun snoozeUserQuestion() {
-        val req = pendingApprovalState.value ?: return
-        if (req.kind != "ask_user") return
-        val session = sessions[req.conversationId] ?: return
+    fun snoozeUserQuestion(request: ApprovalRequest) {
+        val req = pendingApprovals.value[request.conversationId] ?: return
+        if (req.kind != "ask_user" || req.id != request.id) return
+        val session = sessions[request.conversationId] ?: return
         snoozeAnswerTimer(session)
-        pendingApprovalState.value = req.copy(autoDeadlineAt = null, countdownVisibleAt = null)
+        pendingApprovalState.update { current ->
+            if (current[req.conversationId]?.id != req.id) current
+            else current + (req.conversationId to req.copy(autoDeadlineAt = null, countdownVisibleAt = null))
+        }
     }
 
     fun snoozeAllAnswerTimers() {
         sessions.values.forEach { snoozeAnswerTimer(it) }
-        val cur = pendingApprovalState.value
-        if (cur?.kind == "ask_user" && cur.autoDeadlineAt != null) {
-            pendingApprovalState.value = cur.copy(autoDeadlineAt = null, countdownVisibleAt = null)
+        pendingApprovalState.update { current ->
+            current.mapValues { (_, req) ->
+                if (req.kind == "ask_user") req.copy(autoDeadlineAt = null, countdownVisibleAt = null) else req
+            }
         }
     }
 
@@ -431,7 +470,7 @@ internal class SessionControl {
             q.header.ifBlank { q.question.take(24) }
         }.ifBlank { tr("需要你的决定") }
         val startedAt = System.currentTimeMillis()
-        pendingApprovalState.value = ApprovalRequest(
+        publishApproval(ApprovalRequest(
             conversationId = session.conversationId,
             toolName = "AskUserQuestion",
             risk = ToolRisk.READ,
@@ -441,7 +480,7 @@ internal class SessionControl {
             questions = questions,
             autoDeadlineAt = if (autoResolve) startedAt + autoResolveMs else null,
             countdownVisibleAt = if (autoResolve) startedAt + hiddenGraceMs else null,
-        )
+        ))
         return deferred to summary
     }
 
@@ -452,11 +491,10 @@ internal class SessionControl {
         delayMs: Long,
     ) {
         delay(delayMs)
-        if (!session.answerSnoozed && deferred.isActive) {
-            deferred.complete("""{"answers":{}}""")
-            val cur = pendingApprovalState.value
-            if (cur?.kind == "ask_user" && cur.conversationId == conversationId) {
-                pendingApprovalState.value = null
+        if (!session.answerSnoozed && deferred === session.pendingAnswer && deferred.isActive) {
+            val request = pendingApprovals.value[conversationId]
+            if (request?.kind == "ask_user" && takeApproval(conversationId, request.id) != null) {
+                deferred.complete("""{"answers":{}}""")
             }
         }
     }
@@ -471,7 +509,7 @@ internal class SessionControl {
         val deferred = CompletableDeferred<Boolean>()
         session.pending = deferred
         touchAccess(session.conversationId)
-        pendingApprovalState.value = ApprovalRequest(
+        publishApproval(ApprovalRequest(
             conversationId = session.conversationId,
             toolName = toolName,
             risk = ToolRisk.READ,
@@ -479,7 +517,7 @@ internal class SessionControl {
             modeLabel = session.approvalMode.label,
             kind = kind,
             planText = planText,
-        )
+        ))
         return deferred
     }
 
@@ -491,7 +529,7 @@ internal class SessionControl {
         val deferred = CompletableDeferred<String>()
         session.pendingAnswer = deferred
         touchAccess(session.conversationId)
-        pendingApprovalState.value = ApprovalRequest(
+        publishApproval(ApprovalRequest(
             conversationId = session.conversationId,
             toolName = "escalate",
             risk = ToolRisk.READ,
@@ -505,30 +543,29 @@ internal class SessionControl {
                     options = emptyList(),
                 ),
             ),
-        )
+        ))
         return deferred
     }
 
     fun cancelPendingApproval(conversationId: Long, session: Session) {
-        if (pendingApprovalState.value?.conversationId == conversationId) {
-            pendingApprovalState.value = null
-            session.pending?.complete(false)
-            session.pending = null
-        }
+        if (takeApproval(conversationId) != null) cancelSessionApproval(session)
     }
 
     fun clearPendingApprovalFor(conversationId: Long) {
-        if (pendingApprovalState.value?.conversationId == conversationId) {
-            pendingApprovalState.value = null
-        }
+        takeApproval(conversationId)
     }
 
     fun cancelSessionApproval(session: Session?) {
-        session?.pending?.complete(false)
-        session?.pending = null
-        session?.pendingAnswer?.complete("""{"answers":{"__default__":"cancelled"}}""")
-        session?.pendingAnswer = null
+        if (session == null) return
+        clearPendingApprovalFor(session.conversationId)
+        val pending = session.pending
+        val answer = session.pendingAnswer
+        session.pending = null
+        session.pendingArgs = null
+        session.pendingAnswer = null
         clearAnswerTimer(session)
+        pending?.complete(false)
+        answer?.complete("""{"answers":{"__default__":"cancelled"}}""")
     }
 }
 
@@ -552,4 +589,6 @@ internal class Session(
     var lastUserText: String = "",
     var lastAssistantText: String = "",
     var lastAssistantTurnId: String? = null,
-)
+) {
+    val interactionLock = Mutex()
+}

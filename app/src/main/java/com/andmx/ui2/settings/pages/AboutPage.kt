@@ -5,10 +5,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Info
@@ -16,10 +19,13 @@ import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.andmx.BuildConfig
+import com.andmx.R
 import com.andmx.ui2.settings.SettingsItem
 import com.andmx.ui2.settings.SettingsScaffold
 import com.andmx.ui2.settings.tr
@@ -34,17 +40,30 @@ fun AboutPage(onBack: () -> Unit) {
 
     SettingsScaffold(title = tr("关于"), onBack = onBack) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(
-                "AndMX",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                tr("Android 原生的 AI 编程 Agent"),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp, bottom = 16.dp),
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.andmx_block_m_mascot),
+                    contentDescription = null,
+                    modifier = Modifier.size(56.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "AndMX",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        tr("Android 原生的 AI 编程 Agent"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
 
             InfoRow(tr("版本"), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             InfoRow(tr("构建变体"), BuildConfig.FLAVOR)

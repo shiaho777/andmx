@@ -4,7 +4,10 @@ import com.andmx.ui2.settings.tr
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
+import com.andmx.ui2.theme.blockSurface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -39,11 +43,11 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
-import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.ListAlt
 import androidx.compose.material.icons.outlined.PanTool
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.outlined.Security
@@ -53,14 +57,13 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,7 +80,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -85,17 +90,26 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.andmx.agent.SlashCommands
 import com.andmx.ui2.ext.ExtensionSlotHost
 import com.andmx.ui2.ext.ExtensionSlotIds
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ReasoningConfig
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import com.andmx.ui2.chat.voice.VoiceCapsuleBar
 import com.andmx.ui2.chat.voice.VoiceCapsuleState
 import com.andmx.ui2.chat.voice.VoiceInputManager
@@ -122,7 +136,6 @@ fun Composer(
     onSend: () -> Unit,
     isLoading: Boolean,
     onStop: () -> Unit,
-    onSteer: ((String) -> Unit)? = null,
     steeringPending: Boolean = false,
     onCancelSteer: () -> Unit = {},
     modelLabel: String,
@@ -161,16 +174,27 @@ fun Composer(
     inputHistory: List<InputHistoryEntry> = emptyList(),
     onPickHistory: (InputHistoryEntry) -> Unit = {},
     placeholder: String = DEFAULT_PLACEHOLDER,
-    flat: Boolean = false,
+    guideFollowUps: Boolean = false,
     modelMenuToken: Int = 0,
     voiceTranscribe: (suspend (ByteArray) -> String?)? = null,
     modifier: Modifier = Modifier,
+    inputModifier: Modifier = Modifier,
+    contextHeader: (@Composable () -> Unit)? = null,
+    onManageModels: (() -> Unit)? = null,
 ) {
     val motion = LocalMotion.current
     val canSend = value.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()
-    val shape = RoundedCornerShape(20.dp)
-    val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-    val cardBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(modelMenuToken) {
+        if (modelMenuToken > 0) modelMenuOpen = true
+    }
+    var inputFocused by remember { mutableStateOf(false) }
+    val focusAmount by animateFloatAsState(
+        targetValue = if (inputFocused) 1f else 0f,
+        animationSpec = motion.fastEffects,
+        label = "composerFocus",
+    )
+    val borderColor = lerp(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.colorScheme.outline, focusAmount)
     var historyBrowse by remember { mutableStateOf<HistoryBrowseState?>(null) }
     val suggestionsOpen = slashSuggestions.isNotEmpty() ||
         mentionSuggestions.isNotEmpty() ||
@@ -438,20 +462,20 @@ fun Composer(
             }
         }
 
-        val cardModifier = if (flat) {
+        Box(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 2.dp)
-        } else {
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .border(1.dp, borderColor, shape)
-                .background(cardBg)
-                .padding(horizontal = 10.dp, vertical = 10.dp)
-        }
-        Box(cardModifier) {
+                .blockSurface(outline = borderColor)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
             Column {
+                if (contextHeader != null) {
+                    contextHeader()
+                    HorizontalDivider(
+                        modifier = Modifier.padding(bottom = 6.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
                 VoiceCapsuleBar(voiceState)
                 if (attachments.isNotEmpty()) {
                     FlowRow(
@@ -513,9 +537,10 @@ fun Composer(
                             ),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             maxLines = 8,
-                            modifier = Modifier
+                            modifier = inputModifier
                                 .fillMaxWidth()
-                                .heightIn(min = 28.dp, max = 168.dp),
+                                .onFocusChanged { inputFocused = it.isFocused }
+                                .heightIn(min = 30.dp, max = 168.dp),
                         )
                     }
                 }
@@ -533,52 +558,83 @@ fun Composer(
 
                 ExtensionSlotHost(ExtensionSlotIds.COMPOSER_STATUS, Modifier.fillMaxWidth())
 
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                        val showThoughtLabel = maxWidth >= 480.dp
+                val contextActions: @Composable RowScope.() -> Unit = {
+                    PlusMenu(
+                        onAddAttachment = onAddAttachment,
+                        onAddDocument = onAddDocument,
+                        onPasteClipboardImage = onPasteClipboardImage,
+                        onInsertMention = onInsertMention,
+                        onInsertConversation = onInsertConversation,
+                        onInsertCommand = onInsertCommand,
+                        onInsertSkill = onInsertSkill,
+                    )
+                    if (inputHistory.isNotEmpty()) {
+                        InputHistoryMenu(history = inputHistory, onPick = onPickHistory)
+                    }
+                }
+                val modelActions: @Composable RowScope.() -> Unit = {
+                    ExecModePill(mode = execMode, onSelect = onExecModeSelected)
+                    if (planOverlayActive) {
+                        PlanOverlayChip(onExit = onExitPlanMode)
+                    }
+                    ModelPill(
+                        modelLabel = modelLabel,
+                        selectedModel = selectedModel,
+                        activeProviderId = activeProviderId,
+                        providers = providers,
+                        onSwitchModel = onSwitchModel,
+                        expanded = modelMenuOpen,
+                        onExpandedChange = { modelMenuOpen = it },
+                        onManageModels = onManageModels,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ThoughtPill(
+                        effort = reasoningEffort,
+                        reasoning = reasoning,
+                        onSelect = onReasoningSelected,
+                        showLabel = false,
+                    )
+                }
+                val sendActions: @Composable RowScope.() -> Unit = {
+                    VoiceMicButton(voiceState)
+                    SendStopButton(
+                        isLoading = isLoading,
+                        canSend = canSend,
+                        guideFollowUps = guideFollowUps,
+                        onSend = onSend,
+                        onStop = onStop,
+                    )
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val minToolbarWidth = 326.dp +
+                        (if (inputHistory.isNotEmpty()) 44.dp else 0.dp) +
+                        (if (reasoning != null) 40.dp else 0.dp) +
+                        (if (isLoading && canSend) 44.dp else 0.dp)
+                    if (maxWidth >= minToolbarWidth && !planOverlayActive) {
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            PlusMenu(
-                                onAddAttachment = onAddAttachment,
-                                onAddDocument = onAddDocument,
-                                onPasteClipboardImage = onPasteClipboardImage,
-                                onInsertMention = onInsertMention,
-                                onInsertConversation = onInsertConversation,
-                                onInsertCommand = onInsertCommand,
-                                onInsertSkill = onInsertSkill,
+                            contextActions()
+                            modelActions()
+                            sendActions()
+                        }
+                    } else {
+                        Column {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                content = modelActions,
                             )
-                            if (inputHistory.isNotEmpty()) {
-                                InputHistoryMenu(history = inputHistory, onPick = onPickHistory)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                contextActions()
+                                Spacer(Modifier.weight(1f))
+                                sendActions()
                             }
-                            ExecModePill(mode = execMode, onSelect = onExecModeSelected)
-                            if (planOverlayActive) {
-                                PlanOverlayChip(onExit = onExitPlanMode)
-                            }
-                            ModelPill(
-                                modelLabel = modelLabel,
-                                selectedModel = selectedModel,
-                                activeProviderId = activeProviderId,
-                                providers = providers,
-                                onSwitchModel = onSwitchModel,
-                                modelMenuToken = modelMenuToken,
-                                modifier = Modifier.weight(1f),
-                            )
-                            ThoughtPill(
-                                effort = reasoningEffort,
-                                reasoning = reasoning,
-                                onSelect = onReasoningSelected,
-                                showLabel = showThoughtLabel,
-                            )
-                            VoiceMicButton(voiceState)
-                            SendStopButton(
-                                isLoading = isLoading,
-                                canSend = canSend,
-                                onSend = onSend,
-                                onStop = onStop,
-                            )
                         }
                     }
                 }
@@ -887,20 +943,19 @@ private fun ModelPill(
     activeProviderId: String,
     providers: List<ProviderDefinition>,
     onSwitchModel: (providerId: String, modelId: String) -> Unit,
-    modelMenuToken: Int = 0,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onManageModels: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(modelMenuToken) {
-        if (modelMenuToken > 0) expanded = true
-    }
     val enabledProviders = providers.filter { it.enabled }
     val showProviderRail = enabledProviders.size > 1
     var focusProviderId by remember(activeProviderId, providers) {
         mutableStateOf(activeProviderId.ifBlank { enabledProviders.firstOrNull()?.id.orEmpty() })
     }
     var query by remember { mutableStateOf("") }
-    val panelShape = RoundedCornerShape(16.dp)
+    val panelShape = Chrome.panel
+    val motion = LocalMotion.current
 
     Box(modifier) {
         Row(
@@ -908,27 +963,32 @@ private fun ModelPill(
             horizontalArrangement = Arrangement.End,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
+                .clip(Chrome.control)
+                .semantics { contentDescription = tr("选择模型") }
                 .clickable {
-                    expanded = true
+                    onExpandedChange(true)
                     focusProviderId = activeProviderId.ifBlank { enabledProviders.firstOrNull()?.id.orEmpty() }
                     query = ""
                 }
                 .padding(horizontal = 4.dp, vertical = 6.dp),
         ) {
-            Text(
-                tr(modelLabel.ifBlank { tr("选择模型") }),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (modelLabel.isBlank()) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
+            AnimatedContent(
+                targetState = modelLabel,
+                transitionSpec = { motion.rollUp() },
                 modifier = Modifier.weight(1f),
-            )
+                label = "composerModel",
+            ) { label ->
+                Text(
+                    tr(label.ifBlank { "选择模型" }),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (label.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             Icon(
                 Icons.Outlined.KeyboardArrowDown,
                 contentDescription = null,
@@ -938,18 +998,22 @@ private fun ModelPill(
         }
 
         if (expanded) {
+            val density = LocalDensity.current
+            val position = remember(density) {
+                with(density) { ComposerMenuPosition(12.dp.roundToPx(), 4.dp.roundToPx()) }
+            }
+            val width = minOf(320.dp, (LocalConfiguration.current.screenWidthDp.dp - 24.dp).coerceAtLeast(0.dp))
             Popup(
-                alignment = Alignment.BottomEnd,
-                onDismissRequest = { expanded = false },
+                popupPositionProvider = position,
+                onDismissRequest = { onExpandedChange(false) },
                 properties = PopupProperties(focusable = true),
             ) {
                 Box(
                     Modifier
-                        .widthIn(min = 280.dp, max = 340.dp)
-                        .padding(bottom = 4.dp)
+                        .width(width)
                         .clip(panelShape)
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, panelShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        .background(MaterialTheme.colorScheme.surface),
                 ) {
                     Column(Modifier.heightIn(max = 320.dp)) {
                         Box(
@@ -975,7 +1039,7 @@ private fun ModelPill(
                             )
                         }
                         HorizontalDivider()
-                        Row(Modifier.heightIn(max = 260.dp)) {
+                        Row(Modifier.weight(1f, fill = false)) {
                             if (showProviderRail) {
                                 Column(
                                     Modifier
@@ -1070,7 +1134,7 @@ private fun ModelPill(
                                             .clickable {
                                                 if (focus != null) {
                                                     onSwitchModel(focus.id, mid)
-                                                    expanded = false
+                                                    onExpandedChange(false)
                                                 }
                                             }
                                             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1094,6 +1158,16 @@ private fun ModelPill(
                                 }
                             }
                         }
+                        if (onManageModels != null) {
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(tr("管理模型"), style = MaterialTheme.typography.bodyMedium) },
+                                onClick = {
+                                    onExpandedChange(false)
+                                    onManageModels()
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1102,6 +1176,35 @@ private fun ModelPill(
 }
 
 // ── 思考级别 ──────────────────────────────────────────────────────────────
+
+private class ComposerMenuPosition(
+    private val margin: Int,
+    private val gap: Int,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val x = if (layoutDirection == LayoutDirection.Ltr) {
+            anchorBounds.right - popupContentSize.width
+        } else {
+            anchorBounds.left
+        }
+        val above = anchorBounds.top - popupContentSize.height - gap
+        val below = anchorBounds.bottom + gap
+        val y = if (above >= margin || anchorBounds.top >= windowSize.height - anchorBounds.bottom) {
+            above
+        } else {
+            below
+        }
+        return IntOffset(
+            x.coerceIn(margin, maxOf(margin, windowSize.width - popupContentSize.width - margin)),
+            y.coerceIn(margin, maxOf(margin, windowSize.height - popupContentSize.height - margin)),
+        )
+    }
+}
 
 @Composable
 private fun ThoughtPill(
@@ -1179,38 +1282,53 @@ private fun ThoughtPill(
 private fun SendStopButton(
     isLoading: Boolean,
     canSend: Boolean,
+    guideFollowUps: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val motion = LocalMotion.current
-    AnimatedContent(
-        targetState = isLoading && !canSend,
-        transitionSpec = { motion.crossfade() },
-        label = "sendStop",
-    ) { busy ->
-        if (busy && !canSend) {
-            FilledIconButton(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onStop()
-                },
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(Icons.Outlined.Stop, contentDescription = tr("停止生成"), modifier = Modifier.size(20.dp))
-            }
-        } else {
-            FilledIconButton(
-                onClick = {
-                    if (canSend) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSend()
-                    }
-                },
-                enabled = canSend,
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(Icons.Outlined.ArrowUpward, contentDescription = tr("发送"), modifier = Modifier.size(20.dp))
+    if (isLoading) {
+        FilledIconButton(
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onStop()
+            },
+            shape = Chrome.control,
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            ),
+            modifier = Modifier.size(44.dp),
+        ) {
+            Icon(Icons.Outlined.Stop, tr("停止生成"), modifier = Modifier.size(20.dp))
+        }
+    }
+    if (!isLoading || canSend) {
+        FilledIconButton(
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onSend()
+            },
+            enabled = canSend,
+            shape = Chrome.control,
+            modifier = Modifier.size(44.dp),
+        ) {
+            AnimatedContent(
+                targetState = isLoading && !guideFollowUps,
+                transitionSpec = { motion.crossfade() },
+                label = "sendAction",
+            ) { queued ->
+                val description = when {
+                    queued -> tr("加入队列")
+                    isLoading -> tr("发送后续消息")
+                    else -> tr("发送")
+                }
+                Icon(
+                    if (queued) Icons.AutoMirrored.Outlined.PlaylistAdd else Icons.Outlined.ArrowUpward,
+                    description,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
     }
@@ -1220,7 +1338,7 @@ private fun SendStopButton(
 
 @Composable
 private fun CircleIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+    IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
         Icon(
             icon,
             contentDescription = tr(desc),

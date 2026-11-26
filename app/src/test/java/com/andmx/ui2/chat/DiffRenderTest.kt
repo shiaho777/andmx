@@ -7,6 +7,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiffRenderTest {
+    @Test
+    fun reviewHunksLeaveOutDistantContextAndPreserveLineNumbers() {
+        val original = (1..26).joinToString("\n") { "line $it" }
+        val edited = original.replace("line 6\n", "first replacement\n")
+            .replace("line 21\n", "second replacement\n")
+        val hunks = DiffRender.reviewHunks(com.andmx.diff.DiffEngine.diff(original, edited))
+        assertEquals(listOf(3, 18), hunks.map { it.oldStart })
+        assertEquals(listOf(6, 21), hunks.flatMap { it.lines }.map { it.diff }
+            .filter { it.kind == com.andmx.diff.DiffLine.Kind.ADD }.map { it.newNo })
+    }
 
     @Test
     fun parsesHunkHeader() {

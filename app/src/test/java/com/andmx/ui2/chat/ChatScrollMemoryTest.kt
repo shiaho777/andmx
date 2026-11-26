@@ -41,4 +41,23 @@ class ChatScrollMemoryTest {
         assertNull(memory.load(7L))
         assertEquals(ChatScrollMemory.Position(3, 4), memory.load(8L))
     }
+
+    @Test
+    fun savedRowSurvivesNewRepliesAndFallsBackWhenRemoved() {
+        fun row(id: Long, time: Long) = TimelineItem.Message(
+            ChatMessage(id = id, role = "assistant", content = "reply", sortKey = time),
+        )
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val memory = ChatScrollMemory(context)
+        val saved = ChatScrollMemory.Position(index = 1, offset = 15, itemId = "m-12", sortKey = 120)
+        memory.save(9L, saved)
+        assertEquals(saved, memory.load(9L))
+        val items = listOf(row(14, 140), row(13, 130), row(12, 120), row(11, 110))
+        assertEquals(saved.copy(index = 2), saved.resolve(items))
+        assertEquals(
+            ChatScrollMemory.Position(2, 0),
+            saved.resolve(listOf(row(14, 140), row(13, 135), row(11, 115))),
+        )
+        assertEquals(ChatScrollMemory.Position(0, 0), ChatScrollMemory.Position(0, 0).resolve(items))
+    }
 }

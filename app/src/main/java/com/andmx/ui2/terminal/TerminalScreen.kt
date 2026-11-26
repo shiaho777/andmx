@@ -1,6 +1,7 @@
 package com.andmx.ui2.terminal
 
 import com.andmx.ui2.settings.tr
+import com.andmx.ui2.theme.Chrome
 
 import androidx.compose.ui.text.font.FontFamily
 import android.graphics.Typeface as AndroidTypeface
@@ -38,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -120,6 +122,7 @@ fun TerminalScreen(
         return
     }
     val state by active.state.collectAsState()
+    var followOutput by remember(registry) { mutableStateOf(true) }
 
     Column(
         modifier = modifier
@@ -139,6 +142,13 @@ fun TerminalScreen(
                 modifier = Modifier.padding(start = 12.dp),
             )
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = { followOutput = !followOutput }, shape = Chrome.control) {
+                Text(
+                    if (followOutput) tr("自动跟随") else tr("跟随已暂停"),
+                    color = if (followOutput) colors.cursor else colors.chromeMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
             IconButton(onClick = { newSession() }) {
                 Icon(Icons.Outlined.Add, tr("新建终端"), tint = colors.chromeContent)
             }
@@ -198,6 +208,7 @@ fun TerminalScreen(
             styledLines = state.styledLines,
             colors = colors,
             fontFamily = terminalFontFamily,
+            followOutput = followOutput,
             modifier = Modifier.weight(1f),
         )
 
@@ -263,7 +274,7 @@ private fun SpecialKeyRow(
         specialKeys.forEach { key ->
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(Chrome.tile)
                     .background(colors.keyBackground)
                     .clickable(enabled = enabled) { onKey(key.bytes) }
                     .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -290,7 +301,7 @@ private fun CommandInput(
 ) {
     Box(
         modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(Chrome.inset)
             .background(colors.inputBackground)
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {

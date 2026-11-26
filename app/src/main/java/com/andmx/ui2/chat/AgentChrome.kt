@@ -2,6 +2,7 @@ package com.andmx.ui2.chat
 
 import com.andmx.ui2.settings.tr
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +19,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,11 +31,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,11 +53,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andmx.agent.ToolArgs
 import com.andmx.agent.UpdatePlanTool
+
+private val genericApprovalReasons = setOf(
+    "High risk tools require explicit approval",
+    "Tool has side effects and requires approval",
+)
 
 @Composable
 fun ApprovalBanner(
@@ -60,132 +76,115 @@ fun ApprovalBanner(
     onAcceptSuggestion: (com.andmx.agent.permission.PermissionSuggestion) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val proposed = remember(request.id) { ToolEditDiff.preview(request.toolName, request.arguments) }
+    val command = remember(request.id) { ToolArgs.shellCommand(request.toolName, request.arguments) }
+    val isCommand = ToolArgs.canonical(request.toolName) in setOf("shell", "git")
+    val subject = if (isCommand) command.ifBlank { request.inputPreview } else request.inputPreview
+    var showRules by remember(request.id) { mutableStateOf(false) }
+    var showInput by remember(request.id) { mutableStateOf(false) }
+    val canSetRule = request.kind == "tool" && request.rulePreview.isNotBlank()
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = Chrome.gutter, vertical = 6.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        tonalElevation = 2.dp,
+        modifier = modifier.padding(horizontal = Chrome.gutter, vertical = 6.dp).fillMaxWidth(),
+        shape = Chrome.panel,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.Shield,
-                    null,
-                    Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
+                Icon(Icons.Outlined.Shield, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
                 Spacer(Modifier.width(8.dp))
-                Text(tr("等待确认 · ${request.toolName} · ${request.modeLabel}"),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-            }
-            if (request.reason.isNotBlank()) {
-                Text(
-                    request.reason,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
-                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            if (request.inputPreview.isNotBlank()) {
-                Text(
-                    request.inputPreview,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = AndMXType.cardMeta.fontSize,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    ),
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                )
+                Text(tr("等待确认"), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text(request.modeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(
-                request.summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 6.dp),
+                if (isCommand) tr("执行命令") else if (proposed != null) tr("拟议改动") else ToolPresentation.family(request.toolName).label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
             )
-            if (request.rulePreview.isNotBlank()) {
-                Text(tr("长期授权规则：${request.rulePreview}"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
+            when {
+                proposed != null && proposed.lines.isNotEmpty() ->
+                    InlineEditDiffPreview(proposed, isRunning = false, onOpen = null, maxHeight = 92.dp)
+                subject.isNotBlank() -> Text(
+                    subject,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier.fillMaxWidth().clip(Chrome.control)
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .heightIn(max = 92.dp).verticalScroll(rememberScrollState()).padding(8.dp),
+                )
+                else -> Text(request.summary, style = MaterialTheme.typography.bodySmall)
+            }
+            if (request.reason.isNotBlank() && request.reason !in genericApprovalReasons) {
+                Text(
+                    request.reason, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            if (suggestions.isNotEmpty()) {
-                Text(tr("始终允许类似操作"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    suggestions.forEach { suggestion ->
-                        OutlinedButton(onClick = { onAcceptSuggestion(suggestion) }) {
-                            Text(tr(suggestion.label))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (request.arguments.isNotBlank()) {
+                    TextButton(onClick = { showInput = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Text(tr("完整参数"))
+                    }
+                }
+                if (canSetRule || suggestions.isNotEmpty()) {
+                    Box {
+                        TextButton(onClick = { showRules = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                            Text(tr("授权范围"))
+                        }
+                        DropdownMenu(expanded = showRules, onDismissRequest = { showRules = false }) {
+                            if (canSetRule) {
+                                Text(request.rulePreview, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp))
+                                ApprovalScope.entries.filter { it != ApprovalScope.ONCE }.forEach { scope ->
+                                    if (scope.name.startsWith("PROJECT_") && request.projectKey == null) return@forEach
+                                    val label = when (scope) {
+                                        ApprovalScope.SESSION_ALLOW -> tr("允许本会话")
+                                        ApprovalScope.PROJECT_ALLOW -> tr("允许本项目")
+                                        ApprovalScope.PROJECT_ASK -> tr("本次允许，之后询问")
+                                        ApprovalScope.SESSION_DENY -> tr("拒绝本会话")
+                                        ApprovalScope.PROJECT_DENY -> tr("拒绝本项目")
+                                        ApprovalScope.ONCE -> tr("仅本次允许")
+                                    }
+                                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                                        showRules = false
+                                        onScope(scope)
+                                    })
+                                }
+                            }
+                            if (request.projectKey != null) suggestions.forEach { suggestion ->
+                                DropdownMenuItem(text = { Text(tr(suggestion.label)) }, onClick = {
+                                    showRules = false
+                                    onAcceptSuggestion(suggestion)
+                                })
+                            }
                         }
                     }
                 }
             }
-            // ZCode 对齐：会话/项目级 allow·deny 作用域；普通允许/拒绝走 ONCE。
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                OutlinedButton(onClick = { onScope(ApprovalScope.SESSION_ALLOW) }) {
-                    Text(tr("允许本会话"))
-                }
-                OutlinedButton(onClick = { onScope(ApprovalScope.PROJECT_ALLOW) }) {
-                    Text(tr("允许本项目"))
-                }
-                OutlinedButton(onClick = { onScope(ApprovalScope.PROJECT_ASK) }) {
-                    Text(tr("每次询问"))
-                }
-                OutlinedButton(onClick = { onScope(ApprovalScope.SESSION_DENY) }) {
-                    Text(tr("始终拒绝"))
-                }
-                OutlinedButton(onClick = { onScope(ApprovalScope.PROJECT_DENY) }) {
-                    Text(tr("拒绝本项目"))
-                }
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Spacer(Modifier.weight(1f))
-                OutlinedButton(onClick = {
-                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                    onDeny()
-                }) { Text(tr("拒绝")) }
-                Button(onClick = {
-                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                    onAllow()
-                }) { Text(tr("允许")) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                OutlinedButton(onClick = onDeny) { Text(tr("拒绝")) }
+                Button(onClick = onAllow) { Text(tr("仅本次允许")) }
             }
         }
+    }
+    if (showInput) {
+        AlertDialog(
+            onDismissRequest = { showInput = false },
+            title = { Text(tr("完整参数")) },
+            text = {
+                SelectionContainer {
+                    Text(
+                        if (isCommand && command.isNotBlank()) {
+                            command + "\n\n" + prettyToolArguments(request.arguments)
+                        } else prettyToolArguments(request.arguments),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showInput = false }) { Text(tr("返回")) } },
+        )
     }
 }
 
@@ -307,61 +306,28 @@ fun SubAgentStrip(
 }
 
 @Composable
-fun ApprovalTimelineCard(
-    item: ApprovalItem,
-    onAllow: (() -> Unit)? = null,
-    onDeny: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = Chrome.gutter, vertical = 3.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = when (item.status) {
-            "allowed" -> MaterialTheme.colorScheme.primaryContainer
-            "denied" -> MaterialTheme.colorScheme.errorContainer
-            else -> MaterialTheme.colorScheme.tertiaryContainer
-        },
-        tonalElevation = 1.dp,
+fun ApprovalTimelineCard(item: ApprovalItem, modifier: Modifier = Modifier) {
+    val label = when (item.status) {
+        "allowed" -> tr("已允许")
+        "denied" -> tr("已拒绝")
+        "closed" -> tr("确认已结束")
+        else -> tr("等待确认")
+    }
+    Row(
+        modifier.fillMaxWidth().padding(horizontal = Chrome.gutter, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.Shield,
-                    null,
-                    Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    when (item.status) {
-                        "allowed" -> "已允许 · ${item.modeLabel}"
-                        "denied" -> "已拒绝 · ${item.modeLabel}"
-                        else -> "等待确认 · ${item.modeLabel}"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Text(
-                item.summary,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            if (item.status == "pending" && onAllow != null && onDeny != null) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                ) {
-                    OutlinedButton(onClick = onDeny) { Text(tr("拒绝")) }
-                    Button(onClick = onAllow) { Text(tr("允许")) }
-                }
-            }
-        }
+        Icon(
+            Icons.Outlined.Shield, null, Modifier.size(14.dp),
+            tint = if (item.status == "pending") MaterialTheme.colorScheme.tertiary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "$label · ${item.toolName}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

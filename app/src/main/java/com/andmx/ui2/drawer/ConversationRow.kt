@@ -1,6 +1,9 @@
 package com.andmx.ui2.drawer
 
 import com.andmx.ui2.settings.tr
+import com.andmx.ui2.theme.Chrome
+import com.andmx.ui2.theme.LocalMotion
+import com.andmx.ui2.theme.workspaceLinkColor
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -14,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -41,9 +44,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateFloatAsState
 import com.andmx.data.ConversationEntity
 import com.andmx.workspace.ProjectManager
 
@@ -65,21 +72,20 @@ fun ConversationRow(
     onTogglePin: () -> Unit,
     onToggleUnread: () -> Unit = {},
     onMoveToGroup: () -> Unit = {},
+    searchExcerpt: String? = null,
+    awaitingApproval: Boolean = false,
 ) {
     val unread = conversation.unreadAt != null
     var menuOpen by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(12.dp)
-    val bg = if (selected) {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    } else {
-        Color.Transparent
-    }
+    val shape = Chrome.control
+    val selection by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = LocalMotion.current.defaultEffects,
+        label = "taskSelection",
+    )
+    val bg = lerp(Color.Transparent, MaterialTheme.colorScheme.surfaceContainerHighest, selection)
     val titleColor = MaterialTheme.colorScheme.onSurface
-    val metaColor = if (selected) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant
     val ts = activityTimestamp(
         createdAt = conversation.createdAt,
         updatedAt = conversation.updatedAt,
@@ -87,7 +93,7 @@ fun ConversationRow(
     )
     val timeText = relativeTaskTime(ts)
     val title = conversation.title.ifBlank { tr("新任务") }
-    val multiLine = showWorkspaceMeta || !compact
+    val multiLine = showWorkspaceMeta || !compact || searchExcerpt != null
 
     Box(
         Modifier
@@ -99,8 +105,11 @@ fun ConversationRow(
                 .fillMaxWidth()
                 .clip(shape)
                 .background(bg)
+                .semantics { this.selected = selected }
                 .combinedClickable(
                     onClick = onClick,
+                    role = Role.Button,
+                    onLongClickLabel = tr("更多"),
                     onLongClick = { menuOpen = true },
                 )
                 .then(
@@ -117,11 +126,17 @@ fun ConversationRow(
                 contentAlignment = Alignment.Center,
             ) {
                 when {
+                    awaitingApproval -> Icon(
+                        Icons.Outlined.Shield,
+                        tr("等待确认"),
+                        Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
                     streaming -> {
                         CircularProgressIndicator(
                             modifier = Modifier.size(14.dp),
                             strokeWidth = 1.8.dp,
-                            color = metaColor,
+                            color = MaterialTheme.colorScheme.secondary,
                         )
                     }
                     unread -> {
@@ -129,31 +144,23 @@ fun ConversationRow(
                             Modifier
                                 .size(7.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF0EA5E9)),
+                                .background(workspaceLinkColor()),
                         )
                     }
                     conversation.pinned && !archivedMode -> {
                         Icon(
                             Icons.Outlined.PushPin,
-                            null,
+                            tr("取消置顶任务"),
                             Modifier
                                 .size(16.dp)
                                 .clickable(onClick = onTogglePin),
                             tint = metaColor,
                         )
                     }
-                    selected -> {
-                        Box(
-                            Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(metaColor.copy(alpha = 0.35f)),
-                        )
-                    }
                 }
             }
 
-            if (multiLine && showWorkspaceMeta) {
+            if (showWorkspaceMeta || searchExcerpt != null) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         title,
@@ -162,6 +169,16 @@ fun ConversationRow(
                         overflow = TextOverflow.Ellipsis,
                         color = titleColor,
                     )
+                    if (searchExcerpt != null) {
+                        Text(
+                            searchExcerpt,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = metaColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
+                    }
                     Row(
                         Modifier.padding(top = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,

@@ -181,7 +181,9 @@ object ChatActionBus {
         data class OpenFile(
             val path: String,
             val review: com.andmx.ui2.files.FileReviewAnchor? = null,
+            val addContext: Boolean = true,
         ) : Action()
+        data class ReviewFileChange(val path: String) : Action()
         data object OpenTerminal : Action()
         data object OpenSessionImport : Action()
         data class OpenUrl(val url: String) : Action()
@@ -195,9 +197,11 @@ object ChatActionBus {
     private val _actions = MutableSharedFlow<Action>(extraBufferCapacity = 8)
     val actions: SharedFlow<Action> = _actions.asSharedFlow()
 
-    fun openFile(path: String) {
-        if (path.isNotBlank()) _actions.tryEmit(Action.OpenFile(path))
+    fun openFile(path: String, addContext: Boolean = true) {
+        if (path.isNotBlank()) _actions.tryEmit(Action.OpenFile(path, addContext = addContext))
     }
+
+    fun reviewFileChange(path: String) = _actions.tryEmit(Action.ReviewFileChange(path))
 
     fun openCodeReview(comment: AssistantCodeComment) {
         if (comment.file.isBlank()) return

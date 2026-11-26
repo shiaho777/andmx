@@ -2,28 +2,31 @@
 
 AndMX 界面与视觉产出的设计体系文档。唯一数值事实来源是 `runtime/tokens.json`，与 `com.andmx.ui2.theme` 的 `Type.kt`（AndMXType）、`Motion.kt`、`Theme.kt` 色板、`Chrome.kt` 保持一致。本文说明原则与用法；精确数值以 tokens.json 与工具输出为准。
 
+参考 [ZCode v3.18.2 的开源设计系统](https://github.com/zai-org/ZCode/blob/fec975905a2abd4c07e35c40d51fa097a2258ec9/DESIGN.md) 和共享 UI 的草稿输入、窄屏及动效结构。上游第一方源码采用 [Apache-2.0](https://github.com/zai-org/ZCode/blob/fec975905a2abd4c07e35c40d51fa097a2258ec9/LICENSE)，Android 组件用 Compose 实现。
+
 ## 1. 设计语言
 
 - 中性、克制、内容优先：大面积用中性底色，强调色只出现在动作与状态上。
-- 一套界面同一时刻只有一个强调色（品牌蓝）；语义色只表达结果，不做装饰。
+- 主操作使用高对比度中性色，蓝色用于链接，语义色用于状态。
 - 层级靠字号 + 字重 + 间距表达，不靠颜色堆叠；一屏最多 3 个字号层级。
 
 ## 2. 配色
 
 | Token | 值 | 用途 |
 |-------|----|------|
-| brand | `#0EA5E9` | 强调、链接、主操作 |
-| brandSoft | `#E0F2FE` | 品牌浅底、选中态背景 |
+| brand | `#0D0D0D` | 浅色主题的主操作 |
+| accent | `#0066DD` | 浅色主题的链接 |
+| brandSoft | `#EAEAEA` | 品牌浅底、选中态背景 |
 | success | `#46BF72` | 成功状态 |
 | warning | `#FF8A30` | 警告状态 |
 | destructive | `#FF5C5C` | 危险/删除 |
 
-浅色模式：背景 `#F8F8F8`、侧栏 `#F0F0F0`、winAlt `#ECECEE`、表面 `#FFFFFF`、前景 `#262626`、error `#E03131`。
-深色模式：背景 `#161616`、头部 `#202020`、卡片 `#2B2B2B`、次级 `#363636`、前景 `#D4D4D4`、error `#FF5C5C`。
+浅色模式：背景 `#F8F8F8`、侧栏 `#F0F0F0`、winAlt `#ECECEE`、表面 `#FFFFFF`、前景 `#0D0D0D`、error `#AC2E35`。
+深色模式：背景 `#161616`、头部 `#202020`、卡片 `#2B2B2B`、次级 `#363636`、前景 `#F2F2F2`、error `#F4ADB0`。
 
 规则：
 - 正文对比度优先；弱化文本用前景色加透明度（约 60%），不引入新灰阶。
-- 边框用低透明度前景（浅色 `rgba(13,13,13,0.10)`、深色 `rgba(255,255,255,0.10)` 量级），不用实灰线。
+- 边框用主题 outlineVariant，浅色 `#DEDEDE`、深色 `#3C3C3C`。
 - 产出 CSS 用 `var(--andmx-*)`（`design_palette` 生成），Compose 用主题色常量；不写裸十六进制新色。
 
 ## 3. 字阶（sp，对齐 AndMXType）
@@ -40,7 +43,7 @@ AndMX 界面与视觉产出的设计体系文档。唯一数值事实来源是 `
 | statLarge | 18/24 | semibold | 大指标 |
 | input | 14/20 | normal | 输入框 |
 
-Material 标题阶（AndMXTypography）：titleLarge 20/26 semibold、titleMedium 16/22 semibold、titleSmall 14/20 medium；页面级大标题可用 20/16sp 两档。
+Material 标题阶（AndMXTypography）：titleLarge 20/26 semibold、titleMedium 16/22 semibold、titleSmall 14/20 medium；页面级标题使用 headlineMedium 26/32 或 headlineLarge 32/37。
 
 规则：
 - 行高随字号给定，不另行压缩；中文正文不小于 13sp。
@@ -62,7 +65,8 @@ Material 标题阶（AndMXTypography）：titleLarge 20/26 semibold、titleMediu
 | xs | 2 | 行内小标记（MarkdownView 等） |
 | sm | 8 | 代码块、输入附件、列表项 |
 | md | 12 | 卡片、弹层容器（ThemeCard/SelectionToolbar） |
-| bubble | 20 | 聊天气泡（Chrome.bubble） |
+| bubble | 16 | 聊天气泡（Chrome.bubble） |
+| panel | 16 | 输入或内容面板（Chrome.panel） |
 | sheet | 20 | 底部弹层顶部圆角（Chrome.sheet） |
 
 规则：同级元素间距一致；组间距大于组内距；不出现 5/7/10/18 这类网格外值（既有历史代码除外，新产出一律取 token）。
@@ -80,8 +84,8 @@ Material 标题阶（AndMXTypography）：titleLarge 20/26 semibold、titleMediu
 ## 6. 动效（对齐 Motion）
 
 - 时长四档：fast 120ms（微反馈）、base 160ms（常规过渡）、enter 200ms（进场）、ink 320ms（强调/涟漪）。
-- 缓动统一 `cubic-bezier(0.22, 0.61, 0.36, 1)`；弹簧 damping 0.82、stiffness 380（尺寸弹簧 damping 0.9）。
-- 无限循环动画：光标脉冲 480ms、shimmer 1300ms、think 扫光 1400ms（LinearEasing）。
+- 缓动统一 `cubic-bezier(0.4, 0, 0.2, 1)`；弹簧 damping 0.82、stiffness 380。内容展开使用短时缓动。
+- 无限循环动画：录音状态脉冲 480ms、加载占位 1300ms（LinearEasing）。
 - 系统动画缩放为 0 时全部动效退化为瞬时（Motion.Reduced）；CSS 产出必须带 `@media (prefers-reduced-motion: reduce)` 降级。
 - 动画只服务于状态变化（进/出场、展开、反馈），不做纯装饰性持续动画。
 

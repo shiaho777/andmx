@@ -70,6 +70,7 @@ class SessionControlApprovalTest {
         persistedGrants: MutableList<Long> = mutableListOf(),
     ) {
         control.resolveApprovalScoped(
+            control.pendingApprovals.value.values.single(),
             allow,
             scope,
             persistProjectRule = { toolCanonical, ruleKey, behavior ->
@@ -98,10 +99,10 @@ class SessionControlApprovalTest {
         }
         withTimeout(5_000) {
             withContext(Dispatchers.Default) {
-                while (control.pendingApproval.value == null) kotlinx.coroutines.yield()
+                while (control.pendingApprovals.value.values.singleOrNull() == null) kotlinx.coroutines.yield()
             }
         }
-        val req = control.pendingApproval.value!!
+        val req = control.pendingApprovals.value.values.singleOrNull()!!
         assertEquals(1L, req.conversationId)
         assertEquals("Bash", req.toolName)
         assertEquals(ToolRisk.EXECUTE, req.risk)
@@ -120,7 +121,7 @@ class SessionControlApprovalTest {
 
         resolve(control, allow = true, scope = ApprovalScope.ONCE)
         assertEquals(ApprovalOutcome.AllowedOnce, outcome.await())
-        assertNull(control.pendingApproval.value)
+        assertNull(control.pendingApprovals.value.values.singleOrNull())
         assertNull(control.sessions[1L]?.pending)
         assertNull(control.sessions[1L]?.pendingArgs)
     }
@@ -151,7 +152,7 @@ class SessionControlApprovalTest {
         }
         withTimeout(5_000) {
             withContext(Dispatchers.Default) {
-                while (control.pendingApproval.value == null) kotlinx.coroutines.yield()
+                while (control.pendingApprovals.value.values.singleOrNull() == null) kotlinx.coroutines.yield()
             }
         }
         resolve(control, allow = false, scope = ApprovalScope.ONCE)
@@ -166,13 +167,13 @@ class SessionControlApprovalTest {
         val pending = CompletableDeferred<Boolean>()
         s.pending = pending
         s.pendingArgs = """{"command":"npm test"}"""
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 1L,
             toolName = "Bash",
             risk = ToolRisk.EXECUTE,
             summary = "Bash · npm test",
             modeLabel = ExecMode.BUILD.label,
-        )
+        ))
         val projectRules = mutableListOf<Triple<String, String, ApprovalRuleStore.RuleBehavior>>()
         val persisted = mutableListOf<Long>()
         resolve(control, allow = true, scope = ApprovalScope.SESSION_ALLOW, projectRules, persisted)
@@ -213,13 +214,13 @@ class SessionControlApprovalTest {
         val pending = CompletableDeferred<Boolean>()
         s.pending = pending
         s.pendingArgs = """{"command":"npm test"}"""
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 1L,
             toolName = "Bash",
             risk = ToolRisk.EXECUTE,
             summary = "Bash · npm test",
             modeLabel = ExecMode.BUILD.label,
-        )
+        ))
         val projectRules = mutableListOf<Triple<String, String, ApprovalRuleStore.RuleBehavior>>()
         val persisted = mutableListOf<Long>()
         resolve(control, allow = true, scope = ApprovalScope.PROJECT_ALLOW, projectRules, persisted)
@@ -241,13 +242,13 @@ class SessionControlApprovalTest {
         val pending = CompletableDeferred<Boolean>()
         s.pending = pending
         s.pendingArgs = """{"command":"rm -rf build"}"""
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 1L,
             toolName = "Bash",
             risk = ToolRisk.EXECUTE,
             summary = "Bash · rm",
             modeLabel = ExecMode.BUILD.label,
-        )
+        ))
         val projectRules = mutableListOf<Triple<String, String, ApprovalRuleStore.RuleBehavior>>()
         val persisted = mutableListOf<Long>()
         resolve(control, allow = true, scope = ApprovalScope.SESSION_DENY, projectRules, persisted)
@@ -277,13 +278,13 @@ class SessionControlApprovalTest {
         a.pendingArgs = """{"command":"npm test"}"""
         b.pending = pendingB
         b.pendingArgs = """{"command":"npm test"}"""
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 1L,
             toolName = "Bash",
             risk = ToolRisk.EXECUTE,
             summary = "Bash",
             modeLabel = ExecMode.BUILD.label,
-        )
+        ))
         resolve(control, allow = true, scope = ApprovalScope.SESSION_ALLOW)
 
         assertCompleted(true, pendingA)
@@ -296,20 +297,50 @@ class SessionControlApprovalTest {
     }
 
     @Test
+    fun staleDecisionCannotConsumeAnotherRequestOrPersistARule() {
+        val control = SessionControl()
+        val first = session(1L)
+        val second = session(2L)
+        control.sessions[1L] = first
+        control.sessions[2L] = second
+        first.pending = CompletableDeferred()
+        second.pending = CompletableDeferred()
+        val request = ApprovalRequest(1L, "Bash", ToolRisk.EXECUTE, "first", ExecMode.BUILD.label)
+        val other = request.copy(conversationId = 2L, id = "other")
+        val replacement = request.copy(id = "replacement")
+        control.publishApproval(request)
+        control.publishApproval(other)
+        control.publishApproval(replacement)
+
+        val rules = mutableListOf<String>()
+        val stale = control.resolveApprovalScoped(
+            request, true, ApprovalScope.PROJECT_ALLOW,
+            persistProjectRule = { _, key, _ -> rules += key },
+            persistGrants = {},
+        )
+        assertFalse(stale)
+        assertTrue(rules.isEmpty())
+        assertEquals(mapOf(1L to replacement, 2L to other), control.pendingApprovals.value)
+        assertTrue(control.resolveApprovalScoped(replacement, false, ApprovalScope.ONCE, { _, _, _ -> }, {}))
+        assertEquals(mapOf(2L to other), control.pendingApprovals.value)
+        assertFalse(second.pending!!.isCompleted)
+    }
+
+    @Test
     fun resolveApprovalCompletesPendingAnswerJson() {
         val control = SessionControl()
         val s = session(1L)
         control.sessions[1L] = s
         val answer = CompletableDeferred<String>()
         s.pendingAnswer = answer
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 1L,
             toolName = "AskUserQuestion",
             risk = ToolRisk.READ,
             summary = "问题",
             modeLabel = ExecMode.BUILD.label,
             kind = "ask_user",
-        )
+        ))
         resolve(control, allow = true, scope = ApprovalScope.ONCE)
         assertCompleted("""{"answers":{"__default__":"approved"}}""", answer)
         assertNull(control.sessions[1L]?.pendingAnswer)
@@ -324,20 +355,20 @@ class SessionControlApprovalTest {
         val answer = CompletableDeferred<String>()
         s.pending = pending
         s.pendingAnswer = answer
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 1L,
             toolName = "AskUserQuestion",
             risk = ToolRisk.READ,
             summary = "问题",
             modeLabel = ExecMode.BUILD.label,
             kind = "ask_user",
-        )
-        control.resolveUserQuestion("""{"answers":{"q":"a"}}""")
+        ))
+        control.resolveUserQuestion(control.pendingApprovals.value.values.single(), """{"answers":{"q":"a"}}""")
         assertCompleted("""{"answers":{"q":"a"}}""", answer)
         assertCompleted(true, pending)
         assertNull(control.sessions[1L]?.pendingAnswer)
         assertNull(control.sessions[1L]?.pending)
-        assertNull(control.pendingApproval.value)
+        assertNull(control.pendingApprovals.value.values.singleOrNull())
     }
 
     @Test
@@ -375,7 +406,7 @@ class SessionControlApprovalTest {
         assertFalse(s.answerSnoozed)
         assertTrue(summary.startsWith("选择 · "))
         assertTrue(summary.contains("第二个很长的问题文本内容"))
-        val req = control.pendingApproval.value!!
+        val req = control.pendingApprovals.value.values.singleOrNull()!!
         assertEquals("ask_user", req.kind)
         assertEquals("AskUserQuestion", req.toolName)
         assertEquals(questions, req.questions)
@@ -391,7 +422,7 @@ class SessionControlApprovalTest {
             autoResolveMs = 300_000L,
         )
         assertEquals("需要你的决定", blankSummary)
-        val req2 = control.pendingApproval.value!!
+        val req2 = control.pendingApprovals.value.values.singleOrNull()!!
         assertNull(req2.autoDeadlineAt)
         assertNull(req2.countdownVisibleAt)
     }
@@ -410,12 +441,12 @@ class SessionControlApprovalTest {
         )
         val timer = kotlinx.coroutines.Job()
         s.answerTimer = timer
-        control.snoozeUserQuestion()
+        control.snoozeUserQuestion(control.pendingApprovals.value.values.single())
         assertTrue(s.answerSnoozed)
         assertNull(s.answerTimer)
         assertTrue(timer.isCancelled)
         assertFalse(deferred.isCompleted)
-        val req = control.pendingApproval.value!!
+        val req = control.pendingApprovals.value.values.singleOrNull()!!
         assertNull(req.autoDeadlineAt)
         assertNull(req.countdownVisibleAt)
         assertEquals("ask_user", req.kind)
@@ -436,7 +467,7 @@ class SessionControlApprovalTest {
         control.autoResolveAnswer(1L, s, deferred, delayMs = 1L)
         assertTrue(deferred.isCompleted)
         assertEquals("""{"answers":{}}""", deferred.getCompleted())
-        assertNull(control.pendingApproval.value)
+        assertNull(control.pendingApprovals.value.values.singleOrNull())
     }
 
     @Test
@@ -451,10 +482,10 @@ class SessionControlApprovalTest {
             hiddenGraceMs = 10L,
             autoResolveMs = 20L,
         )
-        control.snoozeUserQuestion()
+        control.snoozeUserQuestion(control.pendingApprovals.value.values.single())
         control.autoResolveAnswer(1L, s, deferred, delayMs = 1L)
         assertFalse(deferred.isCompleted)
-        assertNotNull(control.pendingApproval.value)
+        assertNotNull(control.pendingApprovals.value.values.singleOrNull())
     }
 
     @Test
@@ -464,7 +495,7 @@ class SessionControlApprovalTest {
         control.sessions[1L] = s
         val enter = control.beginPlanApproval(s, "EnterPlanMode", "进入计划模式", "enter_plan")
         assertSame(enter, s.pending)
-        val enterReq = control.pendingApproval.value!!
+        val enterReq = control.pendingApprovals.value.values.singleOrNull()!!
         assertEquals("enter_plan", enterReq.kind)
         assertEquals("进入计划模式", enterReq.summary)
         assertEquals("", enterReq.planText)
@@ -472,7 +503,7 @@ class SessionControlApprovalTest {
         val plan = "步骤一\n步骤二"
         val exit = control.beginPlanApproval(s, "ExitPlanMode", plan.take(240), "exit_plan", planText = plan)
         assertSame(exit, s.pending)
-        val exitReq = control.pendingApproval.value!!
+        val exitReq = control.pendingApprovals.value.values.singleOrNull()!!
         assertEquals("exit_plan", exitReq.kind)
         assertEquals(plan, exitReq.planText)
         assertFalse(exit.isCompleted)
@@ -506,22 +537,23 @@ class SessionControlApprovalTest {
         val s = session(1L)
         control.sessions[1L] = s
         s.pending = CompletableDeferred()
-        control.pendingApprovalState.value = ApprovalRequest(
+        control.publishApproval(ApprovalRequest(
             conversationId = 2L,
             toolName = "Bash",
             risk = ToolRisk.EXECUTE,
             summary = "other",
             modeLabel = ExecMode.BUILD.label,
-        )
+        ))
         control.cancelPendingApproval(1L, s)
-        assertNotNull(control.pendingApproval.value)
+        assertNotNull(control.pendingApprovals.value.values.singleOrNull())
         assertFalse(s.pending!!.isCompleted)
         assertNotNull(s.pending)
 
-        control.pendingApprovalState.value = control.pendingApproval.value!!.copy(conversationId = 1L)
+        val other = control.pendingApprovals.value.getValue(2L)
+        control.publishApproval(other.copy(conversationId = 1L))
         val pending = s.pending!!
         control.cancelPendingApproval(1L, s)
-        assertNull(control.pendingApproval.value)
+        assertEquals(mapOf(2L to other), control.pendingApprovals.value)
         assertTrue(pending.isCompleted)
         assertEquals(false, pending.getCompleted())
         assertNull(control.sessions[1L]?.pending)
@@ -598,7 +630,7 @@ class SessionControlApprovalTest {
     @Test
     fun pendingApprovalStateFlowReflectsLatestRequest() = runBlocking {
         val control = SessionControl()
-        assertNull(control.pendingApproval.value)
+        assertNull(control.pendingApprovals.value.values.singleOrNull())
         val req = ApprovalRequest(
             conversationId = 1L,
             toolName = "Bash",
@@ -606,11 +638,11 @@ class SessionControlApprovalTest {
             summary = "s",
             modeLabel = ExecMode.BUILD.label,
         )
-        control.pendingApprovalState.value = req
-        assertSame(req, control.pendingApproval.value)
-        val first = async(Dispatchers.Default) { control.pendingApproval.first { it == null } }
+        control.publishApproval(req)
+        assertSame(req, control.pendingApprovals.value.values.singleOrNull())
+        val first = async(Dispatchers.Default) { control.pendingApprovals.first { it.isEmpty() } }
         kotlinx.coroutines.delay(100)
-        control.pendingApprovalState.value = null
-        withTimeout(5_000) { assertNull(first.await()) }
+        control.clearPendingApprovalFor(1L)
+        withTimeout(5_000) { assertTrue(first.await().isEmpty()) }
     }
 }

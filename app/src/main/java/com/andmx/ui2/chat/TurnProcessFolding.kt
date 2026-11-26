@@ -173,9 +173,12 @@ object TurnProcessFolding {
      * 返回应被折叠隐藏的时间线条目（stableId 集合）。每个折叠覆盖其 sortKey
      * 之后、直到用户消息或最终答案出现前的过程行。
      */
-    fun hiddenIds(timeline: List<TimelineItem>, folds: List<Fold>): Set<String> {
-        if (folds.isEmpty()) return emptySet()
-        val hidden = mutableSetOf<String>()
+    fun hiddenIds(timeline: List<TimelineItem>, folds: List<Fold>): Set<String> =
+        coveringFolds(timeline, folds).keys
+
+    fun coveringFolds(timeline: List<TimelineItem>, folds: List<Fold>): Map<String, Long> {
+        if (folds.isEmpty()) return emptyMap()
+        val hidden = mutableMapOf<String, Long>()
         var covering: Fold? = null
         var foldIdx = 0
         for (item in timeline) {
@@ -191,14 +194,11 @@ object TurnProcessFolding {
                     if (m.role == "user" || (m.role == "assistant" && !m.isProcess && !m.isStreaming)) {
                         covering = null
                     } else if (key >= covering.sortKey) {
-                        hidden += item.stableId
+                        hidden[item.stableId] = covering.sortKey
                     }
                 }
-                is TimelineItem.Tool -> if (key >= covering.sortKey) hidden += item.stableId
-                is TimelineItem.ToolGroup -> if (key >= covering.sortKey) hidden += item.stableId
-                is TimelineItem.Reasoning -> if (key >= covering.sortKey) hidden += item.stableId
-                is TimelineItem.GoalVerify -> if (key >= covering.sortKey) hidden += item.stableId
-                is TimelineItem.SubAgent -> if (key >= covering.sortKey) hidden += item.stableId
+                is TimelineItem.Tool, is TimelineItem.ToolGroup, is TimelineItem.Reasoning,
+                is TimelineItem.GoalVerify, is TimelineItem.SubAgent -> hidden[item.stableId] = covering.sortKey
                 is TimelineItem.Approval -> Unit
                 is TimelineItem.Working -> Unit
                 is TimelineItem.TurnProcess -> Unit

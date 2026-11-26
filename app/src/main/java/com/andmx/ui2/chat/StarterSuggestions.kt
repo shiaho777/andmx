@@ -1,6 +1,5 @@
 package com.andmx.ui2.chat
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.NorthEast
 import androidx.compose.material3.Icon
@@ -19,13 +17,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.settings.UiLang
 import com.andmx.ui2.theme.AndMXType
+import com.andmx.ui2.theme.Chrome
+import androidx.compose.ui.draw.clip
 import com.andmx.ui2.settings.tr
 
 data class StarterSuggestion(val title: String, val prompt: String)
@@ -101,6 +100,32 @@ fun starterSuggestions(
             )
         }
     }
+    if (out.size < 3) {
+        out += if (english) {
+            StarterSuggestion(
+                "Find the test entry points",
+                "Find the test commands and the smallest useful check to run in $project.",
+            )
+        } else {
+            StarterSuggestion(
+                "找到测试入口",
+                "帮我找到 $project 的测试命令，并指出最适合先跑的一项检查。",
+            )
+        }
+    }
+    if (out.size < 3) {
+        out += if (english) {
+            StarterSuggestion(
+                "Plan a change",
+                "Help me scope a small change in $project and write a plan with verifiable steps.",
+            )
+        } else {
+            StarterSuggestion(
+                "规划一个改动",
+                "帮我把 $project 的下一步改动拆成可验证的步骤，先给出计划。",
+            )
+        }
+    }
     return out.take(3)
 }
 
@@ -113,16 +138,15 @@ fun StarterSuggestions(
     if (suggestions.isEmpty()) return
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         suggestions.forEach { suggestion ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .clip(Chrome.control)
                     .clickable { onPick(suggestion.prompt) }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -137,7 +161,7 @@ fun StarterSuggestions(
                         suggestion.prompt,
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp),
                     )
@@ -147,7 +171,7 @@ fun StarterSuggestions(
                     Icons.Outlined.NorthEast,
                     null,
                     Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

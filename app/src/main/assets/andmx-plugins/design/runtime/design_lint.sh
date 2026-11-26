@@ -143,7 +143,7 @@ for i, line in enumerate(source.splitlines(), 1):
             h = norm_hex("#" + m.group(1))
             if h not in palette and h not in neutrals:
                 add(i, "color", "颜色 %s 不在 AndMX 色板" % h,
-                    "改用 token 色（brand #0EA5E9 等）或 var(--andmx-*)；透明请用 rgba/token 色加透明度")
+                    "改用 token 色（brand #0D0D0D 等）或 var(--andmx-*)；透明请用 rgba/token 色加透明度")
     elif mode == "compose":
         for m in re.finditer(r"fontSize\s*=\s*" + NUM + r"\.sp", line):
             v = float(m.group(1))
@@ -177,7 +177,7 @@ for i, line in enumerate(source.splitlines(), 1):
             alpha = m.group(1)[:2].upper()
             if h not in palette and h not in neutrals and alpha == "FF":
                 add(i, "color", "颜色 %s 不在 AndMX 色板" % h,
-                    "改用 ZCodeBrand 等主题色常量；弱化用 copy(alpha=...)")
+                    "改用 WorkspaceInk 等主题色常量；弱化用 copy(alpha=...)")
 
 report = {
     "ok": not issues,

@@ -110,8 +110,8 @@ class DesignLintScriptTest {
         val compose = """
             Text(
                 style = TextStyle(fontSize = 15.sp, lineHeight = 22.sp),
-                modifier = Modifier.padding(16.dp).clip(RoundedCornerShape(20.dp)),
-                color = Color(0xFF0EA5E9),
+                modifier = Modifier.padding(16.dp).clip(RoundedCornerShape(16.dp)),
+                color = Color(0xFF0D0D0D),
             )
         """.trimIndent()
         val payload = kotlinx.serialization.json.buildJsonObject {
@@ -193,7 +193,7 @@ class DesignLintScriptTest {
         val fragment = obj["prompt_fragment"]!!.jsonPrimitive.content
         assertTrue(fragment.contains("设计规则"))
         assertTrue(fragment.contains("design_lint"))
-        assertTrue(fragment.contains("#0EA5E9"))
+        assertTrue(fragment.contains("#0D0D0D"))
         assertTrue(fragment.contains("圆角"))
         assertTrue(fragment.contains("阴影"))
     }
@@ -206,7 +206,7 @@ class DesignLintScriptTest {
         assertTrue(cssOut.contains("--andmx-shadow-raised: 6px;"))
         assertTrue(cssOut.contains("--andmx-xs: 4px;"))
         val composeOut = runScript(gen, "compose")
-        assertTrue(composeOut.contains("val radiusBubbleDp = 20.dp"))
+        assertTrue(composeOut.contains("val radiusBubbleDp = 16.dp"))
         assertTrue(composeOut.contains("val shadowDragDp = 8.dp"))
     }
 

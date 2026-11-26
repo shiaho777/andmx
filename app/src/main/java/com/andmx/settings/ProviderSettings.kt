@@ -30,7 +30,7 @@ data class ProviderSettings(
     val customInstructions: String = "",
     /** "system" | "light" | "dark" */
     val themeMode: String = "system",
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = false,
     /** accent color hex, e.g. "#339CFF" */
     val accent: String = "#339CFF",
     /** persona/tone, e.g. "务实" | "友好" | "简洁" | "幽默" */

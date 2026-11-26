@@ -27,6 +27,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -106,7 +109,7 @@ class ChatViewModel @Inject constructor(
     val goalVerifications: StateFlow<List<GoalVerifyItem>> = _goalVerifications.asStateFlow()
 
 
-    val pendingApproval: StateFlow<ApprovalRequest?> = controller.pendingApproval
+    val pendingApprovals = controller.pendingApprovals
     val planSteps: StateFlow<List<com.andmx.agent.UpdatePlanTool.PlanStep>> = controller.planSteps
 
 
@@ -228,6 +231,9 @@ class ChatViewModel @Inject constructor(
     /** 当前会话 id，UI 据此高亮侧边栏选中项。0 表示尚未落库。 */
     private val _currentConversationId = MutableStateFlow(0L)
     val currentConversationId: StateFlow<Long> = _currentConversationId.asStateFlow()
+    private val _restoringConversation = MutableStateFlow(false)
+    val restoringConversation: StateFlow<Boolean> = _restoringConversation.asStateFlow()
+    private var conversationLoadJob: Job? = null
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val conversationTitle: StateFlow<String> = _currentConversationId.flatMapLatest { id ->
@@ -289,8 +295,13 @@ class ChatViewModel @Inject constructor(
     fun switchToConversation(id: Long) {
         if (id == _currentConversationId.value) return
         // 队列属于当前 task；切走前落盘，切回时再从该 task 读取。
-        persistQueue()
+        if (!_restoringConversation.value) persistQueue()
+        conversationLoadJob?.cancel()
+        _restoringConversation.value = true
+        _fileRewindOpen.value = false
+        _rewindResult.value = null
         _queue.value = emptyList()
+        _recoverableQueue.value = emptyList()
         _steeringMessage.value = null
         _queuePaused.value = QueuePause.NONE
         _compactNotice.value = null
@@ -299,8 +310,11 @@ class ChatViewModel @Inject constructor(
         _isLoading.value = controller.isTurnRunning(id)
         viewModelScope.launch { runCatching { repo.setUnreadAt(id, null) } }
         currentAssistantText = ""
+        streamingMessageId = 0L
+        lastStreamUiAt = 0L
         pendingEditMessageId = null
         _editingMessageId.value = null
+        _messages.value = emptyList()
         _toolCalls.value = emptyList()
         _reasonings.value = emptyList()
         currentReasoningId = null
@@ -309,86 +323,92 @@ class ChatViewModel @Inject constructor(
         _subAgentItems.value = emptyList()
         _goalVerifications.value = emptyList()
         _error.value = null
-        viewModelScope.launch {
-            loadQueueFor(id)
-            val history = runCatching { repo.messages(id) }.getOrDefault(emptyList())
-            val msgs = mutableListOf<ChatMessage>()
-            val tools = mutableListOf<ToolCall>()
-            val subItems = mutableListOf<SubAgentItem>()
-            val reasonings = mutableListOf<ReasoningItem>()
-            for (msg in history) {
-                when (msg.role) {
-                    "user" -> msgs += ChatMessage(
-                        id = msg.id,
-                        role = "user",
-                        content = msg.content,
-                        sortKey = msg.createdAt,
-                        createdAt = msg.createdAt,
-                        imageUrls = decodeImageUrls(msg.imageUrlsJson).orEmpty(),
-                    )
-                    "assistant" -> msgs += ChatMessage(
-                        id = msg.id,
-                        role = "assistant",
-                        content = msg.content,
-                        sortKey = msg.createdAt,
-                        isProcess = false,
-                        createdAt = msg.createdAt,
-                        completedAt = msg.createdAt,
-                        feedback = msg.feedback,
-                    )
-                    "tool" -> {
-                        tools += ToolCall(
-                            id = "hist-${msg.id}",
-                            name = msg.toolName ?: "tool",
-                            args = msg.toolArgs,
-                            output = msg.content,
-                            isRunning = false,
-                            isError = msg.toolError,
+        conversationLoadJob = viewModelScope.launch {
+            try {
+                loadQueueFor(id)
+                val history = runCatching { repo.messages(id) }.getOrDefault(emptyList())
+                ensureActive()
+                val msgs = mutableListOf<ChatMessage>()
+                val tools = mutableListOf<ToolCall>()
+                val subItems = mutableListOf<SubAgentItem>()
+                val reasonings = mutableListOf<ReasoningItem>()
+                for (msg in history) {
+                    when (msg.role) {
+                        "user" -> msgs += ChatMessage(
+                            id = msg.id,
+                            role = "user",
+                            content = msg.content,
                             sortKey = msg.createdAt,
-                            imageUrls = decodeImageUrls(msg.imageUrlsJson),
+                            createdAt = msg.createdAt,
+                            imageUrls = decodeImageUrls(msg.imageUrlsJson).orEmpty(),
                         )
-                        if (msg.toolName in setOf("spawn_agent", "multi_agent", "Agent", "Task", "TaskOutput", "TaskStop")) {
-                            val task = runCatching {
-                                val el = kotlinx.serialization.json.Json.parseToJsonElement(msg.toolArgs)
-                                (el as? kotlinx.serialization.json.JsonObject)
-                                    ?.get("task")
-                                    ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                            }.getOrNull().orEmpty().ifBlank { msg.toolName ?: tr("子代理") }
-                            subItems += SubAgentItem(
-                                id = "hist-sub-${msg.id}",
-                                task = task,
-                                state = if (msg.toolError) "FAILED" else "COMPLETED",
-                                result = msg.content,
+                        "assistant" -> msgs += ChatMessage(
+                            id = msg.id,
+                            role = "assistant",
+                            content = msg.content,
+                            sortKey = msg.createdAt,
+                            isProcess = false,
+                            createdAt = msg.createdAt,
+                            completedAt = msg.createdAt,
+                            feedback = msg.feedback,
+                        )
+                        "tool" -> {
+                            tools += ToolCall(
+                                id = "hist-${msg.id}",
+                                name = msg.toolName ?: "tool",
+                                args = msg.toolArgs,
+                                output = msg.content,
+                                isRunning = false,
+                                isError = msg.toolError,
                                 sortKey = msg.createdAt,
+                                imageUrls = decodeImageUrls(msg.imageUrlsJson),
                             )
+                            if (msg.toolName in setOf("spawn_agent", "multi_agent", "Agent", "Task", "TaskOutput", "TaskStop")) {
+                                val task = runCatching {
+                                    val el = kotlinx.serialization.json.Json.parseToJsonElement(msg.toolArgs)
+                                    (el as? kotlinx.serialization.json.JsonObject)
+                                        ?.get("task")
+                                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                                }.getOrNull().orEmpty().ifBlank { msg.toolName ?: tr("子代理") }
+                                subItems += SubAgentItem(
+                                    id = "hist-sub-${msg.id}",
+                                    task = task,
+                                    state = if (msg.toolError) "FAILED" else "COMPLETED",
+                                    result = msg.content,
+                                    sortKey = msg.createdAt,
+                                )
+                            }
                         }
+                        "reasoning" -> reasonings += ReasoningItem(
+                            id = "hist-think-${msg.id}",
+                            content = msg.content,
+                            isStreaming = false,
+                            sortKey = msg.createdAt,
+                        )
+                        "compact" -> msgs += ChatMessage(
+                            id = msg.id,
+                            role = "compact",
+                            content = msg.content,
+                            sortKey = msg.createdAt,
+                            createdAt = msg.createdAt,
+                            completedAt = msg.createdAt,
+                        )
                     }
-                    "reasoning" -> reasonings += ReasoningItem(
-                        id = "hist-think-${msg.id}",
-                        content = msg.content,
-                        isStreaming = false,
-                        sortKey = msg.createdAt,
-                    )
-                    "compact" -> msgs += ChatMessage(
-                        id = msg.id,
-                        role = "compact",
-                        content = msg.content,
-                        sortKey = msg.createdAt,
-                        createdAt = msg.createdAt,
-                        completedAt = msg.createdAt,
-                    )
                 }
+                val annotated = annotateProcessMessages(msgs, tools)
+                _messages.value = annotated
+                _toolCalls.value = tools
+                _subAgentItems.value = subItems
+                _reasonings.value = reasonings
+                processSortCursor = (annotated.maxOfOrNull { it.sortKey } ?: 0L)
+                    .coerceAtLeast(tools.maxOfOrNull { it.sortKey } ?: 0L)
+                    .coerceAtLeast(reasonings.maxOfOrNull { it.sortKey } ?: 0L)
+                runCatching { controller.focusConversation(id) }
+                ensureActive()
+                refreshContextUsage()
+            } finally {
+                if (isActive && _currentConversationId.value == id) _restoringConversation.value = false
             }
-            val annotated = annotateProcessMessages(msgs, tools)
-            _messages.value = annotated
-            _toolCalls.value = tools
-            _subAgentItems.value = subItems
-            _reasonings.value = reasonings
-            processSortCursor = (annotated.maxOfOrNull { it.sortKey } ?: 0L)
-                .coerceAtLeast(tools.maxOfOrNull { it.sortKey } ?: 0L)
-                .coerceAtLeast(reasonings.maxOfOrNull { it.sortKey } ?: 0L)
-            runCatching { controller.focusConversation(id) }
-            refreshContextUsage()
         }
     }
 
@@ -452,9 +472,17 @@ class ChatViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            controller.pendingApproval.collect { req ->
-                if (req == null) return@collect
-                val existing = _approvals.value
+            combine(_currentConversationId, pendingApprovals) { id, requests -> requests[id] }.collect { req ->
+                if (req == null) {
+                    _approvals.value = _approvals.value.map {
+                        if (it.status == "pending") it.copy(status = "closed") else it
+                    }
+                    return@collect
+                }
+                if (req.conversationId != _currentConversationId.value) return@collect
+                val existing = _approvals.value.map {
+                    if (it.status == "pending" && it.id != req.id) it.copy(status = "closed") else it
+                }
                 if (existing.any { it.id == req.id }) return@collect
                 _approvals.value = existing + ApprovalItem(
                     id = req.id,
@@ -1950,10 +1978,12 @@ class ChatViewModel @Inject constructor(
         finalizeReasoning()
         val id = _currentConversationId.value
         if (id > 0L) controller.cancelTurn(id)
-        else controller.resolveApproval(false)
         _isLoading.value = false
         val running = _toolCalls.value.map {
-            if (it.isRunning) it.copy(isRunning = false, isError = true, output = it.output ?: tr("已停止")) else it
+            if (it.isRunning) {
+                val output = listOfNotNull(it.output?.takeIf(String::isNotBlank), "已停止").joinToString("\n")
+                it.copy(isRunning = false, isError = true, output = output, awaitingApproval = false)
+            } else it
         }
         _toolCalls.value = running
         _subAgentItems.value = _subAgentItems.value.map {
@@ -2081,6 +2111,7 @@ class ChatViewModel @Inject constructor(
     fun dismissFileRewind() { _fileRewindOpen.value = false }
 
     fun revertSingleFile(path: String) {
+        if (_isLoading.value) return
         val id = _currentConversationId.value
         if (id <= 0L) return
         viewModelScope.launch {
@@ -2702,6 +2733,7 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun loadQueueFor(conversationId: Long) {
         val restored = readQueue(conversationId)
+        currentCoroutineContext().ensureActive()
         if (_currentConversationId.value == conversationId) {
             _queue.value = restored
             _recoverableQueue.value = emptyList()
@@ -3115,6 +3147,8 @@ class ChatViewModel @Inject constructor(
                 lastStreamUiAt = 0L
                 val text = event.fullText
                 currentAssistantText = ""
+                val completedStreamId = streamingMessageId
+                streamingMessageId = 0L
                 if (text.isBlank()) {
                     // drop empty streaming placeholder
                     val current = _messages.value.toMutableList()
@@ -3126,7 +3160,9 @@ class ChatViewModel @Inject constructor(
                     return
                 }
                 val current = _messages.value.toMutableList()
-                val streamIndex = current.indexOfLast { it.role == "assistant" && it.isStreaming }
+                val streamIndex = current.indexOfLast {
+                    it.role == "assistant" && (it.isStreaming || (completedStreamId != 0L && it.id == completedStreamId))
+                }
                 // Intermediate process narration stays as its own item (ZCode agent_message).
                 // Only mark final answer when turn ends (Done) — for now each complete is process
                 // if tools continue; Done will promote the last one.
@@ -3156,7 +3192,6 @@ class ChatViewModel @Inject constructor(
                         ),
                     )
                 }
-                streamingMessageId = 0L
                 _messages.value = current
             }
             is ChatEvent.ToolCallArgsDelta -> {
@@ -3363,6 +3398,7 @@ class ChatViewModel @Inject constructor(
                     _messages.value = msgs
                 }
                 currentAssistantText = ""
+                streamingMessageId = 0L
                 lastStreamUiAt = 0L
                 refreshContextUsage()
             }
@@ -3432,45 +3468,32 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun resolveApproval(allow: Boolean) {
-        val req = controller.pendingApproval.value
-        if (req != null) {
-            _approvals.value = _approvals.value.map {
-                if (it.id == req.id) it.copy(status = if (allow) "allowed" else "denied") else it
-            }
-        }
-        controller.resolveApproval(allow)
-    }
-
-    fun acceptApprovalSuggestion(suggestion: com.andmx.agent.permission.PermissionSuggestion) {
-        controller.approvalRuleStore.add(
-            controller.projectKey(),
-            suggestion.toolCanonical,
-            suggestion.ruleKey,
-            com.andmx.agent.ApprovalRuleStore.RuleBehavior.ALLOW,
-        )
-        resolveApprovalScoped(true, ApprovalScope.ONCE)
-    }
-
-    /** ZCode 对齐：审批作用域（允许本会话 / 始终拒绝）。 */
-    fun resolveApprovalScoped(allow: Boolean, scope: ApprovalScope) {
+    fun resolveApproval(
+        request: ApprovalRequest,
+        allow: Boolean,
+        scope: ApprovalScope = ApprovalScope.ONCE,
+        suggestion: com.andmx.agent.permission.PermissionSuggestion? = null,
+    ) {
+        if (request.conversationId != _currentConversationId.value) return
+        if (!controller.resolveApproval(request, allow, scope, suggestion)) return
         val denied = scope == ApprovalScope.SESSION_DENY ||
             scope == ApprovalScope.PROJECT_DENY
-        resolveApproval(allow && !denied)
-        controller.resolveApprovalScoped(allow, scope)
-    }
-
-    fun resolveUserQuestion(answersJson: String) {
-        val req = controller.pendingApproval.value
-        if (req != null) {
-            _approvals.value = _approvals.value.map {
-                if (it.id == req.id) it.copy(status = "allowed", summary = answersJson.take(200)) else it
-            }
+        _approvals.value = _approvals.value.map {
+            if (it.id == request.id) it.copy(status = if (allow && !denied) "allowed" else "denied") else it
         }
-        controller.resolveUserQuestion(answersJson)
     }
 
-    fun snoozeUserQuestion() = controller.snoozeUserQuestion()
+    fun resolveUserQuestion(request: ApprovalRequest, answersJson: String) {
+        if (request.conversationId != _currentConversationId.value) return
+        if (!controller.resolveUserQuestion(request, answersJson)) return
+        _approvals.value = _approvals.value.map {
+            if (it.id == request.id) it.copy(status = "allowed", summary = answersJson.take(200)) else it
+        }
+    }
+
+    fun snoozeUserQuestion(request: ApprovalRequest) {
+        if (request.conversationId == _currentConversationId.value) controller.snoozeUserQuestion(request)
+    }
 
     val questionAutoResolve: StateFlow<Boolean> = controller.questionAutoResolve
 

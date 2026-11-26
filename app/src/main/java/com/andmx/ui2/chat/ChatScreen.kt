@@ -12,13 +12,6 @@ import androidx.compose.animation.slideOutVertically
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
 import androidx.compose.foundation.background
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -42,7 +35,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.outlined.MoreVert
@@ -54,13 +46,14 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,14 +72,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -106,7 +104,6 @@ import com.andmx.ui2.terminal.TerminalScreen
 import com.andmx.ui2.terminal.rememberTerminalColors
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -162,17 +159,24 @@ fun ChatScreen(
         else firstReasoningPerTurn(messages, reasonings)
     }
     val turnCodeComments = remember(messages) { assistantCodeCommentsByTail(messages) }
-    val visibleTools = remember(toolCalls, appSettings.showTodos) {
-        if (appSettings.showTodos) toolCalls
-        else toolCalls.filterNot { tool ->
+    val currentConversationId by viewModel.currentConversationId.collectAsState()
+    val pendingApprovals by viewModel.pendingApprovals.collectAsState()
+    val pendingApproval = pendingApprovals[currentConversationId]
+    val visibleTools = remember(toolCalls, appSettings.showTodos, pendingApproval) {
+        val waiting = pendingApproval?.takeIf { it.kind == "tool" }?.let { request ->
+            toolCalls.lastOrNull { it.isRunning && it.name == request.toolName && it.args == request.arguments }?.id
+                ?: toolCalls.singleOrNull { it.isRunning && it.name == request.toolName }?.id
+        }
+        val tools = if (appSettings.showTodos) toolCalls else toolCalls.filterNot { tool ->
             val n = tool.name.lowercase()
             n.contains("todo") || n == "update_plan"
         }
+        if (waiting == null) tools else tools.map { if (it.id == waiting) it.copy(awaitingApproval = true) else it }
     }
-    val pendingApproval by viewModel.pendingApproval.collectAsState()
     val pendingYoloConfirmation by viewModel.pendingYoloConfirmation.collectAsState()
+    val resolvedApprovals = remember(approvals) { approvals.filterNot { it.status == "pending" } }
     val timeline = remember(
-        messages, visibleTools, approvals, subAgentItems, visibleReasonings, goalVerifications,
+        messages, visibleTools, resolvedApprovals, subAgentItems, visibleReasonings, goalVerifications,
         isLoading, pendingApproval, appSettings.toolGroupingExplore, appSettings.toolGroupingTerminal,
         appSettings.toolGroupingChanges,
     ) {
@@ -184,7 +188,7 @@ fun ChatScreen(
         buildTimeline(
             messages = messages,
             tools = visibleTools,
-            approvals = approvals,
+            approvals = resolvedApprovals,
             subAgents = subAgentItems,
             reasonings = visibleReasonings,
             goalVerifications = goalVerifications,
@@ -198,12 +202,6 @@ fun ChatScreen(
     // Turn 过程折叠（dsh web turn-process 对齐）：已关闭 Turn 的过程行默认
     // 收起为摘要行，手动展开的 Turn 记录在本会话状态里。
     val turnFolds = remember(timeline) { TurnProcessFolding.folds(timeline) }
-    val foldConversationId by viewModel.currentConversationId.collectAsState()
-    var manuallyExpandedFolds by remember(foldConversationId) { mutableStateOf(setOf<Long>()) }
-    val visibleTimeline = remember(timeline, turnFolds, manuallyExpandedFolds) {
-        TurnProcessFolding.visibleTimeline(timeline, turnFolds, manuallyExpandedFolds)
-    }
-    val timelineReversed = remember(visibleTimeline) { visibleTimeline.asReversed() }
     val planSteps by viewModel.planSteps.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val worktree by viewModel.activeWorktree.collectAsState()
@@ -212,6 +210,7 @@ fun ChatScreen(
     val config by viewModel.composerConfig.collectAsState()
     val planOverlay by viewModel.planOverlayActive.collectAsState()
     val fileChanges by viewModel.fileChanges.collectAsState()
+    val changedPaths = remember(fileChanges) { fileChanges.map { it.path } }
     val rewindResult by viewModel.rewindResult.collectAsState()
     val rewindPickerOpen by viewModel.rewindPickerOpen.collectAsState()
     val fileRewindOpen by viewModel.fileRewindOpen.collectAsState()
@@ -238,7 +237,7 @@ fun ChatScreen(
     val conversationTitle by viewModel.conversationTitle.collectAsState()
     val gitInfo by viewModel.gitInfo.collectAsState()
     val hostPath by viewModel.hostPath.collectAsState()
-    val currentConversationId by viewModel.currentConversationId.collectAsState()
+    val restoringConversation by viewModel.restoringConversation.collectAsState()
     val branch = gitInfo?.branch.orEmpty()
 
     LaunchedEffect(hostPath) {
@@ -256,13 +255,74 @@ fun ChatScreen(
     var filesInitialPath by remember { mutableStateOf<String?>(null) }
     var filesLastPath by remember { mutableStateOf<String?>(null) }
     var fileReview by remember { mutableStateOf<com.andmx.ui2.files.FileReviewAnchor?>(null) }
+    var changedFileReviewPath by remember(currentConversationId) { mutableStateOf<String?>(null) }
     var fileTreeRequestKey by remember { mutableStateOf(0) }
     var fileTreeRequestPath by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showCommandCenter by remember { mutableStateOf(false) }
-    var findOpen by remember { mutableStateOf(false) }
-    var findQuery by remember { mutableStateOf("") }
-    var findTick by remember { mutableIntStateOf(0) }
+    var findOpen by remember(currentConversationId) { mutableStateOf(false) }
+    var findQuery by remember(currentConversationId) { mutableStateOf("") }
+    var findSelection by remember(currentConversationId, findQuery) { mutableStateOf<Pair<Long, Int>?>(null) }
+    var findTick by remember(currentConversationId) { mutableIntStateOf(0) }
+    var focusFindField by remember(currentConversationId) { mutableStateOf(false) }
+    var pendingFind by remember { mutableStateOf<ConversationFindRequest?>(null) }
+    val findTargets = remember(timeline, findOpen) {
+        if (!findOpen) emptyList()
+        else timeline.asReversed().mapNotNull { (it as? TimelineItem.Message)?.message?.takeUnless { m -> m.role == "compact" } }
+    }
+    val findHits = remember(findTargets, findQuery) { ChatFind.find(findTargets, findQuery) }
+    val findMessageIndexById = remember(findTargets) {
+        findTargets.mapIndexed { index, message -> message.id to index }.toMap()
+    }
+    val activeFindIndex = findSelection?.let { (messageId, offset) ->
+        findHits.indexOfFirst { it.start == offset && findTargets[it.messageIndex].id == messageId }
+    }?.coerceAtLeast(0) ?: 0
+    val findMessageId = findHits.getOrNull(activeFindIndex)?.let { findTargets[it.messageIndex].id }
+    fun selectFindHit(index: Int) {
+        val hit = findHits.getOrNull(index) ?: return
+        findSelection = findTargets[hit.messageIndex].id to hit.start
+    }
+    LaunchedEffect(findQuery, findMessageId) {
+        if (findSelection == null) selectFindHit(activeFindIndex)
+    }
+    LaunchedEffect(pendingFind, currentConversationId, restoringConversation, findTargets, findQuery) {
+        val request = pendingFind ?: return@LaunchedEffect
+        if (request.conversationId != currentConversationId || restoringConversation) return@LaunchedEffect
+        if (!findOpen || focusFindField || findQuery != request.query) {
+            focusFindField = false
+            findQuery = request.query
+            findOpen = true
+            return@LaunchedEffect
+        }
+        val match = findHits.indexOfFirst { findTargets[it.messageIndex].id == request.messageId }
+        if (findTargets.isNotEmpty()) {
+            selectFindHit(match.coerceAtLeast(0))
+            findTick++
+            pendingFind = null
+        }
+    }
+    var manuallyExpandedFolds by remember(currentConversationId) { mutableStateOf(setOf<Long>()) }
+    val searchFoldByItem = remember(timeline, turnFolds, findOpen) {
+        if (findOpen) TurnProcessFolding.coveringFolds(timeline, turnFolds) else emptyMap()
+    }
+    var suppressSearchFold by remember(findQuery, findMessageId, findTick) { mutableStateOf(false) }
+    val searchFold = if (suppressSearchFold || findMessageId == null) null else searchFoldByItem["m-$findMessageId"]
+    val expandedFolds = searchFold?.let { manuallyExpandedFolds + it } ?: manuallyExpandedFolds
+    val timelineReversed = remember(timeline, turnFolds, expandedFolds) {
+        TurnProcessFolding.visibleTimeline(timeline, turnFolds, expandedFolds).asReversed()
+    }
+    fun openFind() {
+        focusFindField = true
+        findOpen = true
+        pendingFind = null
+    }
+    fun closeFind() {
+        findOpen = false
+        findQuery = ""
+        findSelection = null
+        focusFindField = false
+        pendingFind = null
+    }
     var turnDelta by remember { mutableIntStateOf(0) }
     var modelMenuToken by remember { mutableIntStateOf(0) }
     var settingsInitialPage by remember { mutableStateOf(SettingsPage.HOME) }
@@ -287,8 +347,7 @@ fun ChatScreen(
         }
     }
     BackHandler(enabled = findOpen && !showTerminal && !showFiles && !showSettings) {
-        findOpen = false
-        findQuery = ""
+        closeFind()
     }
 
     var drawerOpen by remember { mutableStateOf(false) }
@@ -379,11 +438,15 @@ fun ChatScreen(
             when (action) {
                 is ChatActionBus.Action.OpenFile -> {
                     val path = action.path
-                    viewModel.addFileContext(path)
+                    if (action.addContext) viewModel.addFileContext(path)
                     filesInitialPath = path
                     filesLastPath = path
                     fileReview = action.review
                     showFiles = true
+                }
+                is ChatActionBus.Action.ReviewFileChange -> {
+                    changedFileReviewPath = action.path
+                    viewModel.openFileRewind()
                 }
                 ChatActionBus.Action.OpenTerminal -> showTerminal = true
                 ChatActionBus.Action.OpenSessionImport -> sessionFilePicker.launch(arrayOf("application/json", "application/octet-stream"))
@@ -675,6 +738,12 @@ fun ChatScreen(
         open = drawerOpen,
         onDismiss = { drawerOpen = false },
         onSelectConversation = { id ->
+            pendingFind = null
+            viewModel.switchToConversation(id)
+            drawerOpen = false
+        },
+        onSelectSearchMatch = { id, messageId, query ->
+            pendingFind = ConversationFindRequest(id, messageId, query)
             viewModel.switchToConversation(id)
             drawerOpen = false
         },
@@ -705,6 +774,7 @@ fun ChatScreen(
         fileTreeRequestKey = fileTreeRequestKey,
         currentConversationId = currentConversationId,
         streamingConversationIds = streamingConversationIds,
+        approvalConversationIds = pendingApprovals.keys,
     ) {
         Box(
             modifier = modifier
@@ -744,7 +814,7 @@ fun ChatScreen(
                             true
                         }
                         SessionShortcuts.FIND_IN_TASK -> {
-                            findOpen = true
+                            openFind()
                             true
                         }
                         SessionShortcuts.PREVIOUS_CONVERSATION -> {
@@ -813,7 +883,7 @@ fun ChatScreen(
             val composerBoundsModifier = Modifier.onGloballyPositioned { coords ->
                 composerBounds = coords.boundsInRoot()
             }
-            var pendingHistoryJump by remember { mutableStateOf<Long?>(null) }
+            var pendingHistoryJump by remember(currentConversationId) { mutableStateOf<Long?>(null) }
             val inputHistory = remember(messages) {
                 messages.filter { it.role == "user" && it.content.isNotBlank() }
                     .takeLast(50)
@@ -826,11 +896,42 @@ fun ChatScreen(
                         )
                     }
             }
+            val isEmpty = timeline.isEmpty() && !restoringConversation
+            val inputFocus = remember { FocusRequester() }
+            val keyboard = LocalSoftwareKeyboardController.current
             @Composable
-            fun ComposerBlock(flat: Boolean = false, extraModifier: Modifier = Modifier) {
-                val outerModifier = if (flat) composerBoundsModifier else extraModifier
+            fun ComposerBlock() {
                 Composer(
+                    contextHeader = if (isEmpty) {
+                        {
+                            EmptyWorkspaceHeader(
+                                hasWorkspace = hostPath != null,
+                                projectName = projectName,
+                                hostPath = hostPath,
+                                branch = branch,
+                                isGitRepo = gitInfo?.isRepo == true,
+                                hasChanges = gitInfo?.hasChanges == true,
+                                dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
+                                ahead = gitInfo?.ahead ?: 0,
+                                candidates = remember(hostPath) { viewModel.workspaceCandidates() },
+                                onSelectWorkspace = { viewModel.selectProject(it) },
+                                onOpenFolder = { workspacePicker.launch(null) },
+                                onOpenRemote = { showRemoteDialog = true },
+                                onPickBranch = { showBranchDialog = true },
+                                onGitActions = {
+                                    dirtyFilesCache = emptyList()
+                                    viewModel.refreshGitInfo()
+                                    showGitActions = true
+                                },
+                            )
+                        }
+                    } else null,
+                    onManageModels = {
+                        settingsInitialPage = SettingsPage.MODEL
+                        showSettings = true
+                    },
                     modelMenuToken = modelMenuToken,
+                    inputModifier = Modifier.focusRequester(inputFocus),
                     value = inputText,
                     onValueChange = { newValue ->
                         // ZCode 对齐：粘贴长文本转附件 chip，不进输入框。
@@ -843,18 +944,15 @@ fun ChatScreen(
                         }
                     },
                     onSend = {
-                        if (inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty()) {
+                        if (!restoringConversation &&
+                            (inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty())
+                        ) {
                             viewModel.sendMessage(inputText, attachments = attachments)
                             inputText = ""
                             attachments = emptyList()
                         }
                     },
-                    onSteer = if (isLoading) {
-                        { text ->
-                            viewModel.steerCurrentTurn(text)
-                            inputText = ""
-                        }
-                    } else null,
+                    guideFollowUps = appSettings.interactionBehavior == "guide" && attachments.isEmpty(),
                     steeringPending = steeringMessage != null,
                     onCancelSteer = { viewModel.cancelSteer() },
                     isLoading = isLoading,
@@ -927,7 +1025,7 @@ fun ChatScreen(
                     inputHistory = inputHistory,
                     placeholder = tr(
                         composerPlaceholder(
-                            flat = flat,
+                            flat = isEmpty,
                             isLoading = isLoading,
                             guide = appSettings.interactionBehavior == "guide",
                         ),
@@ -952,10 +1050,11 @@ fun ChatScreen(
                             }
                         }
                     },
-                    flat = flat,
-                    modifier = outerModifier
+                    modifier = Modifier
+                        .widthIn(max = Chrome.maxReadingWidth)
                         .fillMaxWidth()
-                        .then(if (flat) Modifier else Modifier.padding(horizontal = Chrome.gutter, vertical = 8.dp)),
+                        .padding(horizontal = Chrome.gutter, vertical = 8.dp)
+                        .then(composerBoundsModifier),
                 )
             }
 
@@ -963,8 +1062,9 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(
-                            if (timeline.isEmpty()) tr("新任务")
+                            if (isEmpty) "AndMX"
                             else conversationTitle.ifBlank { projectName.ifBlank { "AndMX" } },
+                            style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
@@ -996,12 +1096,21 @@ fun ChatScreen(
                     IconButton(onClick = { showCommandCenter = true }) {
                         Icon(Icons.Outlined.Search, tr("搜索"))
                     }
-                    IconButton(onClick = {
-                        fileTreeRequestPath = null
-                        fileTreeRequestKey += 1
-                        drawerOpen = true
-                    }) {
-                        Icon(Icons.Outlined.FolderOpen, tr("查看文件"))
+                    if (isEmpty) {
+                        IconButton(onClick = {
+                            settingsInitialPage = SettingsPage.HOME
+                            showSettings = true
+                        }) {
+                            Icon(Icons.Outlined.Settings, tr("设置"))
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            fileTreeRequestPath = null
+                            fileTreeRequestKey += 1
+                            drawerOpen = true
+                        }) {
+                            Icon(Icons.Outlined.FolderOpen, tr("查看文件"))
+                        }
                     }
                     Box {
                         IconButton(onClick = { showActionsMenu = true }) {
@@ -1011,6 +1120,16 @@ fun ChatScreen(
                             expanded = showActionsMenu,
                             onDismissRequest = { showActionsMenu = false },
                         ) {
+                            if (!isEmpty && !restoringConversation) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(tr("在任务中查找")) },
+                                    leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        openFind()
+                                    },
+                                )
+                            }
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text(tr("浏览器")) },
                                 onClick = {
@@ -1018,6 +1137,18 @@ fun ChatScreen(
                                     browserTarget = lastBrowserUrl
                                 },
                             )
+                            if (gitInfo?.isRepo == true) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(tr("Git 操作")) },
+                                    leadingIcon = { Icon(Icons.Outlined.Commit, null) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        dirtyFilesCache = emptyList()
+                                        viewModel.refreshGitInfo()
+                                        showGitActions = true
+                                    },
+                                )
+                            }
                             if (currentConversationId > 0L) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(tr("分享对话")) },
@@ -1043,103 +1174,57 @@ fun ChatScreen(
                             )
                         }
                     }
-                    if (gitInfo?.isRepo == true) {
-                        IconButton(onClick = {
-                            dirtyFilesCache = emptyList()
-                            viewModel.refreshGitInfo()
-                            showGitActions = true
-                        }) {
-                            Icon(Icons.Outlined.Commit, tr("Git 操作"))
+                    if (!isEmpty) {
+                        IconButton(onClick = { showTerminal = !showTerminal }) {
+                            Icon(
+                                Icons.Outlined.Terminal,
+                                if (showTerminal) tr("关闭终端") else tr("终端"),
+                                tint = if (showTerminal) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
                         }
-                    }
-                    IconButton(onClick = { showTerminal = !showTerminal }) {
-                        Icon(
-                            Icons.Outlined.Terminal,
-                            if (showTerminal) tr("关闭终端") else tr("终端"),
-                            tint = if (showTerminal) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                        )
                     }
                 },
             )
 
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             ExtensionSlotHost(ExtensionSlotIds.NAV_PRIMARY, Modifier.fillMaxWidth())
 
-            // ZCode 对齐：无消息时 Composer 居中 + 欢迎语；有消息时 Composer 在底部
-            val isEmpty = timeline.isEmpty()
-
-
-            if (isEmpty) {
-                val starters = remember(
-                    hostPath,
-                    projectName,
-                    gitInfo?.isRepo,
-                    gitInfo?.hasChanges,
-                    gitInfo?.dirtyFileCount,
-                    gitInfo?.ahead,
-                    UiLang.tag,
+            if (restoringConversation) {
+                Box(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    starterSuggestions(
-                        hasWorkspace = hostPath != null,
-                        projectName = projectName,
-                        isGitRepo = gitInfo?.isRepo == true,
-                        hasChanges = gitInfo?.hasChanges == true,
-                        dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
-                        ahead = gitInfo?.ahead ?: 0,
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+            } else if (isEmpty) {
+                Box(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Text(
+                        tr("新任务"),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        modifier = Modifier.padding(bottom = 14.dp),
                     )
                 }
-                EmptyConversationState(
-                    hasWorkspace = hostPath != null,
-                    projectName = projectName,
-                    hostPath = hostPath,
-                    branch = branch,
-                    isGitRepo = gitInfo?.isRepo == true,
-                    hasChanges = gitInfo?.hasChanges == true,
-                    dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
-                    ahead = gitInfo?.ahead ?: 0,
-                    candidates = remember(hostPath) { viewModel.workspaceCandidates() },
-                    onSelectWorkspace = { viewModel.selectProject(it) },
-                    onOpenFolder = { workspacePicker.launch(null) },
-                    onOpenRemote = { showRemoteDialog = true },
-                    onPickBranch = { showBranchDialog = true },
-                    onGitActions = {
-                        dirtyFilesCache = emptyList()
-                        viewModel.refreshGitInfo()
-                        showGitActions = true
-                    },
-                    suggestions = starters,
-                    onPickSuggestion = { inputText = it },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    ComposerBlock(flat = true)
-                }
             } else {
-                val listState = rememberLazyListState()
-                var scrollRestoredFor by remember { mutableStateOf(0L) }
-                LaunchedEffect(currentConversationId, timeline.size) {
-                    if (scrollRestoredFor == currentConversationId) return@LaunchedEffect
-                    if (timeline.isEmpty() && currentConversationId > 0L) return@LaunchedEffect
-                    val saved = scrollMemory.load(currentConversationId)
-                    runCatching {
-                        if (saved != null) listState.scrollToItem(saved.index, saved.offset)
-                        else listState.scrollToItem(0)
-                    }
-                    scrollRestoredFor = currentConversationId
-                }
-                LaunchedEffect(currentConversationId, listState) {
-                    snapshotFlow {
-                        listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-                    }.collectLatest { (index, offset) ->
-                        delay(400)
-                        scrollMemory.save(currentConversationId, index, offset)
-                    }
-                }
-                LaunchedEffect(pendingHistoryJump, timelineReversed) {
+                val viewport = rememberConversationViewport(
+                    currentConversationId, timelineReversed, restoringConversation, scrollMemory,
+                )
+                val listState = viewport.list
+                LaunchedEffect(pendingHistoryJump, viewport.restored) {
                     val id = pendingHistoryJump ?: return@LaunchedEffect
+                    if (!viewport.restored) return@LaunchedEffect
                     val index = timelineReversed.indexOfFirst {
                         it is TimelineItem.Message && it.message.role == "user" && it.message.id == id
                     }
-                    if (index >= 0) listState.scrollAnchorToTop(index)
+                    if (index >= 0) {
+                        viewport.following = false
+                        listState.scrollAnchorToTop(index)
+                    }
                     pendingHistoryJump = null
                 }
                 val userAnchorIndices = remember(timelineReversed) {
@@ -1147,48 +1232,26 @@ fun ChatScreen(
                         if (it is TimelineItem.Message && it.message.role == "user") i else null
                     }
                 }
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                val findTargets = remember(timelineReversed) {
-                    timelineReversed.mapIndexedNotNull { i, item ->
-                        if (item is TimelineItem.Message && item.message.role != "compact") i to item.message else null
+                val findFocusRequester = remember { FocusRequester() }
+                fun moveFindHit(direction: Int) {
+                    if (findHits.isEmpty()) return
+                    selectFindHit(ChatFind.wrap(activeFindIndex + direction, findHits.size))
+                    findTick++
+                }
+                LaunchedEffect(findOpen, focusFindField) {
+                    if (findOpen && focusFindField) findFocusRequester.requestFocus()
+                }
+                LaunchedEffect(findMessageId, findTick, findQuery, viewport.restored) {
+                    if (findMessageId == null || !viewport.restored) return@LaunchedEffect
+                    val index = timelineReversed.indexOfFirst { it.stableId == "m-$findMessageId" }
+                    if (index >= 0) {
+                        viewport.following = false
+                        listState.animateScrollToItem(index)
                     }
-                }
-                val findHits = remember(findTargets, findQuery) {
-                    ChatFind.find(findTargets.map { it.second }, findQuery)
-                }
-                val findMessageIndexById = remember(findTargets) {
-                    findTargets.mapIndexed { mi, p -> p.second.id to mi }.toMap()
-                }
-                var findCurrent by remember { mutableIntStateOf(0) }
-                var findPrevTick by remember { mutableIntStateOf(0) }
-                val findScope = rememberCoroutineScope()
-                val findFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
-                fun jumpToHit(hitIndex: Int) {
-                    val hit = findHits.getOrNull(hitIndex) ?: return
-                    val listIndex = findTargets.getOrNull(hit.messageIndex)?.first ?: return
-                    findScope.launch { listState.animateScrollToItem(listIndex) }
-                }
-                LaunchedEffect(findOpen) {
-                    if (findOpen) runCatching { findFocusRequester.requestFocus() }
-                }
-                LaunchedEffect(findQuery, findOpen) {
-                    findCurrent = 0
-                    if (findOpen && findHits.isNotEmpty()) jumpToHit(0)
-                }
-                LaunchedEffect(findTick) {
-                    if (findTick == 0 || !findOpen || findHits.isEmpty()) return@LaunchedEffect
-                    findCurrent = ChatFind.wrap(findCurrent + 1, findHits.size)
-                    jumpToHit(findCurrent)
-                }
-                LaunchedEffect(findPrevTick) {
-                    if (findPrevTick == 0 || !findOpen || findHits.isEmpty()) return@LaunchedEffect
-                    findCurrent = ChatFind.wrap(findCurrent - 1, findHits.size)
-                    jumpToHit(findCurrent)
                 }
                 if (findOpen) {
                     Row(
                         Modifier
-                            .align(Alignment.TopCenter)
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
@@ -1200,38 +1263,51 @@ fun ChatScreen(
                             onValueChange = { findQuery = it },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (findQuery.isEmpty()) {
+                                        Text(tr("在任务中查找"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    inner()
+                                }
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .focusRequester(findFocusRequester)
+                                .semantics { contentDescription = tr("在任务中查找") }
                                 .onPreviewKeyEvent { event ->
                                     if (event.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
                                         event.key == androidx.compose.ui.input.key.Key.Enter
                                     ) {
-                                        if (event.nativeKeyEvent.isShiftPressed) findPrevTick++ else findTick++
+                                        moveFindHit(if (event.nativeKeyEvent.isShiftPressed) -1 else 1)
                                         true
                                     } else false
                                 },
                         )
                         Text(
-                            text = if (findHits.isEmpty()) "0/0" else "${findCurrent + 1}/${findHits.size}",
+                            text = if (findHits.isEmpty()) "0/0" else "${activeFindIndex + 1}/${findHits.size}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp),
                         )
                         TextButton(
-                            onClick = { findPrevTick++ },
+                            onClick = { moveFindHit(-1) },
                             enabled = findHits.isNotEmpty(),
                         ) { Text(tr("上一个")) }
                         TextButton(
-                            onClick = { findTick++ },
+                            onClick = { moveFindHit(1) },
                             enabled = findHits.isNotEmpty(),
                         ) { Text(tr("下一个")) }
-                        TextButton(onClick = { findOpen = false; findQuery = "" }) { Text(tr("关闭")) }
+                        TextButton(onClick = ::closeFind) { Text(tr("关闭")) }
                     }
                 }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
+                        .nestedScroll(viewport.scrollConnection)
+                        .align(Alignment.TopCenter)
+                        .widthIn(max = Chrome.maxReadingWidth)
                         .fillMaxWidth(),
                     reverseLayout = true,
                 ) {
@@ -1248,7 +1324,7 @@ fun ChatScreen(
                                     }
                                     val findMi = findMessageIndexById[item.message.id]
                                     val bubbleHighlights = if (findOpen && findMi != null) {
-                                        ChatFind.highlightsFor(findHits, findMi, findCurrent)
+                                        ChatFind.highlightsFor(findHits, findMi, activeFindIndex)
                                     } else emptyList()
                                     MessageBubble(
                                         message = item.message,
@@ -1348,30 +1424,29 @@ fun ChatScreen(
                                 is TimelineItem.Tool -> ToolCallCard(
                                     item.tool,
                                     workflowStatus = { viewModel.workflowStatusLine(it) },
+                                    changedPaths = changedPaths,
                                 )
-                                is TimelineItem.ToolGroup -> ToolGroupCard(item.tools)
+                                is TimelineItem.ToolGroup -> ToolGroupCard(
+                                    item.tools,
+                                    workflowStatus = { viewModel.workflowStatusLine(it) },
+                                    changedPaths = changedPaths,
+                                )
                                 is TimelineItem.Reasoning -> ReasoningCard(item.item)
                                 is TimelineItem.Working -> WorkingIndicator(retryStatus)
                                 is TimelineItem.TurnProcess -> TurnProcessRow(
                                     fold = item.fold,
-                                    expanded = item.fold.sortKey in manuallyExpandedFolds,
+                                    expanded = item.fold.sortKey in expandedFolds,
                                     onToggle = {
-                                        manuallyExpandedFolds = if (item.fold.sortKey in manuallyExpandedFolds) {
-                                            manuallyExpandedFolds - item.fold.sortKey
+                                        val key = item.fold.sortKey
+                                        if (key in expandedFolds) {
+                                            manuallyExpandedFolds -= key
+                                            if (key == searchFold) suppressSearchFold = true
                                         } else {
-                                            manuallyExpandedFolds + item.fold.sortKey
+                                            manuallyExpandedFolds += key
                                         }
                                     },
                                 )
-                                is TimelineItem.Approval -> ApprovalTimelineCard(
-                                    item = item.item,
-                                    onAllow = if (item.item.status == "pending") {
-                                        { viewModel.resolveApproval(true) }
-                                    } else null,
-                                    onDeny = if (item.item.status == "pending") {
-                                        { viewModel.resolveApproval(false) }
-                                    } else null,
-                                )
+                                is TimelineItem.Approval -> ApprovalTimelineCard(item.item)
                                 is TimelineItem.SubAgent -> SubAgentTimelineCard(item = item.agent)
                                 is TimelineItem.GoalVerify -> GoalVerifyRow(item = item.item)
                             }
@@ -1403,8 +1478,9 @@ fun ChatScreen(
                         timelineScope.launch {
                             try {
                                 if (clamped == 0) {
-                                    listState.animateScrollToItem(0)
+                                    viewport.latest()
                                 } else {
+                                    viewport.following = false
                                     listState.scrollAnchorToTop(userAnchorIndices[clamped])
                                 }
                             } finally {
@@ -1437,11 +1513,8 @@ fun ChatScreen(
                     )
                 }
                 // ZCode ConversationBackToBottomButton：滚离底部后显示回底按钮。
-                val showBackToBottom by remember {
-                    derivedStateOf {
-                        listState.firstVisibleItemIndex > 0 ||
-                            listState.firstVisibleItemScrollOffset > 200
-                    }
+                val showBackToBottom by remember(viewport) {
+                    derivedStateOf { viewport.restored && !viewport.following && listState.canScrollBackward }
                 }
                 Column(
                     Modifier
@@ -1465,7 +1538,7 @@ fun ChatScreen(
                                 MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
                             )
                             .clickable {
-                                timelineScope.launch { listState.animateScrollToItem(0) }
+                                timelineScope.launch { viewport.latest() }
                             }
                             .padding(horizontal = 12.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1560,7 +1633,10 @@ fun ChatScreen(
                 RewindBar(
                     changes = fileChanges,
                     rewindResult = rewindResult,
-                    onOpen = { viewModel.openFileRewind() },
+                    onOpen = {
+                        changedFileReviewPath = null
+                        viewModel.openFileRewind()
+                    },
                     onDismissResult = { viewModel.clearRewindResult() },
                 )
                 sideChatExcerpt?.let { excerpt ->
@@ -1583,6 +1659,12 @@ fun ChatScreen(
                             viewModel.dismissFileRewind()
                         },
                         onDismiss = { viewModel.dismissFileRewind() },
+                        initialPath = changedFileReviewPath,
+                        canRevert = !isLoading,
+                        onOpenFile = {
+                            viewModel.dismissFileRewind()
+                            ChatActionBus.openFile(it, addContext = false)
+                        },
                     )
                 }
                 if (rewindPickerOpen) {
@@ -1590,32 +1672,6 @@ fun ChatScreen(
                         checkpoints = rewindCheckpoints,
                         onPick = { viewModel.rewindToCheckpoint(it) },
                         onDismiss = { viewModel.dismissRewindPicker() },
-                    )
-                }
-                if (workflowsOpen) {
-                    WorkflowsDialog(
-                        defs = workflowDefs,
-                        runs = workflowRuns,
-                        onPickRun = { viewModel.openWorkflowDetail(it) },
-                        onDismiss = { viewModel.dismissWorkflows() },
-                    )
-                }
-                workflowDetail?.let { snap ->
-                    WorkflowRunDetailDialog(
-                        snapshot = snap,
-                        events = workflowDetailEvents,
-                        openHoles = workflowOpenHoles,
-                        onRefresh = { viewModel.openWorkflowDetail(snap.runId) },
-                        onOpenArtifact = { label, path -> viewModel.openWorkflowArtifact(label, path) },
-                        onCancel = { viewModel.cancelWorkflowRun(it) },
-                        onResume = { viewModel.resumeWorkflowRun(it) },
-                        onDismiss = { viewModel.dismissWorkflowDetail() },
-                    )
-                }
-                workflowArtifactView?.let { artifact ->
-                    WorkflowArtifactDialog(
-                        artifact = artifact,
-                        onDismiss = { viewModel.dismissWorkflowArtifact() },
                     )
                 }
                 modelSwitchGuard?.let { g ->
@@ -1633,24 +1689,22 @@ fun ChatScreen(
                     when (req.kind) {
                         "ask_user" -> AskUserQuestionPanel(
                             request = req,
-                            onSubmit = { viewModel.resolveUserQuestion(it) },
-                            onCancel = { viewModel.resolveApproval(false) },
-                            onSnooze = { viewModel.snoozeUserQuestion() },
+                            onSubmit = { viewModel.resolveUserQuestion(req, it) },
+                            onCancel = { viewModel.resolveApproval(req, false) },
+                            onSnooze = { viewModel.snoozeUserQuestion(req) },
                         )
                         "exit_plan" -> ExitPlanApprovalPanel(
                             request = req,
-                            onAllow = { viewModel.resolveApproval(true) },
-                            onDeny = { viewModel.resolveApproval(false) },
+                            onAllow = { viewModel.resolveApproval(req, true) },
+                            onDeny = { viewModel.resolveApproval(req, false) },
                         )
                         else -> ApprovalBanner(
                             request = req,
-                            onAllow = { viewModel.resolveApproval(true) },
-                            onDeny = { viewModel.resolveApproval(false) },
-                            onScope = { viewModel.resolveApprovalScoped(true, it) },
-                            suggestions = req.suggestions.ifEmpty {
-                                com.andmx.agent.permission.PermissionSuggestions.suggest(req.toolName, req.inputPreview)
-                            },
-                            onAcceptSuggestion = { viewModel.acceptApprovalSuggestion(it) },
+                            onAllow = { viewModel.resolveApproval(req, true) },
+                            onDeny = { viewModel.resolveApproval(req, false) },
+                            onScope = { viewModel.resolveApproval(req, true, it) },
+                            suggestions = req.suggestions,
+                            onAcceptSuggestion = { viewModel.resolveApproval(req, true, suggestion = it) },
                         )
                     }
                 }
@@ -1677,9 +1731,74 @@ fun ChatScreen(
                     )
                 }
 
+            }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 ComposerBlock()
             }
+            if (isEmpty) {
+                val starters = remember(
+                    hostPath,
+                    projectName,
+                    gitInfo?.isRepo,
+                    gitInfo?.hasChanges,
+                    gitInfo?.dirtyFileCount,
+                    gitInfo?.ahead,
+                    UiLang.tag,
+                ) {
+                    starterSuggestions(
+                        hasWorkspace = hostPath != null,
+                        projectName = projectName,
+                        isGitRepo = gitInfo?.isRepo == true,
+                        hasChanges = gitInfo?.hasChanges == true,
+                        dirtyFileCount = gitInfo?.dirtyFileCount ?: 0,
+                        ahead = gitInfo?.ahead ?: 0,
+                    )
+                }
+                WorkbenchHome(
+                    suggestions = starters,
+                    onPickSuggestion = { prompt ->
+                        inputText = if (inputText.isBlank()) prompt else inputText.trimEnd() + "\n\n" + prompt
+                        inputFocus.requestFocus()
+                        keyboard?.show()
+                    },
+                    onFiles = {
+                        filesInitialPath = filesLastPath
+                        showFiles = true
+                    },
+                    onTerminal = { showTerminal = true },
+                    onBrowser = { browserTarget = lastBrowserUrl },
+                    onWorkflows = { viewModel.openWorkflows() },
+                    modifier = Modifier.weight(1.2f),
+                )
+            }
         } // end Column
+
+            if (workflowsOpen) {
+                WorkflowsDialog(
+                    defs = workflowDefs,
+                    runs = workflowRuns,
+                    onPickRun = { viewModel.openWorkflowDetail(it) },
+                    onDismiss = { viewModel.dismissWorkflows() },
+                )
+            }
+            workflowDetail?.let { snap ->
+                WorkflowRunDetailDialog(
+                    snapshot = snap,
+                    events = workflowDetailEvents,
+                    openHoles = workflowOpenHoles,
+                    onRefresh = { viewModel.openWorkflowDetail(snap.runId) },
+                    onOpenArtifact = { label, path -> viewModel.openWorkflowArtifact(label, path) },
+                    onCancel = { viewModel.cancelWorkflowRun(it) },
+                    onResume = { viewModel.resumeWorkflowRun(it) },
+                    onDismiss = { viewModel.dismissWorkflowDetail() },
+                )
+            }
+            workflowArtifactView?.let { artifact ->
+                WorkflowArtifactDialog(
+                    artifact = artifact,
+                    onDismiss = { viewModel.dismissWorkflowArtifact() },
+                )
+            }
 
             if (pendingYoloConfirmation) {
                 YoloModeConfirmDialog(
@@ -1898,158 +2017,6 @@ fun ChatScreen(
     }
 }
 
-/**
- * ZCode 对齐空状态：问候语 + 与 Composer 直接相连的工作区/分支条（左项目、右分支）。
- */
-@Composable
-private fun EmptyConversationState(
-    hasWorkspace: Boolean,
-    projectName: String,
-    hostPath: String?,
-    branch: String,
-    isGitRepo: Boolean,
-    hasChanges: Boolean,
-    dirtyFileCount: Int,
-    ahead: Int = 0,
-    candidates: List<String>,
-    onSelectWorkspace: (String) -> Unit,
-    onOpenFolder: () -> Unit,
-    onOpenRemote: () -> Unit = {},
-    onPickBranch: () -> Unit,
-    onGitActions: () -> Unit = {},
-    suggestions: List<StarterSuggestion> = emptyList(),
-    onPickSuggestion: (String) -> Unit = {},
-    modifier: Modifier = Modifier,
-    composer: @Composable () -> Unit,
-) {
-    // 问候语 + 输入卡片作为同一主体居中。
-    // 键盘只依赖父级连续 safeDrawing，不做可见性分支/布局切换，避免收起时回弹闪一下。
-    val markColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.055f)
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .fillMaxWidth()
-            .padding(horizontal = Chrome.gutter),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 560.dp)
-                .drawBehind { drawEmptyStateMark(markColor) },
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                emptyGreeting(),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            if (hasWorkspace) {
-                Text(
-                    tr(
-                        buildString {
-                            append("开始在 ")
-                            append(projectName)
-                            append(" 项目新建任务")
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 20.dp),
-                )
-            } else {
-                Text(tr("选择一个工作区后开始新任务"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 20.dp),
-                )
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            ) {
-                EmptyWorkspaceHeader(
-                    hasWorkspace = hasWorkspace,
-                    projectName = projectName,
-                    hostPath = hostPath,
-                    branch = branch,
-                    isGitRepo = isGitRepo,
-                    hasChanges = hasChanges,
-                    dirtyFileCount = dirtyFileCount,
-                    ahead = ahead,
-                    candidates = candidates,
-                    onSelectWorkspace = onSelectWorkspace,
-                    onOpenFolder = onOpenFolder,
-                    onOpenRemote = onOpenRemote,
-                    onPickBranch = onPickBranch,
-                    onGitActions = onGitActions,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (suggestions.isNotEmpty()) {
-                    StarterSuggestions(
-                        suggestions = suggestions,
-                        onPick = onPickSuggestion,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                    )
-                }
-                composer()
-            }
-        }
-    }
-}
-
-private fun DrawScope.drawEmptyStateMark(color: Color) {
-    val stroke = 2.dp.toPx()
-    val radius = 120.dp.toPx()
-    val c = Offset(size.width / 2f, 30.dp.toPx())
-    val brush = Brush.verticalGradient(
-        colors = listOf(color, color.copy(alpha = 0f)),
-        startY = c.y - radius,
-        endY = c.y + radius * 0.6f,
-    )
-    drawCircle(brush = brush, radius = radius, center = c, style = Stroke(width = stroke))
-    val arm = radius * 0.42f
-    drawLine(
-        brush = brush,
-        start = Offset(c.x - arm, c.y),
-        end = Offset(c.x + arm, c.y),
-        strokeWidth = stroke,
-        cap = StrokeCap.Round,
-    )
-    drawLine(
-        brush = brush,
-        start = Offset(c.x, c.y - arm),
-        end = Offset(c.x, c.y + arm),
-        strokeWidth = stroke,
-        cap = StrokeCap.Round,
-    )
-}
-
-private fun emptyGreeting(): String {
-    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    return tr(
-        when (hour) {
-            in 5..8 -> tr("早上好呀，新的一天开始啦")
-            in 9..11 -> tr("上午好呀，有什么想让我帮忙的吗")
-            in 12..13 -> tr("中午好呀，要不要先休息一下")
-            in 14..17 -> tr("下午好呀，接下来交给我吧")
-            in 18..22 -> tr("晚上好呀，今天辛苦啦")
-            else -> tr("夜深啦，别忘了照顾好自己哦")
-        },
-    )
-}
-
-/**
- * 文件拖拽的全屏遮罩 + 胶囊提示（ZCode 对齐）。
- *
- * ZCode 桌面端文案：`chat.composer.workspaceFileDragHint` = "松开以引用此文件或目录"。
- * 遮罩只观察不消费指针事件；手指松开（无按压）时回调 [onRelease]。
- */
 @Composable
 private fun FileDragOverlay(
     payload: com.andmx.ui2.files.FileDragBus.Payload,

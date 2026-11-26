@@ -57,7 +57,7 @@ class DesignTokensAssetTest {
         assertEquals(motion.enterMs, obj["enterMs"]!!.jsonPrimitive.content.toInt())
         assertEquals(motion.inkMs, obj["inkMs"]!!.jsonPrimitive.content.toInt())
         val ease = obj["easingCubicBezier"]!!.jsonArray.map { it.jsonPrimitive.double }
-        assertEquals(listOf(0.22, 0.61, 0.36, 1.0), ease)
+        assertEquals(listOf(0.4, 0.0, 0.2, 1.0), ease)
         assertEquals(0.82, obj["springDampingRatio"]!!.jsonPrimitive.double, 0.001)
         assertEquals(380.0, obj["springStiffness"]!!.jsonPrimitive.double, 0.001)
     }
@@ -116,14 +116,15 @@ class DesignTokensAssetTest {
                 ?: error("color not found in Theme.kt: $kotlinName")
             assertEquals(tokenHex.removePrefix("#").uppercase(), match.groupValues[1].takeLast(6).uppercase())
         }
-        assertColor(colors["brand"]!!.jsonPrimitive.content, "ZCodeBrand")
-        assertColor(colors["brandSoft"]!!.jsonPrimitive.content, "ZCodeBrandSoft")
+        assertColor(colors["brand"]!!.jsonPrimitive.content, "WorkspaceInk")
+        assertColor(colors["brandSoft"]!!.jsonPrimitive.content, "WorkspaceSelection")
+        assertColor(colors["accent"]!!.jsonPrimitive.content, "WorkspaceAccent")
         assertColor(colors["success"]!!.jsonPrimitive.content, "ZCodeSuccess")
         assertColor(colors["warning"]!!.jsonPrimitive.content, "ZCodeWarning")
         assertColor(colors["destructive"]!!.jsonPrimitive.content, "ZCodeDestructive")
-        assertColor(colors["light"]!!.jsonObject["background"]!!.jsonPrimitive.content, "ZCodeBgLight")
-        assertColor(colors["dark"]!!.jsonObject["background"]!!.jsonPrimitive.content, "ZCodeBgDark")
-        assertColor(colors["dark"]!!.jsonObject["card"]!!.jsonPrimitive.content, "ZCodeCardDark")
+        assertColor(colors["light"]!!.jsonObject["background"]!!.jsonPrimitive.content, "WorkspaceCanvasLight")
+        assertColor(colors["dark"]!!.jsonObject["background"]!!.jsonPrimitive.content, "WorkspaceCanvasDark")
+        assertColor(colors["dark"]!!.jsonObject["card"]!!.jsonPrimitive.content, "WorkspaceCardDark")
     }
 
     @Test
@@ -149,8 +150,8 @@ class DesignTokensAssetTest {
         assertTrue(assetFile("$base/runtime/session_summary.sh").isFile)
         assertTrue(assetFile("$base/runtime/design_lint.sh").isFile)
         val designDoc = assetFile("$base/DESIGN.md").readText()
-        assertTrue(designDoc.contains("#0EA5E9"))
+        assertTrue(designDoc.contains("#0D0D0D"))
         assertTrue(designDoc.contains("design_lint"))
-        assertTrue(designDoc.contains("cubic-bezier(0.22, 0.61, 0.36, 1)"))
+        assertTrue(designDoc.contains("cubic-bezier(0.4, 0, 0.2, 1)"))
     }
 }

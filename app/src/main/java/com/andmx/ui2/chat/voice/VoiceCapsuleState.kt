@@ -174,12 +174,6 @@ class VoiceCapsuleState(
         }
     }
 
-    fun dismissDownloadPrompt() {
-        if (downloadPhase == WhisperDownloadPhase.DOWNLOADING) return
-        downloadPhase = WhisperDownloadPhase.IDLE
-        downloadProgress = 0f
-    }
-
     fun cancel() {
         session++
         manager.release()

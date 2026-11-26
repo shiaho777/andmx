@@ -70,28 +70,28 @@ private val LightPalette = intArrayOf(
 fun terminalColors(isDark: Boolean): TerminalColors =
     if (isDark) {
         TerminalColors(
-            background = Color(0xFF171717),
-            foreground = Color(0xFFE5E5E5),
-            chrome = Color(0xFF1F1F1F),
-            chromeContent = Color(0xFFE5E5E5),
-            chromeMuted = Color(0xFFA3A3A3),
-            keyBackground = Color(0xFF2A2A2A),
-            keyContent = Color(0xFFD4D4D4),
-            inputBackground = Color(0xFF262626),
-            cursor = Color(0xFFE5E5E5),
+            background = Color(0xFF161616),
+            foreground = Color(0xFFF0F0F0),
+            chrome = Color(0xFF202020),
+            chromeContent = Color(0xFFF0F0F0),
+            chromeMuted = Color(0xFFB5B5B5),
+            keyBackground = Color(0xFF363636),
+            keyContent = Color(0xFFE5E5E5),
+            inputBackground = Color(0xFF2B2B2B),
+            cursor = Color(0xFFF0F0F0),
             palette = DarkPalette,
         )
     } else {
         TerminalColors(
-            background = Color(0xFFFAFAFA),
-            foreground = Color(0xFF1F2328),
-            chrome = Color(0xFFF3F4F6),
-            chromeContent = Color(0xFF1F2328),
-            chromeMuted = Color(0xFF6B7280),
-            keyBackground = Color(0xFFE5E7EB),
-            keyContent = Color(0xFF374151),
-            inputBackground = Color(0xFFEEF0F3),
-            cursor = Color(0xFF0969DA),
+            background = Color(0xFFF8F8F8),
+            foreground = Color(0xFF202020),
+            chrome = Color(0xFFF0F0F0),
+            chromeContent = Color(0xFF202020),
+            chromeMuted = Color(0xFF555555),
+            keyBackground = Color(0xFFE9E9E9),
+            keyContent = Color(0xFF353535),
+            inputBackground = Color(0xFFFFFFFF),
+            cursor = Color(0xFF202020),
             palette = LightPalette,
         )
     }

@@ -4,6 +4,7 @@ import com.andmx.ui2.settings.tr
 
 import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
+import com.andmx.ui2.theme.blockSurface
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -123,8 +124,7 @@ fun StatusCapsule(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f))
+                .blockSurface(shape = Chrome.inset)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
