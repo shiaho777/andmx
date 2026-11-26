@@ -1,5 +1,6 @@
 package com.andmx.ui2.terminal
 
+import com.andmx.term.ExperimentalAlpine
 import com.andmx.ui2.settings.tr
 import com.andmx.ui2.theme.Chrome
 
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -92,9 +95,19 @@ fun TerminalScreen(
     val registry = remember(worktree) { TerminalSessionRegistry.forWorktree(worktree) }
     val sessions = registry.sessions
     val activeIndex = registry.activeIndex
+    val alpineAvailable = remember(context, worktree) {
+        worktree == null && ExperimentalAlpine.isAvailable(context)
+    }
+    var showAlpineOptions by remember { mutableStateOf(false) }
+
+    fun startAlpine(network: Boolean) {
+        registry.newSession(context, alpineNetwork = network)
+        showAlpineOptions = false
+    }
 
     fun newSession() {
-        registry.newSession(context)
+        if (alpineAvailable) showAlpineOptions = true
+        else registry.newSession(context)
     }
 
     fun closeSession(index: Int) {
@@ -103,7 +116,7 @@ fun TerminalScreen(
     }
 
     LaunchedEffect(registry) {
-        registry.ensureSession(context)
+        if (!alpineAvailable) registry.ensureSession(context)
     }
 
     val tabCount = sessions.size
@@ -114,10 +127,24 @@ fun TerminalScreen(
         else -> activeIndex
     }
 
+    if (showAlpineOptions) {
+        AlertDialog(
+            onDismissRequest = { showAlpineOptions = false },
+            title = { Text("Experimental Alpine") },
+            text = { Text("Network access applies to this Alpine session only.") },
+            dismissButton = { TextButton(onClick = { startAlpine(false) }) { Text("Offline") } },
+            confirmButton = { TextButton(onClick = { startAlpine(true) }) { Text("Allow network") } },
+        )
+    }
+
     val active = sessions.getOrNull(selectedTab)
     if (active == null) {
         Box(Modifier.fillMaxSize().background(colors.background), contentAlignment = Alignment.Center) {
-            Text(tr("无终端会话"), color = colors.chromeMuted)
+            if (alpineAvailable) {
+                TextButton(onClick = { showAlpineOptions = true }) { Text("Experimental Alpine") }
+            } else {
+                Text(tr("无终端会话"), color = colors.chromeMuted)
+            }
         }
         return
     }
@@ -128,6 +155,7 @@ fun TerminalScreen(
         modifier = modifier
             .fillMaxSize()
             .background(colors.background)
+            .then(if (alpineAvailable) Modifier.statusBarsPadding() else Modifier)
     ) {
         Row(
             modifier = Modifier
@@ -149,8 +177,12 @@ fun TerminalScreen(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
-            IconButton(onClick = { newSession() }) {
-                Icon(Icons.Outlined.Add, tr("新建终端"), tint = colors.chromeContent)
+            if (alpineAvailable) {
+                TextButton(onClick = { registry.close(selectedTab) }) { Text("End session") }
+            } else {
+                IconButton(onClick = { newSession() }) {
+                    Icon(Icons.Outlined.Add, tr("新建终端"), tint = colors.chromeContent)
+                }
             }
             if (onClose != null) {
                 IconButton(onClick = onClose) {
@@ -209,6 +241,7 @@ fun TerminalScreen(
             colors = colors,
             fontFamily = terminalFontFamily,
             followOutput = followOutput,
+            trimUnusedRows = alpineAvailable,
             modifier = Modifier.weight(1f),
         )
 

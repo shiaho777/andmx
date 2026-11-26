@@ -19,8 +19,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class VideoAttachmentsTest {
     private val clip = VideoAttachment("clip-1", "walkthrough.mp4", "video/mp4", 3)
     private val dataUrl = "data:video/mp4;base64,YWJj"
