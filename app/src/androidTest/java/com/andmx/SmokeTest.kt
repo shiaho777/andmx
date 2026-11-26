@@ -1,5 +1,10 @@
 package com.andmx
 
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.Uri
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
@@ -11,9 +16,11 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.andmx.data.AndmxDatabase
 import com.andmx.data.ConversationEntity
 import com.andmx.data.MessageEntity
+import com.andmx.llm.VideoAttachments
 import com.andmx.llm.provider.ModelDefinition
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ProviderKind
@@ -21,6 +28,7 @@ import com.andmx.settings.ProviderStore
 import com.andmx.settings.SettingsStore
 import com.andmx.ui2.MainActivity2
 import com.andmx.ui2.settings.UiLang
+import java.io.RandomAccessFile
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Before
@@ -135,7 +143,29 @@ class SmokeTest {
             compose.waitUntil(5_000) { compose.onAllNodesWithText("picker-video").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("添加上下文").performClick()
             compose.onNodeWithText("添加视频").assertIsDisplayed()
-            Espresso.pressBack()
+            val oversized = compose.activity.cacheDir.resolve("oversized-picker-fixture.mp4")
+            RandomAccessFile(oversized, "rw").use { it.setLength(VideoAttachments.MAX_FILE_BYTES + 1) }
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val picker = IntentFilter(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                addDataType("video/*")
+            }
+            val monitor = instrumentation.addMonitor(
+                picker,
+                Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(Uri.fromFile(oversized))),
+                true,
+            )
+            try {
+                compose.onNodeWithText("添加视频").performClick()
+                val limit = "每条消息最多 20 MiB 视频"
+                compose.waitUntil(8_000) { compose.onAllNodesWithText(limit).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(limit).assertIsDisplayed()
+                compose.onNodeWithText(oversized.name).assertDoesNotExist()
+                compose.onNodeWithText("知道了").performClick()
+            } finally {
+                instrumentation.removeMonitor(monitor)
+                oversized.delete()
+            }
         } finally {
             runBlocking {
                 settings.update(initial)

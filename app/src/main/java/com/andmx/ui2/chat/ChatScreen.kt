@@ -531,8 +531,10 @@ fun ChatScreen(
                     return@launch
                 }
                 val error = viewModel.composerConfig.value.videoError(attachments.mapNotNull { it.video } + video)
-                if (error == null) attachments = attachments + Attachment(name, uri.toString(), video)
-                else {
+                if (error == null) {
+                    attachments = attachments + Attachment(name, uri.toString(), video)
+                    selectionError = null
+                } else {
                     VideoAttachments.discard(video)
                     selectionError = error
                 }
@@ -1653,28 +1655,6 @@ fun ChatScreen(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = selectionError != null,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                    enter = fadeIn(motion.enter),
-                    exit = fadeOut(motion.enter),
-                ) {
-                    selectionError?.let {
-                        Snackbar(
-                            modifier = Modifier.padding(8.dp),
-                            action = {
-                                androidx.compose.material3.TextButton(
-                                    onClick = { selectionError = null },
-                                ) {
-                                    Text(tr("知道了"))
-                                }
-                            },
-                        ) {
-                            Text(it)
-                        }
-                    }
-                }
-
                 if (compactNotice?.running == true) {
                     CompactMarkerRow(compactNotice?.text ?: tr("正在压缩上下文"))
                 }
@@ -1804,6 +1784,28 @@ fun ChatScreen(
                 }
 
             }
+            AnimatedVisibility(
+                visible = selectionError != null,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                enter = fadeIn(motion.enter),
+                exit = fadeOut(motion.enter),
+            ) {
+                selectionError?.let {
+                    Snackbar(
+                        modifier = Modifier.padding(8.dp),
+                        action = {
+                            androidx.compose.material3.TextButton(
+                                onClick = { selectionError = null },
+                            ) {
+                                Text(tr("知道了"))
+                            }
+                        },
+                    ) {
+                        Text(it)
+                    }
+                }
+            }
+
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 ComposerBlock()
             }
