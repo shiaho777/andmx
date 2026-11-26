@@ -1,103 +1,136 @@
-# AndMX
+<div align="center">
+  <h1>AndMX</h1>
+  <p><img src="app/src/main/res/drawable-nodpi/andmx_block_m_mascot.webp" width="104" alt="AndMX Block M icon"></p>
+  <p><a href="https://github.com/shiaho777/andmx/actions/workflows/ci.yml"><img src="https://github.com/shiaho777/andmx/actions/workflows/ci.yml/badge.svg?branch=main" alt="View the latest AndMX CI build on main"></a></p>
+  <p><strong>An Android coding agent that works directly in your project.</strong></p>
+  <p>Connect a model, ask it to read or edit code, and review proposed changes, terminal output, and file diffs in the same task.</p>
+  <p><a href="#install-and-get-started">Install and get started</a> · <a href="#screenshots">Screenshots</a> · <a href="README.zh-CN.md">简体中文</a></p>
+</div>
 
-Android 原生的 AI 编程 agent。把「能真正改代码、跑命令、操作屏幕的 coding agent」装进手机——不是聊天壳，而是一个自带 Linux 沙盒、真实工具调用、Computer Use 能力的完整 agent。
+## Supported devices
 
-- **包名**：`com.andmx`
-- **SDK**：minSdk 26 / targetSdk 34（`proot` flavor 除外），仅 `arm64-v8a`
-- **语言**：Kotlin + Jetpack Compose，外加少量 C（PTY、exec probe）
-- **版本**：0.1.0
+AndMX runs on **Android 8.0 (API 26) and up**. Standard APK builds target **ARM64 (`arm64-v8a`)**. Choose your build before installing.
 
-## 核心能力
+| Build | Use it for | Execution environment |
+| --- | --- | --- |
+| **Lite** | Reading and editing project files, Git, and the core agent workflow | Android tools and Kotlin/JGit. Targets API 34. |
+| **Proot** | Running a Linux toolchain, shell commands, and builds on the device | A rootless Alpine Linux environment via PRoot. Sideloaded build targeting API 28. The first setup downloads Alpine. |
 
-| 能力 | 说明 |
-|------|------|
-| **Agent 循环** | provider 无关的多步循环：问模型 → 执行工具 → 喂回结果 → 直到模型用纯文本回答；支持并行工具调用、上下文压缩兜底、hooks |
-| **工具系统** | Shell / File / Patch / Git / Browse / ComputerUse / Goal / MCP 等，按风险分级（READ/WRITE/EXECUTE/NETWORK）走批准策略；`shouldDefer` 工具经 ToolSearch 延迟加载，DeferredToolCall 按需执行 |
-| **proot 沙盒** | App 内运行 Linux guest，Alpine rootfs 自动下载，PTY 交互终端，项目目录 bind-mount 到手机真实存储 |
-| **Computer Use** | MediaProjection 截屏 + AccessibilityService 派发手势（tap/swipe/type），构成 screenshot→action→screenshot 纯视觉循环 |
-| **多 Provider** | 统一抽象 OpenAI / Anthropic / GLM(BigModel) / DeepSeek / Ollama / vLLM…，`ProviderKind` → `WireAdapter` 单点分发，reasoning 元数据驱动。已完整实现三套协议：OpenAI Chat Completions、Anthropic Messages 与 OpenAI Responses（`instructions`/`input` items、`function_call(_output)`、`response.*` 类型化 SSE 事件，`store:false` 无状态回放） |
-| **MCP** | 内置 JSON-RPC client，可挂载外部 MCP 服务器作为额外工具 |
+## Screenshots
 
-## 两个构建变体（flavor）
+These screenshots show the Android 15 build from `main` at [`509d1e2`](https://github.com/shiaho777/andmx/commit/509d1e206c30c6310f7c61dab87fdf45bb19c966). The task uses a demo model and a sample project. Select any image to open it at full size.
 
-| flavor | targetSdk | 用途 |
-|--------|-----------|------|
-| `lite` | 34 | 现代 SDK，仅用 Kotlin/JGit 工具，不从 data 目录 exec 原生二进制。Play 友好 |
-| `proot` | 28 | 故意降到 28，让 guest 二进制可以从可写 data 目录被 exec（proot userland）。Sideload 导向 |
+**One task, from request to review.** AndMX reads a validation note, asks before editing, runs a verification command after approval, and opens the resulting diff.
 
-差异源于 Android 对 `targetSdk 29+` 禁止从可写目录 exec 原生二进制（W^X）。`proot` flavor + `vendor/proot/*.deb` + `app/src/main/cpp` + `native/probe.c` 共同构成在 App 内运行 Linux guest 的能力。
+<p align="center">
+  <a href="static/screenshot/conversation.webp"><img width="232" src="static/screenshot/conversation.webp" alt="Completed AndMX task with messages, a tool group and changed files"></a>
+  <a href="static/screenshot/edit-approval.webp"><img width="232" src="static/screenshot/edit-approval.webp" alt="Edit approval with the proposed line change and an Allow once action"></a>
+  <a href="static/screenshot/file-diff.webp"><img width="232" src="static/screenshot/file-diff.webp" alt="Applied file diff with line numbers and a dedicated revert action"></a>
+</p>
 
-## 架构总览
+<details>
+<summary>New task, project and model pickers, sidebar and task search</summary>
 
-按包名分层（`app/src/main/java/com/andmx/`）：
+<p align="center">
+  <a href="static/screenshot/new-task.webp"><img width="232" src="static/screenshot/new-task.webp" alt="New task with project selection, model controls and tool shortcuts"></a>
+  <a href="static/screenshot/project-picker.webp"><img width="232" src="static/screenshot/project-picker.webp" alt="Project picker with local folders and a remote connection entry"></a>
+  <a href="static/screenshot/model-menu.webp"><img width="232" src="static/screenshot/model-menu.webp" alt="Model picker with two demo models and a Manage models entry"></a>
+  <a href="static/screenshot/sidebar.webp"><img width="232" src="static/screenshot/sidebar.webp" alt="Task sidebar with task history and quick actions"></a>
+  <a href="static/screenshot/task-search.webp"><img width="232" src="static/screenshot/task-search.webp" alt="Sidebar search matching text inside a previous task"></a>
+  <a href="static/screenshot/message-match.webp"><img width="232" src="static/screenshot/message-match.webp" alt="Search result revealed inside a previously folded process in the conversation"></a>
+</p>
 
-```
-agent/        agent 循环 + 工具系统（ShellTool/FileTools/PatchTool/GitTool/
-              ComputerUseTool/BrowseTool/GoalTool/McpTool…）+ 批准策略、
-              上下文压缩、hooks、plugins、memory、多 agent
-llm/          LLM 客户端、流式模型、token 跟踪
-llm/provider/ ProviderDefinition / ModelDefinition / ReasoningConfig
-llm/wire/     WireAdapter 三协议实现（OpenAiChat/OpenAiResponses/Anthropic）
-exec/         执行环境抽象（LocalProcess/LocalProot）、PersistentShell、PTY
-exec/proot/   proot runtime、rootfs 安装器
-exec/policy/  ExecPolicy / NetworkPolicy
-computeruse/  AccessibilityService + MediaProjection + ScreenCaptor
-mcp/          JSON-RPC MCP client
-data/         Room 持久化（会话、消息、provider）
-data/rollout/ 会话回放 / 断点续接
-diff/         Diff / Patch 引擎
-term/         终端模拟器
-workspace/    项目管理、change tracker、guest 路径
-settings/     ProviderStore / ProviderSettings
-ui2/          唯一 UI（Material You，对话为唯一主屏），launcher
-```
+</details>
 
-`ui2/`（`MainActivity2`，launcher）是移动优先的极简实现；早期桌面风格的三栏 workbench UI 已删除，不再保留双 UI 切换。
+<details>
+<summary>Command approval, tool output, revert confirmation, terminal and files</summary>
 
-## 构建与运行
+<p align="center">
+  <a href="static/screenshot/command-approval.webp"><img width="232" src="static/screenshot/command-approval.webp" alt="Command approval with its shell command and a one-time permission choice"></a>
+  <a href="static/screenshot/tool-output.webp"><img width="232" src="static/screenshot/tool-output.webp" alt="Expanded tool result with command output, elapsed time and exit code"></a>
+  <a href="static/screenshot/revert-confirmation.webp"><img width="232" src="static/screenshot/revert-confirmation.webp" alt="Confirmation shown before reverting an applied file edit"></a>
+  <a href="static/screenshot/terminal.webp"><img width="232" src="static/screenshot/terminal.webp" alt="Interactive terminal listing files in the sample workspace"></a>
+  <a href="static/screenshot/file-browser.webp"><img width="232" src="static/screenshot/file-browser.webp" alt="Workspace file browser showing the sample documentation files"></a>
+</p>
+
+</details>
+
+<details>
+<summary>Models, command search, browser, settings and dark appearance</summary>
+
+<p align="center">
+  <a href="static/screenshot/models.webp"><img width="232" src="static/screenshot/models.webp" alt="Models settings with the configured demo provider"></a>
+  <a href="static/screenshot/settings.webp"><img width="232" src="static/screenshot/settings.webp" alt="Settings categories for the agent, extensions and workspace"></a>
+  <a href="static/screenshot/command-search.webp"><img width="232" src="static/screenshot/command-search.webp" alt="Command search with actions available from the keyboard or sidebar"></a>
+  <a href="static/screenshot/browser.webp"><img width="232" src="static/screenshot/browser.webp" alt="Built-in browser displaying the AndMX README"></a>
+  <a href="static/screenshot/dark.webp"><img width="232" src="static/screenshot/dark.webp" alt="AndMX task timeline in dark appearance"></a>
+</p>
+
+</details>
+
+## What you can do
+
+| Task | How AndMX helps |
+| --- | --- |
+| **Work in a project** | Open a local directory, reference files with `@`, browse the workspace, and use file-editing and Git tools. Proot adds an on-device Linux shell and PTY terminal. |
+| **Control tool execution** | In **Build** mode, reads run directly while file edits and commands ask for confirmation by default. Inspect the request, allow it once, or manage rules scoped to the task or project. |
+| **Review results** | Expand tool cards to inspect inputs and output, including the exit code for shell runs. Open **File changes** for line-by-line diffs and review tracked changes before confirming a revert. |
+| **Return to a task** | Search task titles and message text from the sidebar, jump to a match inside a folded process, and pick up where you were reading when switching tasks. |
+| **Choose how to connect** | Use a provider or a reachable self-hosted endpoint via OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages. Add tools through MCP, skills, and plugins. Android Use and experimental dynamic workflow tools are available in Settings. |
+
+Track requested features and known issues in the [issue tracker](https://github.com/shiaho777/andmx/issues).
+
+## Install and get started
+
+The repository currently has no published APK on [GitHub Releases](https://github.com/shiaho777/andmx/releases). Build a debug APK from source using **JDK 17**, **Android SDK Platform 34**, **Build-Tools 34.0.0**, **NDK 27.0.12077973**, and **CMake 3.22.1**. Install the SDK tools with Android Studio and set `ANDROID_HOME` or set `sdk.dir` in a local `local.properties`. [Android Studio](https://developer.android.com/studio)
 
 ```bash
-# Debug 构建
-./gradlew assembleLiteDebug      # lite flavor（默认）
-./gradlew assembleProotDebug     # proot flavor（需 sideload）
+git clone https://github.com/shiaho777/andmx.git
+cd andmx
+./gradlew :app:assembleLiteDebug
+```
 
-# 运行单元测试（含 Robolectric；首次运行需联网下载测试依赖）
+| Build | Gradle task | APK under `app/build/outputs/apk/` |
+| --- | --- | --- |
+| Lite | `:app:assembleLiteDebug` | `lite/debug/app-lite-debug.apk` |
+| Proot | `:app:assembleProotDebug` | `proot/debug/app-proot-debug.apk` |
+
+To install over USB on a device with USB debugging enabled, run `./gradlew :app:installLiteDebug` or `./gradlew :app:installProotDebug`. Both builds use the `com.andmx` package name.
+
+1. Open **Settings → Models → Add provider**. Choose the protocol and enter your provider’s base URL and any required API key. Fetch the model list or enter a model ID manually, then save.
+2. In **New task**, select the model and choose a project folder. Android may prompt for all-files access when you open local projects.
+3. Start with a small task, for example, “Read `README.md` and identify the local validation steps.” Keep **Build** mode selected if you want to approve edits and commands as they come up.
+4. For a task that writes files, inspect the proposed change first. After execution, open **File changes** in the task to review the applied diff.
+
+### What leaves the device
+
+Workspace tools and the Proot runtime execute on the device. Model calls send prompts and the context needed for the task, which can include file excerpts and tool output, to your configured provider. Web and MCP tools can contact their own endpoints. Android Use needs screen-capture and accessibility permission for screen capture and interaction. [App permissions](app/src/main/AndroidManifest.xml)
+
+## Contribute and get help
+
+- Report bugs with the app version, Android version, build variant, steps to reproduce, and expected and actual results. **Settings → About → Copy diagnostics** provides the version and device details. Remove credentials and private content from reports and screenshots. [Report an issue](https://github.com/shiaho777/andmx/issues/new)
+- Contributions to Android UI, model adapters, tool behavior, tests, and documentation are welcome. The repository uses Issue-linked PRs into `main` with `CI / build` as its merge gate. [Contribution guide](CONTRIBUTING.md)
+
+<details>
+<summary>Source layout and local tests</summary>
+
+| Location | Responsibility |
+| --- | --- |
+| [`ui2/`](app/src/main/java/com/andmx/ui2) | Native Jetpack Compose workbench, task history, settings and terminal UI |
+| [`agent/`](app/src/main/java/com/andmx/agent), [`llm/`](app/src/main/java/com/andmx/llm) | Agent loop, permission policy, tool registry, model adapters and streaming |
+| [`exec/`](app/src/main/java/com/andmx/exec), [`cpp/`](app/src/main/cpp) | Process execution, PRoot setup and PTY bridge |
+| [`data/`](app/src/main/java/com/andmx/data), [`workspace/`](app/src/main/java/com/andmx/workspace), [`diff/`](app/src/main/java/com/andmx/diff) | Room persistence, project files, change tracking and diff rendering data |
+| [`app/src/test/`](app/src/test), [`app/src/androidTest/`](app/src/androidTest) | Unit and instrumentation tests |
+
+```bash
 ./gradlew :app:testLiteDebugUnitTest
-
-# 安装到已连接设备
-./gradlew installLiteDebug
-
-# 设备/模拟器上的冒烟与回归测试（CI 可加 -PtestAbi=x86_64）
-./gradlew connectedLiteDebugAndroidTest
+./gradlew :app:connectedLiteDebugAndroidTest
 ```
 
-`local.properties` 需配置 Android SDK 路径。
+For an x86_64 test emulator, add `-PtestAbi=x86_64` to the instrumentation command. [CI workflow](.github/workflows/ci.yml) · [Agent instructions](AGENTS.md)
 
-## 技术栈
+</details>
 
-- Kotlin + Jetpack Compose（Material 3 / Material You 动态主题）
-- Hilt（DI）、Room（DB）、DataStore（设置）、kotlinx.serialization、Coroutines
-- NDK 27、CMake（PTY 共享库 `andmxpty`，16KB page-size 兼容）
-- 纯 Kotlin 实现的 Markdown 引擎与 ANSI 终端解析（无第三方 UI 库）
+## License and credits
 
-## 目录结构
-
-```
-app/src/main/java/com/andmx/   Kotlin 源码
-app/src/main/cpp/              pty.c + CMakeLists（PTY 共享库）
-app/src/test/                  单元测试
-native/probe.c                 exec/W^X 探测二进制
-vendor/proot/                  proot .deb（proot flavor 打包用）
-tools/mock_llm_server.py       离线测试用 mock LLM 服务
-```
-
-## 许可
-
-私有项目，未声明开源许可。
-
-## 贡献
-
-交付环：**Issue → PR（base=`main`，`Fixes #N`）→ CI（`CI` / job `build`）→ merge → Issue 关闭**。
-
-详见 [CONTRIBUTING.md](CONTRIBUTING.md)；coding agent 见 [AGENTS.md](AGENTS.md)。
-
+The AndMX repository is publicly visible on GitHub and currently declares no project-wide license. Bundled third-party components retain their own terms. The Proot build uses PRoot and libtalloc packages, and the app includes whisper.cpp for local transcription. [PRoot license](https://github.com/termux/proot/blob/master/COPYING) · [libtalloc package and license](https://github.com/termux/termux-packages/blob/master/packages/libtalloc/build.sh) · [whisper.cpp license](app/src/main/cpp/whisper.cpp/LICENSE)
