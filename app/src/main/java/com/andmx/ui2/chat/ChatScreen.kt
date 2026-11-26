@@ -103,8 +103,11 @@ import com.andmx.ui2.settings.SettingsScreen
 import com.andmx.ui2.terminal.TerminalScreen
 import com.andmx.ui2.terminal.rememberTerminalColors
 import androidx.compose.runtime.snapshotFlow
+import com.andmx.llm.VideoAttachments
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -354,11 +357,15 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
     var draftOwner by remember { mutableStateOf(0L) }
+    val videoImportScope = rememberCoroutineScope()
+    var importingVideo by remember { mutableStateOf(false) }
+    var filePickerOwner by remember { mutableStateOf(0L) }
 
     LaunchedEffect(currentConversationId) {
         if (draftOwner != 0L && draftOwner != currentConversationId) {
             draftStore.save(draftOwner, inputText)
         }
+        if (draftOwner != currentConversationId) attachments = attachments.filter { it.video == null }
         if (currentConversationId > 0L) {
             inputText = draftStore.load(currentConversationId)
         }
@@ -492,12 +499,64 @@ fun ChatScreen(
             attachments = attachments + Attachment(name = attachmentDisplayName(context, uri), uri = uri.toString())
         }
     }
+
+    fun addPickedFile(uri: android.net.Uri, videoOnly: Boolean = false) {
+        val owner = filePickerOwner
+        if (viewModel.currentConversationId.value != owner) return
+        val name = attachmentDisplayName(context, uri)
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        if (!videoOnly && !VideoAttachments.isVideo(name, mime)) {
+            attachments = attachments + Attachment(name, uri.toString())
+            return
+        }
+        if (!viewModel.composerConfig.value.supportsVideo) {
+            selectionError = tr("当前模型或接口不支持视频附件。请选择支持视频的模型。")
+            return
+        }
+        val videoMime = VideoAttachments.mimeFor(name, mime)
+        if (videoMime == null) {
+            selectionError = tr("不支持此视频格式。")
+            return
+        }
+        if (importingVideo) return
+        importingVideo = true
+        videoImportScope.launch {
+            try {
+                val video = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { VideoAttachments.save(context, name, videoMime, it) }
+                        ?: throw java.io.IOException("Cannot open video")
+                }
+                if (viewModel.currentConversationId.value != owner) {
+                    VideoAttachments.discard(video)
+                    return@launch
+                }
+                val error = viewModel.composerConfig.value.videoError(attachments.mapNotNull { it.video } + video)
+                if (error == null) attachments = attachments + Attachment(name, uri.toString(), video)
+                else {
+                    VideoAttachments.discard(video)
+                    selectionError = error
+                }
+            } catch (_: VideoAttachments.TooLarge) {
+                if (viewModel.currentConversationId.value == owner) selectionError = tr("每条消息最多 20 MiB 视频")
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                if (viewModel.currentConversationId.value == owner) selectionError = tr("无法读取附件，请检查文件类型和大小。")
+            } finally {
+                importingVideo = false
+            }
+        }
+    }
+
     val documentPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent(),
     ) { uri ->
-        if (uri != null) {
-            attachments = attachments + Attachment(name = attachmentDisplayName(context, uri), uri = uri.toString())
-        }
+        if (uri != null) addPickedFile(uri)
+    }
+    val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) addPickedFile(uri, videoOnly = true)
     }
 
     // SAF 目录选择器：选择工作区文件夹
@@ -945,11 +1004,15 @@ fun ChatScreen(
                     },
                     onSend = {
                         if (!restoringConversation &&
-                            (inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty())
+                            (importingVideo || inputText.isNotBlank() || attachments.isNotEmpty() || contextChips.isNotEmpty())
                         ) {
-                            viewModel.sendMessage(inputText, attachments = attachments)
-                            inputText = ""
-                            attachments = emptyList()
+                            val videoError = if (importingVideo) tr("正在添加视频，请稍后发送。")
+                                else config.videoError(attachments.mapNotNull { it.video })
+                            if (videoError == null) {
+                                viewModel.sendMessage(inputText, attachments = attachments)
+                                inputText = ""
+                                attachments = emptyList()
+                            } else selectionError = videoError
                         }
                     },
                     guideFollowUps = appSettings.interactionBehavior == "guide" && attachments.isEmpty(),
@@ -977,7 +1040,16 @@ fun ChatScreen(
                         attachments = attachments.filterIndexed { idx, _ -> idx != i }
                     },
                     onAddAttachment = { imagePicker.launch("image/*") },
-                    onAddDocument = { documentPicker.launch("*/*") },
+                    onAddDocument = {
+                        filePickerOwner = currentConversationId
+                        documentPicker.launch("*/*")
+                    },
+                    onAddVideo = if (config.supportsVideo) {
+                        {
+                            filePickerOwner = currentConversationId
+                            videoPicker.launch("video/*")
+                        }
+                    } else null,
                     onPasteClipboardImage = { uri ->
                         val name = uri.lastPathSegment?.substringAfterLast('/') ?: tr("剪贴板图片")
                         attachments = attachments + Attachment(name = name, uri = uri.toString())

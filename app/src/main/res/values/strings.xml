@@ -1421,4 +1421,10 @@
     <string name="str_review_revert_file">"还原此文件"</string>
     <string name="str_review_previous_file">"上一个文件"</string>
     <string name="str_review_next_file">"下一个文件"</string>
+    <string name="str_attachment_add_video">"添加视频"</string>
+    <string name="str_attachment_video_limit">"每条消息最多 20 MiB 视频"</string>
+    <string name="str_attachment_video_model">"当前模型或接口不支持视频附件。请选择支持视频的模型。"</string>
+    <string name="str_attachment_video_format">"不支持此视频格式。"</string>
+    <string name="str_attachment_video_importing">"正在添加视频，请稍后发送。"</string>
+    <string name="str_attachment_video_expired">"视频附件已失效，请重新添加。"</string>
 </resources>

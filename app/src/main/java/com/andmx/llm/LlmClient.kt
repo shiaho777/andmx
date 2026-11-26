@@ -82,7 +82,7 @@ class LlmClient(
     }
 
     private fun doChat(request: ChatRequest): ApiMessage {
-        val body = adapter.encodeRequest(VideoAttachments.project(request.copy(stream = false), def), def)
+        val body = VideoAttachments.requestBody(request.copy(stream = false), def) { adapter.encodeRequest(it, def) }
         val text = doPost(body, stream = false)
         tracker?.let {
             adapter.extractUsage(text)?.let { usage -> it.recordTurn(TokenUsageTracker.parseUsage(usage)) }
@@ -131,7 +131,7 @@ class LlmClient(
     }
 
     private fun doChatStream(request: ChatRequest): Flow<LlmStreamEvent> = flow {
-        val body = adapter.encodeRequest(VideoAttachments.project(request.copy(stream = true), def), def)
+        val body = VideoAttachments.requestBody(request.copy(stream = true), def) { adapter.encodeRequest(it, def) }
         val conn = openConnection(body, stream = true)
         val code = conn.responseCode
         tracker?.updateRateLimit(TokenUsageTracker.parseRateLimit(conn))
@@ -168,7 +168,7 @@ class LlmClient(
     }
 
     /** POST [body] and return the response text (non-streaming). */
-    private fun doPost(body: String, stream: Boolean): String {
+    private fun doPost(body: VideoRequestBody, stream: Boolean): String {
         val conn = openConnection(body, stream)
         val code = conn.responseCode
         tracker?.updateRateLimit(TokenUsageTracker.parseRateLimit(conn))
@@ -188,7 +188,7 @@ class LlmClient(
     }
 
     /** Build and open the HTTP connection with all protocol/provider headers. */
-    private fun openConnection(body: String, stream: Boolean): HttpURLConnection {
+    private fun openConnection(body: VideoRequestBody, stream: Boolean): HttpURLConnection {
         val url = URL(adapter.endpointUrl(def.baseUrl))
         return (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -206,7 +206,13 @@ class LlmClient(
             setRequestProperty("x-codex-installation-id", installationId)
             // Provider-specific custom headers
             def.httpHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
-            outputStream.use { it.write(body.toByteArray()) }
+            body.streamingLength?.let { setFixedLengthStreamingMode(it) }
+            try {
+                outputStream.use(body::writeTo)
+            } catch (failure: Exception) {
+                disconnect()
+                throw failure
+            }
         }
     }
 

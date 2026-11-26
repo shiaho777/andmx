@@ -6,7 +6,10 @@ import com.andmx.llm.provider.ProviderKind
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FilterOutputStream
+import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.Base64
 import java.util.UUID
 
@@ -14,8 +17,8 @@ import java.util.UUID
 data class VideoAttachment(val id: String, val name: String, val mime: String, val bytes: Long)
 
 object VideoAttachments {
-    const val MAX_FILE_BYTES = 12L * 1024 * 1024
-    private const val REQUEST_BYTES = 16L * 1024 * 1024
+    const val MAX_FILE_BYTES = 20L * 1024 * 1024
+    const val MAX_REQUEST_BYTES = MAX_FILE_BYTES
     private val supportedMimeTypes = mapOf(
         "mp4" to "video/mp4",
         "m4v" to "video/mp4",
@@ -27,18 +30,23 @@ object VideoAttachments {
     )
     private val idPattern = Regex("[a-f0-9-]{36}")
     @Volatile private var directory: File? = null
+    @Volatile private var legacyDirectory: File? = null
 
     fun initialize(context: Context) {
-        directory = File(context.filesDir, "video-attachments")
+        directory = File(context.cacheDir, "video-attachments")
+        legacyDirectory = File(context.filesDir, "video-attachments")
     }
 
     fun mimeFor(name: String, mime: String? = null): String? =
         mime?.lowercase()?.takeIf { it in supportedMimeTypes.values }
             ?: supportedMimeTypes[name.substringAfterLast('.', "").lowercase()]
 
+    fun isVideo(name: String, mime: String?): Boolean =
+        mime?.startsWith("video/", ignoreCase = true) == true || mimeFor(name, mime) != null
+
     fun save(context: Context, name: String, mime: String, input: InputStream): VideoAttachment {
-        val root = File(context.filesDir, "video-attachments")
-        check(root.isDirectory || root.mkdirs())
+        val root = File(context.cacheDir, "video-attachments")
+        check(root.mkdirs() || root.isDirectory)
         val id = UUID.randomUUID().toString()
         val file = File(root, id)
         try {
@@ -49,7 +57,7 @@ object VideoAttachments {
                     val count = input.read(buffer)
                     if (count < 0) break
                     bytes += count
-                    require(bytes <= MAX_FILE_BYTES)
+                    if (bytes > MAX_FILE_BYTES) throw TooLarge()
                     output.write(buffer, 0, count)
                 }
             }
@@ -64,20 +72,23 @@ object VideoAttachments {
     fun decode(encoded: String): List<VideoAttachment> =
         runCatching { Json.decodeFromString<List<VideoAttachment>>(encoded) }.getOrDefault(emptyList())
 
-    private fun dataUrl(video: VideoAttachment): String? {
-        val root = directory ?: return null
+    class TooLarge : IOException()
+
+    private fun fileFor(video: VideoAttachment): File? {
         if (!idPattern.matches(video.id) || video.mime !in supportedMimeTypes.values) return null
         if (video.bytes !in 1..MAX_FILE_BYTES) return null
-        return runCatching {
-            val file = File(root, video.id)
-            if (file.canonicalFile.parentFile != root.canonicalFile || file.length() != video.bytes) return null
-            val bytes = ByteArray(video.bytes.toInt())
-            java.io.DataInputStream(file.inputStream()).use { input ->
-                input.readFully(bytes)
-                if (input.read() != -1) return null
-            }
-            "data:${video.mime};base64,${Base64.getEncoder().encodeToString(bytes)}"
-        }.getOrNull()
+        return listOfNotNull(directory, legacyDirectory).firstNotNullOfOrNull { root ->
+            runCatching {
+                val file = File(root, video.id)
+                file.takeIf { it.isFile && it.length() == video.bytes && it.canonicalFile.parentFile == root.canonicalFile }
+            }.getOrNull()
+        }
+    }
+
+    fun isAvailable(video: VideoAttachment): Boolean = fileFor(video) != null
+
+    fun discard(video: VideoAttachment) {
+        fileFor(video)?.delete()
     }
 
     fun supportedBy(provider: ProviderDefinition, model: String): Boolean =
@@ -87,18 +98,21 @@ object VideoAttachments {
     internal fun project(
         request: ChatRequest,
         provider: ProviderDefinition,
-        resolve: (VideoAttachment) -> String? = ::dataUrl,
+        resolve: (VideoAttachment) -> String?,
     ): ChatRequest {
         if (request.messages.none { it.videos.isNotEmpty() }) return request
         val supportsVideo = supportedBy(provider, request.model)
-        var remaining = REQUEST_BYTES
-        val payloads = request.messages.asReversed().map { message ->
-            if (!supportsVideo) return@map emptyList()
+        val start = request.videoStartIndex ?: request.messages.indexOfLast { it.role == "user" }.coerceAtLeast(0)
+        var remaining = MAX_REQUEST_BYTES
+        val payloads = request.messages.mapIndexed { index, message ->
+            if (!supportsVideo || index < start || (message.role != "user" && message.role != "tool")) {
+                return@mapIndexed emptyList()
+            }
             message.videos.mapNotNull { video ->
                 if (video.bytes !in 1..minOf(remaining, MAX_FILE_BYTES)) return@mapNotNull null
                 resolve(video)?.also { remaining -= video.bytes }
             }
-        }.asReversed()
+        }
         val messages = buildList {
             val toolVideos = mutableListOf<String>()
             request.messages.forEachIndexed { index, message ->
@@ -106,8 +120,11 @@ object VideoAttachments {
                 val content = if (urls.size == message.videos.size) {
                     message.content
                 } else {
-                    val hint = if (supportsVideo) "Video unavailable or exceeds the request size limit."
-                    else "This model or endpoint does not accept video attachments."
+                    val hint = when {
+                        index < start -> "Previous video attachment: ${message.videos.joinToString { it.name }}"
+                        !supportsVideo -> "This model or endpoint does not accept video attachments."
+                        else -> "Video unavailable or exceeds the request size limit."
+                    }
                     listOfNotNull(message.content, "[$hint]").joinToString("\n")
                 }
                 if (message.role == "tool") {
@@ -123,5 +140,65 @@ object VideoAttachments {
             }
         }
         return request.copy(messages = messages)
+    }
+
+    internal fun requestBody(
+        request: ChatRequest,
+        provider: ProviderDefinition,
+        encode: (ChatRequest) -> String,
+    ): VideoRequestBody {
+        val parts = mutableListOf<Pair<String, VideoRequestBody.Video>>()
+        val projected = project(request, provider) { video ->
+            val file = fileFor(video) ?: return@project null
+            val marker = UUID.randomUUID().toString()
+            parts += marker to VideoRequestBody.Video(file, video.bytes)
+            "data:${video.mime};base64,$marker"
+        }
+        val json = encode(projected)
+        val videos = parts.mapNotNull { (marker, video) ->
+            json.indexOf(marker).takeIf { it >= 0 }?.let { Triple(it, marker.length, video) }
+        }.sortedBy { it.first }
+        var offset = 0
+        val chunks = videos.map { (index, markerLength, video) ->
+            val prefix = json.substring(offset, index).toByteArray()
+            offset = index + markerLength
+            prefix to video
+        }
+        return VideoRequestBody(chunks, json.substring(offset).toByteArray())
+    }
+}
+
+internal class VideoRequestBody(
+    private val chunks: List<Pair<ByteArray, Video>>,
+    private val tail: ByteArray,
+) {
+    data class Video(val file: File, val bytes: Long)
+
+    val streamingLength: Long? = chunks.takeIf { it.isNotEmpty() }?.sumOf { (prefix, video) ->
+        prefix.size + ((video.bytes + 2) / 3) * 4
+    }?.plus(tail.size)
+
+    fun writeTo(output: OutputStream) {
+        chunks.forEach { (prefix, video) ->
+            output.write(prefix)
+            val target = object : FilterOutputStream(output) {
+                override fun write(bytes: ByteArray, offset: Int, length: Int) = out.write(bytes, offset, length)
+                override fun close() = Unit
+            }
+            video.file.inputStream().use { input ->
+                Base64.getEncoder().wrap(target).use { encoded ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var remaining = video.bytes
+                    while (remaining > 0) {
+                        val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                        if (count < 0) throw IOException("Video attachment changed during upload")
+                        encoded.write(buffer, 0, count)
+                        remaining -= count
+                    }
+                    if (input.read() != -1) throw IOException("Video attachment changed during upload")
+                }
+            }
+        }
+        output.write(tail)
     }
 }
