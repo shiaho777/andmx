@@ -36,6 +36,7 @@ data class ChatRequest(
     val temperature: Double? = null,
     @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     val stream: Boolean = false,
+    @kotlinx.serialization.Transient internal val videoStartIndex: Int? = null,
 )
 
 /**

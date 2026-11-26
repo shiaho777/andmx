@@ -156,6 +156,7 @@ fun Composer(
     onRemoveAttachment: (Int) -> Unit = {},
     onAddAttachment: () -> Unit = {},
     onAddDocument: () -> Unit = {},
+    onAddVideo: (() -> Unit)? = null,
     onPasteClipboardImage: (android.net.Uri) -> Unit = {},
     onInsertMention: () -> Unit = {},
     onInsertConversation: () -> Unit = {},
@@ -562,6 +563,7 @@ fun Composer(
                     PlusMenu(
                         onAddAttachment = onAddAttachment,
                         onAddDocument = onAddDocument,
+                        onAddVideo = onAddVideo,
                         onPasteClipboardImage = onPasteClipboardImage,
                         onInsertMention = onInsertMention,
                         onInsertConversation = onInsertConversation,
@@ -735,6 +737,7 @@ private fun InputHistoryMenu(
 private fun PlusMenu(
     onAddAttachment: () -> Unit,
     onAddDocument: () -> Unit,
+    onAddVideo: (() -> Unit)?,
     onPasteClipboardImage: (android.net.Uri) -> Unit,
     onInsertMention: () -> Unit,
     onInsertConversation: () -> Unit,
@@ -748,6 +751,12 @@ private fun PlusMenu(
             PlusMenuItem(Icons.Outlined.AttachFile, tr("添加图片"), tr("从相册或文件选择图片")) {
                 expanded = false
                 onAddAttachment()
+            }
+            if (onAddVideo != null) {
+                PlusMenuItem(Icons.Outlined.AttachFile, tr("添加视频"), tr("每条消息最多 20 MiB 视频")) {
+                    expanded = false
+                    onAddVideo()
+                }
             }
             PlusMenuItem(
                 Icons.AutoMirrored.Outlined.InsertDriveFile,

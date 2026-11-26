@@ -1421,4 +1421,10 @@
     <string name="str_review_revert_file">"Revert this file"</string>
     <string name="str_review_previous_file">"Previous file"</string>
     <string name="str_review_next_file">"Next file"</string>
+    <string name="str_attachment_add_video">"Add video"</string>
+    <string name="str_attachment_video_limit">"Up to 20 MiB of video per message"</string>
+    <string name="str_attachment_video_model">"This model or endpoint does not support video attachments. Choose a model that supports video."</string>
+    <string name="str_attachment_video_format">"This video format is not supported."</string>
+    <string name="str_attachment_video_importing">"Still adding the video. Wait a moment before sending."</string>
+    <string name="str_attachment_video_expired">"This video attachment is no longer available. Add it again."</string>
 </resources>

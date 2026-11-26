@@ -664,6 +664,7 @@ class AgentEngine(
     }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.loopBody(settings: ProviderSettings, turn: TurnContext) {
+        val activeUserMessage = history.lastOrNull { it.role == "user" }
         // Repair history damaged by an interrupted turn: if the tail is an
         // assistant message with tool_calls but no matching tool results,
         // synthesize "interrupted" results so the model isn't confused.
@@ -823,6 +824,9 @@ class AgentEngine(
                 messages = requestMessages,
                 tools = toolsForRequest,
                 reasoningEffort = reasoningFor(settings, turn),
+                videoStartIndex = activeUserMessage?.let { user ->
+                    requestMessages.indexOfFirst { it === user }.takeIf { it >= 0 } ?: requestMessages.size
+                },
             )
 
             // Stream with retry: a transient stream break / empty reply shouldn't

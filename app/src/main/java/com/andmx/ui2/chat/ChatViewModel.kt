@@ -26,6 +26,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import com.andmx.llm.VideoAttachment
+import com.andmx.llm.VideoAttachments
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -215,6 +217,20 @@ class ChatViewModel @Inject constructor(
             }
 
         val execMode: ExecMode get() = ExecMode.from(settings.approvalMode)
+
+        val supportsVideo: Boolean
+            get() {
+                val provider = providers.firstOrNull { it.id == settings.activeProviderId && it.enabled } ?: primary
+                return provider != null && settings.model.isNotBlank() && VideoAttachments.supportedBy(provider, settings.model)
+            }
+
+        fun videoError(videos: List<VideoAttachment>): String? = when {
+            videos.isEmpty() -> null
+            !supportsVideo -> tr("当前模型或接口不支持视频附件。请选择支持视频的模型。")
+            videos.sumOf { it.bytes } > VideoAttachments.MAX_REQUEST_BYTES -> tr("每条消息最多 20 MiB 视频")
+            videos.any { !VideoAttachments.isAvailable(it) } -> tr("视频附件已失效，请重新添加。")
+            else -> null
+        }
     }
 
     val planOverlayActive: StateFlow<Boolean> = controller.planOverlayActive
@@ -1036,6 +1052,10 @@ class ChatViewModel @Inject constructor(
         val images = resolvedAttachments.mapNotNull { it?.imageDataUrl } +
             attachments.mapNotNull { it.uri.takeIf { uri -> uri.startsWith("data:image") } }
         val videos = resolvedAttachments.mapNotNull { it?.video } + attachments.mapNotNull { it.video }
+        composerConfig.value.videoError(videos)?.let {
+            _error.value = it
+            return
+        }
         val pending = QueuedMessage(withContext, images, videos)
         if (compactJob?.isActive == true) {
             _queue.value = _queue.value + pending
@@ -2646,6 +2666,7 @@ class ChatViewModel @Inject constructor(
     private fun drainQueue() {
         _steeringMessage.value = null
         val next = _queue.value.firstOrNull() ?: return
+        if (pauseForVideoError(next)) return
         _queue.value = _queue.value.drop(1)
         persistQueue()
         runTurn(next.text, next.images, videos = next.videos)
@@ -2660,6 +2681,13 @@ class ChatViewModel @Inject constructor(
 
     private fun pauseQueue(reason: QueuePause) {
         if (_queue.value.isNotEmpty()) _queuePaused.value = reason
+    }
+
+    private fun pauseForVideoError(item: QueuedMessage): Boolean {
+        val error = composerConfig.value.videoError(item.videos) ?: return false
+        _error.value = error
+        pauseQueue(QueuePause.ERROR)
+        return true
     }
 
     fun removeFromQueue(index: Int) {
@@ -2677,6 +2705,7 @@ class ChatViewModel @Inject constructor(
 
     fun sendQueuedNow(index: Int) {
         val item = _queue.value.getOrNull(index) ?: return
+        if (pauseForVideoError(item)) return
         val id = _currentConversationId.value
         if (compactJob?.isActive == true || (_isLoading.value || controller.isTurnRunning(id)) &&
             (item.images.isNotEmpty() || item.videos.isNotEmpty())
