@@ -298,27 +298,19 @@ fun ConversationDrawer(
                             guestRootPath = projectManager.guestMountPath,
                         )
                     } else {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .padding(top = 12.dp, bottom = 6.dp),
-                    ) {
-                        if (!showArchived) {
+                    if (!showArchived && !searchOpen) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                                .padding(top = 12.dp, bottom = 6.dp),
+                        ) {
                             NewTaskButton(onClick = ::newTask)
                             Spacer(Modifier.height(2.dp))
                             DrawerQuickAction(
                                 icon = Icons.Outlined.Search,
                                 label = tr("搜索任务"),
-                                onClick = {
-                                    if (searchOpen && !showArchived) {
-                                        searchFocus.requestFocus()
-                                        keyboard?.show()
-                                    } else {
-                                        showArchived = false
-                                        searchOpen = true
-                                    }
-                                },
+                                onClick = { searchOpen = true },
                             )
                             DrawerQuickAction(
                                 icon = Icons.Outlined.Search,

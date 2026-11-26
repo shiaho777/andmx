@@ -54,6 +54,7 @@ class SmokeTest {
             .assertIsDisplayed()
             .performTextInput("offline-smoke-no-matching-task")
         compose.onNodeWithContentDescription("清除搜索").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("关闭搜索").assertIsDisplayed().performClick()
 
         compose.onNodeWithText("搜索命令").performClick()
         compose.onNode(hasSetTextAction() and hasText("搜索命令、设置与入口…"))
