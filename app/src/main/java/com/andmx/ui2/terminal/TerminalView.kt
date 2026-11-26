@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -44,21 +43,23 @@ fun TerminalView(
     colors: TerminalColors = rememberTerminalColors(),
     fontFamily: FontFamily = FontFamily.Monospace,
     styledLines: List<List<StyledSpan>> = emptyList(),
+    followOutput: Boolean = true,
 ) {
     val listState = rememberLazyListState()
     val hScroll = rememberScrollState()
     var fontSize by remember { mutableFloatStateOf(12f) }
 
-    val lines: List<AnnotatedString> = remember(styledLines, coloredLines, screen, colors) {
-        when {
-            styledLines.isNotEmpty() -> styledLines.map { buildStyledLine(it, colors) }
-            coloredLines.isNotEmpty() -> coloredLines.map { buildColoredLine(it, colors) }
-            else -> splitTerminalLines(screen).map { AnnotatedString(it) }
-        }
+    val plainLines = remember(styledLines.isEmpty(), coloredLines.isEmpty(), screen) {
+        if (styledLines.isEmpty() && coloredLines.isEmpty()) splitTerminalLines(screen) else emptyList()
+    }
+    val lineCount = when {
+        styledLines.isNotEmpty() -> styledLines.size
+        coloredLines.isNotEmpty() -> coloredLines.size
+        else -> plainLines.size
     }
 
-    LaunchedEffect(screen, lines.size) {
-        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+    LaunchedEffect(followOutput, screen, lineCount) {
+        if (followOutput && lineCount > 0) listState.scrollToItem(lineCount - 1)
     }
 
     Box(
@@ -75,7 +76,17 @@ fun TerminalView(
     ) {
         SelectionContainer {
             LazyColumn(state = listState) {
-                itemsIndexed(lines, key = { index, _ -> index }) { _, line ->
+                items(lineCount, key = { it }) { index ->
+                    val styled = styledLines.getOrNull(index)
+                    val colored = coloredLines.getOrNull(index)
+                    val plain = plainLines.getOrNull(index)
+                    val line = remember(styled, colored, plain, colors) {
+                        when {
+                            styled != null -> buildStyledLine(styled, colors)
+                            colored != null -> buildColoredLine(colored, colors)
+                            else -> AnnotatedString(plain.orEmpty())
+                        }
+                    }
                     Text(
                         text = line,
                         fontFamily = fontFamily,

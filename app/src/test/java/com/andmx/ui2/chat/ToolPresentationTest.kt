@@ -7,6 +7,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ToolPresentationTest {
+    @Test
+    fun separatesTerminalResultAndOnlyRecognizesItsFinalMarker() {
+        assertEquals(
+            ToolPresentation.ExecutionOutput("unit tests green", 0),
+            ToolPresentation.executionOutput("unit tests green\r\n[exit=0]\r\n"),
+        )
+        assertEquals(
+            ToolPresentation.ExecutionOutput("[exit=7]\ncontinued", null),
+            ToolPresentation.executionOutput("[exit=7]\ncontinued"),
+        )
+        assertEquals(ToolPresentation.Status.WAITING, ToolPresentation.status(tc(name = "Bash", running = true).copy(awaitingApproval = true)))
+    }
 
     private fun tc(
         name: String = "Bash",
@@ -99,6 +111,7 @@ class ToolPresentationTest {
     @Test
     fun collapsibleDefaults() {
         assertFalse(ToolPresentation.isCollapsible(tc(name = "Read")))
+        assertTrue(ToolPresentation.isCollapsible(tc(name = "Read", error = true)))
         // ZCode ask-question：等待中单行不展开，完成后可展开回看问答。
         assertFalse(ToolPresentation.isCollapsible(tc(name = "AskUserQuestion", running = true)))
         assertTrue(ToolPresentation.isCollapsible(tc(name = "AskUserQuestion")))
@@ -111,6 +124,7 @@ class ToolPresentationTest {
         val args = """{"todos":[{"content":"a","status":"completed"},{"content":"b","status":"pending"}]}"""
         assertEquals("1/2", ToolPresentation.secondary(tc(name = "TodoWrite", args = args)))
         assertEquals("1/2", ToolPresentation.secondary(tc(name = "TodoWrite", args = args, running = true)))
+        assertEquals("1/2", ToolPresentation.secondary(tc(name = "update_plan", args = args.replace("todos", "steps"))))
         assertNull(ToolPresentation.secondary(tc(name = "TodoWrite", args = """{"todos":[]}""")))
     }
 

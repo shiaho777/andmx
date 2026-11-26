@@ -6,16 +6,14 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import com.andmx.ui2.theme.AndMXType
 import com.andmx.ui2.theme.Chrome
 import com.andmx.ui2.theme.LocalMotion
+import com.andmx.ui2.theme.workspaceLinkColor
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,6 +38,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -52,6 +51,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageBitmap
@@ -60,19 +61,22 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.border
@@ -84,6 +88,7 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.text.style.TextAlign
 import com.andmx.agent.ToolArgs
 import com.andmx.diff.DiffLine
+import com.andmx.workspace.GuestPaths
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -94,39 +99,35 @@ private val prettyJson = Json { prettyPrint = true }
 fun ToolCallCard(
     toolCall: ToolCall,
     workflowStatus: (suspend (String) -> String?)? = null,
+    nested: Boolean = false,
+    changedPaths: List<String> = emptyList(),
 ) {
     val isEditTool = ToolPresentation.isEditTool(toolCall.name)
     val collapsible = ToolPresentation.isCollapsible(toolCall)
-    var expanded by remember(toolCall.id) {
-        mutableStateOf(ToolPresentation.defaultExpanded(toolCall))
+    val activelyRunning = toolCall.isRunning && !toolCall.awaitingApproval
+    var autoExpanded by remember(toolCall.id) {
+        mutableStateOf(collapsible && !toolCall.awaitingApproval && ToolPresentation.defaultExpanded(toolCall))
     }
-    var userToggled by remember(toolCall.id) { mutableStateOf(false) }
-    var wasRunning by remember(toolCall.id) { mutableStateOf(toolCall.isRunning) }
-    var contentMounted by remember(toolCall.id) { mutableStateOf(expanded) }
+    var manualExpanded by rememberSaveable(toolCall.id) { mutableStateOf<Boolean?>(null) }
+    val expanded = manualExpanded ?: autoExpanded
+    var wasRunning by remember(toolCall.id) { mutableStateOf(activelyRunning) }
 
-    LaunchedEffect(toolCall.isRunning, toolCall.isError, isEditTool) {
-        if (userToggled || !collapsible) {
-            wasRunning = toolCall.isRunning
+    LaunchedEffect(toolCall.isRunning, toolCall.awaitingApproval, toolCall.isError, isEditTool) {
+        if (manualExpanded != null || !collapsible) {
+            wasRunning = activelyRunning
             return@LaunchedEffect
         }
-        if (toolCall.isRunning || toolCall.isError) {
-            expanded = true
+        if (toolCall.awaitingApproval) {
+            autoExpanded = false
+        } else if (activelyRunning || toolCall.isError) {
+            autoExpanded = true
         } else if (wasRunning) {
             if (!isEditTool) {
                 delay(300)
-                if (!userToggled) expanded = false
+                if (manualExpanded == null) autoExpanded = false
             }
         }
-        wasRunning = toolCall.isRunning
-    }
-
-    LaunchedEffect(expanded) {
-        if (expanded) {
-            contentMounted = true
-        } else {
-            delay(220)
-            if (!expanded) contentMounted = false
-        }
+        wasRunning = activelyRunning
     }
 
     val editPreview = remember(toolCall.id, toolCall.name, toolCall.args) {
@@ -135,15 +136,10 @@ fun ToolCallCard(
     val todoItems = remember(toolCall.id, toolCall.args) { ToolPresentation.todoItems(toolCall) }
     val family = ToolPresentation.family(toolCall.name)
     val canonicalName = ToolArgs.canonical(toolCall.name)
-    val kindLabel = if (editPreview != null) {
+    val kindLabel = if (editPreview != null && !toolCall.awaitingApproval && !toolCall.isError) {
         editKindLabel(editPreview.operation, toolCall.isRunning, toolCall.isError)
     } else {
         ToolPresentation.kindLabel(toolCall)
-    }
-    val summary = if (editPreview != null) {
-        fileNameOf(editPreview.path).ifBlank { ToolPresentation.summary(toolCall) }
-    } else {
-        ToolPresentation.summary(toolCall)
     }
     val secondary = if (editPreview != null) {
         pathDirHint(editPreview.path)
@@ -157,50 +153,55 @@ fun ToolCallCard(
         label = "toolChevron",
     )
 
-    val headerInteraction = remember { MutableInteractionSource() }
-    val pressed by headerInteraction.collectIsPressedAsState()
-    val headerBg = if (pressed) {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
-    } else {
-        Color.Transparent
+    val actions = remember(toolCall.id, toolCall.name, toolCall.args, toolCall.output, toolCall.isError) {
+        ToolPresentation.actions(toolCall)
+    }
+    val openFile = if (!collapsible && !toolCall.isRunning) {
+        actions.filterIsInstance<ToolPresentation.Action.OpenFile>().firstOrNull()
+    } else null
+    val summary = when {
+        editPreview != null && editPreview.path.isNotBlank() -> fileNameOf(editPreview.path)
+        openFile != null && canonicalName in setOf("read", "list") -> fileNameOf(openFile.path)
+        else -> ToolPresentation.summary(toolCall)
     }
 
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = Chrome.gutter, vertical = 1.dp),
+            .padding(horizontal = if (nested) 0.dp else Chrome.gutter),
     ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(headerBg)
-                .clickable(enabled = collapsible, interactionSource = headerInteraction, indication = null) {
-                    userToggled = true
-                    expanded = !expanded
+            modifier = when {
+                collapsible -> Modifier.processDisclosure(expanded) {
+                    manualExpanded = !expanded
                 }
-                .padding(vertical = 5.dp, horizontal = if (collapsible) 2.dp else 0.dp),
+                openFile != null -> Modifier
+                    .fillMaxWidth()
+                    .clip(Chrome.control)
+                    .clickable(role = Role.Button, onClickLabel = openFile.label) { ChatActionBus.openFile(openFile.path) }
+                else -> Modifier.fillMaxWidth()
+            }.heightIn(min = 44.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                family.icon,
+                if (toolCall.awaitingApproval) Icons.Outlined.Shield else family.icon,
                 null,
                 Modifier.size(15.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
             )
             Spacer(Modifier.width(8.dp))
-            if (toolCall.isRunning) {
-                GradientRunningLabel(kindLabel)
+            if (activelyRunning) {
+                RunningLabel(kindLabel)
             } else {
                 Text(
                     text = kindLabel,
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),
-                    color = if (toolCall.isError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                    color = when {
+                        toolCall.isError -> MaterialTheme.colorScheme.error
+                        toolCall.awaitingApproval -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
                     },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -212,7 +213,7 @@ fun ToolCallCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                 )
-                if (toolCall.isRunning) {
+                if (activelyRunning) {
                     // ZCode QueuedSummaryContent：运行中摘要变化时滚动切换。
                     AnimatedContent(
                         targetState = summary,
@@ -223,7 +224,7 @@ fun ToolCallCard(
                         Text(
                             text = s,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
+                            color = if (openFile != null) workspaceLinkColor() else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -232,7 +233,7 @@ fun ToolCallCard(
                     Text(
                         text = summary,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
+                        color = if (openFile != null) workspaceLinkColor() else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
@@ -260,7 +261,7 @@ fun ToolCallCard(
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
-            if (toolCall.isRunning) {
+            if (activelyRunning) {
                 CircularProgressIndicator(
                     Modifier
                         .padding(start = 8.dp)
@@ -281,73 +282,38 @@ fun ToolCallCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
             }
-        }
-
-        val actions = remember(toolCall.id, toolCall.name, toolCall.args, toolCall.output) {
-            ToolPresentation.actions(toolCall)
-        }
-        if (actions.isNotEmpty() && (expanded || toolCall.isRunning)) {
-            val clipboard = LocalClipboardManager.current
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 23.dp, bottom = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                actions.forEach { action ->
-                    TextButton(
-                        onClick = {
-                            when (action) {
-                                is ToolPresentation.Action.OpenFile -> ChatActionBus.openFile(action.path)
-                                is ToolPresentation.Action.OpenTerminal -> ChatActionBus.openTerminal()
-                                is ToolPresentation.Action.OpenUrl -> ChatActionBus.openUrl(action.url)
-                                is ToolPresentation.Action.Copy -> clipboard.setText(AnnotatedString(action.text))
-                            }
-                        },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = 8.dp,
-                            vertical = 0.dp,
-                        ),
-                    ) {
-                        Icon(
-                            when (action) {
-                                is ToolPresentation.Action.OpenFile -> Icons.Outlined.Description
-                                is ToolPresentation.Action.OpenTerminal -> Icons.Outlined.Terminal
-                                is ToolPresentation.Action.OpenUrl -> Icons.AutoMirrored.Outlined.OpenInNew
-                                is ToolPresentation.Action.Copy -> Icons.Outlined.ContentCopy
-                            },
-                            null,
-                            Modifier.size(13.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            action.label,
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = AndMXType.cardMeta.fontSize),
-                        )
-                    }
-                }
+            if (openFile != null) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.OpenInNew,
+                    null,
+                    Modifier.padding(start = 6.dp).size(14.dp),
+                    tint = workspaceLinkColor(),
+                )
             }
         }
 
         AnimatedVisibility(
-            visible = expanded && contentMounted,
+            visible = expanded && collapsible,
             enter = motion.riseIn(),
             exit = motion.riseOut(),
         ) {
             Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 23.dp, top = 2.dp, bottom = 6.dp),
+                Modifier.toolDetailsRail().padding(top = 2.dp, bottom = 4.dp),
             ) {
                 if (editPreview != null && editPreview.lines.isNotEmpty()) {
+                    val path = editPreview.path
+                    val recorded = !toolCall.isRunning && !toolCall.isError &&
+                        changedPaths.any { GuestPaths.same(it, path) }
                     InlineEditDiffPreview(
                         preview = editPreview,
-                        isRunning = toolCall.isRunning,
-                        onOpen = {
-                            val p = editPreview.path
-                            if (p.isNotBlank()) ChatActionBus.openFile(p)
-                        },
+                        isRunning = activelyRunning,
+                        actionLabel = if (recorded) tr("查看改动") else tr("打开文件"),
+                        onOpen = if (!toolCall.isRunning && path.isNotBlank()) {
+                            {
+                                if (recorded) ChatActionBus.reviewFileChange(path)
+                                else ChatActionBus.openFile(path)
+                            }
+                        } else null,
                     )
                     if (!toolCall.output.isNullOrBlank() && toolCall.isError) {
                         Spacer(Modifier.height(8.dp))
@@ -435,7 +401,7 @@ fun ToolCallCard(
                         if (toolCall.args.isNotBlank() && toolCall.args != "{}") {
                             MetaBlock(
                                 title = "参数",
-                                body = prettyArgs(toolCall.args),
+                                body = prettyToolArguments(toolCall.args),
                             )
                             if (!toolCall.output.isNullOrBlank() || toolCall.isRunning) {
                                 Spacer(Modifier.height(8.dp))
@@ -470,9 +436,68 @@ fun ToolCallCard(
                     Spacer(Modifier.height(8.dp))
                     ScreenshotStrip(toolCall.imageUrls.orEmpty())
                 }
+                if (actions.isNotEmpty()) ToolDetailActions(actions)
             }
         }
     }
+}
+
+@Composable
+private fun ToolDetailActions(actions: List<ToolPresentation.Action>) {
+    val clipboard = LocalClipboardManager.current
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        actions.forEach { action ->
+            TextButton(
+                onClick = {
+                    when (action) {
+                        is ToolPresentation.Action.OpenFile -> ChatActionBus.openFile(action.path)
+                        is ToolPresentation.Action.OpenTerminal -> ChatActionBus.openTerminal()
+                        is ToolPresentation.Action.OpenUrl -> ChatActionBus.openUrl(action.url)
+                        is ToolPresentation.Action.Copy -> clipboard.setText(AnnotatedString(action.text))
+                    }
+                },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) {
+                Icon(
+                    when (action) {
+                        is ToolPresentation.Action.OpenFile -> Icons.Outlined.Description
+                        is ToolPresentation.Action.OpenTerminal -> Icons.Outlined.Terminal
+                        is ToolPresentation.Action.OpenUrl -> Icons.AutoMirrored.Outlined.OpenInNew
+                        is ToolPresentation.Action.Copy -> Icons.Outlined.ContentCopy
+                    },
+                    null,
+                    Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(action.label, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+internal fun Modifier.processDisclosure(expanded: Boolean, onToggle: () -> Unit): Modifier =
+    fillMaxWidth()
+        .clip(Chrome.control)
+        .semantics { stateDescription = tr(if (expanded) "已展开" else "已折叠") }
+        .clickable(
+            role = Role.Button,
+            onClickLabel = tr(if (expanded) "收起详情" else "展开详情"),
+            onClick = onToggle,
+        )
+
+@Composable
+private fun Modifier.toolDetailsRail(): Modifier {
+    val color = MaterialTheme.colorScheme.outlineVariant
+    return fillMaxWidth()
+        .padding(start = 11.dp)
+        .drawBehind {
+            val x = if (layoutDirection == LayoutDirection.Ltr) 0.5.dp.toPx() else size.width - 0.5.dp.toPx()
+            drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1.dp.toPx())
+        }
+        .padding(start = 14.dp)
 }
 
 /** 专属卡：workflow/cron/webfetch/search 工具的结构化字段行 + 输出。 */
@@ -541,7 +566,7 @@ private fun StructuredToolCard(
                 Spacer(Modifier.height(8.dp))
             }
         } else if (toolCall.args.isNotBlank() && toolCall.args != "{}") {
-            MetaBlock(title = "参数", body = prettyArgs(toolCall.args))
+            MetaBlock(title = "参数", body = prettyToolArguments(toolCall.args))
             if (!toolCall.output.isNullOrBlank() || toolCall.isRunning) {
                 Spacer(Modifier.height(8.dp))
             }
@@ -632,6 +657,12 @@ private fun ExecuteToolCard(toolCall: ToolCall) {
     val command = remember(toolCall.id, toolCall.name, toolCall.args) {
         ToolArgs.shellCommand(toolCall.name, toolCall.args)
     }
+    val output = remember(toolCall.output, toolCall.isRunning) {
+        val clean = stripAnsi(toolCall.output.orEmpty())
+        if (toolCall.isRunning) ToolPresentation.ExecutionOutput(clean, null)
+        else ToolPresentation.executionOutput(clean)
+    }
+    val clipboard = LocalClipboardManager.current
     Column(
         Modifier
             .fillMaxWidth()
@@ -672,21 +703,47 @@ private fun ExecuteToolCard(toolCall: ToolCall) {
                 Spacer(Modifier.height(6.dp))
             }
         }
+        Row(
+            Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                tr("输出"),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+            )
+            output.exitCode?.let { exitCode ->
+                Text(
+                    "${tr("退出码")} $exitCode",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (exitCode == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                )
+            }
+            if (toolCall.durationMs > 0L) {
+                Text(formatDurationMs(toolCall.durationMs), style = MaterialTheme.typography.labelSmall)
+            }
+            if (output.text.isNotBlank()) {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(output.text)) }) {
+                    Text(tr("复制输出"))
+                }
+            }
+        }
         when {
-            !toolCall.output.isNullOrBlank() -> FollowableOutputText(
-                text = stripAnsi(toolCall.output.orEmpty()).take(12000),
-                following = toolCall.isRunning,
+            output.text.isNotBlank() -> FollowableOutputText(
+                text = output.text,
+                following = toolCall.isRunning && !toolCall.awaitingApproval,
                 emphasize = toolCall.isError,
                 maxHeight = 96.dp,
                 fadeColor = MaterialTheme.colorScheme.surface,
             )
+            toolCall.awaitingApproval -> Text(tr("等待确认"), style = MaterialTheme.typography.bodySmall)
             toolCall.isRunning -> Text(tr("执行中…"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
             )
-            toolCall.isError -> Text(tr("无输出"),
+            else -> Text(tr("无输出"),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
-                color = MaterialTheme.colorScheme.error,
+                color = if (toolCall.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -819,38 +876,46 @@ private fun FollowableOutputText(
             prevScroll = v
         }
     }
-    Box(modifier.fillMaxWidth()) {
-        Text(
-            text = display,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                fontSize = AndMXType.cardMeta.fontSize,
-                lineHeight = 16.sp,
-            ),
-            color = if (emphasize) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = maxHeight)
-                .verticalScroll(scroll),
-        )
-        if (scroll.value > 8) {
-            Box(
-                Modifier
+    Column(modifier.fillMaxWidth()) {
+        Box {
+            Text(
+                text = display,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                    fontSize = AndMXType.cardMeta.fontSize,
+                    lineHeight = 16.sp,
+                ),
+                color = if (emphasize) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
+                },
+                modifier = Modifier
                     .fillMaxWidth()
-                    .height(14.dp)
-                    .align(Alignment.TopCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(fadeColor.copy(alpha = 0.92f), Color.Transparent),
-                        ),
-                    ),
+                    .heightIn(max = maxHeight)
+                    .verticalScroll(scroll),
             )
+            if (scroll.value > 8) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(14.dp)
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(fadeColor.copy(alpha = 0.92f), Color.Transparent),
+                            ),
+                        ),
+                )
+            }
         }
-    }
+        if (following && frozen != null) {
+            TextButton(onClick = {
+                prevScroll = scroll.value
+                frozen = null
+            }) { Text(tr("继续跟随")) }
+        }
+        }
 }
 
 private val SOURCE_URL_RE = Regex("""https?://[^\s"'()\[\]<>]+""")
@@ -1024,35 +1089,17 @@ private fun MetaBlock(
 }
 
 @Composable
-private fun GradientRunningLabel(text: String) {
-    val infinite = rememberInfiniteTransition(label = "tool-run")
-    val shift by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = LocalMotion.current.shimmerSweep,
-        label = "tool-shift",
-    )
-    val c1 = MaterialTheme.colorScheme.primary
-    val c2 = MaterialTheme.colorScheme.tertiary
-    val c3 = MaterialTheme.colorScheme.secondary
-    val brush = Brush.linearGradient(
-        colors = listOf(c1, c2, c3, c1),
-        start = Offset(shift * 220f, 0f),
-        end = Offset(shift * 220f + 160f, 28f),
-    )
+private fun RunningLabel(text: String) {
     Text(
         text = text,
-        style = TextStyle(
-            brush = brush,
-            fontSize = AndMXType.cardTitle.fontSize,
-            fontWeight = FontWeight.Medium,
-        ),
+        style = AndMXType.cardTitle,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
 }
 
-private fun prettyArgs(raw: String): String {
+internal fun prettyToolArguments(raw: String): String {
     val t = raw.trim()
     if (t.length < 2) return t
     return try {
@@ -1067,7 +1114,7 @@ private fun prettyArgs(raw: String): String {
 
 
 @Composable
-private fun diffAddColor(): Color = MaterialTheme.colorScheme.primary
+private fun diffAddColor(): Color = MaterialTheme.colorScheme.secondary
 
 @Composable
 private fun diffDelColor(): Color = MaterialTheme.colorScheme.error
@@ -1194,10 +1241,12 @@ private fun AnimatedMetricNumber(
 }
 
 @Composable
-private fun InlineEditDiffPreview(
+internal fun InlineEditDiffPreview(
     preview: ToolEditPreview,
     isRunning: Boolean,
-    onOpen: () -> Unit,
+    onOpen: (() -> Unit)?,
+    actionLabel: String = tr("打开文件"),
+    maxHeight: Dp = 240.dp,
 ) {
     val hunks = remember(preview.lines) {
         DiffRender.focusHunks(DiffRender.hunks(preview.lines), limit = 56)
@@ -1215,15 +1264,11 @@ private fun InlineEditDiffPreview(
             .clip(RoundedCornerShape(12.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onOpen,
-            ),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
+                .then(if (onOpen == null) Modifier else Modifier.clickable(role = Role.Button, onClick = onOpen))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f))
                 .padding(horizontal = 10.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1249,8 +1294,8 @@ private fun InlineEditDiffPreview(
                 active = isRunning,
                 animationKey = "preview:${preview.path}:${preview.stats.added}:${preview.stats.removed}",
             )
-            if (preview.path.isNotBlank()) {
-                Text(tr("打开"),
+            if (onOpen != null) {
+                Text(actionLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 10.dp),
@@ -1260,7 +1305,7 @@ private fun InlineEditDiffPreview(
         Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = 240.dp)
+                .heightIn(max = maxHeight)
                 .verticalScroll(scroll),
         ) {
             hunks.forEach { hunk ->
@@ -1282,7 +1327,7 @@ private fun InlineEditDiffPreview(
 }
 
 @Composable
-private fun DiffHunkHeader(header: String) {
+internal fun DiffHunkHeader(header: String) {
     Text(
         text = header,
         style = MaterialTheme.typography.labelSmall.copy(
@@ -1300,8 +1345,13 @@ private fun DiffHunkHeader(header: String) {
 }
 
 @Composable
-private fun DiffPreviewLine(line: DiffRender.Line) {
+internal fun DiffPreviewLine(
+    line: DiffRender.Line,
+    showLineNumbers: Boolean? = null,
+    wrapLongLines: Boolean? = null,
+) {
     val preview = com.andmx.ui2.markdown.LocalCodePreviewConfig.current
+    val wrap = wrapLongLines ?: preview.wrapLongLines
     val codeSize = preview.fontSize.sp
     val add = diffAddColor()
     val del = diffDelColor()
@@ -1343,7 +1393,7 @@ private fun DiffPreviewLine(line: DiffRender.Line) {
                 .height(18.dp)
                 .background(if (diff.kind == DiffLine.Kind.CONTEXT) Color.Transparent else fg),
         )
-        if (preview.showLineNumbers) {
+        if (showLineNumbers ?: preview.showLineNumbers) {
             Text(
                 text = (diff.oldNo?.toString() ?: "").padStart(3),
                 style = MaterialTheme.typography.labelSmall.copy(
@@ -1411,8 +1461,8 @@ private fun DiffPreviewLine(line: DiffRender.Line) {
             } else {
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f)
             },
-            maxLines = if (preview.wrapLongLines) Int.MAX_VALUE else 1,
-            overflow = if (preview.wrapLongLines) TextOverflow.Clip else TextOverflow.Ellipsis,
+            maxLines = if (wrap) Int.MAX_VALUE else 1,
+            overflow = if (wrap) TextOverflow.Clip else TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 4.dp, end = 8.dp, top = 1.dp, bottom = 1.dp),
@@ -1423,13 +1473,19 @@ private fun DiffPreviewLine(line: DiffRender.Line) {
 private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
 @Composable
-fun ToolGroupCard(tools: List<ToolCall>) {
-    val key = tools.map { it.id }.joinToString()
+fun ToolGroupCard(
+    tools: List<ToolCall>,
+    workflowStatus: (suspend (String) -> String?)? = null,
+    changedPaths: List<String> = emptyList(),
+) {
+    val first = tools.firstOrNull() ?: return
     val running = tools.any { it.isRunning }
     val failed = tools.count { it.isError }
-    var expanded by remember(key) { mutableStateOf(running || failed > 0) }
-    var userToggled by remember(key) { mutableStateOf(false) }
-    var wasRunning by remember(key) { mutableStateOf(running) }
+    var autoExpanded by remember(first.id) { mutableStateOf(running || failed > 0) }
+    var manualExpanded by rememberSaveable(first.id) { mutableStateOf<Boolean?>(null) }
+    val expanded = manualExpanded ?: autoExpanded
+    val childStates = rememberSaveableStateHolder()
+    var wasRunning by remember(first.id) { mutableStateOf(running) }
     val motion = LocalMotion.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
@@ -1438,20 +1494,20 @@ fun ToolGroupCard(tools: List<ToolCall>) {
     )
 
     LaunchedEffect(running, failed) {
-        if (userToggled) {
+        if (manualExpanded != null) {
             wasRunning = running
             return@LaunchedEffect
         }
         if (running || failed > 0) {
-            expanded = true
+            autoExpanded = true
         } else if (wasRunning) {
             delay(300)
-            if (!userToggled) expanded = false
+            if (manualExpanded == null) autoExpanded = false
         }
         wasRunning = running
     }
 
-    val kind = ZCodeToolGroup.classify(tools.first())
+    val kind = ZCodeToolGroup.classify(first)
     val title = buildString {
         when (kind) {
             ZCodeToolGroup.Class.CHANGES -> {
@@ -1485,15 +1541,11 @@ fun ToolGroupCard(tools: List<ToolCall>) {
     ) {
         Row(
             Modifier
-                .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {
-                    userToggled = true
-                    expanded = !expanded
+                .processDisclosure(expanded) {
+                    manualExpanded = !expanded
                 }
-                .padding(vertical = 5.dp),
+                .heightIn(min = 44.dp)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -1503,15 +1555,15 @@ fun ToolGroupCard(tools: List<ToolCall>) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
             )
             Spacer(Modifier.width(8.dp))
-            if (running) {
-                GradientRunningLabel(title)
+            if (tools.any { it.isRunning && !it.awaitingApproval }) {
+                RunningLabel(title)
             } else {
                 Text(
-                    text = title,
+                    text = if (tools.any { it.awaitingApproval }) "$title · ${tr("等待确认")}" else title,
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                    color = if (failed > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -1534,113 +1586,13 @@ fun ToolGroupCard(tools: List<ToolCall>) {
             exit = motion.riseOut(),
         ) {
             Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 8.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                Modifier.toolDetailsRail().padding(bottom = 4.dp),
             ) {
                 tools.forEach { tool ->
-                    CompactToolProcessRow(tool)
+                    childStates.SaveableStateProvider(tool.id) {
+                        ToolCallCard(tool, workflowStatus, nested = true, changedPaths = changedPaths)
+                    }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CompactToolProcessRow(tool: ToolCall) {
-    val family = ToolPresentation.family(tool.name)
-    val summary = ToolPresentation.summary(tool)
-    val label = ToolPresentation.kindLabel(tool)
-    // ZCode 分组的子项是完整 ToolCallBlock；这里保持单行但允许点开看输出。
-    val expandable = !tool.output.isNullOrBlank()
-    var open by remember(tool.id) { mutableStateOf(false) }
-    val motion = LocalMotion.current
-    val chevronRotation by animateFloatAsState(
-        targetValue = if (open) 90f else 0f,
-        animationSpec = motion.defaultEffects,
-        label = "groupChildChevron",
-    )
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .clickable(enabled = expandable) { open = !open }
-                .padding(vertical = 3.dp, horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                family.icon,
-                null,
-                Modifier.size(13.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = AndMXType.cardMeta.fontSize),
-                color = when {
-                    tool.isError -> MaterialTheme.colorScheme.error
-                    tool.isRunning -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
-                },
-            )
-            if (summary.isNotBlank()) {
-                Text(
-                    text = " · $summary",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AndMXType.cardMeta.fontSize),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            if (expandable) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                    null,
-                    Modifier
-                        .padding(start = 2.dp)
-                        .size(13.dp)
-                        .rotate(chevronRotation)
-                        .alpha(if (open) 0.85f else 0.4f),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-            }
-        }
-        AnimatedVisibility(
-            visible = open,
-            enter = motion.riseIn(),
-            exit = motion.riseOut(),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 21.dp, top = 1.dp, bottom = 3.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.3f),
-                    )
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            ) {
-                Text(
-                    text = stripAnsi(tool.output.orEmpty()).take(3000),
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = AndMXType.micro.fontSize,
-                        lineHeight = 15.sp,
-                    ),
-                    color = if (tool.isError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 160.dp)
-                        .verticalScroll(rememberScrollState()),
-                )
             }
         }
     }
@@ -1668,7 +1620,7 @@ fun WorkingIndicator(status: String? = null) {
             strokeWidth = 1.4.dp,
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
         )
-        GradientRunningLabel(status ?: "响应中")
+        RunningLabel(status ?: "响应中")
         Spacer(Modifier.weight(1f))
         Text(
             text = formatElapsed(elapsed),

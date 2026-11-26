@@ -92,8 +92,8 @@ fun GeneralPage(onBack: () -> Unit) {
                 }
                 HorizontalDivider()
                 SwitchRow(
-                    title = tr("动态取色"),
-                    description = tr("跟随系统壁纸生成 Material You 配色（Android 12 及以上生效）。"),
+                    title = tr("壁纸调色"),
+                    description = tr("让界面底色随壁纸变化（Android 12 及以上）。"),
                     checked = s.dynamicColor,
                     onCheckedChange = { save(s.copy(dynamicColor = it)) },
                 )

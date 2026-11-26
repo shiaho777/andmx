@@ -3,7 +3,6 @@ package com.andmx.ui2.chat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
@@ -34,9 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -222,27 +218,9 @@ fun ReasoningCard(item: ReasoningItem) {
 
 @Composable
 private fun ThinkingLabel() {
-    val infinite = rememberInfiniteTransition(label = "think-grad")
-    val shift by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = LocalMotion.current.thinkSweep,
-        label = "think-shift",
-    )
-    val c1 = MaterialTheme.colorScheme.primary
-    val c2 = MaterialTheme.colorScheme.tertiary
-    val c3 = MaterialTheme.colorScheme.secondary
-    val brush = Brush.linearGradient(
-        colors = listOf(c1, c2, c3, c1),
-        start = Offset(shift * 240f, 0f),
-        end = Offset(shift * 240f + 180f, 40f),
-    )
     Text(
         text = tr("正在思考"),
-        style = TextStyle(
-            brush = brush,
-            fontSize = AndMXType.cardTitle.fontSize,
-            fontWeight = FontWeight.Medium,
-        ),
+        style = AndMXType.cardTitle,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

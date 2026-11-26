@@ -4,6 +4,7 @@ import com.andmx.ui2.settings.tr
 
 import com.andmx.ui2.theme.Chrome
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,9 +46,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import java.util.Calendar
+
+private val userMessageShape = RoundedCornerShape(
+    topStart = 12.dp,
+    topEnd = 4.dp,
+    bottomEnd = 12.dp,
+    bottomStart = 12.dp,
+)
 
 @Composable
 fun MessageBubble(
@@ -142,7 +151,7 @@ private fun UserProcessBubble(
         Column(
             modifier = Modifier
                 .widthIn(max = maxBubble)
-                .clip(Chrome.bubble)
+                .clip(userMessageShape)
                 .then(
                     if (onCopy != null && selectionActions == null) {
                         Modifier.pointerInput(message.id) {
@@ -154,10 +163,15 @@ private fun UserProcessBubble(
                     if (isEditing) {
                         MaterialTheme.colorScheme.tertiaryContainer
                     } else {
-                        MaterialTheme.colorScheme.primaryContainer
+                        MaterialTheme.colorScheme.surface
                     },
                 )
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .border(
+                    1.dp,
+                    if (isEditing) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outlineVariant,
+                    userMessageShape,
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             if (message.imageUrls.isNotEmpty()) {
                 ScreenshotStrip(message.imageUrls)
@@ -171,7 +185,7 @@ private fun UserProcessBubble(
                         color = if (isEditing) {
                             MaterialTheme.colorScheme.onTertiaryContainer
                         } else {
-                            MaterialTheme.colorScheme.onPrimaryContainer
+                            MaterialTheme.colorScheme.onSurface
                         },
                     )
                 }
@@ -281,7 +295,12 @@ private fun AssistantProcessBlock(
         }
     }
     var showFull by remember(message.id) { mutableStateOf(false) }
-    val visibleText = if (previewPlan.truncated && !showFull) previewPlan.preview else commentProjection.text
+    val revealMatch = remember(previewPlan, message.content, highlightRanges) {
+        previewPlan.truncated && highlightRanges.any { it.isCurrent } &&
+            ChatFind.rebase(message.content, previewPlan.preview, highlightRanges).none { it.isCurrent }
+    }
+    val showPreview = previewPlan.truncated && !showFull && !revealMatch
+    val visibleText = if (showPreview) previewPlan.preview else commentProjection.text
     val markdownHighlights = remember(highlightRanges, message.content, visibleText) {
         ChatFind.rebase(message.content, visibleText, highlightRanges)
             .map { com.andmx.ui2.markdown.MarkdownHighlight(it.start, it.endExclusive, it.isCurrent) }
@@ -303,7 +322,7 @@ private fun AssistantProcessBlock(
             highlightRanges = markdownHighlights,
             selectionActions = selectionActions,
         )
-        if (previewPlan.truncated && !showFull) {
+        if (showPreview) {
             Row(
                 Modifier
                     .padding(top = 2.dp)
@@ -339,7 +358,11 @@ private fun AssistantProcessBlock(
             )
         }
         val showActions = !process && !message.isStreaming && message.content.isNotBlank()
-        if (showActions && (onCopy != null || onBranch != null || onRegenerate != null || onQuote != null || message.completedAt > 0L || message.createdAt > 0L)) {
+        if (showActions && (
+                onCopy != null || onBranch != null || onRegenerate != null || onQuote != null ||
+                    onSideChat != null || onFeedback != null || message.completedAt > 0L || message.createdAt > 0L
+                )
+        ) {
             AssistantActionBar(
                 createdAt = message.createdAt.takeIf { it > 0L } ?: message.sortKey,
                 completedAt = message.completedAt,
@@ -418,13 +441,15 @@ private fun AssistantActionBar(
                 )
             }
             if (onFeedback != null) {
-                FeedbackChip(
+                ActionChip(
                     icon = if (feedback == 1) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                    label = tr("有帮助"),
                     active = feedback == 1,
                     onClick = { onFeedback(1) },
                 )
-                FeedbackChip(
+                ActionChip(
                     icon = if (feedback == -1) Icons.Filled.ThumbDown else Icons.Outlined.ThumbDown,
+                    label = tr("没帮助"),
                     active = feedback == -1,
                     onClick = { onFeedback(-1) },
                 )
@@ -446,46 +471,23 @@ private fun AssistantActionBar(
 private fun ActionChip(
     icon: ImageVector,
     label: String,
+    active: Boolean? = null,
     onClick: () -> Unit,
 ) {
-    val color = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
+    Box(
         modifier = Modifier
+            .size(42.dp)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (active == null) Modifier else Modifier.semantics { selected = active }),
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = color,
-            modifier = Modifier.size(15.dp),
+            tint = if (active == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
         )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = color,
-        )
-    }
-}
-
-@Composable
-private fun FeedbackChip(
-    icon: ImageVector,
-    active: Boolean,
-    onClick: () -> Unit,
-) {
-    val tint = if (active) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-    ) {
-        Icon(icon, null, Modifier.size(15.dp), tint = tint)
     }
 }
 

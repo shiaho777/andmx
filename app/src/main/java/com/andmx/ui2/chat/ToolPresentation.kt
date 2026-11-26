@@ -28,9 +28,10 @@ import com.andmx.ui2.settings.tr
  */
 object ToolPresentation {
 
-    enum class Status { PENDING, RUNNING, COMPLETED, FAILED, DENIED, STOPPED }
+    enum class Status { PENDING, WAITING, RUNNING, COMPLETED, FAILED, DENIED, STOPPED }
 
     fun status(tc: ToolCall): Status = when {
+        tc.isRunning && tc.awaitingApproval -> Status.WAITING
         tc.isRunning -> if (tc.args.isBlank() && tc.output == null) Status.PENDING else Status.RUNNING
         tc.isError -> deniedOrStopped(tc.output) ?: Status.FAILED
         else -> Status.COMPLETED
@@ -86,6 +87,7 @@ object ToolPresentation {
 
     private fun kindLabelZh(tc: ToolCall): String {
         val st = status(tc)
+        if (st == Status.WAITING) return tr("等待确认")
         if (st == Status.FAILED) return tr("失败")
         if (st == Status.DENIED) return tr("已拒绝")
         if (st == Status.STOPPED) return tr("已停止")
@@ -124,6 +126,17 @@ object ToolPresentation {
         }
     }
 
+    data class ExecutionOutput(val text: String, val exitCode: Int?)
+
+    fun executionOutput(output: String?): ExecutionOutput {
+        val text = output.orEmpty().trimEnd()
+        val marker = executionExit.find(text) ?: return ExecutionOutput(text, null)
+        val exitCode = marker.groupValues[1].toIntOrNull() ?: return ExecutionOutput(text, null)
+        return ExecutionOutput(text.substring(0, marker.range.first).trimEnd(), exitCode)
+    }
+
+    private val executionExit = Regex("""(?:^|\n)\[exit=(-?\d+)\]$""")
+
     fun summary(tc: ToolCall): String {
         val preview = ToolArgs.preview(tc.name, tc.args)
         return preview.replace('\n', ' ').replace(Regex("\\s+"), " ").trim().take(160)
@@ -154,7 +167,7 @@ object ToolPresentation {
 
     /** Collapsible by default; some tools stay single-line (read/search). */
     fun isCollapsible(tc: ToolCall): Boolean = when (ToolArgs.canonical(tc.name)) {
-        "read", "list", "grep", "glob", "todoread" -> false
+        "read", "list", "grep", "glob", "todoread" -> tc.isError
         // ZCode ask-question：等待时单行（交互在审批面板），完成后可展开回看问答。
         "ask" -> !tc.isRunning
         else -> true
@@ -188,7 +201,7 @@ object ToolPresentation {
         val obj = runCatching {
             kotlinx.serialization.json.Json.parseToJsonElement(tc.args)
         }.getOrNull() as? kotlinx.serialization.json.JsonObject ?: return null
-        val arr = obj["todos"] as? kotlinx.serialization.json.JsonArray ?: return null
+        val arr = (obj["todos"] ?: obj["steps"]) as? kotlinx.serialization.json.JsonArray ?: return null
         val items = arr.mapNotNull { el ->
             val o = el as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
             val content = o["content"]

@@ -6,9 +6,9 @@ import android.net.Uri
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.Image
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -52,6 +52,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -67,6 +68,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.ui2.theme.AndMXType
+import com.andmx.ui2.theme.Chrome
+import com.andmx.ui2.theme.blockSurface
+import com.andmx.ui2.theme.workspaceLinkColor
 import com.andmx.ui2.theme.LocalMotion
 
 data class MarkdownHighlight(
@@ -86,25 +90,23 @@ fun MarkdownView(
     selectionActions: com.andmx.ui2.chat.SelectionActions? = null,
 ) {
     val parser = remember { IncrementalMarkdown.Parser() }
-    val incremental = if (streaming) {
-        remember(markdown) { parser.update(markdown) }
-    } else {
-        null
+    val positioned = remember(markdown, streaming) {
+        val blocks = if (streaming) {
+            val incremental = parser.update(markdown)
+            incremental.frozen + incremental.tail
+        } else {
+            MarkdownEngine.parseWithOffsets(markdown)
+                .map { IncrementalMarkdown.PositionedBlock(it.block, it.startOffset) }
+        }
+        mergeAdjacentQuotes(blocks)
     }
-    val rawPositioned: List<IncrementalMarkdown.PositionedBlock> = if (streaming && incremental != null) {
-        incremental.frozen + incremental.tail
-    } else {
-        remember(markdown) { MarkdownEngine.parseWithOffsets(markdown) }
-            .map { IncrementalMarkdown.PositionedBlock(it.block, it.startOffset) }
-    }
-    val positioned = mergeAdjacentQuotes(rawPositioned)
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val textColor = if (contentColor == Color.Unspecified) {
         MaterialTheme.colorScheme.onSurface
     } else {
         contentColor
     }
-    val linkColor = MaterialTheme.colorScheme.primary
+    val linkColor = workspaceLinkColor()
     val mutedColor = textColor.copy(alpha = 0.82f)
     val bodyStyle = if (bodySizeSp > 0f) {
         MaterialTheme.typography.bodyLarge.copy(
@@ -159,7 +161,7 @@ fun MarkdownView(
                                 remember(block.code) { InteractiveCardSpec.parse(block.code) }
                             } else null
                             when {
-                                lang == "mermaid" -> MermaidBlock(block.code)
+                                lang == "mermaid" && !streaming -> MermaidBlock(block.code)
                                 card != null -> InteractiveCard(card)
                                 else -> CodeBlock(
                                     code = block.code,
@@ -219,7 +221,11 @@ fun MarkdownView(
 
                         is MdBlock.Table -> MarkdownTable(block, bodyStyle, textColor, linkColor)
 
-                        is MdBlock.Math -> MathBlock(block.tex, block.display)
+                        is MdBlock.Math -> if (streaming) {
+                            Text(block.tex, style = bodyStyle, color = textColor)
+                        } else {
+                            MathBlock(block.tex, block.display)
+                        }
                     }
                 }
             }
@@ -705,6 +711,7 @@ fun CodeBlock(
         wrapLongLines = config.wrapLongLines || lightweight,
         fontSize = config.fontSize,
         lightweight = lightweight,
+        collapsible = !lightweight,
     )
 }
 
@@ -719,15 +726,25 @@ fun CodeBlockThemed(
     language: String = "",
     lineNumberStart: Int = 1,
     highlightRange: IntRange? = null,
+    collapsible: Boolean = false,
 ) {
     var wrapOverride by remember(code) { mutableStateOf<Boolean?>(null) }
     val wrap = wrapOverride ?: wrapLongLines
     val clipboard = LocalClipboardManager.current
-    val highlighted = remember(code, theme, lightweight, highlightRange) {
+    var expanded by remember(code) { mutableStateOf(false) }
+    val lineCount = remember(code, collapsible, showLineNumbers) {
+        if (collapsible || showLineNumbers) code.count { it == '\n' } + 1 else 0
+    }
+    val canFold = collapsible && lineCount > 24
+    val renderedCode = remember(code, canFold, expanded) {
+        if (canFold && !expanded) code.lineSequence().take(16).joinToString("\n") else code
+    }
+    val renderedLines = if (canFold && !expanded) 16 else lineCount
+    val highlighted = remember(renderedCode, theme, lightweight, highlightRange) {
         val base = if (lightweight) {
-            AnnotatedString(code)
+            AnnotatedString(renderedCode)
         } else {
-            CodeHighlight.highlight(code, theme)
+            CodeHighlight.highlight(renderedCode, theme)
         }
         if (highlightRange == null) {
             base
@@ -735,7 +752,7 @@ fun CodeBlockThemed(
             androidx.compose.ui.text.buildAnnotatedString {
                 append(base)
                 var offset = 0
-                code.split('\n').forEachIndexed { index, line ->
+                renderedCode.split('\n').forEachIndexed { index, line ->
                     if (index + 1 in highlightRange) {
                         addStyle(
                             androidx.compose.ui.text.SpanStyle(background = theme.keyword.copy(alpha = 0.14f)),
@@ -748,14 +765,14 @@ fun CodeBlockThemed(
             }
         }
     }
-    val lineCount = remember(code) { code.count { it == '\n' } + 1 }
     val gutterWidth = (lineCount.toString().length * fontSize * 0.62f).dp + 12.dp
 
+    val sizeMotion = LocalMotion.current.contentSize()
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(theme.background),
+            .blockSurface(color = theme.background, shape = Chrome.inset)
+            .then(if (canFold) Modifier.animateContentSize(sizeMotion) else Modifier),
     ) {
         Row(
             Modifier
@@ -798,7 +815,7 @@ fun CodeBlockThemed(
                 Row(Modifier.padding(horizontal = 12.dp)) {
                     if (showLineNumbers) {
                         Text(
-                            text = (lineNumberStart until lineNumberStart + lineCount).joinToString("\n"),
+                            text = (lineNumberStart until lineNumberStart + renderedLines).joinToString("\n"),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = fontSize.sp,
@@ -823,6 +840,17 @@ fun CodeBlockThemed(
                 inner()
             } else {
                 Box(Modifier.horizontalScroll(rememberScrollState())) { inner() }
+            }
+        }
+        if (canFold) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                Text(
+                    if (expanded) tr("收起代码") else tr("展开代码") + " · " + lineCount,
+                    color = theme.foreground,
+                )
             }
         }
     }

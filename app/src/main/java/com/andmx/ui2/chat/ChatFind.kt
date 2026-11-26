@@ -1,5 +1,7 @@
 package com.andmx.ui2.chat
 
+internal data class ConversationFindRequest(val conversationId: Long, val messageId: Long, val query: String)
+
 data class FindHit(
     val messageIndex: Int,
     val start: Int,

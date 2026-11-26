@@ -1,5 +1,8 @@
 package com.andmx.ui2.theme
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
@@ -23,6 +26,10 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -31,7 +38,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 
-private val Ease = CubicBezierEasing(0.22f, 0.61f, 0.36f, 1f)
+private val Ease = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 
 private fun <T> paced(ms: Int): FiniteAnimationSpec<T> =
     if (ms <= 0) snap() else tween(durationMillis = ms, easing = Ease)
@@ -57,8 +64,6 @@ data class Motion(
         if (baseMs <= 0) snap() else spring(dampingRatio = 0.82f, stiffness = 380f)
     val springDp: FiniteAnimationSpec<Dp> =
         if (baseMs <= 0) snap() else spring(dampingRatio = 0.82f, stiffness = 380f)
-    val springSize: FiniteAnimationSpec<IntSize> =
-        if (baseMs <= 0) snap() else spring(dampingRatio = 0.9f, stiffness = 380f)
     val cursorPulse: InfiniteRepeatableSpec<Float> = infiniteRepeatable(
         animation = tween(durationMillis = if (inkMs <= 0) 1 else 480, easing = LinearEasing),
         repeatMode = RepeatMode.Reverse,
@@ -67,12 +72,8 @@ data class Motion(
         animation = tween(durationMillis = if (inkMs <= 0) 1 else 1300, easing = LinearEasing),
         repeatMode = RepeatMode.Restart,
     )
-    val thinkSweep: InfiniteRepeatableSpec<Float> = infiniteRepeatable(
-        animation = tween(durationMillis = if (inkMs <= 0) 1 else 1400, easing = LinearEasing),
-        repeatMode = RepeatMode.Restart,
-    )
 
-    fun contentSize(): FiniteAnimationSpec<IntSize> = springSize
+    fun contentSize(): FiniteAnimationSpec<IntSize> = defaultExpand
 
     fun overlayEnter(): EnterTransition =
         slideInVertically(enterOffset) { it / 12 } + fadeIn(enter)
@@ -81,12 +82,12 @@ data class Motion(
         slideOutVertically(enterOffset) { it / 12 } + fadeOut(enter)
 
     fun push(): ContentTransform =
-        (slideInHorizontally(enterOffset) { it } + fadeIn(enter)) togetherWith
-            (slideOutHorizontally(enterOffset) { -it / 4 } + fadeOut(enter))
+        (slideInHorizontally(enterOffset) { it / 10 } + fadeIn(enter)) togetherWith
+            (slideOutHorizontally(enterOffset) { -it / 14 } + fadeOut(enter))
 
     fun pop(): ContentTransform =
-        (slideInHorizontally(enterOffset) { -it / 4 } + fadeIn(enter)) togetherWith
-            (slideOutHorizontally(enterOffset) { it } + fadeOut(enter))
+        (slideInHorizontally(enterOffset) { -it / 14 } + fadeIn(enter)) togetherWith
+            (slideOutHorizontally(enterOffset) { it / 10 } + fadeOut(enter))
 
     fun riseIn(): EnterTransition = expandVertically(defaultExpand) + fadeIn(enter)
     fun riseOut(): ExitTransition = shrinkVertically(defaultExpand) + fadeOut(enter)
@@ -94,8 +95,8 @@ data class Motion(
     fun crossfade(): ContentTransform = fadeIn(defaultEffects) togetherWith fadeOut(defaultEffects)
 
     fun rollUp(): ContentTransform =
-        (slideInVertically(enterOffset) { it / 2 } + fadeIn(enter)) togetherWith
-            (slideOutVertically(enterOffset) { -it / 2 } + fadeOut(enter))
+        (slideInVertically(enterOffset) { it / 4 } + fadeIn(enter)) togetherWith
+            (slideOutVertically(enterOffset) { -it / 4 } + fadeOut(enter))
 
     companion object {
         val Reduced = Motion(fastMs = 0, baseMs = 0, enterMs = 0, inkMs = 0)
@@ -106,15 +107,20 @@ val LocalMotion = staticCompositionLocalOf { Motion() }
 
 @Composable
 fun rememberMotion(): Motion {
-    val context = LocalContext.current
-    return remember {
-        val scale = runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1f,
-            )
-        }.getOrDefault(1f)
-        if (scale == 0f) Motion.Reduced else Motion()
+    val resolver = LocalContext.current.contentResolver
+    fun readReduced(): Boolean = runCatching {
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }.getOrDefault(false)
+    var reduced by remember(resolver) { mutableStateOf(readReduced()) }
+    DisposableEffect(resolver) {
+        val uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                reduced = readReduced()
+            }
+        }
+        resolver.registerContentObserver(uri, false, observer)
+        onDispose { resolver.unregisterContentObserver(observer) }
     }
+    return remember(reduced) { if (reduced) Motion.Reduced else Motion() }
 }

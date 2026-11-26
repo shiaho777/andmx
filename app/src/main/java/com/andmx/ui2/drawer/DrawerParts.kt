@@ -1,6 +1,7 @@
 package com.andmx.ui2.drawer
 
 import com.andmx.ui2.settings.tr
+import com.andmx.ui2.theme.Chrome
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -66,8 +67,9 @@ fun NewTaskButton(onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .height(48.dp)
+            .clip(Chrome.inset)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -76,7 +78,7 @@ fun NewTaskButton(onClick: () -> Unit) {
             Modifier
                 .size(22.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -365,6 +367,7 @@ fun SearchField(
     query: String,
     archived: Boolean,
     onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
 ) {
     val placeholder = if (archived) tr("搜索归档任务...") else tr("搜索任务...")
@@ -397,7 +400,7 @@ fun SearchField(
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
         ),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
     )

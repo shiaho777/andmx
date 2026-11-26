@@ -42,10 +42,10 @@ class ConversationSearchTest {
     }
 
     @Test
-    fun searchesRevealGroupsWithoutDestroyingCollapsedPreferences() {
-        val collapsed = setOf("proj_app", "grp_recent", "tl_TODAY")
-        assertTrue(searchCollapsedGroups("task", collapsed).isEmpty())
-        assertSame(collapsed, searchCollapsedGroups("", collapsed))
-        assertSame(collapsed, searchCollapsedGroups(" \n", collapsed))
+    fun bodyMatchesAreMergedWithMetadataWithinTheSelectedSource() {
+        assertEquals(
+            listOf(3L, 2L),
+            filterConversations(conversations, "release", setOf(2L, 99L)).map { it.id },
+        )
     }
 }

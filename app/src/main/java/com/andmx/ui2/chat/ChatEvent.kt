@@ -94,6 +94,7 @@ data class ToolCall(
     val sortKey: Long = System.currentTimeMillis(),
     val imageUrls: List<String>? = null,
     val durationMs: Long = 0,
+    val awaitingApproval: Boolean = false,
 )
 
 data class ApprovalItem(

@@ -1,6 +1,7 @@
 package com.andmx
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -9,6 +10,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.andmx.data.AndmxDatabase
+import com.andmx.data.ConversationEntity
+import com.andmx.data.MessageEntity
 import com.andmx.settings.SettingsStore
 import com.andmx.ui2.MainActivity2
 import com.andmx.ui2.settings.UiLang
@@ -68,7 +72,8 @@ class SmokeTest {
 
     @Test
     fun builtInBrowserRejectsFileSchemes() {
-        compose.onNodeWithContentDescription("更多操作").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("切换侧边栏").performClick()
+        compose.onNodeWithText("新建任务").performClick()
         compose.onNodeWithText("浏览器").assertIsDisplayed().performClick()
         compose.onNode(hasSetTextAction() and hasText("网址"))
             .assertIsDisplayed()
@@ -78,4 +83,60 @@ class SmokeTest {
         compose.onNodeWithText("关闭").performClick()
         compose.onNodeWithContentDescription("更多操作").assertIsDisplayed()
     }
+    @Test
+    fun draftWorkspaceAndModelSettingsAreReachableFromComposer() {
+        compose.onNodeWithContentDescription("切换侧边栏").performClick()
+        compose.onNodeWithText("新建任务").performClick()
+        compose.onNodeWithContentDescription("选择项目").assertIsDisplayed()
+        compose.onNodeWithContentDescription("选择模型").assertIsDisplayed().performClick()
+        compose.onNodeWithText("管理模型").assertIsDisplayed().performClick()
+        compose.onNodeWithText("模型设置").assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回").performClick()
+        compose.onNodeWithContentDescription("选择模型").assertIsDisplayed()
+    }
+
+    @Test
+    fun taskSearchOpensMatchInsideCollapsedProcess() {
+        val dao = AndmxDatabase.get(compose.activity).dao()
+        val title = "History task fixture"
+        val query = "checkpoint-42%"
+        val narration = "Read $query before applying changes."
+        val created = System.currentTimeMillis()
+        val id = runBlocking {
+            val id = dao.insertConversation(ConversationEntity(project = "/root/project", title = title))
+            listOf(
+                "user" to "Check the build",
+                "assistant" to narration,
+                "tool" to "Workspace read complete",
+                "assistant" to "Ready to continue.",
+            ).forEachIndexed { index, (role, text) ->
+                dao.insertMessage(
+                    MessageEntity(
+                        conversationId = id,
+                        role = role,
+                        content = text,
+                        toolName = if (role == "tool") "Read" else null,
+                        createdAt = created + index,
+                    ),
+                )
+            }
+            id
+        }
+        try {
+            compose.onNodeWithContentDescription("切换侧边栏").performClick()
+            compose.onNodeWithText("搜索任务").performClick()
+            compose.onNode(hasSetTextAction() and hasText("搜索任务...")).performTextInput(query)
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(narration).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(narration).assertIsDisplayed()
+            compose.onNodeWithText(title).performClick()
+            compose.onNodeWithContentDescription("在任务中查找").assertIsDisplayed()
+            compose.onNodeWithText("1/1").assertIsDisplayed()
+            compose.onNodeWithText(narration).assertIsDisplayed()
+            compose.onNodeWithText("关闭").performClick()
+            compose.onNodeWithText(narration).assertDoesNotExist()
+        } finally {
+            runBlocking { dao.deleteConversation(id) }
+        }
+    }
+
 }

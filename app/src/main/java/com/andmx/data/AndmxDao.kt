@@ -7,6 +7,12 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+data class ConversationMessageMatch(
+    val conversationId: Long,
+    val messageId: Long,
+    val excerpt: String,
+)
+
 @Dao
 interface AndmxDao {
 
@@ -38,6 +44,22 @@ interface AndmxDao {
             "ORDER BY c.updatedAt DESC LIMIT 50",
     )
     suspend fun search(q: String): List<ConversationEntity>
+
+    @Query(
+        """
+        SELECT c.id AS conversationId, m.id AS messageId,
+               substr(m.content, max(1, instr(lower(m.content), lower(:term)) - 24), 140) AS excerpt
+        FROM conversations c
+        JOIN messages m ON m.id = (
+            SELECT candidate.id FROM messages candidate
+            WHERE candidate.conversationId = c.id AND candidate.role IN ('user', 'assistant')
+              AND instr(lower(candidate.content), lower(:term)) > 0
+            ORDER BY candidate.id DESC LIMIT 1
+        )
+        WHERE c.archived = :archived
+        """,
+    )
+    fun observeConversationMessageMatches(term: String, archived: Boolean): Flow<List<ConversationMessageMatch>>
 
     @Query("SELECT * FROM conversations WHERE id = :id")
     suspend fun getConversation(id: Long): ConversationEntity?

@@ -75,7 +75,7 @@ fun EmptyWorkspaceHeader(
         horizontalArrangement = Arrangement.Start,
     ) {
         WorkspacePill(
-            label = if (hasWorkspace) projectName else tr("选择项目"),
+            label = if (hasWorkspace) projectName.ifBlank { tr("当前工作区") } else tr("选择项目"),
             path = hostPath,
             candidates = candidates,
             onSelectWorkspace = onSelectWorkspace,

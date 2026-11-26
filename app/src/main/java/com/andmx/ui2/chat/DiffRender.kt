@@ -130,6 +130,22 @@ object DiffRender {
         return out
     }
 
+    fun reviewHunks(lines: List<DiffLine>): List<Hunk> {
+        val windows = mutableListOf<IntRange>()
+        lines.forEachIndexed { index, line ->
+            if (line.kind != DiffLine.Kind.CONTEXT) {
+                val window = (index - 3).coerceAtLeast(0)..(index + 3).coerceAtMost(lines.lastIndex)
+                val previous = windows.lastOrNull()
+                if (previous != null && window.first <= previous.last + 1) {
+                    windows[windows.lastIndex] = previous.first..window.last
+                } else {
+                    windows += window
+                }
+            }
+        }
+        return windows.flatMap { hunks(lines.subList(it.first, it.last + 1)) }
+    }
+
     fun inlineRanges(old: String, new: String): Pair<IntRange?, IntRange?> {
         if (old == new) return null to null
         val minLen = minOf(old.length, new.length)
