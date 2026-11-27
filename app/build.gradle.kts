@@ -9,9 +9,13 @@ plugins {
 
 val includeLinuxRuntime = providers.gradleProperty("androidLinuxRuntimeDir").isPresent
 val githubPreview = providers.gradleProperty("andmxGithubPreview").orNull == "true"
+val githubStable = providers.gradleProperty("andmxGithubStable").orNull == "true"
 val previewVersionCode = providers.gradleProperty("andmxPreviewVersionCode").orNull?.toInt() ?: 2
 val previewVersionName = providers.gradleProperty("andmxPreviewVersionName").orElse("0.1.0-preview.1").get()
+val stableVersionCode = providers.gradleProperty("andmxStableVersionCode").orNull?.toInt() ?: 4
+val stableVersionName = providers.gradleProperty("andmxStableVersionName").orElse("1.0.0").get()
 
+require(!(githubPreview && githubStable))
 
 android {
     namespace = "com.andmx"
@@ -25,6 +29,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("boolean", "GITHUB_RELEASE", "false")
         buildConfigField("boolean", "GITHUB_PREVIEW", "false")
         vectorDrawables { useSupportLibrary = true }
         ndk {
@@ -55,11 +60,17 @@ android {
             dimension = "engine"
             targetSdk = 34
             buildConfigField("int", "PROBE_TARGET_SDK", "34")
+            if (githubPreview || githubStable) buildConfigField("boolean", "GITHUB_RELEASE", "true")
             if (githubPreview) {
                 require(previewVersionCode > 1 && previewVersionName.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+-preview\\.[0-9]+")))
                 versionCode = previewVersionCode
                 versionName = previewVersionName
                 buildConfigField("boolean", "GITHUB_PREVIEW", "true")
+            }
+            if (githubStable) {
+                require(stableVersionCode > 1 && stableVersionName.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+")))
+                versionCode = stableVersionCode
+                versionName = stableVersionName
             }
         }
         // Power engine: targetSdk 28 so guest binaries can be exec'd from the
@@ -127,7 +138,7 @@ android {
     }
 }
 
-if (githubPreview) {
+if (githubPreview || githubStable) {
     androidComponents.onVariants(androidComponents.selector().withFlavor("engine" to "lite")) { variant ->
         variant.packaging.jniLibs.excludes.addAll("**/libproot.so", "**/libproot_loader.so", "**/libtalloc.so")
     }

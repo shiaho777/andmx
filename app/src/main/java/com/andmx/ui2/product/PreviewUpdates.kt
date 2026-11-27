@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
+import com.andmx.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -25,7 +26,11 @@ internal const val PRODUCT_REPO = "https://github.com/shiaho777/andmx"
 private const val APK_NAME = "andmx-lite-arm64-v8a.apk"
 private const val APK_LIMIT = 160L * 1024 * 1024
 private val previewTag = Regex("""v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+""")
+private val stableTag = Regex("""v[0-9]+\.[0-9]+\.[0-9]+""")
 private val digestPattern = Regex("[a-f0-9]{64}")
+
+internal fun matchesGithubReleaseChannel(tag: String, prerelease: Boolean, previewChannel: Boolean): Boolean =
+    prerelease == previewChannel && (if (previewChannel) previewTag else stableTag).matches(tag)
 
 internal data class PreviewRelease(
     val versionName: String,
@@ -41,7 +46,7 @@ internal fun parsePreviewRelease(tag: String, manifest: JSONObject, notes: Strin
     val versionName = manifest.getString("versionName")
     val versionCode = manifest.getLong("versionCode")
     val sha256 = manifest.getString("sha256")
-    require(previewTag.matches(tag) && tag == "v$versionName")
+    require((stableTag.matches(tag) || previewTag.matches(tag)) && tag == "v$versionName")
     require(manifest.getString("packageName") == "com.andmx" && manifest.getString("apk") == APK_NAME)
     val certificate = manifest.getString("certificateSha256")
     require(versionCode > 1 && digestPattern.matches(sha256) && digestPattern.matches(certificate))
@@ -59,7 +64,9 @@ internal class PreviewUpdates(private val app: Context) {
             for (index in 0 until releases.length()) {
                 val item = releases.getJSONObject(index)
                 val tag = item.optString("tag_name")
-                if (!item.optBoolean("prerelease") || item.optBoolean("draft") || !previewTag.matches(tag)) continue
+                if (item.optBoolean("draft") ||
+                    !matchesGithubReleaseChannel(tag, item.optBoolean("prerelease"), BuildConfig.GITHUB_PREVIEW)
+                ) continue
                 val assets = item.getJSONArray("assets")
                 val names = (0 until assets.length()).map { assets.getJSONObject(it).optString("name") }
                 if ("release-manifest.json" !in names || APK_NAME !in names) continue
@@ -173,7 +180,7 @@ internal class PreviewUpdates(private val app: Context) {
                 connection.instanceFollowRedirects = false
                 connection.connectTimeout = 8000
                 connection.readTimeout = 12000
-                connection.setRequestProperty("User-Agent", "AndMX Preview")
+                connection.setRequestProperty("User-Agent", "AndMX")
                 val status = connection.responseCode
                 if (status in listOf(301, 302, 303, 307, 308)) {
                     target = URL(target, requireNotNull(connection.getHeaderField("Location")))

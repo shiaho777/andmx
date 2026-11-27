@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -73,15 +74,22 @@ class SmokeTest {
         compose.onNode(hasSetTextAction() and hasText("搜索设置")).performTextInput("快速入门")
         compose.onNodeWithText("重播离线样例或使用你自己的文件").performClick()
         compose.onNodeWithTag("product-first-sample").performClick()
+        val draft = hasTestTag("product-task-content") and hasText("Status: draft", substring = true)
+        compose.waitUntil(5_000) { compose.onAllNodes(draft).fetchSemanticsNodes().isNotEmpty() }
         val content = compose.onNodeWithTag("product-task-content")
         content.assertTextContains("Status: draft", substring = true)
         compose.onNodeWithTag("product-sample-propose").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("拒绝").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("拒绝").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("已拒绝，文件未修改。").fetchSemanticsNodes().isNotEmpty() }
         content.assertTextContains("Status: draft", substring = true)
         compose.onNodeWithTag("product-sample-propose").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("仅本次允许").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("仅本次允许").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("还原此文件").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("还原此文件").performClick()
         compose.onNodeWithText("还原").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("已还原为初始内容。").fetchSemanticsNodes().isNotEmpty() }
         content.assertTextContains("Status: draft", substring = true)
         val directory = java.io.File(compose.activity.noBackupFilesDir, "first-task")
         val sampleId = JSONObject(directory.resolve("SAMPLE.json").readText()).getString("id")

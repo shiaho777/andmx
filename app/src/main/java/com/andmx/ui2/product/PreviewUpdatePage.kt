@@ -41,7 +41,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val updateChannelAvailable = BuildConfig.GITHUB_PREVIEW && !BuildConfig.DEBUG
+internal val updateChannelAvailable = BuildConfig.GITHUB_RELEASE && !BuildConfig.DEBUG
+
+internal val productBuildChannelLabel: String
+    get() = tr(when {
+        !updateChannelAvailable -> "本地构建"
+        BuildConfig.GITHUB_PREVIEW -> "GitHub 预览渠道"
+        else -> "GitHub 正式渠道"
+    })
 
 @Composable
 internal fun PreviewUpdateNotice(preferences: ProductPreferences) {
@@ -96,7 +103,7 @@ internal fun PreviewUpdateNotice(preferences: ProductPreferences) {
         release?.let { available ->
             AlertDialog(
                 onDismissRequest = { release = null },
-                title = { Text(tr("有新的 AndMX 预览版")) },
+                title = { Text(tr("有新的 AndMX 版本")) },
                 text = { Text(available.versionName) },
                 confirmButton = {
                     TextButton(onClick = { details = true }) { Text(tr("查看更新")) }
@@ -144,7 +151,7 @@ internal fun PreviewUpdatePage(onBack: () -> Unit, initialRelease: PreviewReleas
     SettingsScaffold(title = tr("应用更新"), onBack = onBack) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.titleLarge)
-            Text(tr(if (updateChannelAvailable) "GitHub 预览渠道" else "本地构建"))
+            Text(productBuildChannelLabel)
             Text(tr("更新从 GitHub 获取，验证后交由 Android 安装。"))
             if (updateChannelAvailable) {
                 Row(
@@ -163,7 +170,7 @@ internal fun PreviewUpdatePage(onBack: () -> Unit, initialRelease: PreviewReleas
                         verified = null
                         release = updater.check()
                         preferences.lastCheckTime = System.currentTimeMillis()
-                        if (release == null) status = "没有更新的预览版。"
+                        if (release == null) status = "没有发现新版本。"
                     }
                 }, enabled = operation == null) { Text(tr("检查 GitHub 更新")) }
             }
