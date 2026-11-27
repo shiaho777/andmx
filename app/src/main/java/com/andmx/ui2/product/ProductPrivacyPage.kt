@@ -128,7 +128,7 @@ internal fun ProductPrivacyPage(onBack: () -> Unit, navigate: (SettingsPage) -> 
             )
             PrivacyItem(
                 "联网更新",
-                "检查预览更新会连接 GitHub。可在应用更新中关闭自动检查。",
+                "检查应用更新会连接 GitHub。可在应用更新中关闭自动检查。",
                 actionLabel = "应用更新",
                 onClick = { navigate(SettingsPage.UPDATES) },
             )

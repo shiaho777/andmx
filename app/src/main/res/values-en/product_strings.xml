@@ -38,7 +38,7 @@
     <string name="str_product_036">Couldn\'t restore the file. Try again.</string>
     <string name="str_product_037">Original content restored.</string>
     <string name="str_product_038">What\'s new in this version</string>
-    <string name="str_product_039">An AndMX preview update is available</string>
+    <string name="str_product_039">An AndMX update is available</string>
     <string name="str_product_040">View update</string>
     <string name="str_product_042">Couldn\'t fetch or verify the update. Try again.</string>
     <string name="str_product_043">App updates</string>
@@ -46,7 +46,7 @@
     <string name="str_product_045">Local build</string>
     <string name="str_product_046">AndMX verifies updates from GitHub before handing them to Android for installation.</string>
     <string name="str_product_047">Check for updates automatically</string>
-    <string name="str_product_048">No newer preview is available.</string>
+    <string name="str_product_048">No newer version is available.</string>
     <string name="str_product_049">Check GitHub for updates</string>
     <string name="str_product_050">Download and signing certificate verified.</string>
     <string name="str_product_051">Download and verify</string>
@@ -79,14 +79,14 @@
     <string name="str_product_080">Android\'s installer opens for updates and project APKs and asks you to confirm.</string>
     <string name="str_product_081">Open app updates</string>
     <string name="str_product_082">Online updates</string>
-    <string name="str_product_083">Preview update checks connect to GitHub. Disable automatic checks in App updates.</string>
+    <string name="str_product_083">App update checks connect to GitHub. Disable automatic checks in App updates.</string>
     <string name="str_product_084">Read the full privacy statement</string>
     <string name="str_product_086">Off</string>
     <string name="str_product_087">Quick start</string>
     <string name="str_product_088">Help and support</string>
     <string name="str_product_089">Replay the offline sample or use your own file</string>
     <string name="str_product_090">See permissions, data destinations, and settings</string>
-    <string name="str_product_091">Check for signed previews, set update preferences, and view release notes</string>
+    <string name="str_product_091">Check for signed updates, set update preferences, and view release notes</string>
     <string name="str_product_092">Channel</string>
     <string name="str_product_093">AndMX connects to your chosen model on Android so you can inspect project files, review edits, and approve actions. Try the offline sample or start with one text file.</string>
     <string name="str_product_094">Project license</string>
@@ -102,4 +102,5 @@
     <string name="str_product_104">Diagnostics</string>
     <string name="str_product_close_diff">Close diff</string>
     <string name="str_product_offline_guide">Offline guide</string>
+    <string name="str_product_stable_channel">GitHub stable channel</string>
 </resources>

@@ -213,7 +213,7 @@ private fun SettingsHome(
         SettingsPage.MEMORY to tr("在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。"),
         SettingsPage.QUICK_START to tr("重播离线样例或使用你自己的文件"),
         SettingsPage.PRIVACY to tr("检查授权、数据去向和各项功能的开关"),
-        SettingsPage.UPDATES to tr("检查签名预览、设置更新偏好并查看版本记录"),
+        SettingsPage.UPDATES to tr("检查签名更新、设置更新偏好并查看版本记录"),
         SettingsPage.ABOUT to tr("版本、构建与诊断信息"),
     )
     val filtered = filterSettingsGroups(query, groups, descriptions)

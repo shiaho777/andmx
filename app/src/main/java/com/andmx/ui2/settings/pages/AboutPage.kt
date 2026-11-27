@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.andmx.BuildConfig
 import com.andmx.R
 import com.andmx.ui2.product.PRODUCT_REPO
+import com.andmx.ui2.product.productBuildChannelLabel
 import com.andmx.ui2.settings.SettingsItem
 import com.andmx.ui2.settings.SettingsScaffold
 import com.andmx.ui2.settings.UiLang
@@ -76,7 +77,7 @@ fun AboutPage(onBack: () -> Unit) {
             }
 
             InfoRow(tr("版本"), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            InfoRow(tr("渠道"), tr(if (BuildConfig.GITHUB_PREVIEW && !BuildConfig.DEBUG) "GitHub 预览渠道" else "本地构建"))
+            InfoRow(tr("渠道"), productBuildChannelLabel)
             InfoRow(tr("构建变体"), BuildConfig.FLAVOR)
             InfoRow(tr("构建类型"), BuildConfig.BUILD_TYPE)
             InfoRow(tr("包名"), BuildConfig.APPLICATION_ID)

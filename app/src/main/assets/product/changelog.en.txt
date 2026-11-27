@@ -1,3 +1,8 @@
+## 1.0.0
+• Browse project files, search conversations and review changes in the Android workbench.
+• Try an offline edit or send your own text file to a model after confirming the destination.
+• Review permissions and diagnostics, and check for signed updates on the stable GitHub channel.
+
 ## 0.1.0-preview.1
 • Try approvals, file diffs, and restoring changes in an offline sample.
 • Choose one text file, confirm sending it to your configured model, and review the proposal before saving a copy.

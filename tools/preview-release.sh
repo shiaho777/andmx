@@ -11,8 +11,22 @@ version_code=$2
 keystore=$3
 output=$4
 expected_cert=${5:-}
-if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ || ! "$version_code" =~ ^[1-9][0-9]*$ || "$version_code" -lt 2 ]]; then
-    echo "Expected a preview version name and a version code greater than 1." >&2
+if [[ ! "$version_code" =~ ^[1-9][0-9]*$ || "$version_code" -lt 2 ]]; then
+    echo "Expected a version code greater than 1." >&2
+    exit 2
+fi
+if [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    gradle_version_args=(
+        -PandmxGithubStable=true "-PandmxStableVersionName=$version_name"
+        "-PandmxStableVersionCode=$version_code"
+    )
+elif [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]; then
+    gradle_version_args=(
+        -PandmxGithubPreview=true "-PandmxPreviewVersionName=$version_name"
+        "-PandmxPreviewVersionCode=$version_code"
+    )
+else
+    echo "Expected a stable or preview version name." >&2
     exit 2
 fi
 
@@ -48,8 +62,7 @@ fi
 (
     cd "$root"
     ./gradlew :app:assembleLiteRelease --no-daemon \
-      -PandmxGithubPreview=true "-PandmxPreviewVersionName=$version_name" \
-      "-PandmxPreviewVersionCode=$version_code" -PtestAbi=arm64-v8a </dev/null
+      "${gradle_version_args[@]}" -PtestAbi=arm64-v8a </dev/null
 )
 unsigned="$root/app/build/outputs/apk/lite/release/app-lite-release-unsigned.apk"
 "$build_tools/zipalign" -P 16 -f 4 "$unsigned" "$work/aligned.apk"
@@ -122,4 +135,4 @@ cp "$root/THIRD_PARTY.md" "$work/THIRD_PARTY.md"
 for file in "$apk_name" release-manifest.json SHA256SUMS apk-certificates.txt CHANGELOG.md THIRD_PARTY.md NOTICES.zip; do
     mv "$work/$file" "$output/$file"
 done
-printf 'Verified preview candidate: %s\n' "$output/$apk_name"
+printf 'Verified release candidate: %s\n' "$output/$apk_name"

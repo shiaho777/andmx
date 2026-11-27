@@ -38,7 +38,7 @@
     <string name="str_product_036">还原失败，请重试。</string>
     <string name="str_product_037">已还原为初始内容。</string>
     <string name="str_product_038">此版本的改动</string>
-    <string name="str_product_039">有新的 AndMX 预览版</string>
+    <string name="str_product_039">有新的 AndMX 版本</string>
     <string name="str_product_040">查看更新</string>
     <string name="str_product_042">暂时无法获取或验证更新，请重试。</string>
     <string name="str_product_043">应用更新</string>
@@ -46,7 +46,7 @@
     <string name="str_product_045">本地构建</string>
     <string name="str_product_046">更新从 GitHub 获取，验证后交由 Android 安装。</string>
     <string name="str_product_047">自动检查更新</string>
-    <string name="str_product_048">没有更新的预览版。</string>
+    <string name="str_product_048">没有发现新版本。</string>
     <string name="str_product_049">检查 GitHub 更新</string>
     <string name="str_product_050">已验证下载内容和签名。</string>
     <string name="str_product_051">下载并验证</string>
@@ -79,14 +79,14 @@
     <string name="str_product_080">安装更新或项目 APK 时，Android 会打开系统安装器，并要求你确认。</string>
     <string name="str_product_081">打开应用更新</string>
     <string name="str_product_082">联网更新</string>
-    <string name="str_product_083">检查预览更新会连接 GitHub。可在应用更新中关闭自动检查。</string>
+    <string name="str_product_083">检查应用更新会连接 GitHub。可在应用更新中关闭自动检查。</string>
     <string name="str_product_084">查看完整隐私说明</string>
     <string name="str_product_086">已关闭</string>
     <string name="str_product_087">快速入门</string>
     <string name="str_product_088">帮助与支持</string>
     <string name="str_product_089">重播离线样例或使用你自己的文件</string>
     <string name="str_product_090">检查授权、数据去向和各项功能的开关</string>
-    <string name="str_product_091">检查签名预览、设置更新偏好并查看版本记录</string>
+    <string name="str_product_091">检查签名更新、设置更新偏好并查看版本记录</string>
     <string name="str_product_092">渠道</string>
     <string name="str_product_093">AndMX 在 Android 上连接你选用的模型，在项目中查看文件、审阅改动和运行已授权的操作。可先体验离线样例，再从一个文本文件开始。</string>
     <string name="str_product_094">项目许可证</string>
@@ -102,4 +102,5 @@
     <string name="str_product_104">诊断信息</string>
     <string name="str_product_close_diff">关闭差异</string>
     <string name="str_product_offline_guide">离线使用指南</string>
+    <string name="str_product_stable_channel">GitHub 正式渠道</string>
 </resources>

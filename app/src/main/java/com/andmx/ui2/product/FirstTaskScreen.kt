@@ -34,7 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import com.andmx.BuildConfig
 import com.andmx.agent.ToolRisk
 import com.andmx.llm.ApiMessage
 import com.andmx.llm.ChatRequest
@@ -90,7 +89,7 @@ internal fun FirstTaskScreen(resumeIntro: Boolean = false, onClose: () -> Unit) 
                 OutlinedButton(onClick = { goTo("document") }, modifier = Modifier.testTag("product-first-document")) {
                     Text(tr("配置模型并试用真实文件"))
                 }
-                if (BuildConfig.GITHUB_PREVIEW) {
+                if (updateChannelAvailable) {
                     var automatic by remember { mutableStateOf(preferences.automaticUpdates) }
                     androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(checked = automatic, onCheckedChange = {
