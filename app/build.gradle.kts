@@ -8,6 +8,10 @@ plugins {
 }
 
 val includeLinuxRuntime = providers.gradleProperty("androidLinuxRuntimeDir").isPresent
+val githubPreview = providers.gradleProperty("andmxGithubPreview").orNull == "true"
+val previewVersionCode = providers.gradleProperty("andmxPreviewVersionCode").orNull?.toInt() ?: 2
+val previewVersionName = providers.gradleProperty("andmxPreviewVersionName").orElse("0.1.0-preview.1").get()
+
 
 android {
     namespace = "com.andmx"
@@ -21,6 +25,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("boolean", "GITHUB_PREVIEW", "false")
         vectorDrawables { useSupportLibrary = true }
         ndk {
             // Real devices and the dev emulator are arm64; keep the APK lean.
@@ -50,6 +55,12 @@ android {
             dimension = "engine"
             targetSdk = 34
             buildConfigField("int", "PROBE_TARGET_SDK", "34")
+            if (githubPreview) {
+                require(previewVersionCode > 1 && previewVersionName.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+-preview\\.[0-9]+")))
+                versionCode = previewVersionCode
+                versionName = previewVersionName
+                buildConfigField("boolean", "GITHUB_PREVIEW", "true")
+            }
         }
         // Power engine: targetSdk 28 so guest binaries can be exec'd from the
         // writable data dir (the proot userland). Sideload-only by design.
@@ -116,6 +127,12 @@ android {
     }
 }
 
+if (githubPreview) {
+    androidComponents.onVariants(androidComponents.selector().withFlavor("engine" to "lite")) { variant ->
+        variant.packaging.jniLibs.excludes.addAll("**/libproot.so", "**/libproot_loader.so", "**/libtalloc.so")
+    }
+}
+
 androidComponents.onVariants(androidComponents.selector().withFlavor("engine" to "vm")) { variant ->
     variant.packaging.jniLibs.excludes.addAll("**/libproot.so", "**/libproot_loader.so", "**/libtalloc.so")
 }
@@ -158,6 +175,7 @@ dependencies {
     testImplementation(libs.room.testing)
 
     androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.mockwebserver)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.espresso.core)

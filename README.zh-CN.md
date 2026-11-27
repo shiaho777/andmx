@@ -13,12 +13,20 @@ AndMX 支持 **Android 8.0（API 26）及以上**。默认 APK 面向 **ARM64（
 
 | 版本 | 适用场景 | 执行环境 |
 | --- | --- | --- |
-| **Lite** | 读取和编辑项目文件、Git 操作和常规 Agent 任务 | Android 工具与 Kotlin/JGit，目标 API 34。 |
+| **Lite** | 读取和编辑项目文件、Git 操作和常规 Agent 任务 | Android 原生工具与 Kotlin，目标 API 34。 |
 | **Proot** | 在设备上运行 Linux 工具链、Shell 命令和构建 | 通过 PRoot 运行无需 root 权限的 Alpine Linux 环境。目标 API 28，需侧载。首次配置会下载 Alpine。 |
 
 ## 界面截图
 
-截图来自 `main` 上的 [`509d1e2`](https://github.com/shiaho777/andmx/commit/509d1e206c30c6310f7c61dab87fdf45bb19c966)，运行于 Android 15 模拟器。示例任务使用演示模型和样例项目。点击图片可查看原尺寸。
+下列离线引导截图来自 ARM64 Android 模拟器上的 Lite 签名预览候选包。
+
+<p align="center">
+  <a href="static/screenshot/quick-start.webp"><img width="232" src="static/screenshot/quick-start.webp" alt="提供离线样例和模型配置入口的快速入门"></a>
+  <a href="static/screenshot/sample-approval.webp"><img width="232" src="static/screenshot/sample-approval.webp" alt="应用私有样例等待编辑审批"></a>
+  <a href="static/screenshot/sample-diff.webp"><img width="232" src="static/screenshot/sample-diff.webp" alt="样例改动写入后的逐行差异"></a>
+</p>
+
+下方的工作台截图来自 `main` 上的 [`509d1e2`](https://github.com/shiaho777/andmx/commit/509d1e206c30c6310f7c61dab87fdf45bb19c966)，运行于 Android 15 模拟器。示例任务使用演示模型和样例项目。点击图片可查看原尺寸。
 
 **从发出任务到审阅结果。** AndMX 先读取验证说明，提交修改申请，获准后执行验证命令，最后打开实际改动的差异。
 
@@ -81,6 +89,12 @@ AndMX 支持 **Android 8.0（API 26）及以上**。默认 APK 面向 **ARM64（
 功能需求和已知问题见 [Issue 列表](https://github.com/shiaho777/andmx/issues)。
 
 ## 安装与快速开始
+
+首次安装后可以选择 **体验离线样例**，实际完成拒绝、批准、查看差异和还原。选择 **配置模型并试用真实文件** 时，可以导入一个不超过 32 KB 的 UTF-8 文本文件。确认模型端点后发送内容，审阅通过后可以用 Android 文件选择器另存副本。**设置 → 快速入门** 可随时重新打开这两个入口。
+
+**设置 → 隐私与权限** 集中显示授权状态和数据去向。**设置 → 关于** 提供项目文档、GitHub 反馈和可预览复制的诊断信息。[隐私声明](PRIVACY.md)
+
+Lite 签名预览正在验证中。[发布流程](docs/preview-release.md) · [变更记录](CHANGELOG.md) · [第三方组件与授权](THIRD_PARTY.md)
 
 目前 [GitHub Releases](https://github.com/shiaho777/andmx/releases) 尚无发布的 APK。可以从源码构建调试版，所需环境为 **JDK 17**、**Android SDK Platform 34**、**Build-Tools 34.0.0**、**NDK 27.0.12077973** 和 **CMake 3.22.1**。通过 Android Studio 安装 SDK 工具后，设置 `ANDROID_HOME`，或在本机的 `local.properties` 中设置 `sdk.dir`。[Android Studio](https://developer.android.com/studio)
 

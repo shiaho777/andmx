@@ -13,12 +13,20 @@ AndMX runs on **Android 8.0 (API 26) and up**. Standard APK builds target **ARM6
 
 | Build | Use it for | Execution environment |
 | --- | --- | --- |
-| **Lite** | Reading and editing project files, Git, and the core agent workflow | Android tools and Kotlin/JGit. Targets API 34. |
+| **Lite** | Reading and editing project files, Git, and the core agent workflow | Native Android and Kotlin tools. Targets API 34. |
 | **Proot** | Running a Linux toolchain, shell commands, and builds on the device | A rootless Alpine Linux environment via PRoot. Sideloaded build targeting API 28. The first setup downloads Alpine. |
 
 ## Screenshots
 
-These screenshots show the Android 15 build from `main` at [`509d1e2`](https://github.com/shiaho777/andmx/commit/509d1e206c30c6310f7c61dab87fdf45bb19c966). The task uses a demo model and a sample project. Select any image to open it at full size.
+The offline walkthrough below was captured from the signed Lite preview candidate on an ARM64 Android emulator.
+
+<p align="center">
+  <a href="static/screenshot/quick-start.webp"><img width="232" src="static/screenshot/quick-start.webp" alt="Quick start with offline and model setup options"></a>
+  <a href="static/screenshot/sample-approval.webp"><img width="232" src="static/screenshot/sample-approval.webp" alt="Private local sample waiting for edit approval"></a>
+  <a href="static/screenshot/sample-diff.webp"><img width="232" src="static/screenshot/sample-diff.webp" alt="The applied sample edit with a line-by-line diff"></a>
+</p>
+
+The workbench screenshots below show the Android 15 build from `main` at [`509d1e2`](https://github.com/shiaho777/andmx/commit/509d1e206c30c6310f7c61dab87fdf45bb19c966). The task uses a demo model and a sample project. Select any image to open it at full size.
 
 **One task, from request to review.** AndMX reads a validation note, asks before editing, runs a verification command after approval, and opens the resulting diff.
 
@@ -82,7 +90,11 @@ Track requested features and known issues in the [issue tracker](https://github.
 
 ## Install and get started
 
-The repository currently has no published APK on [GitHub Releases](https://github.com/shiaho777/andmx/releases). Build a debug APK from source using **JDK 17**, **Android SDK Platform 34**, **Build-Tools 34.0.0**, **NDK 27.0.12077973**, and **CMake 3.22.1**. Install the SDK tools with Android Studio and set `ANDROID_HOME` or set `sdk.dir` in a local `local.properties`. [Android Studio](https://developer.android.com/studio)
+On a fresh install, choose **Try the offline sample** to practice declining, approving, inspecting and restoring a local edit. Choose **Set up a model and try your own file** to import one UTF-8 text file of up to 32 KB. You confirm the selected model endpoint before sending its contents, review the proposed revision, and can save a separate copy from Android’s file picker. **Settings → Quick start** reopens both paths.
+
+Permission status and data destinations are documented under **Settings → Privacy and permissions** and in the [privacy statement](PRIVACY.md). **Settings → About** provides project resources, GitHub feedback and a diagnostic preview you can copy.
+
+The repository currently has no published APK on [GitHub Releases](https://github.com/shiaho777/andmx/releases). Build a debug APK from source using **JDK 17**, **Android SDK Platform 34**, **Build-Tools 34.0.0**, **NDK 27.0.12077973**, and **CMake 3.22.1**. Install the SDK tools with Android Studio and set `ANDROID_HOME` or set `sdk.dir` in a local `local.properties`. [Android Studio](https://developer.android.com/studio) The signed Lite preview is being qualified. See the [preview release runbook](docs/preview-release.md), [changelog](CHANGELOG.md) and [third-party inventory](THIRD_PARTY.md).
 
 ```bash
 git clone https://github.com/shiaho777/andmx.git

@@ -57,6 +57,9 @@ jobs:
       - name: Build native (CMake/NDK)
         run: ./gradlew :app:externalNativeBuildLiteDebug --no-daemon --stacktrace
 
+      - name: Assemble unsigned Lite preview
+        run: ./gradlew :app:assembleLiteRelease -PandmxGithubPreview=true --no-daemon --stacktrace
+
       - name: Unit tests
         run: ./gradlew :app:testLiteDebugUnitTest --no-daemon --stacktrace
 

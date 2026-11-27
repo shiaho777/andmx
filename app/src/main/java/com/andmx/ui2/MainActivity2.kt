@@ -118,7 +118,7 @@ class MainActivity2 : ComponentActivity() {
                                 fontSize = settings.codeFontSize
                             )
                     ) {
-                        ChatScreen(modifier = Modifier.fillMaxSize())
+                        com.andmx.ui2.product.ProductIntroHost { ChatScreen(modifier = Modifier.fillMaxSize()) }
                     }
                 }
                 }

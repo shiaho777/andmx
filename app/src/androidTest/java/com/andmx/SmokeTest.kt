@@ -12,8 +12,12 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.core.content.FileProvider
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -29,6 +33,10 @@ import com.andmx.settings.SettingsStore
 import com.andmx.ui2.MainActivity2
 import com.andmx.ui2.settings.UiLang
 import java.io.RandomAccessFile
+import java.util.concurrent.TimeUnit
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.json.JSONObject
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Before
@@ -53,6 +61,105 @@ class SmokeTest {
             if (current.locale != "zh") store.update(current.copy(locale = "zh"))
         }
         compose.waitUntil(5_000) { UiLang.tag == "zh" }
+        if (compose.onAllNodes(androidx.compose.ui.test.hasTestTag("product-first-skip")).fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithTag("product-first-skip").performScrollTo().performClick()
+        }
+    }
+
+    @Test
+    fun offlineSampleCanDeclineApplyAndRestoreARealPrivateFile() {
+        compose.onNodeWithContentDescription("切换侧边栏").performClick()
+        compose.onNodeWithText("设置").performClick()
+        compose.onNode(hasSetTextAction() and hasText("搜索设置")).performTextInput("快速入门")
+        compose.onNodeWithText("重播离线样例或使用你自己的文件").performClick()
+        compose.onNodeWithTag("product-first-sample").performClick()
+        val content = compose.onNodeWithTag("product-task-content")
+        content.assertTextContains("Status: draft", substring = true)
+        compose.onNodeWithTag("product-sample-propose").performClick()
+        compose.onNodeWithText("拒绝").performScrollTo().performClick()
+        content.assertTextContains("Status: draft", substring = true)
+        compose.onNodeWithTag("product-sample-propose").performScrollTo().performClick()
+        compose.onNodeWithText("仅本次允许").performScrollTo().performClick()
+        compose.onNodeWithText("还原此文件").performClick()
+        compose.onNodeWithText("还原").performClick()
+        content.assertTextContains("Status: draft", substring = true)
+        val directory = java.io.File(compose.activity.noBackupFilesDir, "first-task")
+        val sampleId = JSONObject(directory.resolve("SAMPLE.json").readText()).getString("id")
+        check(directory.resolve("$sampleId.txt").readText() == "# AndMX sample\n\nStatus: draft\n")
+    }
+
+    @Test
+    fun firstRealTaskConfirmsAnIsolatedModelRequestAndExportsACopy() {
+        val activity = compose.activity
+        val providers = ProviderStore(activity)
+        val providerId = "product-local-fixture"
+        val original = activity.cacheDir.resolve("product-source.txt").apply { writeText("status: draft") }
+        val exported = activity.cacheDir.resolve("product-copy.txt").apply { writeText("") }
+        val server = MockWebServer()
+        val instrument = InstrumentationRegistry.getInstrumentation()
+        fun intercept(action: String, file: java.io.File): Instrumentation.ActivityMonitor {
+            val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+            val filter = IntentFilter(action).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                addDataType("*/*")
+            }
+            return instrument.addMonitor(filter, Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(uri)), true)
+        }
+        val picker = intercept(Intent.ACTION_OPEN_DOCUMENT, original)
+        val save = intercept(Intent.ACTION_CREATE_DOCUMENT, exported)
+        try {
+            server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+            val revised = JSONObject().put("content", "status: reviewed").toString()
+            val response = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":${JSONObject.quote(revised)}},\"finish_reason\":\"stop\"}]}"
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(response))
+            runBlocking {
+                providers.upsert(ProviderDefinition(
+                    id = providerId,
+                    name = "Local product fixture",
+                    kind = ProviderKind.OPENAI,
+                    baseUrl = "http://127.0.0.1:${server.port}/v1",
+                    apiKey = "test-only",
+                    models = mapOf("revision-fixture" to ModelDefinition()),
+                ))
+            }
+            compose.onNodeWithContentDescription("切换侧边栏").performClick()
+            compose.onNodeWithText("设置").performClick()
+            compose.onNode(hasSetTextAction() and hasText("搜索设置")).performTextInput("快速入门")
+            compose.onNodeWithText("重播离线样例或使用你自己的文件").performClick()
+            compose.onNodeWithTag("product-first-document").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Local product fixture · revision-fixture").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("导入文本文件").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("status: draft").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNode(hasSetTextAction() and hasText("你想修改什么？")).performTextInput("Mark reviewed")
+            compose.onNodeWithText("请求改动").performScrollTo().performClick()
+            check(server.requestCount == 0)
+            compose.onNodeWithText("取消").performClick()
+            check(server.requestCount == 0)
+            compose.onNodeWithText("请求改动").performScrollTo().performClick()
+            compose.onNodeWithText("发送并预览改动").performClick()
+            val request = checkNotNull(server.takeRequest(10, TimeUnit.SECONDS))
+            val body = JSONObject(request.body.readUtf8())
+            check(body.getString("model") == "revision-fixture")
+            check(!body.has("tools"))
+            val sent = JSONObject(body.getJSONArray("messages").getJSONObject(1).getString("content"))
+            check(sent.getString("file") == "status: draft" && sent.getString("instruction") == "Mark reviewed")
+            check(original.readText() == "status: draft" && exported.readText().isEmpty())
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("仅本次允许").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("仅本次允许").performScrollTo().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("还原此文件").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("关闭差异").performClick()
+            compose.onNodeWithText("保存修改后的副本").performScrollTo().performClick()
+            compose.waitUntil(5_000) { exported.readText() == "status: reviewed" }
+            check(original.readText() == "status: draft")
+            check(server.requestCount == 1)
+        } finally {
+            instrument.removeMonitor(picker)
+            instrument.removeMonitor(save)
+            original.delete()
+            exported.delete()
+            runBlocking { providers.delete(providerId) }
+            server.shutdown()
+        }
     }
 
     @Test

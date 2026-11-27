@@ -22,6 +22,9 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.PlayCircleOutline
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Keyboard
@@ -55,6 +58,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.andmx.ui2.product.LocalOpenProductIntro
+import com.andmx.ui2.product.PreviewUpdatePage
+import com.andmx.ui2.product.ProductPrivacyPage
 import com.andmx.ui2.settings.pages.AboutPage
 import com.andmx.ui2.settings.pages.CodePreviewPage
 import com.andmx.ui2.settings.pages.CommandPage
@@ -97,6 +103,9 @@ enum class SettingsPage(val title: String, val icon: ImageVector) {
     USAGE(tr("使用统计"), Icons.Outlined.QueryStats),
     MODEL_TRAJECTORY(tr("模型调用轨迹"), Icons.Outlined.QueryStats),
     MEMORY(tr("记忆"), Icons.Outlined.Storage),
+    QUICK_START(tr("快速入门"), Icons.Outlined.PlayCircleOutline),
+    PRIVACY(tr("隐私与权限"), Icons.Outlined.Security),
+    UPDATES(tr("应用更新"), Icons.Outlined.Download),
     ABOUT(tr("关于"), Icons.Outlined.Info),
 }
 
@@ -118,6 +127,7 @@ fun SettingsScreen(
         if (page != SettingsPage.HOME) backFromPage() else onClose()
     }
 
+    val openIntro = LocalOpenProductIntro.current
     val motion = LocalMotion.current
     AnimatedContent(
         targetState = page,
@@ -128,7 +138,9 @@ fun SettingsScreen(
         modifier = modifier.fillMaxSize(),
     ) { target ->
         when (target) {
-            SettingsPage.HOME -> SettingsHome(onOpen = { page = it }, onClose = onClose)
+            SettingsPage.HOME -> SettingsHome(onOpen = { selection ->
+                if (selection == SettingsPage.QUICK_START) openIntro() else page = selection
+            }, onClose = onClose)
             SettingsPage.GENERAL -> GeneralPage(backFromPage)
             SettingsPage.PERSONALIZATION -> PersonalizationPage(backFromPage)
             SettingsPage.CODE_PREVIEW -> CodePreviewPage(backFromPage)
@@ -148,6 +160,9 @@ fun SettingsScreen(
             SettingsPage.USAGE -> UsagePage(backFromPage)
             SettingsPage.MODEL_TRAJECTORY -> ModelTrajectoryPage(backFromPage)
             SettingsPage.MEMORY -> MemoryViewerPage(backFromPage)
+            SettingsPage.QUICK_START -> Unit
+            SettingsPage.PRIVACY -> ProductPrivacyPage(backFromPage, navigate = { page = it })
+            SettingsPage.UPDATES -> PreviewUpdatePage(backFromPage)
             SettingsPage.ABOUT -> AboutPage(backFromPage)
         }
     }
@@ -174,7 +189,7 @@ private fun SettingsHome(
         tr("数据与统计") to listOf(
             SettingsPage.INDEX, SettingsPage.USAGE, SettingsPage.MODEL_TRAJECTORY,
         ),
-        tr("关于") to listOf(SettingsPage.ABOUT),
+        tr("帮助与支持") to listOf(SettingsPage.QUICK_START, SettingsPage.PRIVACY, SettingsPage.UPDATES, SettingsPage.ABOUT),
     )
     val descriptions = mapOf(
         SettingsPage.GENERAL to tr("语言与当前窗口体验"),
@@ -196,6 +211,9 @@ private fun SettingsHome(
         SettingsPage.USAGE to tr("查看会话活跃度与模型用量的粗略统计。"),
         SettingsPage.MODEL_TRAJECTORY to tr("逐次模型调用的来源、Token 与输入输出"),
         SettingsPage.MEMORY to tr("在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。"),
+        SettingsPage.QUICK_START to tr("重播离线样例或使用你自己的文件"),
+        SettingsPage.PRIVACY to tr("检查授权、数据去向和各项功能的开关"),
+        SettingsPage.UPDATES to tr("检查签名预览、设置更新偏好并查看版本记录"),
         SettingsPage.ABOUT to tr("版本、构建与诊断信息"),
     )
     val filtered = filterSettingsGroups(query, groups, descriptions)
