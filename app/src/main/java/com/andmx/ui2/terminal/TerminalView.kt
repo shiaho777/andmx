@@ -44,6 +44,7 @@ fun TerminalView(
     fontFamily: FontFamily = FontFamily.Monospace,
     styledLines: List<List<StyledSpan>> = emptyList(),
     followOutput: Boolean = true,
+    trimUnusedRows: Boolean = false,
 ) {
     val listState = rememberLazyListState()
     val hScroll = rememberScrollState()
@@ -53,6 +54,11 @@ fun TerminalView(
         if (styledLines.isEmpty() && coloredLines.isEmpty()) splitTerminalLines(screen) else emptyList()
     }
     val lineCount = when {
+        trimUnusedRows -> (when {
+            styledLines.isNotEmpty() -> styledLines.indexOfLast { it.isNotEmpty() }
+            coloredLines.isNotEmpty() -> coloredLines.indexOfLast { it.isNotEmpty() }
+            else -> plainLines.indexOfLast { it.isNotBlank() }
+        } + 1).coerceAtLeast(1)
         styledLines.isNotEmpty() -> styledLines.size
         coloredLines.isNotEmpty() -> coloredLines.size
         else -> plainLines.size

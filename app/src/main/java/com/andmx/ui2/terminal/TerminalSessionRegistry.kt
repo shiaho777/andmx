@@ -28,8 +28,8 @@ open class TerminalSessions(private val worktree: com.andmx.workspace.LocalWorkt
         if (_sessions.isEmpty()) newSession(context)
     }
 
-    fun newSession(context: Context): TerminalSession {
-        val session = TerminalSession(context.applicationContext, worktree = worktree)
+    fun newSession(context: Context, alpineNetwork: Boolean? = null): TerminalSession {
+        val session = TerminalSession(context.applicationContext, worktree = worktree, alpineNetwork = alpineNetwork)
         _sessions.add(session)
         activeIndex = _sessions.lastIndex
         runCatching { session.start() }

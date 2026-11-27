@@ -7,15 +7,19 @@ import com.andmx.exec.pty.PtyProcess
 import com.andmx.workspace.ProjectManager
 import com.andmx.workspace.RemoteWorkspaceStore
 import com.andmx.workspace.WorkspaceKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import kotlin.coroutines.coroutineContext
 
 /**
  * An interactive shell session running inside the proot guest, surfaced to the
@@ -26,11 +30,14 @@ class TerminalSession(
     private val context: Context,
     private val runtime: ProotRuntime = ProotRuntime(context),
     private val worktree: com.andmx.workspace.LocalWorktree? = null,
+    private val alpineNetwork: Boolean? = null,
 ) {
     val sessionId: String = java.util.UUID.randomUUID().toString()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val buffer = TerminalEmulator(rows = 24, cols = 80)
     private var process: PtyProcess? = null
+    @Volatile private var alpineConsole: AlpineConsole? = null
+    private var started = false
 
     private val _state = MutableStateFlow(SessionState())
     val state: StateFlow<SessionState> = _state
@@ -53,8 +60,13 @@ class TerminalSession(
     val screen: String get() = _state.value.screenText
 
     fun start() {
-        if (process != null) return
+        if (started) return
+        started = true
         scope.launch(worktree?.context() ?: kotlin.coroutines.EmptyCoroutineContext) {
+            if (alpineNetwork != null) {
+                startAlpine(alpineNetwork)
+                return@launch
+            }
             val projectManager = ProjectManager(context)
             if (worktree == null && projectManager.workspaceKind.value == WorkspaceKind.REMOTE) {
                 startRemoteSsh(projectManager)
@@ -103,6 +115,46 @@ class TerminalSession(
         }
     }
 
+
+    private suspend fun startAlpine(allowNetwork: Boolean) {
+        emit(status = "Starting Alpine")
+        try {
+            ExperimentalAlpine.open(context, allowNetwork) { progress ->
+                emit(status = progress)
+                feed(progress + "\r\n")
+            }.use { console ->
+                alpineConsole = console
+                try {
+                    coroutineContext.ensureActive()
+                    val input = InputStreamReader(console.input, StandardCharsets.UTF_8)
+                    val buffer = CharArray(4096)
+                    val readyMarker = "ALPINE_RUNTIME_READY"
+                    var tail = ""
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        val output = String(buffer, 0, count)
+                        if (!_state.value.running) {
+                            val recent = tail + output
+                            if (readyMarker in recent) emit(running = true, status = "Alpine")
+                            tail = recent.takeLast(readyMarker.length)
+                        }
+                        feed(output)
+                    }
+                    val code = console.waitFor()
+                    emit(running = false, exitCode = code, status = "Alpine exited ($code)")
+                } finally {
+                    alpineConsole = null
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            val message = failure.message ?: "Alpine could not start"
+            emit(running = false, exitCode = -1, status = message)
+            feed(message + "\r\n")
+        }
+    }
 
     private suspend fun startRemoteSsh(projectManager: ProjectManager) {
         emit(status = "准备 SSH 远程终端…")
@@ -194,9 +246,14 @@ class TerminalSession(
     }
 
     fun write(text: String) {
-        val p = process ?: return
+        val output = alpineConsole?.output ?: process?.output ?: return
         scope.launch {
-            runCatching { p.output.write(text.toByteArray(StandardCharsets.UTF_8)); p.output.flush() }
+            runCatching {
+                synchronized(output) {
+                    output.write(text.toByteArray(StandardCharsets.UTF_8))
+                    output.flush()
+                }
+            }
         }
     }
 
@@ -226,6 +283,7 @@ class TerminalSession(
     }
 
     fun destroy() {
+        alpineConsole?.stop()
         process?.destroy()
         process = null
         scope.cancel()

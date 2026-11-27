@@ -7,9 +7,11 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+val includeLinuxRuntime = providers.gradleProperty("androidLinuxRuntimeDir").isPresent
+
 android {
     namespace = "com.andmx"
-    compileSdk = 34
+    compileSdk = if (includeLinuxRuntime) 36 else 34
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
@@ -28,7 +30,7 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments += "-DANDROID_STL=c++_static"
+                arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             }
         }
     }
@@ -57,6 +59,17 @@ android {
             buildConfigField("int", "PROBE_TARGET_SDK", "28")
         }
     }
+
+    if (includeLinuxRuntime) {
+        productFlavors.create("vm") {
+            dimension = "engine"
+            targetSdk = 36
+            applicationIdSuffix = ".vm"
+            buildConfigField("int", "PROBE_TARGET_SDK", "36")
+        }
+    }
+    sourceSets.named("lite") { java.srcDir("src/noVm/java") }
+    sourceSets.named("proot") { java.srcDir("src/noVm/java") }
 
     buildTypes {
         release {
@@ -103,7 +116,12 @@ android {
     }
 }
 
+androidComponents.onVariants(androidComponents.selector().withFlavor("engine" to "vm")) { variant ->
+    variant.packaging.jniLibs.excludes.addAll("**/libproot.so", "**/libproot_loader.so", "**/libtalloc.so")
+}
+
 dependencies {
+    if (includeLinuxRuntime) add("vmImplementation", "org.andmx:linux-runtime:0.1.0-alpha.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

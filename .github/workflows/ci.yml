@@ -104,3 +104,54 @@ jobs:
             echo "- Issues close via PR body \`Fixes #N\` / \`Closes #N\` on **merge**, not from CI."
             echo "- Do not close the linked Issue while CI is red or only because the PR opened."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  vm:
+    name: vm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the standalone runtime revision
+        id: runtime
+        run: |
+          revision="$(cat gradle/android-linux-runtime.rev)"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: shiaho777/android-linux-runtime
+          ref: ${{ steps.runtime.outputs.revision }}
+          path: .runtime-ci
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install VM build dependencies
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;34.0.0" "ndk;27.0.12077973" "ndk;28.2.13676358" "cmake;3.22.1"
+          python -m pip install -r .runtime-ci/tools/requirements.txt
+      - name: Prepare the verified engine
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          python .runtime-ci/tools/prepare.py
+      - name: Build and test the VM variant
+        run: |
+          ./gradlew :app:testVmDebugUnitTest :app:assembleVmDebug :app:bundleVmRelease \
+            "-PandroidLinuxRuntimeDir=$GITHUB_WORKSPACE/.runtime-ci" --no-daemon --stacktrace
+      - name: Upload the VM unit test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-unit-test-report
+          path: app/build/reports/tests/testVmDebugUnitTest
+          retention-days: 7

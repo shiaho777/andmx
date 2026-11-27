@@ -102,6 +102,21 @@ cd andmx
 3. 先试一个小任务，例如“读取 `README.md`，列出本地验证步骤”。保留**构建**模式，可以逐次确认文件编辑和命令执行。
 4. 遇到写入请求时先检查拟议改动。执行后从任务里的**文件改动**打开实际差异。
 
+### 实验性 Alpine 虚拟机
+
+ARM64 虚拟机预览以 API 36 为目标，安装包名为 `com.andmx.vm`。打开 **终端 → Experimental Alpine**，为本次会话选择是否联网。构建前按独立项目的说明准备 Android SDK 和 NDK。 [Android Linux Runtime](https://github.com/shiaho777/android-linux-runtime#build-the-demo-and-sdk)
+
+从 AndMX 仓库根目录执行以下命令，检出当前版本固定的运行时、准备依赖并安装实验版本。
+
+```sh
+git clone https://github.com/shiaho777/android-linux-runtime.git ../android-linux-runtime
+git -C ../android-linux-runtime checkout --detach "$(cat gradle/android-linux-runtime.rev)"
+python3 -m venv ../android-linux-runtime/.venv
+../android-linux-runtime/.venv/bin/pip install -r ../android-linux-runtime/tools/requirements.txt
+../android-linux-runtime/.venv/bin/python ../android-linux-runtime/tools/prepare.py
+./gradlew :app:installVmDebug -PandroidLinuxRuntimeDir=../android-linux-runtime
+```
+
 ### 哪些数据会离开设备
 
 工作区工具和 Proot 环境在设备上运行。模型调用会把提示词及任务所需的上下文发给你配置的供应商，其中可能包含文件片段和工具输出。网页和 MCP 工具也可能访问各自的端点。Android Use 使用录屏与无障碍权限来读取画面和操作界面。[应用权限声明](app/src/main/AndroidManifest.xml)

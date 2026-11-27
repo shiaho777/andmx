@@ -102,6 +102,21 @@ To install over USB on a device with USB debugging enabled, run `./gradlew :app:
 3. Start with a small task, for example, “Read `README.md` and identify the local validation steps.” Keep **Build** mode selected if you want to approve edits and commands as they come up.
 4. For a task that writes files, inspect the proposed change first. After execution, open **File changes** in the task to review the applied diff.
 
+### Experimental Alpine VM
+
+The ARM64 VM preview targets API 36 and installs as `com.andmx.vm`. Open **Terminal → Experimental Alpine** and choose whether to enable networking for the session. Set up the Android SDK and NDK listed in the standalone project before building. [Android Linux Runtime](https://github.com/shiaho777/android-linux-runtime#build-the-demo-and-sdk)
+
+With the runtime checked out at the revision used by this AndMX checkout, prepare the engine and build the experimental variant.
+
+```sh
+git clone https://github.com/shiaho777/android-linux-runtime.git ../android-linux-runtime
+git -C ../android-linux-runtime checkout --detach "$(cat gradle/android-linux-runtime.rev)"
+python3 -m venv ../android-linux-runtime/.venv
+../android-linux-runtime/.venv/bin/pip install -r ../android-linux-runtime/tools/requirements.txt
+../android-linux-runtime/.venv/bin/python ../android-linux-runtime/tools/prepare.py
+./gradlew :app:installVmDebug -PandroidLinuxRuntimeDir=../android-linux-runtime
+```
+
 ### What leaves the device
 
 Workspace tools and the Proot runtime execute on the device. Model calls send prompts and the context needed for the task, which can include file excerpts and tool output, to your configured provider. Web and MCP tools can contact their own endpoints. Android Use needs screen-capture and accessibility permission for screen capture and interaction. [App permissions](app/src/main/AndroidManifest.xml)
