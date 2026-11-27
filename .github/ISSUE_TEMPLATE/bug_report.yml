@@ -1,0 +1,21 @@
+name: Bug report
+description: Report an AndMX behavior you can reproduce
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the screen or task you started from and the actions you took.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: build
+    attributes:
+      label: App version and Android version
+      description: You can review and copy build diagnostics in Settings → About. Remove any credentials, private paths, logs, or file contents before posting.

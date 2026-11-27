@@ -54,7 +54,7 @@ fun FileRewindDialog(
     onDismiss: () -> Unit,
     initialPath: String? = null,
     canRevert: Boolean = true,
-    onOpenFile: (String) -> Unit = {},
+    onOpenFile: ((String) -> Unit)? = null,
 ) {
     var selectedPath by remember(initialPath) { mutableStateOf(initialPath) }
     var confirmation by remember { mutableStateOf<List<FileChange>?>(null) }
@@ -201,9 +201,11 @@ fun FileRewindDialog(
                         TextButton(enabled = canRevert, onClick = { confirmation = listOf(selected) }) {
                             Text(tr("还原此文件"))
                         }
-                        TextButton(onClick = { onOpenFile(selected.path) }) { Text(tr("打开文件")) }
+                        if (onOpenFile != null) {
+                            TextButton(onClick = { onOpenFile(selected.path) }) { Text(tr("打开文件")) }
+                        }
                     }
-                    TextButton(onClick = onDismiss) { Text(tr("关闭")) }
+                    TextButton(onClick = onDismiss) { Text(tr("关闭差异")) }
                 }
             }
         }
