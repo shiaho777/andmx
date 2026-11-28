@@ -22,11 +22,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "AndMX"
 include(":app")
-
-providers.gradleProperty("androidLinuxRuntimeDir").orNull?.let { runtimeDir ->
-    includeBuild(file(runtimeDir)) {
-        dependencySubstitution {
-            substitute(module("org.andmx:linux-runtime")).using(project(":runtime"))
-        }
-    }
-}

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.util.WeakHashMap
 
 enum class WorkspaceKind { LOCAL, REMOTE }
 
@@ -16,20 +17,34 @@ class ProjectManager(context: Context) {
 
     val guestMountPath: String = "/root/project"
 
-    private val _hostPath = MutableStateFlow(prefs.getString(KEY_HOST_PATH, null))
+    private val state = synchronized(states) {
+        states.getOrPut(appContext) {
+            State(
+                MutableStateFlow(prefs.getString(KEY_HOST_PATH, null)),
+                MutableStateFlow(runCatching {
+                    WorkspaceKind.valueOf(prefs.getString(KEY_KIND, WorkspaceKind.LOCAL.name)!!)
+                }.getOrDefault(WorkspaceKind.LOCAL)),
+                MutableStateFlow(prefs.getString(KEY_REMOTE_SPEC, null)),
+                MutableStateFlow(loadRecent()),
+            )
+        }
+    }
+    private val _hostPath = state.path
+    private val _workspaceKind = state.kind
+    private val _remoteSpecJson = state.remote
+    private val _recentPaths = state.recent
+
     val hostPath: StateFlow<String?> = _hostPath.asStateFlow()
-
-    private val _workspaceKind = MutableStateFlow(
-        runCatching { WorkspaceKind.valueOf(prefs.getString(KEY_KIND, WorkspaceKind.LOCAL.name)!!) }
-            .getOrDefault(WorkspaceKind.LOCAL),
-    )
     val workspaceKind: StateFlow<WorkspaceKind> = _workspaceKind.asStateFlow()
-
-    private val _remoteSpecJson = MutableStateFlow(prefs.getString(KEY_REMOTE_SPEC, null))
     val remoteSpecJson: StateFlow<String?> = _remoteSpecJson.asStateFlow()
-
-    private val _recentPaths = MutableStateFlow(loadRecent())
     val recentPaths: StateFlow<List<String>> = _recentPaths.asStateFlow()
+
+    private class State(
+        val path: MutableStateFlow<String?>,
+        val kind: MutableStateFlow<WorkspaceKind>,
+        val remote: MutableStateFlow<String?>,
+        val recent: MutableStateFlow<List<String>>,
+    )
 
     val hasProject: Boolean get() = _hostPath.value != null
 
@@ -51,7 +66,6 @@ class ProjectManager(context: Context) {
         _hostPath.value = normalized
         _workspaceKind.value = WorkspaceKind.LOCAL
         _remoteSpecJson.value = null
-        com.andmx.exec.proot.ProotRuntime.extraBind = normalized to guestMountPath
         pushRecent(normalized)
         WorkspaceIndex.get(appContext).onProjectSelected(normalized)
     }
@@ -67,7 +81,6 @@ class ProjectManager(context: Context) {
         _hostPath.value = uri
         _workspaceKind.value = WorkspaceKind.REMOTE
         _remoteSpecJson.value = encoded
-        com.andmx.exec.proot.ProotRuntime.extraBind = null
         pushRecent(uri)
     }
 
@@ -88,16 +101,7 @@ class ProjectManager(context: Context) {
         _hostPath.value = null
         _workspaceKind.value = WorkspaceKind.LOCAL
         _remoteSpecJson.value = null
-        com.andmx.exec.proot.ProotRuntime.extraBind = null
         WorkspaceIndex.get(appContext).onProjectSelected(null)
-    }
-
-    fun restoreBinding() {
-        if (isRemote) {
-            com.andmx.exec.proot.ProotRuntime.extraBind = null
-        } else {
-            _hostPath.value?.let { com.andmx.exec.proot.ProotRuntime.extraBind = it to guestMountPath }
-        }
     }
 
     fun suggestedRoots(): List<String> {
@@ -148,6 +152,7 @@ class ProjectManager(context: Context) {
 
 
     companion object {
+        private val states = WeakHashMap<Context, State>()
         private const val PREFS = "andmx_project"
         private const val KEY_HOST_PATH = "host_path"
         private const val KEY_RECENT = "recent_paths"

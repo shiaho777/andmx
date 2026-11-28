@@ -8,7 +8,6 @@ import com.andmx.agent.workflow.WorkflowService
 import com.andmx.data.WorkflowStore
 import com.andmx.data.AndmxDatabase
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +32,7 @@ class WorkflowResumeToolTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val service = WorkflowService(
             scope = scope,
-            store = WorkflowStore(context, GuestFs(ProotRuntime(context))),
+            store = WorkflowStore(context, GuestFs(context)),
             actorRunner = { WorkflowAgentResult("ok") },
         )
         try {
@@ -53,7 +52,7 @@ class WorkflowResumeToolTest {
     fun readArtifactTextRoundTripsThroughService() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val service = WorkflowService(
             scope = scope,
             store = store,

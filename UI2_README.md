@@ -34,7 +34,7 @@
 
 ## 待完善
 
-- ChatController 的可测性重构（当前构造期耦合 Context/Room/DataStore/proot，需注入化后才能 JVM 单测）
+- ChatController 的可测性重构（当前构造期耦合 Context/Room/DataStore/Alpine，需注入化后才能 JVM 单测）
 - Computer Use 与对话流的深度集成
 - 会话搜索
 

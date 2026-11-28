@@ -320,7 +320,7 @@ fun McpEditPage(
                     }
                     StackedSettingRow(
                         title = tr("传输类型"),
-                        description = if (remote) tr("远程 HTTP 或旧版 SSE") else tr("本地命令，在 proot 里启动"),
+                        description = if (remote) tr("远程 HTTP 或旧版 SSE") else tr("本地命令，在 Alpine 里启动"),
                     ) {
                         SegmentedRow(
                             options = listOf("remote" to "HTTP / SSE", "stdio" to tr("本地命令")),

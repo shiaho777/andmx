@@ -1,6 +1,7 @@
 *.iml
 .gradle/
 /local.properties
+/.venv/
 /.idea/
 .DS_Store
 /build/
@@ -9,6 +10,7 @@
 .externalNativeBuild/
 .cxx/
 *.apk
+*.APK
 *.aab
 
 # 工具/IDE 产物

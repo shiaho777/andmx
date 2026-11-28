@@ -85,7 +85,6 @@ import com.andmx.data.rollout.SessionResumer
 import com.andmx.data.rollout.TurnContext as RolloutTurnContext
 import com.andmx.exec.files.GuestFs
 import com.andmx.exec.policy.NetworkPolicy
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.llm.ApiFunctionCall
 import com.andmx.llm.ApiMessage
 import com.andmx.llm.VideoAttachment
@@ -159,7 +158,7 @@ class ChatController private constructor(private val context: Context) {
     private val projectManager = com.andmx.workspace.ProjectManager(context)
     private val access = WorkspaceAccess(context)
     private val networkPolicy = NetworkPolicy.PERMISSIVE
-    private val guestFs = GuestFs(ProotRuntime(context))
+    private val guestFs = GuestFs(context)
     private val savedWorkflowStore = com.andmx.agent.workflow.SavedWorkflowStore(
         com.andmx.agent.workflow.GuestWorkflowFileSystem(guestFs),
         cwd = { access.guestCwd() },
@@ -3065,7 +3064,7 @@ class ChatController private constructor(private val context: Context) {
     ): Pair<List<String>, String> {
         val gitPath = access.guestCwd()
         val git = runCatching {
-            com.andmx.workspace.GitBaseline(context).collectGitInfo(gitPath)
+            com.andmx.workspace.GitBaseline(context).collectWorkspaceGitInfo(gitPath)
         }.getOrNull()
         val host = projectManager.hostPath.value
         val gitStatus = when {
@@ -3130,11 +3129,8 @@ class ChatController private constructor(private val context: Context) {
             }
         }
         val deviceNote = runCatching { AndroidContextProvider(context).environmentNote() }.getOrDefault("")
-        val shellKind = if (BuildConfig.FLAVOR == "proot") {
-            "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), shell in proot Alpine guest"
-        } else {
-            "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), host shell"
-        }
+        val shell = if (access.isRemote) "remote SSH" else "built-in Alpine Linux"
+        val shellKind = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), shell in $shell"
         val env = ZCodePrompts.SessionEnv(
             cwd = access.guestCwd(),
             isGitRepo = git?.isRepo == true,
@@ -3381,7 +3377,7 @@ class ChatController private constructor(private val context: Context) {
         val tools = session?.turnToolOutputs.orEmpty()
         val plan = session?.planTool?.state?.value.orEmpty()
         val git = runCatching {
-            com.andmx.workspace.GitBaseline(context).collectGitInfo(access.displayCwd())
+            com.andmx.workspace.GitBaseline(context).collectWorkspaceGitInfo(access.guestCwd())
         }.getOrNull()
         val recent = repo.messages(conversationId).takeLast(8).map {
             HandoffRunLogItem(
@@ -3422,7 +3418,7 @@ class ChatController private constructor(private val context: Context) {
                     )
                 },
                 runtimeEnvironment = listOf(
-                    if (projectManager.isRemote) "remote-ssh" else "local-proot",
+                    if (projectManager.isRemote) "remote-ssh" else "local-alpine-vm",
                     access.displayCwd(),
                 ),
             ),

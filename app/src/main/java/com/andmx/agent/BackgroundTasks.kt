@@ -2,8 +2,8 @@ package com.andmx.agent
 
 import android.content.Context
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.policy.EnvScrubber
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.ProcessSpec
+import com.andmx.exec.alpine.AlpineVm
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
@@ -30,8 +30,8 @@ class BackgroundTasks(
     private val loadTasks: (suspend (Long) -> List<TaskRecord>)? = null,
 ) {
     private val appContext = context.applicationContext
-    private val runtime = ProotRuntime(appContext)
-    private val guestFs = GuestFs(runtime)
+    private val vm = AlpineVm.get(appContext)
+    private val guestFs = GuestFs(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val tasks = ConcurrentHashMap<String, BgTask>()
 
@@ -181,33 +181,22 @@ class BackgroundTasks(
     }
 
     private suspend fun runTask(task: BgTask, hostFile: File) {
-        val rootfs = runtime.rootfsDir.takeIf { it.exists() }
-        val sh = if (rootfs != null) "/bin/sh" else "/system/bin/sh"
-        val quotedCwd = "'${task.cwd.replace("'", "'\"'\"'")}'"
-        val cdCommand = when {
-            task.cwd.isBlank() -> task.command
-            else -> "cd $quotedCwd 2>/dev/null || cd ~; ${task.command}"
-        }
         val process = runCatching {
-            ProcessBuilder(runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = rootfs))
-                .directory(File(appContext.filesDir.path))
-                .apply {
-                    environment().clear()
-                    environment().putAll(EnvScrubber.scrub(runtime.env()))
-                    redirectErrorStream(true)
-                }
-                .start()
-        }.getOrElse {
+            kotlinx.coroutines.runInterruptible {
+                vm.start(ProcessSpec(listOf("/bin/sh", "-lc", task.command), redirectErrorStream = true), vm.workspace())
+                    .also { task.process = it }
+            }
+                }.getOrElse {
             hostFile.appendText("执行失败: ${it.message}\n[exit=-1]\n")
-            task.state = TaskState.FAILED
-            task.finishedAt = System.currentTimeMillis()
+            if (task.state == TaskState.RUNNING) task.state = TaskState.FAILED
+            if (task.finishedAt == null) task.finishedAt = System.currentTimeMillis()
             refresh()
             persist(task)
             _events.tryEmit(Event.Terminated(task))
             return
         }
-        task.process = process
         try {
+            process.outputStream.close()
             hostFile.bufferedWriter().use { writer ->
                 val buffer = ByteArray(8_192)
                 while (true) {
@@ -225,8 +214,7 @@ class BackgroundTasks(
             if (task.state == TaskState.RUNNING) task.state = TaskState.FAILED
         } finally {
             task.process = null
-            runCatching { if (process.isAlive) process.destroyForcibly() }
-            runCatching { process.inputStream.close() }
+            process.close()
             if (task.finishedAt == null) task.finishedAt = System.currentTimeMillis()
             refresh()
             persist(task)

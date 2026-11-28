@@ -56,11 +56,11 @@ fun agentMethodologyText(context: AgentMethodologyContext): String = buildString
     appendLine("5. 收束: 汇报改动、证据、剩余风险, 必要时生成 handoff/resume")
     appendLine()
     appendLine("### 环境边界")
-    appendLine("- 文件、终端、diff、浏览器都围绕 Android/proot Alpine guest rootfs 工作")
+    appendLine("- 文件、终端、diff、浏览器都围绕 Android and the built-in Alpine Linux environment 工作")
     appendLine("- `@/root/file` 和 `@relative/path` 会被解析为工作区文件引用")
     appendLine("- 右侧 Files/Terminal/Diff/Browser 是同一任务上下文的工作面板")
     appendLine("- 底部终端适合保留长时间运行的 shell 状态")
-    appendLine("- 运行环境: ${context.runtimeSurface.ifBlank { "Android/proot guest rootfs" }} · ${context.runtimeHealth.ifBlank { "等待诊断" }}")
+    appendLine("- 运行环境: ${context.runtimeSurface.ifBlank { "built-in Alpine Linux" }} · ${context.runtimeHealth.ifBlank { "等待诊断" }}")
     if (context.instructionLayers.isNotEmpty()) {
         appendLine("- 可见指令层: ${context.instructionLayers.joinToString(" / ")}")
     }

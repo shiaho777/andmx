@@ -51,7 +51,6 @@ import com.andmx.ui2.settings.SwitchRow
 import com.andmx.data.CronStore
 import com.andmx.exec.PersistentShell
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.settings.backAppBar
 import com.andmx.ui2.settings.tr
 import com.andmx.workspace.ProjectManager
@@ -227,7 +226,7 @@ private data class UserHookDraft(
 @Composable
 fun HooksPage(onBack: () -> Unit) {
     val context = LocalContext.current
-    val fs = remember { GuestFs(ProotRuntime(context)) }
+    val fs = remember { GuestFs(context) }
     val system = remember { PluginSystem(context, fs, PersistentShell(context)) }
     val scope = rememberCoroutineScope()
     val path = "/root/.andmx/hooks.json"
@@ -709,7 +708,7 @@ fun ShortcutsPage(onBack: () -> Unit) {
 @Composable
 fun WorkspaceIgnorePage(onBack: () -> Unit) {
     val context = LocalContext.current
-    val fs = remember { GuestFs(ProotRuntime(context)) }
+    val fs = remember { GuestFs(context) }
     val project = remember { ProjectManager(context) }
     val scope = rememberCoroutineScope()
     val path = "${project.guestMountPath}/.zcodeignore"

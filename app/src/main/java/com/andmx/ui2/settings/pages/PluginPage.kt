@@ -63,7 +63,6 @@ import com.andmx.agent.plugins.PluginMarketplace
 import com.andmx.agent.plugins.PluginSystem
 import com.andmx.exec.PersistentShell
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.settings.EmptyState
 import com.andmx.ui2.settings.ResourceBadge
 import com.andmx.ui2.settings.ResourceCardGroup
@@ -87,9 +86,8 @@ private sealed class PluginView {
 @Composable
 fun PluginPage(onBack: () -> Unit) {
     val context = LocalContext.current
-    val runtime = remember { ProotRuntime(context) }
-    val fs = remember { GuestFs(runtime) }
-    val shell = remember { PersistentShell(context, runtime) }
+    val fs = remember { GuestFs(context) }
+    val shell = remember { PersistentShell(context) }
     val system = remember { PluginSystem(context, fs, shell) }
     val market = remember { PluginMarketplace(context, fs, shell) }
     val scope = rememberCoroutineScope()
@@ -637,7 +635,7 @@ private fun InstallPluginDialog(
                 )
                 Text(
                     if (mode == 0) tr("将 clone 到 /root/.andmx/plugins/<name>，并识别 .andmx-plugin / .zcode-plugin / .codex-plugin / SKILL.md。")
-                    else tr("从 proot 内路径复制整个目录作为插件。"),
+                    else tr("从 Alpine 内路径复制整个目录作为插件。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

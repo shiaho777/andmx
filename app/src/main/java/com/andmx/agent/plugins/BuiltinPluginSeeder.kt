@@ -3,7 +3,6 @@ package com.andmx.agent.plugins
 import android.content.Context
 import android.util.Log
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -22,12 +21,12 @@ object BuiltinPluginSeeder {
         val assetError: String? = null,
     )
 
-    suspend fun ensureSeeded(context: Context, fs: GuestFs = GuestFs(ProotRuntime(context))): List<String> =
+    suspend fun ensureSeeded(context: Context, fs: GuestFs = GuestFs(context)): List<String> =
         seedWithReport(context, fs).installed
 
     suspend fun seedWithReport(
         context: Context,
-        fs: GuestFs = GuestFs(ProotRuntime(context)),
+        fs: GuestFs = GuestFs(context),
     ): SeedReport = withContext(Dispatchers.IO) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val installed = mutableListOf<String>()

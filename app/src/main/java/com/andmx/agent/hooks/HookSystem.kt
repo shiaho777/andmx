@@ -2,8 +2,7 @@ package com.andmx.agent.hooks
 
 import android.content.Context
 import com.andmx.exec.ProcessSpec
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.alpine.AlpineEnvironment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,7 +20,7 @@ import kotlinx.serialization.json.put
  * (before/after tool use, on session start/stop, before/after compaction).
  * They can block tool execution, modify inputs/outputs, or inject context.
  *
- * Hook commands run inside the proot guest and communicate via JSON over
+ * Hook commands run inside the Alpine guest and communicate via JSON over
  * stdin/stdout. This design lets users write hooks in any language available
  * in the Alpine guest (sh, python, node, etc.).
  */
@@ -30,8 +29,7 @@ class HookSystem(
     hooks: List<HookConfig> = emptyList(),
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
-    private val runtime = ProotRuntime(context)
-    private val env = LocalProotEnvironment(context, runtime)
+    private val env = AlpineEnvironment(context)
     private val asyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var hooks: List<HookConfig> = hooks.toList()
 

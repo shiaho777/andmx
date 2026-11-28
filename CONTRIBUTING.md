@@ -38,7 +38,7 @@ Issue → PR (base=main, Fixes #N) → CI green → merge → Issue closes
 ### 本地自检
 
 ```bash
-./gradlew :app:compileLiteDebugKotlin --no-daemon
+./gradlew :app:compileDebugKotlin --no-daemon
 ```
 
 ## PR 检查清单

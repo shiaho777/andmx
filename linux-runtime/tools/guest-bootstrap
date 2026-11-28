@@ -1,0 +1,42 @@
+#!/bin/busybox sh
+set -e
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+/bin/busybox --install -s
+mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+modprobe virtio_mmio
+modprobe virtio_blk
+modprobe virtio_net
+for module in /runtime-modules/*; do
+    insmod "$module"
+done
+mkdir -p /sysroot
+mount -t ext4 /dev/vda /sysroot
+installed=/sysroot/.alpine-runtime-installed
+init=/sysroot/sbin/android-runtime-init
+if [ ! -f "$installed" ]; then
+    tar -xzf /payload.tgz -C /sysroot
+fi
+if ! chroot /sysroot /bin/busybox true; then
+    echo "Alpine boot files failed validation. The virtual disk was kept."
+    poweroff -f
+fi
+if ! cmp -s /runtime-init "$init"; then
+    cp /runtime-init "$init.new"
+    chmod 700 "$init.new"
+    mv -f "$init.new" "$init"
+fi
+cp /runtime-agent /sysroot/sbin/andmx-runtime-agent.new
+chmod 700 /sysroot/sbin/andmx-runtime-agent.new
+mv -f /sysroot/sbin/andmx-runtime-agent.new /sysroot/sbin/andmx-runtime-agent
+if [ ! -f "$installed" ]; then
+    sync
+    touch "$installed"
+fi
+sync
+mkdir -p /sysroot/proc /sysroot/sys /sysroot/dev
+mount --move /proc /sysroot/proc
+mount --move /sys /sysroot/sys
+mount --move /dev /sysroot/dev
+exec switch_root /sysroot /sbin/android-runtime-init

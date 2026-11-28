@@ -2,7 +2,6 @@ package com.andmx.exec
 
 import android.content.Context
 import android.util.Log
-import com.andmx.exec.proot.ProotRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -31,8 +30,6 @@ class ShellSnapshots(
     }
 
     private val snapshotsDir = File(context.filesDir, SNAPSHOTS_DIR).apply { mkdirs() }
-    private val runtime = ProotRuntime(context)
-    private val sh get() = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
 
     @Serializable
     data class ShellSnapshot(

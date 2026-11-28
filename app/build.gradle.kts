@@ -7,36 +7,34 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-val includeLinuxRuntime = providers.gradleProperty("androidLinuxRuntimeDir").isPresent
-val githubPreview = providers.gradleProperty("andmxGithubPreview").orNull == "true"
-val githubStable = providers.gradleProperty("andmxGithubStable").orNull == "true"
-val previewVersionCode = providers.gradleProperty("andmxPreviewVersionCode").orNull?.toInt() ?: 2
-val previewVersionName = providers.gradleProperty("andmxPreviewVersionName").orElse("0.1.0-preview.1").get()
-val stableVersionCode = providers.gradleProperty("andmxStableVersionCode").orNull?.toInt() ?: 4
-val stableVersionName = providers.gradleProperty("andmxStableVersionName").orElse("1.0.0").get()
+val appAbi = providers.gradleProperty("testAbi").getOrElse("arm64-v8a")
+require(appAbi in setOf("arm64-v8a", "x86_64"))
+val runtimeSource = rootProject.layout.projectDirectory.dir("linux-runtime")
+val githubRelease = providers.gradleProperty("andmxGithubRelease").orNull == "true"
+val appVersionCode = providers.gradleProperty("andmxVersionCode").orNull?.toInt() ?: 4
+val appVersionName = providers.gradleProperty("andmxVersionName").getOrElse("1.0.0")
+val releaseVersion = Regex("""[0-9]+\.[0-9]+\.[0-9]+(?:-preview\.[0-9]+)?""")
 
-require(!(githubPreview && githubStable))
+require(appVersionCode > 0)
+require(!githubRelease || appVersionCode > 1 && releaseVersion.matches(appVersionName))
 
 android {
     namespace = "com.andmx"
-    compileSdk = if (includeLinuxRuntime) 36 else 34
+    compileSdk = 34
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.andmx"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("boolean", "GITHUB_RELEASE", "false")
-        buildConfigField("boolean", "GITHUB_PREVIEW", "false")
+        buildConfigField("boolean", "GITHUB_RELEASE", githubRelease.toString())
+        buildConfigField("boolean", "GITHUB_PREVIEW", (githubRelease && "-preview." in appVersionName).toString())
         vectorDrawables { useSupportLibrary = true }
         ndk {
-            // Real devices and the dev emulator are arm64; keep the APK lean.
-            abiFilters += providers.gradleProperty("testAbi").getOrElse("arm64-v8a").also {
-                require(it in setOf("arm64-v8a", "x86_64"))
-            }
+            abiFilters += appAbi
         }
         externalNativeBuild {
             cmake {
@@ -52,46 +50,9 @@ android {
         }
     }
 
-    flavorDimensions += "engine"
-    productFlavors {
-        // Plan C core: modern targetSdk, JGit/Kotlin tools only (no native exec
-        // from the data dir). Play-friendly.
-        create("lite") {
-            dimension = "engine"
-            targetSdk = 34
-            buildConfigField("int", "PROBE_TARGET_SDK", "34")
-            if (githubPreview || githubStable) buildConfigField("boolean", "GITHUB_RELEASE", "true")
-            if (githubPreview) {
-                require(previewVersionCode > 1 && previewVersionName.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+-preview\\.[0-9]+")))
-                versionCode = previewVersionCode
-                versionName = previewVersionName
-                buildConfigField("boolean", "GITHUB_PREVIEW", "true")
-            }
-            if (githubStable) {
-                require(stableVersionCode > 1 && stableVersionName.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+")))
-                versionCode = stableVersionCode
-                versionName = stableVersionName
-            }
-        }
-        // Power engine: targetSdk 28 so guest binaries can be exec'd from the
-        // writable data dir (the proot userland). Sideload-only by design.
-        create("proot") {
-            dimension = "engine"
-            targetSdk = 28
-            buildConfigField("int", "PROBE_TARGET_SDK", "28")
-        }
+    sourceSets.named("main") {
+        java.srcDir(runtimeSource.dir("src"))
     }
-
-    if (includeLinuxRuntime) {
-        productFlavors.create("vm") {
-            dimension = "engine"
-            targetSdk = 36
-            applicationIdSuffix = ".vm"
-            buildConfigField("int", "PROBE_TARGET_SDK", "36")
-        }
-    }
-    sourceSets.named("lite") { java.srcDir("src/noVm/java") }
-    sourceSets.named("proot") { java.srcDir("src/noVm/java") }
 
     buildTypes {
         release {
@@ -131,25 +92,40 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            // Extract native binaries to nativeLibraryDir on install so they can
-            // be exec'd (required for proot and the exec probe).
             useLegacyPackaging = true
         }
     }
 }
 
-if (githubPreview || githubStable) {
-    androidComponents.onVariants(androidComponents.selector().withFlavor("engine" to "lite")) { variant ->
-        variant.packaging.jniLibs.excludes.addAll("**/libproot.so", "**/libproot_loader.so", "**/libtalloc.so")
+abstract class PrepareLinuxRuntime : Exec() {
+    @get:OutputDirectory
+    abstract val runtimeAssets: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val runtimeLibraries: DirectoryProperty
+}
+
+if (appAbi == "arm64-v8a") {
+    val prepareLinuxRuntime = tasks.register<PrepareLinuxRuntime>("prepareLinuxRuntime") {
+        inputs.dir(runtimeSource.dir("tools"))
+        inputs.dir(runtimeSource.dir("native"))
+        workingDir(rootProject.projectDir)
+        val localPython = rootProject.file(".venv/bin/python")
+        val python = providers.gradleProperty("andmxRuntimePython")
+            .orElse(providers.environmentVariable("ANDMX_RUNTIME_PYTHON"))
+            .getOrElse(if (localPython.canExecute()) localPython.absolutePath else "python3")
+        val script = runtimeSource.file("tools/prepare.py").asFile
+        doFirst {
+            commandLine(python, script, "--assets", runtimeAssets.get().asFile, "--jni", runtimeLibraries.get().asFile)
+        }
+    }
+    androidComponents.onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(prepareLinuxRuntime, PrepareLinuxRuntime::runtimeAssets)
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(prepareLinuxRuntime, PrepareLinuxRuntime::runtimeLibraries)
     }
 }
 
-androidComponents.onVariants(androidComponents.selector().withFlavor("engine" to "vm")) { variant ->
-    variant.packaging.jniLibs.excludes.addAll("**/libproot.so", "**/libproot_loader.so", "**/libtalloc.so")
-}
-
 dependencies {
-    if (includeLinuxRuntime) add("vmImplementation", "org.andmx:linux-runtime:0.1.0-alpha.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

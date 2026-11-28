@@ -4,8 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.andmx.exec.ExecutionEnvironment
 import com.andmx.exec.ProcessSpec
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.alpine.AlpineEnvironment
 import com.andmx.exec.remote.RemoteSshEnvironment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,8 +35,8 @@ class GitBaseline(
     }
 
     private val appContext = context.applicationContext
-    private val runtime = ProotRuntime(context)
-    private val localEnv = LocalProotEnvironment(context, runtime)
+    private val localEnv = AlpineEnvironment(context)
+    private val inspectionEnv = AlpineEnvironment(context, timeoutMs = 5_000, requireActiveSession = true)
     private val projectManager = ProjectManager(context)
     private val baselineDir = "${context.filesDir.absolutePath}/$BASELINE_DIR"
 
@@ -69,7 +68,7 @@ class GitBaseline(
         val gitInfo: GitInfo? = null,
     )
 
-    private val localSh get() = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
+    private val localSh get() = "/bin/sh"
 
     private data class ExecTarget(
         val env: ExecutionEnvironment,
@@ -78,7 +77,7 @@ class GitBaseline(
         val isRemote: Boolean,
     )
 
-    private fun resolveTarget(workspacePath: String): ExecTarget {
+    private fun resolveTarget(workspacePath: String, inspectOnly: Boolean): ExecTarget {
         val remoteSpec = when {
             workspacePath.startsWith("ssh://") -> projectManager.currentRemoteSpec()
             projectManager.isRemote && projectManager.hostPath.value == workspacePath ->
@@ -97,7 +96,7 @@ class GitBaseline(
             )
         }
         return ExecTarget(
-            env = localEnv,
+            env = if (inspectOnly) inspectionEnv else localEnv,
             workspacePath = workspacePath,
             sh = localSh,
             isRemote = false,
@@ -113,8 +112,13 @@ class GitBaseline(
         return path.ifBlank { "~" }
     }
 
-    private suspend fun runShell(workspacePath: String, script: String, login: Boolean = true): com.andmx.exec.ProcessResult {
-        val target = resolveTarget(workspacePath)
+    private suspend fun runShell(
+        workspacePath: String,
+        script: String,
+        login: Boolean = true,
+        inspectOnly: Boolean = false,
+    ): com.andmx.exec.ProcessResult {
+        val target = resolveTarget(workspacePath, inspectOnly)
         val flag = if (login) "-lc" else "-c"
         val actual = target.workspacePath
         val rewritten = if (target.isRemote && workspacePath != actual) {
@@ -227,8 +231,18 @@ class GitBaseline(
      * Collect git information about a workspace.
      * Mirrors Codex's gitInfo structure (sha, branch, originUrl, hasChanges, isWorktree).
      */
-    suspend fun collectGitInfo(workspacePath: String): GitInfo = withContext(Dispatchers.IO) {
-        ensureGit(workspacePath)
+    suspend fun collectWorkspaceGitInfo(workspacePath: String): GitInfo = withContext(Dispatchers.IO) {
+        val worktree = worktreeProvider()
+        val remote = worktree == null && projectManager.isRemote
+        val execPath = if (remote) projectManager.hostPath.value ?: workspacePath else workspacePath
+        val info = collectGitInfo(execPath, inspectOnly = true)
+        if (info.isRepo || remote) return@withContext info
+        val localPath = worktree?.hostDirectory(appContext)?.path ?: projectManager.hostPath.value
+        localPath?.let(::collectHostGitInfo) ?: info
+    }
+
+    suspend fun collectGitInfo(workspacePath: String, inspectOnly: Boolean = false): GitInfo = withContext(Dispatchers.IO) {
+        if (!inspectOnly) ensureGit(workspacePath)
         val script = buildString {
             append("cd '$workspacePath' 2>/dev/null || exit 0; ")
             append("echo SHA=$(git rev-parse HEAD 2>/dev/null || echo ''); ")
@@ -243,7 +257,7 @@ class GitBaseline(
             append("echo UNAME=$(git config user.name 2>/dev/null || echo ''); ")
             append("echo UEMAIL=$(git config user.email 2>/dev/null || echo '')")
         }
-        val res = runShell(workspacePath, script, login = true)
+        val res = runShell(workspacePath, script, inspectOnly = inspectOnly)
         val output = res.stdout
 
         val sha = extractVar(output, "SHA=")
@@ -283,7 +297,7 @@ class GitBaseline(
     }
 
     /**
-     * Host-side git probe that does not depend on proot.
+     * Host-side git probe that does not depend on Alpine.
      * Reads `.git/HEAD` and `git status --porcelain` when host `git` is available,
      * so the empty-composer branch pill still appears before the guest is ready.
      */

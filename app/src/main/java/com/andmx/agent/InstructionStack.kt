@@ -24,7 +24,7 @@ fun instructionStackText(snapshot: InstructionStackSnapshot): String = buildStri
     appendLine("- 授权: **${snapshot.approvalModeLabel}**")
     appendLine()
     appendLine("### 可见指令层")
-    appendLine("- 应用边界: Android/proot Alpine guest rootfs, 文件/终端/diff/browser 共享同一工作上下文")
+    appendLine("- 应用边界: Android and the built-in Alpine Linux environment, 文件/终端/diff/browser 共享同一工作上下文")
     appendLine("- 用户设置: 模型、端点、语气、推理档、授权模式、自定义指令、MCP")
     appendLine("- 工具注册: ${snapshot.builtInToolCount} 个内置工具, ${snapshot.mcpServerCount} 个已连接 MCP 服务器")
     appendLine("- MCP 配置: ${if (snapshot.mcpConfigured) "已填写" else "未填写"}")

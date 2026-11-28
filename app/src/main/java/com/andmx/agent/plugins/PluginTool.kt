@@ -5,8 +5,7 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
 import com.andmx.exec.ProcessSpec
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.alpine.AlpineEnvironment
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -19,7 +18,7 @@ import kotlinx.serialization.json.putJsonObject
  * A tool backed by an executable script declared in a plugin manifest.
  *
  * Each entry in [PluginManifest.tools] names a script (relative to the plugin
- * directory). This tool runs `<pluginDir>/<script> <args>` inside the proot
+ * directory). This tool runs `<pluginDir>/<script> <args>` inside the Alpine
  * guest and returns its output — turning a declarative plugin tool into a real
  * callable agent tool. The script receives the tool's `args` JSON on argv
  * (space-joined values) and on stdin.
@@ -40,7 +39,7 @@ class PluginTool(
     override val description = desc
     override val risk = ToolRisk.EXECUTE
 
-    private val env = LocalProotEnvironment(context, ProotRuntime(context))
+    private val env = AlpineEnvironment(context)
 
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")

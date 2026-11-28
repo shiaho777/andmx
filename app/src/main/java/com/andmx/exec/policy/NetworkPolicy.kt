@@ -4,11 +4,11 @@ package com.andmx.exec.policy
  * Network domain-level access control — mirrors Codex's network proxy rules.
  *
  * On Android (no root, no iptables), full network isolation isn't possible
- * inside proot. Instead, we implement two complementary approaches:
+ * inside Alpine. Instead, we implement two complementary approaches:
  *
  * 1. Domain allow/deny lists — enforced at the application layer for tools
  *    that make HTTP requests (browse, web_search)
- * 2. hosts file injection — for the proot guest's DNS resolution
+ * 2. hosts file injection — for the Alpine guest's DNS resolution
  *
  * This is weaker than Codex's SOCKS5 proxy, but provides meaningful control
  * over where agent-initiated network requests can go.
@@ -59,7 +59,7 @@ class NetworkPolicy(
         return if (host != null) check(host) else Decision(NetworkAction.ALLOW)
     }
 
-    /** Generate /etc/hosts entries for the proot guest (deny rules → 127.0.0.1). */
+    /** Generate /etc/hosts entries for the Alpine guest (deny rules → 127.0.0.1). */
     fun hostsEntries(): String {
         val denyHosts = rules.filter { it.action == NetworkAction.DENY }.map { it.host }
         if (denyHosts.isEmpty()) return ""

@@ -30,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.settings.backAppBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,7 +42,7 @@ private const val USER_INSTRUCTIONS_MAX_BYTES = 100 * 1024
 @Composable
 fun PersonalizationPage(onBack: () -> Unit) {
     val context = LocalContext.current
-    val fs = remember { GuestFs(ProotRuntime(context)) }
+    val fs = remember { GuestFs(context) }
     val scope = rememberCoroutineScope()
     var saved by remember { mutableStateOf("") }
     var draft by remember { mutableStateOf("") }

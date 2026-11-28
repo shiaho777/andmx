@@ -17,7 +17,6 @@ class AndmxApp : Application() {
         super.onCreate()
         com.andmx.llm.VideoAttachments.initialize(this)
         val pm = ProjectManager(this)
-        pm.restoreBinding()
         ChangeTracker.install(this)
         HookTrustStore.install(this)
         ModelCallTrace.install(this)

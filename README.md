@@ -9,16 +9,11 @@
 
 ## Supported devices
 
-AndMX runs on **Android 8.0 (API 26) and up**. Standard APK builds target **ARM64 (`arm64-v8a`)**. Choose your build before installing.
-
-| Build | Use it for | Execution environment |
-| --- | --- | --- |
-| **Lite** | Reading and editing project files, Git, and the core agent workflow | Native Android and Kotlin tools. Targets API 34. |
-| **Proot** | Running a Linux toolchain, shell commands, and builds on the device | A rootless Alpine Linux environment via PRoot. Sideloaded build targeting API 28. The first setup downloads Alpine. |
+AndMX runs on **Android 8.0 (API 26) and later**. The ARM64 APK targets API 34 and includes Android Linux Runtime and the Alpine base system. The first boot works offline. The terminal and Agent share the selected project at `/root/project`.
 
 ## Screenshots
 
-The offline walkthrough below was captured from the signed Lite preview candidate on an ARM64 Android emulator.
+The offline walkthrough below was captured from the signed preview candidate on an ARM64 Android emulator.
 
 <p align="center">
   <a href="static/screenshot/quick-start.webp"><img width="232" src="static/screenshot/quick-start.webp" alt="Quick start with offline and model setup options"></a>
@@ -80,7 +75,7 @@ The workbench screenshots below show the Android 15 build from `main` at [`509d1
 
 | Task | How AndMX helps |
 | --- | --- |
-| **Work in a project** | Open a local directory, reference files with `@`, browse the workspace, and use file-editing and Git tools. Proot adds an on-device Linux shell and PTY terminal. |
+| **Work in a project** | Open a local directory, reference files with `@`, browse the workspace, and use file-editing and Git tools. A built-in Linux shell and PTY terminal are available on ARM64. |
 | **Control tool execution** | In **Build** mode, reads run directly while file edits and commands ask for confirmation by default. Inspect the request, allow it once, or manage rules scoped to the task or project. |
 | **Review results** | Expand tool cards to inspect inputs and output, including the exit code for shell runs. Open **File changes** for line-by-line diffs and review tracked changes before confirming a revert. |
 | **Return to a task** | Search task titles and message text from the sidebar, jump to a match inside a folded process, and pick up where you were reading when switching tasks. |
@@ -94,48 +89,32 @@ On a fresh install, choose **Try the offline sample** to practice declining, app
 
 Permission status and data destinations are documented under **Settings → Privacy and permissions** and in the [privacy statement](PRIVACY.md). **Settings → About** provides project resources, GitHub feedback and a diagnostic preview you can copy.
 
-The repository currently has no published APK on [GitHub Releases](https://github.com/shiaho777/andmx/releases). Build a debug APK from source using **JDK 17**, **Android SDK Platform 34**, **Build-Tools 34.0.0**, **NDK 27.0.12077973**, and **CMake 3.22.1**. Install the SDK tools with Android Studio and set `ANDROID_HOME` or set `sdk.dir` in a local `local.properties`. [Android Studio](https://developer.android.com/studio) The signed Lite preview is being qualified. See the [preview release runbook](docs/preview-release.md), [changelog](CHANGELOG.md) and [third-party inventory](THIRD_PARTY.md).
+Build from source with JDK 17, Android SDK 34, Build-Tools 34.0.0, NDK 27.0.12077973 and 28.2.13676358, CMake 3.22.1, Python 3.9+, Go 1.24+ and `mke2fs`. Set `ANDROID_HOME` to your SDK directory. The build verifies and packages pinned Linux inputs.
 
 ```bash
-git clone https://github.com/shiaho777/andmx.git
-cd andmx
-./gradlew :app:assembleLiteDebug
+python3 -m venv .venv
+.venv/bin/pip install -r linux-runtime/tools/requirements.txt
+./gradlew :app:assembleDebug
 ```
 
-| Build | Gradle task | APK under `app/build/outputs/apk/` |
-| --- | --- | --- |
-| Lite | `:app:assembleLiteDebug` | `lite/debug/app-lite-debug.apk` |
-| Proot | `:app:assembleProotDebug` | `proot/debug/app-proot-debug.apk` |
-
-To install over USB on a device with USB debugging enabled, run `./gradlew :app:installLiteDebug` or `./gradlew :app:installProotDebug`. Both builds use the `com.andmx` package name.
+The APK is at `app/build/outputs/apk/debug/app-debug.apk`. [Release runbook](docs/preview-release.md)
 
 1. Open **Settings → Models → Add provider**. Choose the protocol and enter your provider’s base URL and any required API key. Fetch the model list or enter a model ID manually, then save.
 2. In **New task**, select the model and choose a project folder. Android may prompt for all-files access when you open local projects.
 3. Start with a small task, for example, “Read `README.md` and identify the local validation steps.” Keep **Build** mode selected if you want to approve edits and commands as they come up.
 4. For a task that writes files, inspect the proposed change first. After execution, open **File changes** in the task to review the applied diff.
 
-### Experimental Alpine VM
+### Built-in Alpine Linux
 
-The ARM64 VM preview targets API 36 and installs as `com.andmx.vm`. Open **Terminal → Experimental Alpine** and choose whether to enable networking for the session. Set up the Android SDK and NDK listed in the standalone project before building. [Android Linux Runtime](https://github.com/shiaho777/android-linux-runtime#build-the-demo-and-sdk)
-
-With the runtime checked out at the revision used by this AndMX checkout, prepare the engine and build the experimental variant.
-
-```sh
-git clone https://github.com/shiaho777/android-linux-runtime.git ../android-linux-runtime
-git -C ../android-linux-runtime checkout --detach "$(cat gradle/android-linux-runtime.rev)"
-python3 -m venv ../android-linux-runtime/.venv
-../android-linux-runtime/.venv/bin/pip install -r ../android-linux-runtime/tools/requirements.txt
-../android-linux-runtime/.venv/bin/python ../android-linux-runtime/tools/prepare.py
-./gradlew :app:installVmDebug -PandroidLinuxRuntimeDir=../android-linux-runtime
-```
+Open **Terminal → Alpine Linux** and choose offline or network access. Alpine keeps installed packages on its virtual disk. Additional packages need access to their repositories. Close active Linux processes before switching the mounted project or network mode.
 
 ### What leaves the device
 
-Workspace tools and the Proot runtime execute on the device. Model calls send prompts and the context needed for the task, which can include file excerpts and tool output, to your configured provider. Web and MCP tools can contact their own endpoints. Android Use needs screen-capture and accessibility permission for screen capture and interaction. [App permissions](app/src/main/AndroidManifest.xml)
+Workspace tools and the Alpine VM execute on the device. Model calls send prompts and the context needed for the task, which can include file excerpts and tool output, to your configured provider. Web and MCP tools can contact their own endpoints. Android Use needs screen-capture and accessibility permission for screen capture and interaction. [App permissions](app/src/main/AndroidManifest.xml)
 
 ## Contribute and get help
 
-- Report bugs with the app version, Android version, build variant, steps to reproduce, and expected and actual results. **Settings → About → Copy diagnostics** provides the version and device details. Remove credentials and private content from reports and screenshots. [Report an issue](https://github.com/shiaho777/andmx/issues/new)
+- Report bugs with the app version, Android version, build type, steps to reproduce, and expected and actual results. **Settings → About → Copy diagnostics** provides the version and device details. Remove credentials and private content from reports and screenshots. [Report an issue](https://github.com/shiaho777/andmx/issues/new)
 - Contributions to Android UI, model adapters, tool behavior, tests, and documentation are welcome. The repository uses Issue-linked PRs into `main` with `CI / build` as its merge gate. [Contribution guide](CONTRIBUTING.md)
 
 <details>
@@ -145,13 +124,13 @@ Workspace tools and the Proot runtime execute on the device. Model calls send pr
 | --- | --- |
 | [`ui2/`](app/src/main/java/com/andmx/ui2) | Native Jetpack Compose workbench, task history, settings and terminal UI |
 | [`agent/`](app/src/main/java/com/andmx/agent), [`llm/`](app/src/main/java/com/andmx/llm) | Agent loop, permission policy, tool registry, model adapters and streaming |
-| [`exec/`](app/src/main/java/com/andmx/exec), [`cpp/`](app/src/main/cpp) | Process execution, PRoot setup and PTY bridge |
+| [`exec/`](app/src/main/java/com/andmx/exec), [`cpp/`](app/src/main/cpp) | Process execution, Alpine integration and PTY bridge |
 | [`data/`](app/src/main/java/com/andmx/data), [`workspace/`](app/src/main/java/com/andmx/workspace), [`diff/`](app/src/main/java/com/andmx/diff) | Room persistence, project files, change tracking and diff rendering data |
 | [`app/src/test/`](app/src/test), [`app/src/androidTest/`](app/src/androidTest) | Unit and instrumentation tests |
 
 ```bash
-./gradlew :app:testLiteDebugUnitTest
-./gradlew :app:connectedLiteDebugAndroidTest
+./gradlew :app:testDebugUnitTest
+./gradlew :app:connectedDebugAndroidTest
 ```
 
 For an x86_64 test emulator, add `-PtestAbi=x86_64` to the instrumentation command. [CI workflow](.github/workflows/ci.yml) · [Agent instructions](AGENTS.md)
@@ -160,4 +139,4 @@ For an x86_64 test emulator, add `-PtestAbi=x86_64` to the instrumentation comma
 
 ## License and credits
 
-The AndMX repository is publicly visible on GitHub and currently declares no project-wide license. Bundled third-party components retain their own terms. The Proot build uses PRoot and libtalloc packages, and the app includes whisper.cpp for local transcription. [PRoot license](https://github.com/termux/proot/blob/master/COPYING) · [libtalloc package and license](https://github.com/termux/termux-packages/blob/master/packages/libtalloc/build.sh) · [whisper.cpp license](app/src/main/cpp/whisper.cpp/LICENSE)
+The AndMX repository is publicly visible on GitHub and currently declares no project-wide license. Bundled components retain their own terms. See the [third-party inventory](THIRD_PARTY.md).

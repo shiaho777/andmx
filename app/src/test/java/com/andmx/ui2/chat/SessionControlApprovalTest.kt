@@ -86,6 +86,7 @@ class SessionControlApprovalTest {
         control.sessions[1L] = session(1L)
         val notifications = mutableListOf<Triple<Long, String, String>>()
         val hooks = mutableListOf<Pair<String, String>>()
+        val callbacksDone = CompletableDeferred<Unit>()
         val outcome = async(Dispatchers.Default) {
             control.prompt(
                 conversationId = 1L,
@@ -94,14 +95,13 @@ class SessionControlApprovalTest {
                 mode = ExecMode.BUILD,
                 reason = "需要确认",
                 notify = { id, title, body -> notifications += Triple(id, title, body) },
-                launchPermissionHook = { name, raw -> hooks += name to raw },
+                launchPermissionHook = { name, raw ->
+                    hooks += name to raw
+                    callbacksDone.complete(Unit)
+                },
             )
         }
-        withTimeout(5_000) {
-            withContext(Dispatchers.Default) {
-                while (control.pendingApprovals.value.values.singleOrNull() == null) kotlinx.coroutines.yield()
-            }
-        }
+        withTimeout(5_000) { callbacksDone.await() }
         val req = control.pendingApprovals.value.values.singleOrNull()!!
         assertEquals(1L, req.conversationId)
         assertEquals("Bash", req.toolName)

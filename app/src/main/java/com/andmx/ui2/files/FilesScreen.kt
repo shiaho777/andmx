@@ -78,7 +78,7 @@ fun FilesScreen(
     val guestMount = worktree?.path ?: projectManager.guestMountPath
     val rootPath = sessionHostPath
         ?: android.os.Environment.getExternalStorageDirectory()?.absolutePath ?: "/sdcard"
-    val rootfsRoot = remember { com.andmx.exec.proot.ProotRuntime(context).rootfsDir.absolutePath }
+    val rootfsRoot = remember { com.andmx.exec.files.GuestFs(context).rootfsRoot.absolutePath }
     val resolved = remember(initialPath, rootPath, hostPath) {
         resolveLocalBrowseTarget(initialPath, rootPath, sessionHostPath, guestMount, rootfsRoot)
     }
