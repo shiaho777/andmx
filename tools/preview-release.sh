@@ -15,20 +15,14 @@ if [[ ! "$version_code" =~ ^[1-9][0-9]*$ || "$version_code" -lt 2 ]]; then
     echo "Expected a version code greater than 1." >&2
     exit 2
 fi
-if [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    gradle_version_args=(
-        -PandmxGithubStable=true "-PandmxStableVersionName=$version_name"
-        "-PandmxStableVersionCode=$version_code"
-    )
-elif [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]; then
-    gradle_version_args=(
-        -PandmxGithubPreview=true "-PandmxPreviewVersionName=$version_name"
-        "-PandmxPreviewVersionCode=$version_code"
-    )
-else
+if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]]; then
     echo "Expected a stable or preview version name." >&2
     exit 2
 fi
+
+gradle_version_args=(
+    -PandmxGithubRelease=true "-PandmxVersionName=$version_name" "-PandmxVersionCode=$version_code"
+)
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
@@ -53,7 +47,7 @@ keystore=$(cd "$(dirname "$keystore")" && pwd)/$(basename "$keystore")
 work=$(mktemp -d "$output/.preview.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-apk_name=andmx-lite-arm64-v8a.apk
+apk_name="andmx.${version_name}.APK"
 revision=$(git -C "$root" rev-parse HEAD)
 dirty=false
 if [[ -n $(git -C "$root" status --porcelain) ]]; then
@@ -61,10 +55,10 @@ if [[ -n $(git -C "$root" status --porcelain) ]]; then
 fi
 (
     cd "$root"
-    ./gradlew :app:assembleLiteRelease --no-daemon \
+    ./gradlew :app:assembleRelease --no-daemon \
       "${gradle_version_args[@]}" -PtestAbi=arm64-v8a </dev/null
 )
-unsigned="$root/app/build/outputs/apk/lite/release/app-lite-release-unsigned.apk"
+unsigned="$root/app/build/outputs/apk/release/app-release-unsigned.apk"
 "$build_tools/zipalign" -P 16 -f 4 "$unsigned" "$work/aligned.apk"
 "$build_tools/apksigner" sign --ks "$keystore" --out "$work/$apk_name" "$work/aligned.apk"
 "$build_tools/zipalign" -c -P 16 4 "$work/$apk_name"
@@ -95,7 +89,9 @@ if expected and certificate != expected.replace(":", "").lower():
 
 with ZipFile(apk) as archive:
     libraries = [name for name in archive.namelist() if name.startswith("lib/") and name.endswith(".so")]
-    assert libraries
+    assert "lib/arm64-v8a/liblinux_runtime.so" in libraries
+    assert "lib/arm64-v8a/libqemu-system-aarch64.so" in libraries
+    assert "assets/linux-runtime/initramfs" in archive.namelist()
     for name in libraries:
         elf = archive.read(name)
         assert name.startswith("lib/arm64-v8a/") and elf.startswith(b"\x7fELF\x02\x01"), name
@@ -128,6 +124,7 @@ with ZipFile(folder / "NOTICES.zip", "w") as notices:
         if path.is_file():
             notices.write(path, path.relative_to(root))
     notices.write(root / "app/src/main/cpp/whisper.cpp/LICENSE", "licenses/whisper.cpp-MIT.txt")
+    notices.write(root / "linux-runtime/LICENSE", "licenses/Android-Linux-Runtime-Apache-2.0.txt")
 PY
 
 cp "$root/CHANGELOG.md" "$work/CHANGELOG.md"

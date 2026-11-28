@@ -9,7 +9,6 @@ import com.andmx.agent.Tool
 import com.andmx.agent.ToolResult
 import com.andmx.agent.ToolRisk
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.workspace.WorkspaceAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -66,7 +65,7 @@ private object HtmlVideoPaths {
 
 private class HtmlVideoFs(context: Context) {
     val access = WorkspaceAccess(context)
-    private val guest = GuestFs(ProotRuntime(context.applicationContext))
+    private val guest = GuestFs(context.applicationContext)
 
     fun cwd(): String = access.guestCwd()
     fun resolve(path: String): String = access.resolvePath(path)

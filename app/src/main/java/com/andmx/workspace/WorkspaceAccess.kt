@@ -5,17 +5,15 @@ import com.andmx.exec.ExecutionEnvironment
 import com.andmx.exec.ProcessSpec
 import com.andmx.exec.ProcessResult
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.alpine.AlpineEnvironment
 import com.andmx.exec.remote.RemoteFsClient
 import com.andmx.exec.remote.RemoteSshEnvironment
+import java.io.File
 
 class WorkspaceAccess(context: Context) {
     private val appContext = context.applicationContext
     private val projectManager = ProjectManager(appContext)
-    private val runtime = ProotRuntime(appContext)
-    private val localEnv = LocalProotEnvironment(appContext, runtime)
-    private val localFs = GuestFs(runtime)
+    private val localFs = GuestFs(appContext)
 
     val isRemote: Boolean get() = LocalWorktree.current() == null && projectManager.isRemote
 
@@ -50,13 +48,10 @@ class WorkspaceAccess(context: Context) {
                 }
             }
         }
-        return localEnv
+        return AlpineEnvironment(appContext, timeoutMs ?: 120_000)
     }
 
-    fun shellBinary(): String =
-        if (isRemote) "/bin/sh"
-        else if (runtime.rootfsDir.exists()) "/bin/sh"
-        else "/system/bin/sh"
+    fun shellBinary(): String = "/bin/sh"
 
     fun resolvePath(path: String): String {
         val raw = path.trim().ifBlank { guestCwd() }
@@ -77,7 +72,12 @@ class WorkspaceAccess(context: Context) {
         return "$base/${raw.trimStart('/')}"
     }
 
-    suspend fun executeShell(command: String, cwd: String? = null, timeoutMs: Long? = null): ProcessResult {
+    suspend fun executeShell(
+        command: String,
+        cwd: String? = null,
+        timeoutMs: Long? = null,
+        stdin: String? = null,
+    ): ProcessResult {
         val env = environment(timeoutMs)
         val work = cwd?.takeIf { it.isNotBlank() } ?: guestCwd()
         val sh = shellBinary()
@@ -86,84 +86,52 @@ class WorkspaceAccess(context: Context) {
         return env.execute(
             ProcessSpec(
                 argv = listOf(sh, "-lc", script),
-                workingDir = work,
+                workingDir = if (isRemote) work else "/root",
+                stdin = stdin,
                 redirectErrorStream = true,
             ),
         )
     }
 
-    suspend fun exists(path: String): Boolean {
-        val p = resolvePath(path)
-        return if (isRemote) {
-            val res = executeShell(
-                "if [ -e ${q(p)} ]; then echo YES; else echo NO; fi",
-                cwd = guestCwd(),
-            )
-            res.stdout.contains("YES")
-        } else {
-            localFs.exists(toGuestPath(p))
-        }
+    suspend fun exists(path: String): Boolean = checkPath(path, "-e", File::exists)
+
+    suspend fun isDirectory(path: String): Boolean = checkPath(path, "-d", File::isDirectory)
+
+    private suspend fun checkPath(path: String, test: String, check: (File) -> Boolean): Boolean {
+        val resolved = resolvePath(path)
+        val file = hostFile(resolved)
+        return if (file != null) check(file) else executeShell("test $test ${q(resolved)}").ok
     }
 
-    suspend fun isDirectory(path: String): Boolean {
-        val p = resolvePath(path)
-        return if (isRemote) {
-            val res = executeShell(
-                "if [ -d ${q(p)} ]; then echo YES; else echo NO; fi",
-                cwd = guestCwd(),
-            )
-            res.stdout.contains("YES")
-        } else {
-            runCatching { localFs.resolve(toGuestPath(p)).isDirectory }.getOrDefault(false)
-        }
+    suspend fun statMtime(path: String): Long? =
+        stat(path, "%Y", File::lastModified)?.takeIf { it > 0 }
+
+    suspend fun statSize(path: String): Long? = stat(path, "%s", File::length)
+
+    private suspend fun stat(path: String, format: String, value: (File) -> Long): Long? {
+        val resolved = resolvePath(path)
+        val file = hostFile(resolved)
+        if (file != null) return value(file).takeIf { file.exists() }
+        val result = executeShell("stat -c $format ${q(resolved)}")
+        val raw = result.stdout.trim().toLongOrNull()?.takeIf { result.ok && it >= 0 } ?: return null
+        return if (format == "%Y") raw * 1000 else raw
     }
 
-    /** 文件最后修改毫秒（本地 GuestFs stat；远端 stat -c %Y）。 */
-    suspend fun statMtime(path: String): Long? {
-        val p = resolvePath(path)
-        return if (isRemote) {
-            val res = executeShell("stat -c %Y ${q(p)} 2>/dev/null || echo -1", cwd = guestCwd())
-            (res.stdout.trim().toLongOrNull()?.takeIf { it >= 0 })?.times(1000L)
-        } else {
-            runCatching { localFs.resolve(toGuestPath(p)).lastModified() }
-                .getOrNull()?.takeIf { it > 0L }
-        }
-    }
+    fun hostFile(path: String): File? =
+        if (isRemote) null else resolveLocal(resolvePath(path))
 
-    suspend fun statSize(path: String): Long? {
-        val p = resolvePath(path)
-        return if (isRemote) {
-            val res = executeShell("stat -c %s ${q(p)} 2>/dev/null || echo -1", cwd = guestCwd())
-            res.stdout.trim().toLongOrNull()?.takeIf { it >= 0 }
-        } else {
-            runCatching { localFs.resolve(toGuestPath(p)).length() }.getOrNull()?.takeIf { it >= 0L }
-        }
-    }
-
-    /** 本地访客路径映射为宿主 File（远端返回 null）——PdfRenderer 等需要真实 fd 的场景用。 */
-    fun hostFile(path: String): java.io.File? {
-        if (isRemote) return null
-        val p = resolvePath(path)
-        return runCatching { localFs.resolve(toGuestPath(p)) }.getOrNull()
-    }
-
-    /** 读文件原始字节（本地直读；远端 base64 回传，限量）。 */
     suspend fun readBytes(path: String, maxBytes: Int = 8 * 1024 * 1024): ByteArray? {
-        val p = resolvePath(path)
-        return if (isRemote) {
-            val res = executeShell(
-                "head -c $maxBytes ${q(p)} | base64 | tr -d '\\n'",
-                cwd = guestCwd(),
-            )
-            res.stdout.trim().takeIf { it.isNotEmpty() }?.let {
-                runCatching {
-                    android.util.Base64.decode(it, android.util.Base64.DEFAULT)
-                }.getOrNull()
-            }
-        } else {
-            runCatching { localFs.resolve(toGuestPath(p)).readBytes() }
-                .getOrNull()?.takeIf { it.size <= maxBytes }
-        }
+        val resolved = resolvePath(path)
+        val file = hostFile(resolved)
+        if (file != null) return runCatching {
+            if (file.isFile && file.length() <= maxBytes) file.readBytes().takeIf { it.size <= maxBytes } else null
+        }.getOrNull()
+        val result = executeShell(
+            "test -f ${q(resolved)} && head -c ${maxBytes.toLong() + 1} ${q(resolved)} | base64 | tr -d '\n'",
+        )
+        if (!result.ok) return null
+        return runCatching { android.util.Base64.decode(result.stdout.trim(), android.util.Base64.DEFAULT) }
+            .getOrNull()?.takeIf { it.size <= maxBytes }
     }
 
     suspend fun fetchRemoteFile(path: String, maxBytes: Int = REMOTE_FETCH_MAX_BYTES): Result<java.io.File> {
@@ -214,45 +182,63 @@ class WorkspaceAccess(context: Context) {
     }
 
     suspend fun readText(path: String, limit: Int = 256 * 1024): String {
-        val p = resolvePath(path)
+        val resolved = resolvePath(path)
         if (isRemote) {
-            val spec = projectManager.currentRemoteSpec()
-                ?: error("未打开远程工作区")
-            return RemoteFsClient(appContext, spec).readText(p, maxBytes = limit).getOrThrow()
+            val spec = projectManager.currentRemoteSpec() ?: error("未打开远程工作区")
+            return RemoteFsClient(appContext, spec).readText(resolved, maxBytes = limit).getOrThrow()
         }
-        return localFs.readText(toGuestPath(p), limit)
+        val bytes = readBytes(resolved, limit)
+        requireNotNull(bytes) { "文件无法读取或超过 $limit 字节: $resolved" }
+        return bytes.toString(Charsets.UTF_8)
     }
 
     suspend fun writeText(path: String, content: String) {
-        val p = resolvePath(path)
+        val resolved = resolvePath(path)
         if (isRemote) {
-            val spec = projectManager.currentRemoteSpec()
-                ?: error("未打开远程工作区")
-            RemoteFsClient(appContext, spec).writeText(p, content).getOrThrow()
+            val spec = projectManager.currentRemoteSpec() ?: error("未打开远程工作区")
+            RemoteFsClient(appContext, spec).writeText(resolved, content).getOrThrow()
             return
         }
-        localFs.writeText(toGuestPath(p), content)
+        val file = hostFile(resolved)
+        if (file != null) {
+            file.parentFile?.mkdirs()
+            file.writeText(content)
+        } else {
+            val result = executeShell(
+                "mkdir -p ${q(resolved.substringBeforeLast('/').ifBlank { "/" })} && cat > ${q(resolved)}",
+                stdin = content,
+            )
+            check(result.ok) { result.error ?: result.stdout.trim() }
+        }
     }
 
     suspend fun deleteFile(path: String): Boolean {
-        val p = resolvePath(path)
-        if (isRemote) {
-            val res = executeShell("rm -f ${q(p)} && echo OK", cwd = guestCwd())
-            return res.stdout.contains("OK")
-        }
-        return localFs.deleteFile(toGuestPath(p))
+        val resolved = resolvePath(path)
+        val file = hostFile(resolved)
+        if (file == null) return executeShell("rm -f ${q(resolved)}").ok
+        require(!file.exists() || file.isFile) { "不是文件: $resolved" }
+        return !file.exists() || file.delete()
     }
 
     suspend fun list(path: String): List<String> {
-        val p = resolvePath(path)
+        val resolved = resolvePath(path)
         if (isRemote) {
-            val spec = projectManager.currentRemoteSpec()
-                ?: error("未打开远程工作区")
-            return RemoteFsClient(appContext, spec).listDir(p).map {
+            val spec = projectManager.currentRemoteSpec() ?: error("未打开远程工作区")
+            return RemoteFsClient(appContext, spec).listDir(resolved).map {
                 if (it.isDirectory) it.name + "/" else it.name
             }
         }
-        return localFs.list(toGuestPath(p))
+        val dir = hostFile(resolved)
+        if (dir == null) {
+            val result = executeShell("ls -1Ap ${q(resolved)}")
+            check(result.ok) { result.error ?: result.stdout.trim() }
+            return result.stdout.lineSequence().filter { it.isNotEmpty() }.toList()
+        }
+        require(dir.isDirectory) { "不是目录: $resolved" }
+        return dir.listFiles()
+            ?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() })
+            ?.map { it.name + if (it.isDirectory) "/" else "" }
+            .orEmpty()
     }
 
     suspend fun loadAgentsMdFragment(): String {
@@ -293,19 +279,21 @@ class WorkspaceAccess(context: Context) {
         }
     }
 
-    private fun toGuestPath(path: String): String {
-        // Local GuestFs expects guest absolute paths. Host project is bound at /root/project.
-        if (path.startsWith("/root")) return path
-        if (path.startsWith(projectManager.guestMountPath)) return path
-        // Absolute host path under selected project → map into guest mount
-        val host = hostPath
-        if (host != null && (path == host || path.startsWith("$host/"))) {
-            val rel = path.removePrefix(host).trimStart('/')
-            val mount = LocalWorktree.current()?.path ?: projectManager.guestMountPath
-            return if (rel.isEmpty()) mount else "$mount/$rel"
+    private fun resolveLocal(path: String): File? {
+        val worktree = LocalWorktree.current()
+        val project = worktree?.project ?: projectManager.hostPath.value
+        val guest = GuestPaths.normalize(path)
+        val mount = projectManager.guestMountPath
+        if (project != null) {
+            val root = File(project)
+            if (guest == mount || guest.startsWith("$mount/")) {
+                return GuestPaths.resolve(root, guest.removePrefix(mount).ifBlank { "/" })
+            }
+            if (path == project || path.startsWith("$project/")) {
+                return GuestPaths.resolve(root, path.removePrefix(project).ifBlank { "/" })
+            }
         }
-        if (path.startsWith("/")) return path
-        return resolvePath(path)
+        return if (guest == "/root" || guest.startsWith("/root/")) localFs.resolve(guest) else null
     }
 
     private fun q(value: String): String = "'" + value.replace("'", "'\\''") + "'"

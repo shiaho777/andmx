@@ -13,7 +13,6 @@ import com.andmx.computeruse.MediaProjectionManagerHolder
 import com.andmx.computeruse.ScreenCaptor
 import com.andmx.computeruse.ScreenCaptureService
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.workspace.WorkspaceAccess
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -281,7 +280,7 @@ class OnDeviceAndroidBackend(private val context: Context) {
         val bytes = runCatching { Base64.decode(payload, Base64.DEFAULT) }.getOrNull() ?: return null
         val guest = access.resolvePath(hint)
         return runCatching {
-            val file = GuestFs(ProotRuntime(app)).resolve(guest)
+            val file = GuestFs(app).resolve(guest)
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
             guest
@@ -310,7 +309,7 @@ class OnDeviceAndroidBackend(private val context: Context) {
         if (asHost.isFile) return asHost
         val guest = access.resolvePath(raw)
         val fromGuest = runCatching {
-            GuestFs(ProotRuntime(app)).resolve(guest)
+            GuestFs(app).resolve(guest)
         }.getOrNull()
         if (fromGuest != null && fromGuest.isFile) return fromGuest
         val hostProject = access.hostPath

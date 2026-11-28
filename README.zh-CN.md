@@ -9,16 +9,11 @@
 
 ## 支持设备
 
-AndMX 支持 **Android 8.0（API 26）及以上**。默认 APK 面向 **ARM64（`arm64-v8a`）** 设备。构建前先选适合自己的版本。
-
-| 版本 | 适用场景 | 执行环境 |
-| --- | --- | --- |
-| **Lite** | 读取和编辑项目文件、Git 操作和常规 Agent 任务 | Android 原生工具与 Kotlin，目标 API 34。 |
-| **Proot** | 在设备上运行 Linux 工具链、Shell 命令和构建 | 通过 PRoot 运行无需 root 权限的 Alpine Linux 环境。目标 API 28，需侧载。首次配置会下载 Alpine。 |
+AndMX 支持 **Android 8.0（API 26）及以上**。ARM64 APK 的目标 API 为 34，内置 Android Linux Runtime、Alpine 内核和基础系统，首次启动可离线完成。本地终端和 Agent 命令共享挂载到 `/root/project` 的项目。
 
 ## 界面截图
 
-下列离线引导截图来自 ARM64 Android 模拟器上的 Lite 签名预览候选包。
+下列离线引导截图来自 ARM64 Android 模拟器上的 签名预览候选包。
 
 <p align="center">
   <a href="static/screenshot/quick-start.webp"><img width="232" src="static/screenshot/quick-start.webp" alt="提供离线样例和模型配置入口的快速入门"></a>
@@ -80,7 +75,7 @@ AndMX 支持 **Android 8.0（API 26）及以上**。默认 APK 面向 **ARM64（
 
 | 场景 | 在 AndMX 中怎么做 |
 | --- | --- |
-| **操作项目** | 选择本地目录，用 `@` 引用文件，浏览工作区，调用文件编辑和 Git 工具。Proot 还可以在设备上运行 Linux Shell 和 PTY 交互终端。 |
+| **操作项目** | 选择本地目录，用 `@` 引用文件，浏览工作区，调用文件编辑和 Git 工具。ARM64 版本可使用内置 Linux Shell 和 PTY 交互终端。 |
 | **控制工具执行** | 在默认的**构建**模式下，读取直接执行，工具修改文件或执行命令前请求确认。可以查看请求、仅允许一次，或管理任务与项目范围的规则。 |
 | **审阅工作结果** | 展开工具卡片查看输入和输出，包括 Shell 命令的退出码。通过**文件改动**逐行审阅差异，并在确认后还原已跟踪的改动。 |
 | **接着之前的任务做** | 从侧栏搜索任务标题和正文，跳转到折叠过程里的命中项。重新打开任务可接着上次位置阅读。 |
@@ -94,50 +89,34 @@ AndMX 支持 **Android 8.0（API 26）及以上**。默认 APK 面向 **ARM64（
 
 **设置 → 隐私与权限** 集中显示授权状态和数据去向。**设置 → 关于** 提供项目文档、GitHub 反馈和可预览复制的诊断信息。[隐私声明](PRIVACY.md)
 
-Lite 签名预览正在验证中。[发布流程](docs/preview-release.md) · [变更记录](CHANGELOG.md) · [第三方组件与授权](THIRD_PARTY.md)
+[发布流程](docs/preview-release.md) · [变更记录](CHANGELOG.md) · [第三方组件与授权](THIRD_PARTY.md)
 
-目前 [GitHub Releases](https://github.com/shiaho777/andmx/releases) 尚无发布的 APK。可以从源码构建调试版，所需环境为 **JDK 17**、**Android SDK Platform 34**、**Build-Tools 34.0.0**、**NDK 27.0.12077973** 和 **CMake 3.22.1**。通过 Android Studio 安装 SDK 工具后，设置 `ANDROID_HOME`，或在本机的 `local.properties` 中设置 `sdk.dir`。[Android Studio](https://developer.android.com/studio)
+从源码构建需要 JDK 17、Android SDK 34、Build-Tools 34.0.0、NDK 27.0.12077973 和 28.2.13676358、CMake 3.22.1、Python 3.9+、Go 1.24+ 和 `mke2fs`。将 `ANDROID_HOME` 设为 SDK 路径。构建时会校验并内置固定版本的 Linux 组件。
 
 ```bash
-git clone https://github.com/shiaho777/andmx.git
-cd andmx
-./gradlew :app:assembleLiteDebug
+python3 -m venv .venv
+.venv/bin/pip install -r linux-runtime/tools/requirements.txt
+./gradlew :app:assembleDebug
 ```
 
-| 版本 | Gradle 任务 | `app/build/outputs/apk/` 下的产物 |
-| --- | --- | --- |
-| Lite | `:app:assembleLiteDebug` | `lite/debug/app-lite-debug.apk` |
-| Proot | `:app:assembleProotDebug` | `proot/debug/app-proot-debug.apk` |
-
-开启设备的 USB 调试并连接后，可执行 `./gradlew :app:installLiteDebug` 或 `./gradlew :app:installProotDebug` 安装。两个版本使用同一个包名 `com.andmx`。
+APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。[发布流程](docs/preview-release.md)
 
 1. 在**设置 → 模型设置 → 添加供应商**中选择协议，填写 API 地址和所需密钥。拉取模型列表或手动填写模型 ID，然后保存。
 2. 在**新建任务**中选模型和项目文件夹。打开本地项目时，Android 可能会要求授予所有文件访问权限。
 3. 先试一个小任务，例如“读取 `README.md`，列出本地验证步骤”。保留**构建**模式，可以逐次确认文件编辑和命令执行。
 4. 遇到写入请求时先检查拟议改动。执行后从任务里的**文件改动**打开实际差异。
 
-### 实验性 Alpine 虚拟机
+### 内置 Alpine Linux
 
-ARM64 虚拟机预览以 API 36 为目标，安装包名为 `com.andmx.vm`。打开 **终端 → Experimental Alpine**，为本次会话选择是否联网。构建前按独立项目的说明准备 Android SDK 和 NDK。 [Android Linux Runtime](https://github.com/shiaho777/android-linux-runtime#build-the-demo-and-sdk)
-
-从 AndMX 仓库根目录执行以下命令，检出当前版本固定的运行时、准备依赖并安装实验版本。
-
-```sh
-git clone https://github.com/shiaho777/android-linux-runtime.git ../android-linux-runtime
-git -C ../android-linux-runtime checkout --detach "$(cat gradle/android-linux-runtime.rev)"
-python3 -m venv ../android-linux-runtime/.venv
-../android-linux-runtime/.venv/bin/pip install -r ../android-linux-runtime/tools/requirements.txt
-../android-linux-runtime/.venv/bin/python ../android-linux-runtime/tools/prepare.py
-./gradlew :app:installVmDebug -PandroidLinuxRuntimeDir=../android-linux-runtime
-```
+打开 **终端 → Alpine Linux**，选择离线或允许联网。安装到 Alpine 的软件保留在虚拟磁盘上。额外安装软件包需要访问软件源。切换挂载项目或网络模式前，先关闭还在运行的 Linux 进程。
 
 ### 哪些数据会离开设备
 
-工作区工具和 Proot 环境在设备上运行。模型调用会把提示词及任务所需的上下文发给你配置的供应商，其中可能包含文件片段和工具输出。网页和 MCP 工具也可能访问各自的端点。Android Use 使用录屏与无障碍权限来读取画面和操作界面。[应用权限声明](app/src/main/AndroidManifest.xml)
+工作区工具和 Alpine 虚拟机在设备上运行。模型调用会把提示词及任务所需的上下文发给你配置的供应商，其中可能包含文件片段和工具输出。网页和 MCP 工具也可能访问各自的端点。Android Use 使用录屏与无障碍权限来读取画面和操作界面。[应用权限声明](app/src/main/AndroidManifest.xml)
 
 ## 贡献与反馈
 
-- 报告问题时请附应用版本、Android 版本、构建变体、复现步骤、预期和实际结果。可在**设置 → 关于 → 复制诊断信息**获取版本和设备信息。提交截图或日志前请移除密钥和隐私内容。[提交 Issue](https://github.com/shiaho777/andmx/issues/new)
+- 报告问题时请附应用版本、Android 版本、构建类型、复现步骤、预期和实际结果。可在**设置 → 关于 → 复制诊断信息**获取版本和设备信息。提交截图或日志前请移除密钥和隐私内容。[提交 Issue](https://github.com/shiaho777/andmx/issues/new)
 - 欢迎贡献 Android 界面、模型适配、工具行为、测试和文档。PR 需关联 Issue、以 `main` 为目标，并通过 `CI / build` 才能合并。[贡献指南](CONTRIBUTING.md)
 
 <details>
@@ -147,13 +126,13 @@ python3 -m venv ../android-linux-runtime/.venv
 | --- | --- |
 | [`ui2/`](app/src/main/java/com/andmx/ui2) | Jetpack Compose 工作台、历史任务、设置和终端界面 |
 | [`agent/`](app/src/main/java/com/andmx/agent)、[`llm/`](app/src/main/java/com/andmx/llm) | Agent 循环、权限策略、工具注册、模型协议和流式响应 |
-| [`exec/`](app/src/main/java/com/andmx/exec)、[`cpp/`](app/src/main/cpp) | 进程执行、PRoot 初始化和 PTY 桥接 |
+| [`exec/`](app/src/main/java/com/andmx/exec)、[`cpp/`](app/src/main/cpp) | 进程执行、Alpine 接入和 PTY 桥接 |
 | [`data/`](app/src/main/java/com/andmx/data)、[`workspace/`](app/src/main/java/com/andmx/workspace)、[`diff/`](app/src/main/java/com/andmx/diff) | Room 持久化、项目文件、改动跟踪和差异数据 |
 | [`app/src/test/`](app/src/test)、[`app/src/androidTest/`](app/src/androidTest) | 单元测试与设备仪器测试 |
 
 ```bash
-./gradlew :app:testLiteDebugUnitTest
-./gradlew :app:connectedLiteDebugAndroidTest
+./gradlew :app:testDebugUnitTest
+./gradlew :app:connectedDebugAndroidTest
 ```
 
 在 x86_64 测试模拟器上运行仪器测试时，给第二条命令加 `-PtestAbi=x86_64`。[CI 工作流](.github/workflows/ci.yml) · [Agent 说明](AGENTS.md)
@@ -162,4 +141,4 @@ python3 -m venv ../android-linux-runtime/.venv
 
 ## 许可与致谢
 
-AndMX 仓库在 GitHub 公开可见，目前尚未声明项目级许可证。随应用提供的第三方组件适用各自的许可。Proot 版本使用 PRoot 和 libtalloc 软件包，应用包含用于本地转写的 whisper.cpp。[PRoot 许可证](https://github.com/termux/proot/blob/master/COPYING) · [libtalloc 软件包与许可](https://github.com/termux/termux-packages/blob/master/packages/libtalloc/build.sh) · [whisper.cpp 许可证](app/src/main/cpp/whisper.cpp/LICENSE)
+AndMX 仓库在 GitHub 公开可见，目前尚未声明项目级许可证。随应用提供的组件适用各自的许可。[第三方组件与授权](THIRD_PARTY.md)

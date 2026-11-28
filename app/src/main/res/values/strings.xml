@@ -65,7 +65,7 @@
     <string name="str_0062">"尚未添加模型，可拉取列表勾选，或手动输入 ID"</string>
     <string name="str_0063">"Android SDK 根目录，空则自动探测"</string>
     <string name="str_0064">"为 Claude 的各模型槽位选择对应的模型"</string>
-    <string name="str_0065">"从 proot 内路径复制整个目录作为插件。"</string>
+    <string name="str_0065">"从 Alpine 内路径复制整个目录作为插件。"</string>
     <string name="str_0066">"启动时把工作区说明写进这个子智能体的上下文。"</string>
     <string name="str_0067">"正在读取本地应用会话历史，可能需要一点时间。"</string>
     <string name="str_0068">"编辑当前工作区的 .zcodeignore。"</string>
@@ -104,7 +104,7 @@
     <string name="str_0101">"设置 API Key 后即可启用。"</string>
     <string name="str_0102">"在代码内容和差异视图中显示行号。"</string>
     <string name="str_0103">"已经同步过 .gitignore"</string>
-    <string name="str_0104">"本地命令，在 proot 里启动"</string>
+    <string name="str_0104">"本地命令，在 Alpine 里启动"</string>
     <string name="str_0105">"当前区间暂无可展示的用量数据。"</string>
     <string name="str_0106">"远程 HTTP 或旧版 SSE"</string>
     <string name="str_0107">"选择浅色、深色或跟随系统主题。"</string>
@@ -1167,7 +1167,6 @@
     <string name="str_1164">"没有找到相关设置"</string>
     <string name="str_1165">"Android 原生的 AI 编程 Agent"</string>
     <string name="str_1166">"应用信息"</string>
-    <string name="str_1167">"构建变体"</string>
     <string name="str_1168">"构建类型"</string>
     <string name="str_1169">"包名"</string>
     <string name="str_1170">"系统版本"</string>
@@ -1177,7 +1176,7 @@
     <string name="str_1174">"在浏览器打开 GitHub Releases"</string>
     <string name="str_1175">"查看 GitHub 仓库"</string>
     <string name="str_1176">"复制诊断信息"</string>
-    <string name="str_1177">"版本、设备与构建变体，便于反馈问题"</string>
+    <string name="str_1177">"版本、设备与构建类型，便于反馈问题"</string>
     <string name="str_1178">"已复制诊断信息"</string>
     <string name="str_1179">"暂无后台任务"</string>
     <string name="str_1180">"查看输出"</string>

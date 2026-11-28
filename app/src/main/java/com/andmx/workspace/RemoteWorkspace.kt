@@ -200,7 +200,7 @@ class RemoteWorkspaceStore(context: Context) {
         logs += "已校验向导参数，准备发起连接。"
         val ssh = findSshBinary()
         if (ssh == null) {
-            logs += "未找到 ssh 可执行文件（可在 proot rootfs 中安装 openssh）"
+            logs += "未找到 Android 端的 ssh 可执行文件"
             return@withContext RemoteConnectResult(false, "当前环境没有可用的 ssh 客户端", logs)
         }
         logs += "使用 ssh：$ssh"
@@ -323,8 +323,6 @@ class RemoteWorkspaceStore(context: Context) {
         val candidates = listOf(
             "/system/bin/$name",
             "/system/xbin/$name",
-            "/data/data/${appContext.packageName}/files/proot-rootfs/usr/bin/$name",
-            "/data/data/${appContext.packageName}/files/rootfs/usr/bin/$name",
         )
         candidates.firstOrNull { File(it).exists() }?.let { return it }
         return try {

@@ -14,7 +14,6 @@ import com.andmx.agent.zcode.WorkflowTools
 import com.andmx.data.WorkflowJournalStore
 import com.andmx.data.WorkflowStore
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +104,7 @@ class DynamicWorkflowRunnerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         var analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host().apply { blockSecondAsk = true }
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val journals = WorkflowJournalStore(context)
         var runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         try {
@@ -160,7 +159,7 @@ class DynamicWorkflowRunnerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host()
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val journals = WorkflowJournalStore(context)
         val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         try {
@@ -226,7 +225,7 @@ class DynamicWorkflowRunnerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host()
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val journals = WorkflowJournalStore(context)
         val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         val service = WorkflowService(
@@ -311,7 +310,7 @@ class DynamicWorkflowRunnerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host().apply { blockSecondAsk = true }
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val journals = WorkflowJournalStore(context)
         val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         val service = WorkflowService(
@@ -413,7 +412,7 @@ class DynamicWorkflowRunnerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host()
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val journals = WorkflowJournalStore(context)
         val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         val service = WorkflowService(
@@ -502,7 +501,7 @@ class DynamicWorkflowRunnerTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val analyzer = WebViewWorkflowScriptAnalyzer(context)
         val host = Host().apply { typedRepair = true }
-        val store = WorkflowStore(context, GuestFs(ProotRuntime(context)))
+        val store = WorkflowStore(context, GuestFs(context))
         val journals = WorkflowJournalStore(context)
         val runner = DynamicWorkflowRunner(context, analyzer, host, store, journals, scope)
         try {

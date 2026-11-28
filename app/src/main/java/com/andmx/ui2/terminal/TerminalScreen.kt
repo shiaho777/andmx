@@ -1,6 +1,7 @@
 package com.andmx.ui2.terminal
 
-import com.andmx.term.ExperimentalAlpine
+import com.andmx.exec.alpine.AlpineVm
+import com.andmx.workspace.ProjectManager
 import com.andmx.ui2.settings.tr
 import com.andmx.ui2.theme.Chrome
 
@@ -96,7 +97,7 @@ fun TerminalScreen(
     val sessions = registry.sessions
     val activeIndex = registry.activeIndex
     val alpineAvailable = remember(context, worktree) {
-        worktree == null && ExperimentalAlpine.isAvailable(context)
+        (worktree != null || !ProjectManager(context).isRemote) && AlpineVm.get(context).isAvailable
     }
     var showAlpineOptions by remember { mutableStateOf(false) }
 
@@ -116,7 +117,8 @@ fun TerminalScreen(
     }
 
     LaunchedEffect(registry) {
-        if (!alpineAvailable) registry.ensureSession(context)
+        if (sessions.isEmpty() && alpineAvailable) showAlpineOptions = true
+        else if (!alpineAvailable) registry.ensureSession(context)
     }
 
     val tabCount = sessions.size
@@ -130,8 +132,8 @@ fun TerminalScreen(
     if (showAlpineOptions) {
         AlertDialog(
             onDismissRequest = { showAlpineOptions = false },
-            title = { Text("Experimental Alpine") },
-            text = { Text("Network access applies to this Alpine session only.") },
+            title = { Text("Alpine Linux") },
+            text = { Text("Choose whether this Alpine environment can access the network.") },
             dismissButton = { TextButton(onClick = { startAlpine(false) }) { Text("Offline") } },
             confirmButton = { TextButton(onClick = { startAlpine(true) }) { Text("Allow network") } },
         )
@@ -141,7 +143,7 @@ fun TerminalScreen(
     if (active == null) {
         Box(Modifier.fillMaxSize().background(colors.background), contentAlignment = Alignment.Center) {
             if (alpineAvailable) {
-                TextButton(onClick = { showAlpineOptions = true }) { Text("Experimental Alpine") }
+                TextButton(onClick = { showAlpineOptions = true }) { Text("Alpine Linux") }
             } else {
                 Text(tr("无终端会话"), color = colors.chromeMuted)
             }

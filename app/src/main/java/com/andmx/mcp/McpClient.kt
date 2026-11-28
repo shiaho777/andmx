@@ -36,6 +36,7 @@ class McpClient(
     private val protocolVersion: String = McpProtocol.LATEST_VERSION,
     private val timeoutMs: Long = 60_000,
     private val elicitationHandler: (suspend (McpElicitationRequest) -> McpElicitationResponse)? = null,
+    private val startProcess: (suspend () -> Process)? = null,
 ) {
     private var process: Process? = null
     private var writer: BufferedWriter? = null
@@ -55,7 +56,7 @@ class McpClient(
         val pb = ProcessBuilder(argv)
         pb.environment().putAll(env)
         pb.redirectErrorStream(false)
-        val p = pb.start().also { process = it }
+        val p = (startProcess?.invoke() ?: pb.start()).also { process = it }
         writer = p.outputStream.bufferedWriter()
 
         // reader loop: complete pending requests by id, handle server-initiated requests
@@ -63,6 +64,15 @@ class McpClient(
             runCatching {
                 p.inputStream.bufferedReader().forEachLine { line ->
                     handleMessage(line)
+                }
+            }
+        }
+
+        scope.launch {
+            runCatching {
+                p.errorStream.use { stream ->
+                    val buffer = ByteArray(8192)
+                    while (stream.read(buffer) >= 0) Unit
                 }
             }
         }
@@ -318,7 +328,10 @@ class McpClient(
     }
 
     fun close() {
-        runCatching { process?.destroy() }
+        val child = process
+        runCatching { child?.destroy() }
+        if (child is AutoCloseable) kotlin.concurrent.thread(isDaemon = true) { runCatching { child.close() } }
+        process = null
         scope.cancel()
     }
 }

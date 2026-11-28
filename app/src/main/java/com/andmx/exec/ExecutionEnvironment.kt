@@ -7,14 +7,14 @@ package com.andmx.exec
  * is ultimately expressed as a process run inside some environment. Concrete
  * environments include:
  *   - [LocalProcessEnvironment]      : raw ProcessBuilder on the Android host
- *   - LocalProotEnvironment (later)  : a proot guest distro (real shell/git)
+ *   - AlpineEnvironment : the built-in Alpine Linux virtual machine
  *   - RemoteSshEnvironment (later)   : tools running on a remote machine
  *
  * Keeping this interface narrow lets the agent loop and UI stay backend-
  * agnostic exactly as designed in plan C.
  */
 interface ExecutionEnvironment {
-    /** Stable identifier, e.g. "local-process", "local-proot". */
+    /** Stable identifier, e.g. "local-process", "local-alpine-vm". */
     val id: String
 
     /** Human-facing label shown in the UI. */

@@ -9,15 +9,14 @@ package com.andmx.exec.policy
  *
  * Nothing in the harness passes a credential to a child through the
  * environment: providers authenticate over HTTP from Kotlin, and the guest
- * gets its own explicit variable set from [com.andmx.exec.proot.ProotRuntime].
+ * gets its own explicit variable set from the Alpine runtime.
  */
 object EnvScrubber {
 
     /**
      * Case-insensitive substrings marking a variable as a credential. Matching
      * is unanchored, so `GITHUB_TOKEN` and `MY_API_KEY_B64` are both caught.
-     * Deliberately narrow: `PATH`, `HOME`, `TERM`, `LD_LIBRARY_PATH`, and the
-     * `PROOT_*` variables the guest needs all survive.
+     * Deliberately narrow: `PATH`, `HOME`, `TERM` and `LD_LIBRARY_PATH` all survive.
      */
     private val SENSITIVE = listOf("KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
 

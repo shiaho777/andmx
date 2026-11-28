@@ -7,8 +7,7 @@ import java.io.File
 /**
  * The most basic execution environment: launches processes directly on the
  * Android host via [ProcessBuilder]. Used to run binaries shipped in the app's
- * nativeLibraryDir, and as the substrate that proot itself will be launched
- * through later.
+ * nativeLibraryDir.
  */
 class LocalProcessEnvironment : ExecutionEnvironment {
 

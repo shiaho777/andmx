@@ -210,13 +210,13 @@ class SavedWorkflowStore(
         const val PROJECT_DIR = ".zcode/workflows"
         const val GLOBAL_DIR = ".zcode/workflows"
         const val MAX_NAME_CHARS = 64
-        /** proot guest 的 HOME。全局档落在 guest 家目录下。 */
+        /** Alpine guest 的 HOME。全局档落在 guest 家目录下。 */
         const val DEFAULT_GUEST_HOME = "/root"
         private val NAME_PATTERN = Regex("^[A-Za-z0-9_.-]+$")
     }
 }
 
-/** store 需要的文件能力。窄接口是为了让 store 能脱离 proot 做单测。 */
+/** store 需要的文件能力。窄接口是为了让 store 能脱离 Alpine 做单测。 */
 interface WorkflowFileSystem {
     fun exists(path: String): Boolean
     fun isDirectory(path: String): Boolean
@@ -225,7 +225,7 @@ interface WorkflowFileSystem {
     fun list(dir: String): List<String>
 }
 
-/** 把 proot guest 的文件系统接成 store 的依赖。 */
+/** 把 Alpine guest 的文件系统接成 store 的依赖。 */
 class GuestWorkflowFileSystem(private val fs: GuestFs) : WorkflowFileSystem {
     override fun exists(path: String): Boolean = fs.exists(path)
     override fun isDirectory(path: String): Boolean = runCatching { fs.resolve(path).isDirectory }.getOrDefault(false)

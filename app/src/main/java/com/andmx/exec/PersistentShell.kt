@@ -2,20 +2,19 @@ package com.andmx.exec
 
 import android.content.Context
 import android.util.Log
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
-import com.andmx.exec.pty.PtyProcess
+import com.andmx.exec.alpine.AlpineProcess
+import com.andmx.exec.alpine.AlpineVm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
  * A persistent shell session that keeps a single long-running shell process
- * alive inside the proot guest, sending commands and reading results through
- * the PTY. This avoids the 50-200ms fork+exec+proot overhead per command.
+ * alive inside the Alpine guest, sending commands and reading results through
+ * the PTY. This avoids the 50-200ms process setup overhead per command.
  *
  * Design (mirrors Codex's shell_snapshot / zsh-exec-bridge concept):
- * 1. Start a shell (/bin/sh) inside proot via PTY
+ * 1. Start a shell (/bin/sh) inside Alpine via PTY
  * 2. Set a unique prompt marker so we can detect command completion
  * 3. For each command: send "command; echo __EXIT_<uuid>_$?" and read until marker
  * 4. Parse exit code from the marker line
@@ -31,7 +30,6 @@ import java.util.UUID
  */
 class PersistentShell(
     private val context: Context,
-    private val runtime: ProotRuntime = ProotRuntime(context),
     private val rows: Int = 24,
     private val cols: Int = 80,
 ) {
@@ -57,7 +55,7 @@ class PersistentShell(
         )
     }
 
-    private var pty: PtyProcess? = null
+    private var pty: AlpineProcess? = null
     private val markerId: String = UUID.randomUUID().toString().replace("-", "").take(16)
     private val exitMarker = "__ANDMX_EXIT_${markerId}_"
     private val promptMarker = "__ANDMX_PROMPT_${markerId}"
@@ -77,40 +75,28 @@ class PersistentShell(
         if (failedStarts >= MAX_START_ATTEMPTS) return@withContext false
         if (dead || pty != null) resetSession()
 
-        val install = runtime.install()
-        if (!install.ok) {
-            Log.e(TAG, "proot install failed: ${install.message}")
-            failedStarts++
-            return@withContext false
-        }
-
-        val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
-        val prootArgv = runtime.prootArgv(listOf(sh), rootfs = runtime.rootfsDir.takeIf { it.exists() })
-        val env = runtime.env()
-
         try {
-            pty = PtyProcess.start(
-                command = prootArgv.first(),
-                argv = prootArgv.toTypedArray(),
-                envp = env.map { "${it.key}=${it.value}" }.toTypedArray(),
-                cwd = null,
+            val vm = AlpineVm.get(context)
+            pty = vm.start(
+                ProcessSpec(argv = listOf("/bin/sh", "-i"), redirectErrorStream = true),
+                workspace = vm.workspace(),
                 rows = rows,
                 cols = cols,
             )
             // Set a minimal prompt so we can detect readiness
             val p = pty!!
-            p.output.write("export PS1='$promptMarker'\n".toByteArray())
-            p.output.flush()
+            p.outputStream.write("export PS1='$promptMarker'\n".toByteArray())
+            p.outputStream.flush()
             // Wait for the first prompt marker
             readUntilMarker(promptMarker, timeoutMs = 10_000)
             // Clear the screen of marker artifacts
-            p.output.write("clear\n".toByteArray())
-            p.output.flush()
+            p.outputStream.write("clear\n".toByteArray())
+            p.outputStream.flush()
             readUntilMarker(promptMarker, timeoutMs = 3_000)
             initialized = true
             dead = false
             failedStarts = 0
-            Log.i(TAG, "PersistentShell started (pid=${p.pid})")
+            Log.i(TAG, "PersistentShell started")
             true
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to start persistent shell", t)
@@ -135,8 +121,8 @@ class PersistentShell(
         try {
             // Send the command followed by an exit-code marker
             val cmd = "$command\necho '$exitMarker'$?\n"
-            p.output.write(cmd.toByteArray())
-            p.output.flush()
+            p.outputStream.write(cmd.toByteArray())
+            p.outputStream.flush()
 
             // Read until we see the exit marker
             val rawOutput = readUntilMarker(exitMarker, timeoutMs = timeoutMs)
@@ -160,7 +146,7 @@ class PersistentShell(
     }
 
     /** Check if the shell is alive and ready. */
-    val isAlive: Boolean get() = initialized && !dead && !destroyed && pty != null
+    val isAlive: Boolean get() = initialized && !dead && !destroyed && pty?.isAlive == true
 
     /** Destroy the shell session permanently; [start] will not revive it. */
     fun destroy() {
@@ -171,7 +157,7 @@ class PersistentShell(
     // ── Internal ──────────────────────────────────────
 
     private fun resetSession() {
-        runCatching { pty?.destroy() }
+        runCatching { pty?.close() }
         pty = null
         initialized = false
         dead = false
@@ -189,7 +175,7 @@ class PersistentShell(
         val deadline = System.currentTimeMillis() + timeoutMs
 
         while (System.currentTimeMillis() < deadline) {
-            val available = p.input.available()
+            val available = p.inputStream.available()
             if (available <= 0) {
                 try {
                     Thread.sleep(READ_INTERVAL_MS)
@@ -199,7 +185,7 @@ class PersistentShell(
                 }
                 continue
             }
-            val n = p.input.read(chunk, 0, available.coerceAtMost(chunk.size))
+            val n = p.inputStream.read(chunk, 0, available.coerceAtMost(chunk.size))
             if (n < 0) break
             if (capture.append(chunk, n)) break
         }

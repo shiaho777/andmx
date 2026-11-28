@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -23,7 +22,7 @@ class MemoryDreamTest {
     @Before
     fun setUp() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val fs = GuestFs(ProotRuntime(context))
+        val fs = GuestFs(context)
         system = MemorySystem(fs, MemoryConfig(maxRawMemoriesForConsolidation = 100))
         system.clear()
     }

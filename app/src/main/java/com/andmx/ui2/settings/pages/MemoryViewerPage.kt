@@ -39,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.agent.memory.MemorySystem
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.settings.ProviderSettings
 import com.andmx.settings.SettingsStore
 import com.andmx.ui2.settings.SwitchRow
@@ -82,7 +81,7 @@ private val MemoryFiles = listOf(
 @Composable
 fun MemoryViewerPage(onBack: () -> Unit) {
     val context = LocalContext.current
-    val fs = remember { GuestFs(ProotRuntime(context)) }
+    val fs = remember { GuestFs(context) }
     val memorySystem = remember { MemorySystem(fs) }
     var selected by remember { mutableStateOf<MemoryFileEntry?>(null) }
     var query by remember { mutableStateOf("") }

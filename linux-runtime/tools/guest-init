@@ -1,0 +1,44 @@
+#!/bin/sh
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+export TERM=xterm-256color
+export HOME=/root
+export GIT_CONFIG_COUNT=2
+export GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/root/project
+export GIT_CONFIG_KEY_1=safe.directory GIT_CONFIG_VALUE_1='/root/.andmx/worktrees/*'
+export PS1='alpine:\w# '
+hostname alpine
+mkdir -p /dev/pts /run/andmx
+mount -t devpts devpts /dev/pts
+mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 andmx_control /run/andmx || poweroff -f
+mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 andmx_home /root || poweroff -f
+case " $(cat /proc/cmdline) " in
+    *" runtime.workspace=1 "*)
+        mkdir -p /root/project
+        mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 andmx_workspace /root/project || poweroff -f
+        ;;
+esac
+if [ -d /sys/class/net/eth0 ]; then
+    ip link set eth0 up
+    ip addr add 192.168.76.15/24 dev eth0
+    ip route add default via 192.168.76.2
+    dns=192.168.76.3
+    mirror=
+    for option in $(cat /proc/cmdline); do
+        case "$option" in
+            runtime.dns=*) dns=${option#runtime.dns=} ;;
+            runtime.mirror=*) mirror=${option#runtime.mirror=} ;;
+        esac
+    done
+    printf 'nameserver %s\n' "$dns" > /etc/resolv.conf
+    if [ -n "$mirror" ]; then
+        touch /etc/hosts
+        sed -i '/[[:space:]]# andmx-runtime-mirror$/d' /etc/hosts
+        printf '%s dl-cdn.alpinelinux.org # andmx-runtime-mirror\n' "$mirror" >> /etc/hosts
+    fi
+fi
+cd /root
+printf '\nAlpine Linux %s (aarch64)\n' "$(cat /etc/alpine-release)"
+printf 'ALPINE_RUNTIME_READY\n'
+/sbin/andmx-runtime-agent
+sync
+poweroff -f

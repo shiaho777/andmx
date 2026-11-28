@@ -72,7 +72,6 @@ import com.andmx.agent.plugins.PluginSystem
 import com.andmx.agent.plugins.SkillInstaller
 import com.andmx.exec.PersistentShell
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.chat.ChatComposerBus
 import com.andmx.ui2.settings.EmptyState
 import com.andmx.ui2.settings.ResourceBadge
@@ -111,9 +110,8 @@ private data class SkillsSnapshot(
 @Composable
 fun SkillsPage(onBack: () -> Unit, onCloseSettings: (() -> Unit)? = null) {
     val context = LocalContext.current
-    val runtime = remember { ProotRuntime(context) }
-    val fs = remember { GuestFs(runtime) }
-    val shell = remember { PersistentShell(context, runtime) }
+    val fs = remember { GuestFs(context) }
+    val shell = remember { PersistentShell(context) }
     val installer = remember { SkillInstaller(fs, shell) }
     val pluginSystem = remember { PluginSystem(context, fs, shell) }
     val scope = rememberCoroutineScope()

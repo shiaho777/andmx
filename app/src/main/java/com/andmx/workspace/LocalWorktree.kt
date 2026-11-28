@@ -1,9 +1,8 @@
 package com.andmx.workspace
 
 import android.content.Context
-import com.andmx.BuildConfig
-import com.andmx.exec.proot.ProotRuntime
-import com.andmx.exec.proot.RootfsInstaller
+import com.andmx.exec.alpine.AlpineVm
+import com.andmx.exec.files.GuestFs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asContextElement
@@ -14,7 +13,7 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
 data class LocalWorktree(val project: String, val path: String) {
-    fun hostDirectory(context: Context): File = GuestPaths.resolve(ProotRuntime(context).rootfsDir, path)
+    fun hostDirectory(context: Context): File = GuestFs(context).resolve(path)
 
     fun context(): CoroutineContext = active.asContextElement(this)
 
@@ -36,8 +35,7 @@ data class LocalWorktree(val project: String, val path: String) {
             source: LocalWorktree? = null,
             carryChanges: Boolean = false,
         ): LocalWorktree = withContext(Dispatchers.IO) {
-            require(BuildConfig.FLAVOR == "proot") { "Worktree requires the proot build." }
-            require(RootfsInstaller(ProotRuntime(context)).isInstalled()) { "Open the terminal to set up Alpine first." }
+            require(AlpineVm.get(context).isAvailable) { "Worktree requires the ARM64 Alpine environment." }
             val root = File(project).canonicalFile
             require(root.isDirectory && File(root, ".git").exists()) { "Select a local Git repository first." }
             val id = UUID.randomUUID().toString()

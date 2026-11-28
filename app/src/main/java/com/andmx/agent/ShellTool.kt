@@ -3,15 +3,11 @@ package com.andmx.agent
 import android.content.Context
 import com.andmx.exec.PersistentShell
 import com.andmx.exec.ProcessSpec
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
-import com.andmx.exec.proot.RootfsInstaller
-import com.andmx.exec.pty.PtyProcess
+import com.andmx.exec.LocalProcessEnvironment
+import com.andmx.exec.alpine.AlpineEnvironment
 import com.andmx.workspace.WorkspaceAccess
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -19,26 +15,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
-import java.io.File
-import java.nio.charset.StandardCharsets
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
-/**
- * The agent's primary hand: run a shell command inside the proot Linux guest
- * and return its combined output. This is what turns AndMX from a chat app
- * into a workbench.
- *
- * Uses [PersistentShell] for 5-10x faster execution by keeping a long-running
- * shell process alive. Falls back to fork+exec per command if the persistent
- * shell is unavailable or for commands that need a fresh environment.
- */
 private const val DEFAULT_TIMEOUT_MS = 120_000L
 private const val MAX_TIMEOUT_MS = 600_000L
 
@@ -93,9 +74,7 @@ class ShellTool(
     private val shellRuntime: () -> String = { "" },
 ) : Tool, ExecutionAwareTool {
     private val access = WorkspaceAccess(context)
-    private val runtime = ProotRuntime(context)
-    private val env = LocalProotEnvironment(context, runtime)
-    private val persistentShell = PersistentShell(context, runtime)
+    private val persistentShell = PersistentShell(context)
     private var usePersistent = false
     private val _events = MutableSharedFlow<ShellEvent>(extraBufferCapacity = 128)
     val events: SharedFlow<ShellEvent> = _events
@@ -234,41 +213,44 @@ class ShellTool(
         }
 
         val noSandbox = (args["dangerouslyDisableSandbox"] as? JsonPrimitive)?.booleanOrNull == true
-
-        if (bounded) {
-            return executeBounded(cdCommand, timeoutMs, maxOutputChars, noSandbox)
-        }
-
-        if (callId.isNotBlank()) {
-            return executeBound(callId, command, cwd, cdCommand, noSandbox)
-        }
-
-        if (usePersistent && !noSandbox && persistentShell.isAlive) {
-            val res = persistentShell.exec(cdCommand)
-            if (res.error == null) {
-                val out = buildString {
-                    append(res.stdout.ifBlank { "(无输出)" })
-                    append("\n[exit=${res.exitCode}]")
+        val onHost = noSandbox || ShellResolver.resolve(shellRuntime(), true) == "/system/bin/sh"
+        if (callId.isNotBlank()) _events.tryEmit(ShellEvent.Started(callId, command, cwd))
+        val spec = ProcessSpec(argv = listOf("/bin/sh", "-lc", cdCommand), redirectErrorStream = true)
+        val result = when {
+            onHost -> {
+                val hostDir = access.hostFile(cwd)?.takeIf { it.isDirectory }
+                if (hostDir == null && strictCwd) {
+                    return ToolResult("执行失败: 找不到本地工作目录 $cwd", isError = true)
                 }
-                return withImageOutput(
-                    ToolResult(withPersistedOverflow(res.stdout, out, 16_000, res.exitCode != 0), isError = res.exitCode != 0),
-                )
+                kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+                    LocalProcessEnvironment().execute(
+                        spec.copy(argv = listOf("/system/bin/sh", "-lc", prepared), workingDir = hostDir?.path),
+                    )
+                } ?: com.andmx.exec.ProcessResult(124, "", "", timeoutMs, "Command timed out")
             }
-            // Persistent shell failed — fall through to fork+exec
+            usePersistent && !bounded && callId.isBlank() && persistentShell.isAlive ->
+                persistentShell.exec(cdCommand)
+            else -> AlpineEnvironment(context, timeoutMs).execute(
+                spec,
+                onOutput = { if (callId.isNotBlank()) _events.tryEmit(ShellEvent.Delta(callId, it)) },
+                progress = { if (callId.isNotBlank()) _events.tryEmit(ShellEvent.Delta(callId, "$it\r\n")) },
+            )
         }
-
-        // Fallback: fork+exec per command
-        val sh = ShellResolver.resolve(shellRuntime(), runtime.rootfsDir.exists())
-        val res = env.execute(ProcessSpec(argv = listOf(sh, "-lc", cdCommand)))
-        if (res.error != null) return ToolResult("执行失败: ${res.error}", isError = true)
-
-        val out = buildString {
-            append(res.stdout.ifBlank { "(无输出)" })
-            append("\n[exit=${res.exitCode}]")
+        if (result.error != null && result.exitCode != 124) {
+            if (callId.isNotBlank()) _events.tryEmit(ShellEvent.Failed(callId, command, result.error))
+            return ToolResult("执行失败: ${result.error}", isError = true)
         }
-        return withImageOutput(
-            ToolResult(withPersistedOverflow(res.stdout, out, 16_000, res.exitCode != 0), isError = res.exitCode != 0),
-        )
+        if (callId.isNotBlank()) {
+            if (onHost) _events.tryEmit(ShellEvent.Delta(callId, result.stdout))
+            _events.tryEmit(ShellEvent.Finished(callId, command, result.exitCode, !result.ok))
+        }
+        val rendered = buildString {
+            append(result.stdout.replace("\r", "").trimEnd().ifBlank { "(无输出)" })
+            if (result.exitCode == 124 && result.error != null) append("\n(超时,已终止)")
+            append("\n[exit=${result.exitCode}]")
+        }
+        val output = withPersistedOverflow(result.stdout, rendered, maxOutputChars, !result.ok)
+        return withImageOutput(ToolResult(output, isError = !result.ok))
     }
 
     /** 上游 persistOutput=on_truncate 等价：超限时完整 stdout 落 .andmx/outputs/ 并把路径回给模型。 */
@@ -287,192 +269,6 @@ class ShellTool(
         val marker = "\n…[截断]${saved?.let { " 完整输出: $it" }.orEmpty()}"
         return truncateShellOutput(rendered, limit, marker, keepTail)
     }
-
-    private suspend fun executeBounded(
-        cdCommand: String,
-        timeoutMs: Long,
-        maxOutputChars: Int,
-        noSandbox: Boolean = false,
-    ): ToolResult {
-        val install = runtime.install()
-        if (!install.ok) {
-            return ToolResult("执行失败: ${install.message}", isError = true)
-        }
-        val rootfs = runtime.rootfsDir.takeIf { it.exists() && !noSandbox }
-        val sh = ShellResolver.resolve(shellRuntime(), rootfs != null)
-        val argv = if (noSandbox) {
-            listOf(sh, "-lc", cdCommand)
-        } else {
-            runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = rootfs)
-        }
-
-        return withContext(Dispatchers.IO) {
-            val process = runCatching {
-                ProcessBuilder(argv)
-                    .directory(File(context.filesDir.path))
-                    .apply {
-                        environment().clear()
-                        environment().putAll(com.andmx.exec.policy.EnvScrubber.scrub(runtime.env()))
-                        redirectErrorStream(true)
-                    }
-                    .start()
-            }.getOrElse {
-                return@withContext ToolResult("执行失败: ${it.message}", isError = true)
-            }
-            val output = StringBuilder()
-            val buffer = ByteArray(8_192)
-            var timedOut = false
-            var truncated = false
-            var overflowWriter: java.io.BufferedWriter? = null
-            var overflowGuestPath: String? = null
-            val started = System.nanoTime()
-            val reader = process.inputStream
-            try {
-                process.outputStream.close()
-                while (true) {
-                    currentCoroutineContext().ensureActive()
-                    if ((System.nanoTime() - started) / 1_000_000 >= timeoutMs) {
-                        timedOut = true
-                        break
-                    }
-                    val available = reader.available()
-                    if (available > 0) {
-                        val n = reader.read(buffer, 0, minOf(available, buffer.size))
-                        if (n <= 0) break
-                        val chunk = String(buffer, 0, n, StandardCharsets.UTF_8)
-                        val remaining = maxOutputChars - output.length
-                        output.append(chunk.take(remaining))
-                        if (chunk.length > remaining) {
-                            if (!truncated) {
-                                truncated = true
-                                // 上游 bash persistOutput=on_truncate 等价：截断后完整输出落盘，
-                                // 路径回给模型（本地工作区才落；远端无 host fd 保持纯截断）。
-                                val guest = "${cwdProvider().trimEnd('/')}/.andmx/outputs/" +
-                                    "shell-${System.currentTimeMillis()}.log"
-                                overflowGuestPath = guest
-                                overflowWriter = runCatching {
-                                    access.hostFile(guest)?.also { f ->
-                                        f.parentFile?.mkdirs()
-                                    }?.bufferedWriter(StandardCharsets.UTF_8)
-                                }.getOrNull()
-                                overflowWriter?.write(output.toString())
-                            }
-                            runCatching { overflowWriter?.write(chunk) }
-                        }
-                    } else if (!process.isAlive) {
-                        break
-                    } else {
-                        delay(25)
-                    }
-                }
-                runCatching { overflowWriter?.close() }
-                val exitCode = if (timedOut) 124 else process.exitValue()
-                val suffix = if (timedOut) "\n(超时,已终止)\n[exit=124]" else "\n[exit=$exitCode]"
-                val text = output.toString().replace("\r", "").trimEnd().ifBlank { "(无输出)" }
-                val persisted = overflowGuestPath?.let { " 完整输出: $it" }.orEmpty()
-                val marker = "\n…[截断]$persisted"
-                val rendered = if (truncated || text.length + suffix.length > maxOutputChars) {
-                    text.take((maxOutputChars - marker.length - suffix.length).coerceAtLeast(0)) + marker + suffix
-                } else text + suffix
-                ToolResult(rendered.takeLast(maxOutputChars), isError = timedOut || exitCode != 0)
-                    .let { withImageOutput(it) }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                ToolResult("执行失败: ${e.message}".take(maxOutputChars), isError = true)
-            } finally {
-                runCatching { process.destroy() }
-                runCatching { if (process.isAlive) process.destroyForcibly() }
-                runCatching { reader.close() }
-                runCatching { process.errorStream.close() }
-                runCatching { process.outputStream.close() }
-            }
-        }
-    }
-
-    private suspend fun executeBound(
-        callId: String,
-        command: String,
-        cwd: String,
-        cdCommand: String,
-        noSandbox: Boolean = false,
-    ): ToolResult = withContext(Dispatchers.IO) {
-        _events.tryEmit(ShellEvent.Started(callId, command, cwd))
-
-        val install = runtime.install()
-        if (!install.ok) {
-            val message = "执行失败: ${install.message}"
-            _events.tryEmit(ShellEvent.Failed(callId, command, message))
-            return@withContext ToolResult(message, isError = true)
-        }
-
-        val installer = RootfsInstaller(runtime)
-        if (!installer.isInstalled()) {
-            _events.tryEmit(ShellEvent.Delta(callId, "正在安装 Alpine rootfs...\r\n"))
-            if (!installer.install { line -> _events.tryEmit(ShellEvent.Delta(callId, "$line\r\n")) }) {
-                val message = "执行失败: rootfs 安装失败"
-                _events.tryEmit(ShellEvent.Failed(callId, command, message))
-                return@withContext ToolResult(message, isError = true)
-            }
-        }
-
-        val sh = ShellResolver.resolve(shellRuntime(), runtime.rootfsDir.exists() && !noSandbox)
-        val argv = if (noSandbox) {
-            listOf(sh, "-lc", cdCommand)
-        } else {
-            runtime.prootArgv(listOf(sh, "-lc", cdCommand), rootfs = runtime.rootfsDir.takeIf { it.exists() })
-        }
-        val envp = runtime.env().map { "${it.key}=${it.value}" }.toTypedArray()
-        val process = runCatching {
-            PtyProcess.start(
-                command = if (noSandbox) sh else runtime.prootBin.path,
-                argv = argv.toTypedArray(),
-                envp = envp,
-                cwd = context.filesDir.path,
-                rows = 24,
-                cols = 80,
-            )
-        }.getOrElse {
-            val res = env.execute(ProcessSpec(argv = listOf(sh, "-lc", cdCommand)))
-            val combined = when {
-                res.error != null -> "执行失败: ${res.error}"
-                res.stdout.isNotBlank() -> res.stdout
-                else -> res.stderr
-            }.ifBlank { "(无输出)" }
-            _events.tryEmit(ShellEvent.Delta(callId, combined))
-            _events.tryEmit(ShellEvent.Finished(callId, command, res.exitCode, res.exitCode != 0 || res.error != null))
-            return@withContext ToolResult(
-                buildString {
-                    append(combined.trimEnd())
-                    append("\n[exit=${res.exitCode}]")
-                }.take(16_000),
-                isError = res.exitCode != 0 || res.error != null,
-            )
-        }
-
-        val output = StringBuilder()
-        val buffer = ByteArray(8192)
-        try {
-            while (true) {
-                val n = process.input.read(buffer)
-                if (n <= 0) break
-                val chunk = String(buffer, 0, n, StandardCharsets.UTF_8)
-                output.append(chunk)
-                _events.tryEmit(ShellEvent.Delta(callId, chunk))
-            }
-        } catch (_: Throwable) {
-        }
-        val exitCode = runCatching { process.waitFor() }.getOrDefault(-1)
-        process.destroy()
-        _events.tryEmit(ShellEvent.Finished(callId, command, exitCode, exitCode != 0))
-        val cleaned = output.toString().replace("\r", "").trimEnd()
-        val finalOutput = buildString {
-            append(cleaned.ifBlank { "(无输出)" })
-            append("\n[exit=$exitCode]")
-        }
-        ToolResult(finalOutput.take(16_000), isError = exitCode != 0)
-    }
-
 
     private fun ensureNetworkTools(command: String): String {
         if (!Regex("""\bcurl\b""").containsMatchIn(command)) return command

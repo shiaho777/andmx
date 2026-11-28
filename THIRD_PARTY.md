@@ -1,6 +1,6 @@
 # Third-party components
 
-This inventory records what is known about the signed Lite preview source and binary. Rights clearance and outstanding asset checks are tracked in the [preview release runbook](docs/preview-release.md).
+This inventory records what is known about the signed AndMX release source and binary. Rights clearance and outstanding asset checks are tracked in the [preview release runbook](docs/preview-release.md).
 
 | Component | Use in AndMX | Terms and source |
 | --- | --- | --- |
@@ -11,6 +11,16 @@ This inventory records what is known about the signed Lite preview source and bi
 | AndroidX, Jetpack Compose, Material Components, Hilt and Dagger | Android UI, navigation, persistence and dependency injection. | Apache-2.0. [AndroidX](https://github.com/androidx/androidx/blob/androidx-main/LICENSE.txt) · [Dagger](https://github.com/google/dagger/blob/master/LICENSE.txt) |
 | Kotlin, coroutines and serialization | Language runtime, concurrency and serialization. | Apache-2.0. [Kotlin](https://github.com/JetBrains/kotlin/blob/master/license/LICENSE.txt) · [Coroutines](https://github.com/Kotlin/kotlinx.coroutines/blob/master/LICENSE.txt) · [Serialization](https://github.com/Kotlin/kotlinx.serialization/blob/master/LICENSE.txt) |
 
-The repository also contains Termux-built PRoot and talloc binaries for existing non-preview builds. The signed Lite preview excludes these binaries. Their redistribution and corresponding-source review is tracked independently. The experimental VM uses a separately versioned [Android Linux Runtime](https://github.com/shiaho777/android-linux-runtime) and is outside the Lite preview artifact.
+The APK includes the [Android Linux Runtime integration at revision `b6fffc8`](https://github.com/shiaho777/android-linux-runtime/tree/b6fffc8e7489a369d534e7b2e6502e4bb8479131), with AndMX changes in [linux-runtime](linux-runtime). The [preparation script](linux-runtime/tools/prepare.py) pins the exact engine and Alpine inputs by SHA-256.
+
+| Runtime component | Source and license |
+| --- | --- |
+| Android Linux Runtime integration | [Original source license](linux-runtime/LICENSE) |
+| Android QEMU port and native dependencies | [QubeVM 7.1.5 build recipe, source and license](https://github.com/rhn-1k/QubeVM/tree/a45126697776e1efd4c8d72b94335e88590492ef) |
+| QEMU 11.1.3 | [QEMU source and license](https://github.com/qemu/qemu/tree/v11.1.3) |
+| Alpine Linux 3.24.4 kernel, initramfs and base system | [Package sources](https://gitlab.alpinelinux.org/alpine/aports/-/tree/v3.24.4) · [Matching ARM64 binaries](https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/) |
+| Go standard library in the guest bridge | [Go source and license](https://go.dev/LICENSE) |
+
+Bundle corresponding sources and notices for the pinned engine and Alpine components when distributing the APK.
 
 Direct dependency declarations and version pins are in [the app build](app/build.gradle.kts) and [the Gradle catalog](gradle/libs.versions.toml).

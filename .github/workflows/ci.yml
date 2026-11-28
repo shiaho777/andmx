@@ -29,6 +29,18 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Install Alpine image build dependencies
+        run: python -m pip install -r linux-runtime/tools/requirements.txt
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -41,30 +53,36 @@ jobs:
 
       - name: Install platform and build-tools
         run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973" "ndk;28.2.13676358" "cmake;3.22.1"
 
-      - name: Gradle compile liteDebug
-        run: ./gradlew :app:compileLiteDebugKotlin --no-daemon --stacktrace
+      - name: Gradle compile debug
+        run: ./gradlew :app:compileDebugKotlin --no-daemon --stacktrace
 
-      # The proot flavor drops targetSdk to 28 so guest binaries stay exec-able.
-      # It compiles from the same sources but is a separate variant, so a
-      # lite-only gate can go green while this one is broken.
-      - name: Gradle compile prootDebug
-        run: ./gradlew :app:compileProotDebugKotlin --no-daemon --stacktrace
-
-      # pty.c backs PersistentShell and TerminalSession. Kotlin compilation
-      # never touches it, so without this step C breakage ships unnoticed.
       - name: Build native (CMake/NDK)
-        run: ./gradlew :app:externalNativeBuildLiteDebug --no-daemon --stacktrace
+        run: ./gradlew :app:externalNativeBuildDebug --no-daemon --stacktrace
 
-      - name: Assemble unsigned Lite preview
-        run: ./gradlew :app:assembleLiteRelease -PandmxGithubPreview=true --no-daemon --stacktrace
+      - name: Assemble unsigned AndMX release
+        run: ./gradlew :app:assembleRelease -PandmxGithubRelease=true --no-daemon --stacktrace
+
+      - name: Verify the embedded Linux runtime
+        run: |
+          python - <<'PY'
+          from zipfile import ZipFile
+
+          with ZipFile('app/build/outputs/apk/release/app-release-unsigned.apk') as apk:
+              files = set(apk.namelist())
+              assert 'lib/arm64-v8a/liblinux_runtime.so' in files
+              assert 'lib/arm64-v8a/libqemu-system-aarch64.so' in files
+              assert 'assets/linux-runtime/vmlinuz' in files
+              assert 'assets/linux-runtime/initramfs' in files
+              assert not any('libproot' in name or 'libtalloc' in name for name in files)
+          PY
 
       - name: Unit tests
-        run: ./gradlew :app:testLiteDebugUnitTest --no-daemon --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Compile instrumented smoke tests
-        run: ./gradlew :app:assembleLiteDebug :app:assembleLiteDebugAndroidTest -PtestAbi=x86_64 --no-daemon --stacktrace
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PtestAbi=x86_64 --no-daemon --stacktrace
 
       - name: Enable KVM
         run: |
@@ -81,7 +99,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: ./gradlew :app:connectedLiteDebugAndroidTest -PtestAbi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=com.andmx.SmokeTest,com.andmx.DynamicWorkflowRunnerTest --no-daemon --stacktrace
+          script: ./gradlew :app:connectedDebugAndroidTest -PtestAbi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=com.andmx.SmokeTest,com.andmx.DynamicWorkflowRunnerTest --no-daemon --stacktrace
 
       - name: Upload test report
         if: failure()
@@ -89,8 +107,8 @@ jobs:
         with:
           name: unit-test-report
           path: |
-            app/build/reports/tests/testLiteDebugUnitTest
-            app/build/test-results/testLiteDebugUnitTest
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
             app/build/reports/androidTests/connected
             app/build/outputs/androidTest-results
           retention-days: 7
@@ -102,59 +120,8 @@ jobs:
           {
             echo "## Delivery gate"
             echo "- Job: \`build\` (workflow **CI**)"
-            echo "- Verifies: lite Kotlin · proot Kotlin · native (CMake/NDK) · unit/Robolectric tests · x86_64 Android smoke tests"
+            echo "- Verifies: Kotlin · bundled ARM64 Alpine · native (CMake/NDK) · unit/Robolectric tests · x86_64 Android smoke tests"
             echo "- Merge only when this job is green on PRs into \`main\`."
             echo "- Issues close via PR body \`Fixes #N\` / \`Closes #N\` on **merge**, not from CI."
             echo "- Do not close the linked Issue while CI is red or only because the PR opened."
           } >> "$GITHUB_STEP_SUMMARY"
-
-  vm:
-    name: vm
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Read the standalone runtime revision
-        id: runtime
-        run: |
-          revision="$(cat gradle/android-linux-runtime.rev)"
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          repository: shiaho777/android-linux-runtime
-          ref: ${{ steps.runtime.outputs.revision }}
-          path: .runtime-ci
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - name: Install VM build dependencies
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;34.0.0" "ndk;27.0.12077973" "ndk;28.2.13676358" "cmake;3.22.1"
-          python -m pip install -r .runtime-ci/tools/requirements.txt
-      - name: Prepare the verified engine
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
-          python .runtime-ci/tools/prepare.py
-      - name: Build and test the VM variant
-        run: |
-          ./gradlew :app:testVmDebugUnitTest :app:assembleVmDebug :app:bundleVmRelease \
-            "-PandroidLinuxRuntimeDir=$GITHUB_WORKSPACE/.runtime-ci" --no-daemon --stacktrace
-      - name: Upload the VM unit test report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vm-unit-test-report
-          path: app/build/reports/tests/testVmDebugUnitTest
-          retention-days: 7

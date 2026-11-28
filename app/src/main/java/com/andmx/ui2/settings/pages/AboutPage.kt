@@ -78,7 +78,6 @@ fun AboutPage(onBack: () -> Unit) {
 
             InfoRow(tr("版本"), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             InfoRow(tr("渠道"), productBuildChannelLabel)
-            InfoRow(tr("构建变体"), BuildConfig.FLAVOR)
             InfoRow(tr("构建类型"), BuildConfig.BUILD_TYPE)
             InfoRow(tr("包名"), BuildConfig.APPLICATION_ID)
             InfoRow(tr("系统版本"), "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -181,7 +180,7 @@ private fun InfoRow(label: String, value: String) {
 
 private fun diagnostics(): String = buildString {
     appendLine("AndMX ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-    appendLine("flavor=${BuildConfig.FLAVOR} buildType=${BuildConfig.BUILD_TYPE}")
+    appendLine("buildType=${BuildConfig.BUILD_TYPE}")
     appendLine("package=${BuildConfig.APPLICATION_ID}")
     appendLine("android=${Build.VERSION.RELEASE} api=${Build.VERSION.SDK_INT}")
 }

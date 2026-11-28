@@ -3,7 +3,8 @@ package com.andmx.mcp
 import android.content.Context
 import com.andmx.agent.McpTool
 import com.andmx.agent.Tool
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.ProcessSpec
+import com.andmx.exec.alpine.AlpineVm
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
@@ -207,11 +208,11 @@ data class ResourceSubscription(
 
 /**
  * Connects to the configured MCP servers and exposes their tools to the agent.
- * Supports stdio (in proot) and HTTP/SSE transports.
+ * Supports stdio in Alpine and HTTP/SSE transports.
  * Failures are isolated per-server so one bad server doesn't break the others.
  */
 class McpManager(private val context: Context) {
-    private val runtime = ProotRuntime(context)
+    private val vm = AlpineVm.get(context)
     private val clients = McpSessionRegistry<McpClient> { it.close() }
     private val httpTransports = McpSessionRegistry<McpHttpTransport> { it.close() }
     private val oauth = McpOAuth(context)
@@ -243,7 +244,6 @@ class McpManager(private val context: Context) {
         val key = serverKey(cfg)
         if (clients.contains(key, sessionId) || httpTransports.contains(key, sessionId)) return emptyList()
         val tools = mutableListOf<Tool>()
-        val sh = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
         runCatching {
             when (cfg.transport) {
                 McpTransport.HTTP, McpTransport.WEBSOCKET -> {
@@ -283,17 +283,19 @@ class McpManager(private val context: Context) {
                     onLog("MCP ${cfg.name} (HTTP): ${descs.size} 个工具")
                 }
                 McpTransport.STDIO -> {
-                    val argv = runtime.prootArgv(
-                        command = listOf(sh, "-lc", cfg.shellCommand()),
-                        rootfs = runtime.rootfsDir.takeIf { it.exists() },
-                    )
                     val client = clients.getOrCreate(key, sessionId) {
+                        val argv = listOf("/bin/sh", "-lc", cfg.shellCommand())
                         McpClient(
                             cfg.name,
                             argv,
-                            runtime.env() + cfg.env,
+                            cfg.env,
                             protocolVersion = cfg.wireProtocol(),
                             timeoutMs = cfg.timeoutMs,
+                            startProcess = {
+                                kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
+                                    vm.start(ProcessSpec(argv, env = cfg.env), vm.workspace(), explicitEnvironment = true)
+                                }
+                            },
                         )
                     }
                     val descs = runCatching { client.connect() }.getOrElse {

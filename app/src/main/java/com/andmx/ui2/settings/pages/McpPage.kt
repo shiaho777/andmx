@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andmx.agent.plugins.PluginSystem
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.mcp.McpManager
 import com.andmx.mcp.McpOAuth
 import com.andmx.settings.ProviderSettings
@@ -152,7 +151,7 @@ private fun McpListView(
     LaunchedEffect(Unit) {
         loadingPlugins = true
         pluginEntries = withContext(Dispatchers.IO) {
-            val fs = GuestFs(ProotRuntime(context))
+            val fs = GuestFs(context)
             val system = PluginSystem(context, fs)
             runCatching { com.andmx.agent.plugins.BuiltinPluginSeeder.ensureSeeded(context, fs) }
             system.listPluginMcpEntries()

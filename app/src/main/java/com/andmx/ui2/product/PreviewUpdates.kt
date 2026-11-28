@@ -23,7 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal const val PRODUCT_REPO = "https://github.com/shiaho777/andmx"
-private const val APK_NAME = "andmx-lite-arm64-v8a.apk"
+private const val STAGED_APK_NAME = "update.apk"
 private const val APK_LIMIT = 160L * 1024 * 1024
 private val previewTag = Regex("""v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+""")
 private val stableTag = Regex("""v[0-9]+\.[0-9]+\.[0-9]+""")
@@ -32,6 +32,8 @@ private val digestPattern = Regex("[a-f0-9]{64}")
 internal fun matchesGithubReleaseChannel(tag: String, prerelease: Boolean, previewChannel: Boolean): Boolean =
     prerelease == previewChannel && (if (previewChannel) previewTag else stableTag).matches(tag)
 
+private fun releaseApkName(versionName: String): String = "andmx.$versionName.APK"
+
 internal data class PreviewRelease(
     val versionName: String,
     val versionCode: Long,
@@ -39,7 +41,7 @@ internal data class PreviewRelease(
     val certificateSha256: String,
     val notes: String,
 ) {
-    val apkUrl: String get() = "$PRODUCT_REPO/releases/download/v$versionName/$APK_NAME"
+    val apkUrl: String get() = "$PRODUCT_REPO/releases/download/v$versionName/${releaseApkName(versionName)}"
 }
 
 internal fun parsePreviewRelease(tag: String, manifest: JSONObject, notes: String): PreviewRelease {
@@ -47,7 +49,7 @@ internal fun parsePreviewRelease(tag: String, manifest: JSONObject, notes: Strin
     val versionCode = manifest.getLong("versionCode")
     val sha256 = manifest.getString("sha256")
     require((stableTag.matches(tag) || previewTag.matches(tag)) && tag == "v$versionName")
-    require(manifest.getString("packageName") == "com.andmx" && manifest.getString("apk") == APK_NAME)
+    require(manifest.getString("packageName") == "com.andmx" && manifest.getString("apk") == releaseApkName(versionName))
     val certificate = manifest.getString("certificateSha256")
     require(versionCode > 1 && digestPattern.matches(sha256) && digestPattern.matches(certificate))
     return PreviewRelease(versionName, versionCode, sha256, certificate, notes.take(6000))
@@ -69,7 +71,8 @@ internal class PreviewUpdates(private val app: Context) {
                 ) continue
                 val assets = item.getJSONArray("assets")
                 val names = (0 until assets.length()).map { assets.getJSONObject(it).optString("name") }
-                if ("release-manifest.json" !in names || APK_NAME !in names) continue
+                val apkName = releaseApkName(tag.removePrefix("v"))
+                if ("release-manifest.json" !in names || apkName !in names) continue
                 val manifest = JSONObject(readText("$PRODUCT_REPO/releases/download/$tag/release-manifest.json"))
                 add(parsePreviewRelease(tag, manifest, item.optString("body")))
             }
@@ -79,7 +82,7 @@ internal class PreviewUpdates(private val app: Context) {
 
     suspend fun download(release: PreviewRelease, progress: (Long, Long) -> Unit): File = withContext(Dispatchers.IO) {
         directory.mkdirs()
-        val apk = File(directory, APK_NAME)
+        val apk = File(directory, STAGED_APK_NAME)
         val temporary = File.createTempFile("download-", ".apk", directory)
         val coroutine = currentCoroutineContext()
         try {
@@ -119,7 +122,7 @@ internal class PreviewUpdates(private val app: Context) {
     }
 
     suspend fun installer(file: File, release: PreviewRelease): Intent = withContext(Dispatchers.IO) {
-        require(file.canonicalFile == File(directory, APK_NAME).canonicalFile)
+        require(file.canonicalFile == File(directory, STAGED_APK_NAME).canonicalFile)
         val digest = MessageDigest.getInstance("SHA-256")
         val coroutine = currentCoroutineContext()
         file.inputStream().use { input ->

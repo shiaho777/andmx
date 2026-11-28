@@ -1,17 +1,11 @@
 package com.andmx.exec.files
 
-import com.andmx.exec.proot.ProotRuntime
+import android.content.Context
 import com.andmx.workspace.GuestPaths
 import java.io.File
 
-/**
- * Maps guest (Linux) absolute paths onto the host files that back the proot
- * rootfs. Since the rootfs lives inside the app's data dir, plain File I/O is
- * enough to read/write guest files — no proot needed for file ops.
- */
-class GuestFs(private val runtime: ProotRuntime) {
-
-    private val root: File get() = runtime.rootfsDir
+class GuestFs(context: Context) {
+    private val root = File(context.filesDir, "rootfs")
 
     val rootfsRoot: File get() = root
 

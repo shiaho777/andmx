@@ -16,7 +16,6 @@ import com.andmx.agent.plugins.PluginSystem
 import com.andmx.agent.plugins.BuiltinPluginSeeder
 import com.andmx.data.ConversationRepository
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.llm.provider.ProviderDefinition
 import com.andmx.llm.provider.ReasoningConfig
 import com.andmx.settings.ProviderSettings
@@ -190,7 +189,7 @@ class ChatViewModel @Inject constructor(
         combine(settingsStore.customSubAgents, settingsStore.subagentState) { agents, state ->
             com.andmx.agent.multi.SubagentCatalog.listAll(agents, state)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    private val skillInstaller = SkillInstaller(GuestFs(ProotRuntime(context)))
+    private val skillInstaller = SkillInstaller(GuestFs(context))
 
     /** 供应商列表 + 当前选中设置（Composer 配置链）。 */
     data class ComposerConfig(
@@ -524,9 +523,9 @@ class ChatViewModel @Inject constructor(
             runCatching {
                 providerStore.ensureSeeded(settingsStore.legacyProvider())
             }
-            // 拉取已安装技能，供 $ 联想；proot 未就绪则保持空列表
+            // 拉取已安装技能，供 $ 联想；Alpine 未就绪则保持空列表
             runCatching {
-                val fs = GuestFs(ProotRuntime(context))
+                val fs = GuestFs(context)
                 BuiltinPluginSeeder.ensureSeeded(context, fs)
                 val system = PluginSystem(context, fs)
                 val local = runCatching { skillInstaller.listInstalled() }.getOrDefault(emptyList())
@@ -567,7 +566,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** 刷新当前工作区的 git 信息（分支、变更）。proot 失败时回退到主机 .git 探测。 */
+    /** 刷新当前工作区的 git 信息（分支、变更）。Alpine 失败时回退到主机 .git 探测。 */
     fun refreshGitInfo() {
         viewModelScope.launch {
             val execPath = workspaceExecPath()

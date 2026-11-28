@@ -95,7 +95,6 @@ object AllowedPrompts {
         else -> kw
     }
 
-    /** Common developer-tooling aliases so "tests" matches "gradle testLiteDebugUnitTest". */
     private fun stem(keyword: String): List<String> = when (keyword) {
         "test" -> listOf("test")
         "depend" -> listOf("install", "sync", "restore", "fetch", "add")  // any dependency command implies installation

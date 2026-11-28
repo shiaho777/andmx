@@ -65,7 +65,7 @@
     <string name="str_0062">"No models yet. Fetch the list, or type an ID."</string>
     <string name="str_0063">"Android SDK root. Empty means detect it."</string>
     <string name="str_0064">"Pick the model used for each Claude slot"</string>
-    <string name="str_0065">"Copy a whole directory inside proot and use it as a plugin."</string>
+    <string name="str_0065">"Copy a whole directory inside Alpine and use it as a plugin."</string>
     <string name="str_0066">"Put the workspace instructions into this subagent when it starts."</string>
     <string name="str_0067">"Reading local chat history. This can take a moment."</string>
     <string name="str_0068">"Edit .zcodeignore for this workspace."</string>
@@ -104,7 +104,7 @@
     <string name="str_0101">"Add an API key to enable it."</string>
     <string name="str_0102">"Show line numbers in code and diffs."</string>
     <string name="str_0103">".gitignore is already in the editor"</string>
-    <string name="str_0104">"Local command, started in proot"</string>
+    <string name="str_0104">"Local command, started in Alpine"</string>
     <string name="str_0105">"No usage in this range."</string>
     <string name="str_0106">"Remote HTTP or legacy SSE"</string>
     <string name="str_0107">"Light, dark, or follow the system."</string>
@@ -1167,7 +1167,6 @@
     <string name="str_1164">"No matching settings"</string>
     <string name="str_1165">"An Android-native AI coding agent"</string>
     <string name="str_1166">"App info"</string>
-    <string name="str_1167">"Flavor"</string>
     <string name="str_1168">"Build type"</string>
     <string name="str_1169">"Package"</string>
     <string name="str_1170">"Android version"</string>
@@ -1177,7 +1176,7 @@
     <string name="str_1174">"Open GitHub Releases in a browser"</string>
     <string name="str_1175">"View GitHub repository"</string>
     <string name="str_1176">"Copy diagnostics"</string>
-    <string name="str_1177">"Version, device and build variant for bug reports"</string>
+    <string name="str_1177">"Version, device and build type for bug reports"</string>
     <string name="str_1178">"Diagnostics copied"</string>
     <string name="str_1179">"No background tasks"</string>
     <string name="str_1180">"Show output"</string>

@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import com.andmx.agent.plugins.SkillInstaller
 import com.andmx.agent.plugins.SkillValidator
 import com.andmx.exec.files.GuestFs
-import com.andmx.exec.proot.ProotRuntime
 import com.andmx.ui2.markdown.MarkdownView
 import com.andmx.ui2.settings.SettingsGroup
 import com.andmx.ui2.settings.backAppBar
@@ -44,7 +43,7 @@ fun SkillDetailPage(
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
-    val fs = remember { GuestFs(ProotRuntime(context)) }
+    val fs = remember { GuestFs(context) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     val skillMd by produceState(initialValue = "", key1 = skill.path) {

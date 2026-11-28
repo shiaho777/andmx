@@ -4,8 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.andmx.exec.ExecutionEnvironment
 import com.andmx.exec.ProcessSpec
-import com.andmx.exec.proot.LocalProotEnvironment
-import com.andmx.exec.proot.ProotRuntime
+import com.andmx.exec.alpine.AlpineEnvironment
 import com.andmx.exec.remote.RemoteSshEnvironment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,8 +35,7 @@ class GitBaseline(
     }
 
     private val appContext = context.applicationContext
-    private val runtime = ProotRuntime(context)
-    private val localEnv = LocalProotEnvironment(context, runtime)
+    private val localEnv = AlpineEnvironment(context)
     private val projectManager = ProjectManager(context)
     private val baselineDir = "${context.filesDir.absolutePath}/$BASELINE_DIR"
 
@@ -69,7 +67,7 @@ class GitBaseline(
         val gitInfo: GitInfo? = null,
     )
 
-    private val localSh get() = if (runtime.rootfsDir.exists()) "/bin/sh" else "/system/bin/sh"
+    private val localSh get() = "/bin/sh"
 
     private data class ExecTarget(
         val env: ExecutionEnvironment,
@@ -283,7 +281,7 @@ class GitBaseline(
     }
 
     /**
-     * Host-side git probe that does not depend on proot.
+     * Host-side git probe that does not depend on Alpine.
      * Reads `.git/HEAD` and `git status --porcelain` when host `git` is available,
      * so the empty-composer branch pill still appears before the guest is ready.
      */

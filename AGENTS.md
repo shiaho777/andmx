@@ -11,7 +11,7 @@
 ## 常用验证
 
 ```bash
-./gradlew :app:compileLiteDebugKotlin --offline --no-daemon
+./gradlew :app:compileDebugKotlin --offline --no-daemon
 ```
 
 有网络/干净环境时可去掉 `--offline`。
