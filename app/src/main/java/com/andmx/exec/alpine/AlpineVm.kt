@@ -49,12 +49,19 @@ internal class AlpineVm private constructor(private val context: Context) {
         cols: Int = 0,
         progress: (String) -> Unit = {},
         explicitEnvironment: Boolean = false,
+        requireActiveSession: Boolean = false,
     ): AlpineProcess {
         require(isAvailable) { "The built-in Alpine environment requires ARM64." }
         val project = workspace?.canonicalFile
         require(project == null || project.isDirectory) { "The selected workspace is unavailable." }
 
         var active = session
+        if (requireActiveSession) {
+            check(active != null && active.console.isAlive && active.project == project &&
+                (network == null || active.network == network)) {
+                "The selected workspace has no active Alpine session."
+            }
+        }
         if (active != null && (!active.console.isAlive || active.project != project ||
                 network != null && active.network != network)) {
             check(!active.console.isAlive || active.processes.none { it.isAlive }) {

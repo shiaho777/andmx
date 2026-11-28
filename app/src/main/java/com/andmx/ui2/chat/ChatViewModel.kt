@@ -569,28 +569,11 @@ class ChatViewModel @Inject constructor(
     /** 刷新当前工作区的 git 信息（分支、变更）。Alpine 失败时回退到主机 .git 探测。 */
     fun refreshGitInfo() {
         viewModelScope.launch {
-            val execPath = workspaceExecPath()
-            val host = projectManager.hostPath.value.takeIf { activeWorktree.value == null }
-            if (host == null && execPath == null) {
-                _gitInfo.value = null
-                return@launch
-            }
-            var info: com.andmx.workspace.GitBaseline.GitInfo? = null
-            if (host != null && !projectManager.isRemote) {
-                info = runCatching { gitBaseline.collectHostGitInfo(host) }
+            _gitInfo.value = workspaceExecPath()?.let { path ->
+                runCatching { gitBaseline.collectWorkspaceGitInfo(path) }
                     .getOrNull()
                     ?.takeIf { it.isRepo && it.branch.isNotBlank() }
             }
-            if (execPath != null) {
-                val guest = runCatching { gitBaseline.collectGitInfo(execPath) }
-                    .getOrNull()
-                    ?.takeIf { it.isRepo && it.branch.isNotBlank() }
-                if (guest != null) {
-                    _gitInfo.value = guest
-                    return@launch
-                }
-            }
-            _gitInfo.value = info
         }
     }
 

@@ -17,6 +17,7 @@ internal class AlpineEnvironment(
     context: Context,
     private val timeoutMs: Long = 120_000,
     private val workspace: (() -> File?)? = null,
+    private val requireActiveSession: Boolean = false,
 ) : ExecutionEnvironment {
     private val vm = AlpineVm.get(context)
 
@@ -40,8 +41,12 @@ internal class AlpineEnvironment(
             ProcessResult(code, stdout.toString(), stderr.toString(), (System.nanoTime() - started) / 1_000_000, error)
         try {
             val command = runInterruptible(Dispatchers.IO) {
-                vm.start(spec, if (workspace == null) vm.workspace() else workspace.invoke(), progress = progress)
-                    .also { process = it }
+                vm.start(
+                    spec,
+                    if (workspace == null) vm.workspace() else workspace.invoke(),
+                    progress = progress,
+                    requireActiveSession = requireActiveSession,
+                ).also { process = it }
             }
             withTimeoutOrNull(timeoutMs) {
                 coroutineScope {

@@ -3064,7 +3064,7 @@ class ChatController private constructor(private val context: Context) {
     ): Pair<List<String>, String> {
         val gitPath = access.guestCwd()
         val git = runCatching {
-            com.andmx.workspace.GitBaseline(context).collectGitInfo(gitPath)
+            com.andmx.workspace.GitBaseline(context).collectWorkspaceGitInfo(gitPath)
         }.getOrNull()
         val host = projectManager.hostPath.value
         val gitStatus = when {
@@ -3377,7 +3377,7 @@ class ChatController private constructor(private val context: Context) {
         val tools = session?.turnToolOutputs.orEmpty()
         val plan = session?.planTool?.state?.value.orEmpty()
         val git = runCatching {
-            com.andmx.workspace.GitBaseline(context).collectGitInfo(access.displayCwd())
+            com.andmx.workspace.GitBaseline(context).collectWorkspaceGitInfo(access.guestCwd())
         }.getOrNull()
         val recent = repo.messages(conversationId).takeLast(8).map {
             HandoffRunLogItem(

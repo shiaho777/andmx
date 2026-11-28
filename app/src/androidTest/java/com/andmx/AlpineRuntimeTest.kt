@@ -4,7 +4,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.andmx.agent.ShellTool
 import com.andmx.exec.ProcessSpec
+import com.andmx.exec.alpine.AlpineEnvironment
 import com.andmx.exec.alpine.AlpineVm
+import com.andmx.workspace.GitBaseline
 import com.andmx.workspace.ProjectManager
 import com.andmx.workspace.WorkspaceAccess
 import kotlinx.coroutines.runBlocking
@@ -34,6 +36,12 @@ class AlpineRuntimeTest {
         val access = WorkspaceAccess(context)
         projects.selectProject(workspace.path)
         try {
+            val gitDir = File(workspace, ".git").apply { mkdir() }
+            File(gitDir, "HEAD").writeText("ref: refs/heads/main\n")
+            val git = GitBaseline(context).collectWorkspaceGitInfo(access.guestCwd())
+            assertEquals("main", git.branch)
+            val existingAlpine = AlpineEnvironment(context, requireActiveSession = true)
+            assertFalse(existingAlpine.execute(ProcessSpec(listOf("/bin/true"))).ok)
             access.writeText("from-android.txt", "android")
             vm.start(
                 ProcessSpec(listOf("/bin/sh", "-c",
